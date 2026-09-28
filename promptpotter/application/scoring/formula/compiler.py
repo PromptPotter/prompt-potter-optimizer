@@ -464,22 +464,27 @@ def compile_scorer(
     return CellScorer(fitness=_fitness, objective=_objective)
 
 
-def auto_scorer_id(per_sample: str | None, per_cell: str | None) -> str:
+def auto_scorer_id(
+    per_sample: str | None, per_cell: str | None, *, judge_instrument: str | None
+) -> str:
     """Stable id over the WHOLE grading function; ``None``/empty ``per_sample`` → ``default_hit``.
 
     ``per_cell`` is half of it — the composite IS ``objective`` — and grades cached under this id
     are what a δ ruler is fit on (`hard_sample_archive`), so an id naming only ``per_sample``
-    hands one arm the other's grades. Absent, the payload is unchanged, so a campaign declaring
-    no composite keeps the id it already has."""
+    hands one arm the other's grades. The judges are the rest: a formula reads the terms they
+    banked, so the same text over another grader is another grading function
+    (``judges.judge_instrument``). Either absent, the payload is unchanged."""
     if not per_sample:
         return DEFAULT_SCORER_ID
     payload = f"{per_sample}\x1f{per_cell}\x1f{MISS_COST_SHARE}" if per_cell else per_sample
+    if judge_instrument is not None:
+        payload = f"{payload}\x1f{judge_instrument}"
     h = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:10]
     return f"auto_{h}"
 
 
 def split_scoring_block(
-    block: str | dict[str, str] | None,
+    block: str | dict[str, str] | None, *, judge_instrument: str | None
 ) -> ScoringSpec:
     if isinstance(block, dict):
         unknown = set(block) - {"per_sample", "per_cell"}
@@ -493,9 +498,12 @@ def split_scoring_block(
             )
         per_sample = block.get("per_sample")
         per_cell = block.get("per_cell")
-        return ScoringSpec(per_sample, per_cell, auto_scorer_id(per_sample, per_cell))
+        scorer_id = auto_scorer_id(per_sample, per_cell, judge_instrument=judge_instrument)
+        return ScoringSpec(per_sample, per_cell, scorer_id)
     if isinstance(block, str) and block:
-        return ScoringSpec(block, None, auto_scorer_id(block, None))
+        return ScoringSpec(
+            block, None, auto_scorer_id(block, None, judge_instrument=judge_instrument)
+        )
     return ScoringSpec(None, None, DEFAULT_SCORER_ID)
 
 

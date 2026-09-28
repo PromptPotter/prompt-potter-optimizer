@@ -9,7 +9,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Annotated, Any, Literal, NamedTuple, NotRequired, TypedDict, cast
 
 from promptpotter.config.settings import ANSWER_SPACE_CAP, NO_RESULT
-from promptpotter.shared.errors import ErrorCategory, is_error_result
+from promptpotter.shared.errors import ErrorCategory, is_charged_error, is_error_result
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
@@ -360,6 +360,20 @@ def is_unscored(result: Mapping[str, object]) -> bool:
     return bool(result.get("unscored"))
 
 
+@shapes_optimizer_prompt
+def is_graded(result: Mapping[str, object]) -> bool:
+    """Whether a row carries a verdict — every reading's ONE population, optimizer and bench alike.
+    A refusal or a truncation is a miss the formula graded, and an error the configuration caused
+    is a miss at ``rescore_results``' 0.0 wherever a label defines one; the rest carry none."""
+    if is_unscored(result):
+        return False
+    if not is_error_result(result):
+        return True
+    return is_charged_error(result) and not is_verifier_graded(
+        str(result.get("ground_truth") or "")
+    )
+
+
 def recorded_elapsed_s(result: QueryMeasurement) -> float | None:
     """Wall-clock this row RECORDED, or ``None`` where it recorded none — the display read.
 
@@ -578,6 +592,7 @@ __all__ = [
     "all_verifier_graded",
     "enumerable_truth_labels",
     "is_answer_collapsed",
+    "is_graded",
     "is_hit",
     "is_unscored",
     "is_verifier_graded",

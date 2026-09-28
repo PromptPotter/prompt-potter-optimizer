@@ -177,6 +177,30 @@ describe("benchReading", () => {
     expect(benchReading(null, "running").sub).toBe("graded when the run ends");
     expect(benchReading(null, "terminal").sub).toBe("not graded — the run ended first");
   });
+
+  // The headline is the composite, a 0–1 score: printed as a percent it reads as accuracy, and a
+  // pick that solved nothing still shows its misses' cost share as "20%".
+  it("reads the composite as a score, with the served accuracy beside it", () => {
+    const reading = {
+      sp_hash: "s",
+      ci_lo: null,
+      ci_hi: null,
+      n_scored: 10,
+      run_id: "bench_s",
+    };
+    const graded: BenchScore = {
+      bench_size: 10,
+      origin: { ...reading, round: 0, accuracy: 0.0, composite_fitness: 0.2 },
+      selected: { ...reading, round: 3, accuracy: 0.5, composite_fitness: 0.62 },
+      missing_reason: null,
+      lift: 0.42,
+      lift_ci_lo: null,
+      lift_ci_hi: null,
+    };
+    const stat = benchReading(graded, "terminal");
+    expect(stat.value).toBe("0.62");
+    expect(stat.sub?.startsWith("accuracy 50% · origin 0.20")).toBe(true);
+  });
 });
 
 describe("campaignTitle", () => {

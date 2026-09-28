@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, assert_never, cast
 
 from promptpotter.domain.backend import BackpressureReading
-from promptpotter.domain.bench import BenchScore
+from promptpotter.domain.bench import BenchReading, BenchScore
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop, WorkspaceDir
-from promptpotter.domain.dashboard_rows import RoundSummary
+from promptpotter.domain.dashboard_rows import RoundSummary, RunStanding
 from promptpotter.domain.phases import CampaignPhase, DashboardState, PhaseEvent, RunPhase
 from promptpotter.domain.results import (
     HeadlineMetric,
@@ -161,7 +161,6 @@ class LiveDashboardProjection(Projection):
         state_path: Path | None,
         hop: CycleHop,
         session_id: str,
-        patience: int | None,
         arms_per_round: int | None,
         sp_budget_round: int,
         headline_metric: HeadlineMetric,
@@ -176,14 +175,12 @@ class LiveDashboardProjection(Projection):
         # Spelled by the caller rather than derived from `cycle_dir`, because both modes read
         # that same directory and only the write target tells them apart.
         self.state_path = state_path
-        self.patience_max = patience
         # The schema IS the on-disk shape (`_persist` dumps this instance), so it also owns
         # which fields a resume inherits and which this process stamps fresh.
         self.state = LiveDashboardState.for_run(
             resume_from,
             hop=hop,
             session_id=session_id,
-            patience=patience,
             arms_per_round=arms_per_round,
             sp_budget_round=sp_budget_round,
             langfuse_trace_url=langfuse_trace_url,
@@ -242,7 +239,6 @@ class LiveDashboardProjection(Projection):
         *,
         tenant_root: str,
         session_id: str,
-        patience: int | None,
         arms_per_round: int | None,
         sp_budget_round: int,
         headline_metric: HeadlineMetric,
@@ -278,7 +274,6 @@ class LiveDashboardProjection(Projection):
             state_path=CycleLayout(Path(cycle_dir)).dashboard,
             hop=hop,
             session_id=session_id,
-            patience=patience,
             arms_per_round=arms_per_round,
             sp_budget_round=sp_budget_round,
             headline_metric=headline_metric,
@@ -453,20 +448,26 @@ class LiveDashboardProjection(Projection):
             return
 
         if record.phase == CampaignPhase.BENCH and record.event == "scored":
-            self.state.bench_score = BenchScore.model_validate(view_fields(record)["bench"])
+            score = BenchScore.model_validate(view_fields(record)["bench"])
+            self.state.bench_score = score
+            self._place_bench(score.origin, score.selected)
+            self._flush_pending_persist()
+            return
+
+        if record.phase == CampaignPhase.BENCH and record.event == "graded":
+            raw = view_fields(record)["reading"]
+            self._place_bench(None if raw is None else BenchReading.model_validate(raw))
             self._flush_pending_persist()
             return
 
         if record.phase == "round" and record.event == "display":
             payload = record.payload
-            stall = int(payload.get("stall") or 0)
-            hearts_raw = payload.get("hearts")
-            hearts = None if hearts_raw is None else int(hearts_raw)
+            self.state.run_standing = RunStanding.model_validate(payload["run_standing"])
             # The headline scalars come off the PERSISTED lean form — the same numbers the full
             # result carries, so they fold whether or not a live producer is behind the record.
             accuracy = (payload.get("round_result") or {}).get("accuracy")
             if accuracy is not None:
-                self._absorb_round_complete(float(accuracy), stall, hearts)
+                self._absorb_round_complete(float(accuracy))
             # The trajectory row needs the WHOLE `RoundResult`. It rides the in-memory-only field
             # for a live producer and comes off `rounds/round_NNNN.json` for a fold with none —
             # one document, two carriers, resolved HERE so no caller has to know which it got.
@@ -478,7 +479,9 @@ class LiveDashboardProjection(Projection):
                 origin_rows = (
                     [] if round_result.round == 0 else origin_rows_from_disk(self.cycle_dir)
                 )
-                summary = build_round_summary(round_result, origin_rows)
+                summary = build_round_summary(
+                    round_result, origin_rows, best_so_far=self.state.best
+                )
                 rounds_list = [r for r in self.state.rounds if r.round != round_result.round]
                 rounds_list.append(summary)
                 rounds_list.sort(key=lambda r: r.round)
@@ -537,12 +540,22 @@ class LiveDashboardProjection(Projection):
         self._buffer.slot(record.idx)["changes_description"] = record.changes_description
         self._flush_pending_persist()
 
+    def _place_bench(self, *readings: BenchReading | None) -> None:
+        """Each bench reading onto the round whose selection it graded."""
+        by_round = {r.round: r for r in readings if r is not None}
+        self.state.rounds = [
+            r.model_copy(update={"bench": by_round[r.round]}) if r.round in by_round else r
+            for r in self.state.rounds
+        ]
+
     @staticmethod
     def _restamp_ability(r: RoundSummary, ability: AbilityReading) -> RoundSummary:
         """The warm-ruler correction, applied to the round AND to round 0's candidate row.
 
         Round 0 holds no election fit of its own, so the round's θ IS its one candidate's; later
         rounds stamp per candidate at the election and are left alone."""
+        if not r.stamps_theta:
+            return r
         candidates = (
             [
                 c.model_copy(update={"theta": ability.theta, "theta_se": ability.se})
@@ -691,12 +704,6 @@ class LiveDashboardProjection(Projection):
             short = view.get("composite_fitness_formula_short")
             if short is not None:
                 self.short_formula_template = short
-            # Re-seats `patience_max`, so the "N/M" reading survives a fold that never got the
-            # constructor's copy — a replay off disk has only the ledger. The ceilings themselves
-            # are WIRING (`run_limits`): they were declared at launch, and this record arrives
-            # after the whole origin has already scored.
-            patience = view.get("patience")
-            self.patience_max = None if patience is None else int(patience)
         elif event.phase == CampaignPhase.PROPOSE and event.event == "enter":
             s.degraded_count = 0
             # Rewind/fork-in-place clamp: drop rounds this run will overwrite. Sole clamp
@@ -831,9 +838,7 @@ class LiveDashboardProjection(Projection):
         if acc is not None:
             self.state.current_acc = round(float(acc), 4)
 
-    def _absorb_round_complete(
-        self, round_accuracy: float, stall: int, hearts: int | None = None
-    ) -> None:
+    def _absorb_round_complete(self, round_accuracy: float) -> None:
         """Never settle to ``cumulative_accuracy`` — nothing rescores it, so that pooled series can
         exceed everything the cycle measured. The round's own ``total`` is the answer beside it."""
         s = self.state
@@ -841,8 +846,6 @@ class LiveDashboardProjection(Projection):
         s.current_acc = acc
         if s.best is None or acc > s.best:
             s.best = acc
-        s.patience = f"{stall}/{self.patience_max}" if self.patience_max is not None else ""
-        s.hearts = hearts
 
     # -- Round-state mutations (snapshot-record fan-out) ----------------------
     # Per-candidate / per-sample / P(best) writes live on the ``RoundBuffer``;
@@ -978,9 +981,7 @@ class LiveDashboardProjection(Projection):
             s.waiting_since = self._waiting[1]
         s.backpressure = self._backpressure
         s.bench_lift_per_incurred_usd = (
-            None
-            if s.bench_score is None
-            else s.bench_score.lift_per_usd(s.spend.total_incurred_usd)
+            None if s.bench_score is None else s.bench_score.lift_per_usd(s.spend)
         )
         s.wallclock_serialized_at = utcnow_iso()
         # The typed model IS the on-disk shape, and `extra="forbid"` rejects an undeclared
@@ -1037,7 +1038,6 @@ def fold_at(cut: Cut) -> LiveDashboardState:
         hop=cut.hop,
         # The wiring, at the model's own defaults — `WIRING_FIELDS` names what the caller stamps.
         session_id="",
-        patience=0,
         arms_per_round=0,
         sp_budget_round=0,
         headline_metric="accuracy",

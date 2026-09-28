@@ -8,6 +8,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.scoring.evaluators import Evaluator, validate_campaign_evaluator
+from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.judges.call import absent, bind_cache
 from promptpotter.judges.grounding import ANSWER_GROUNDING, EVIDENCE_RETRIEVAL
 from promptpotter.judges.protocol import Judge, JudgeSpec
@@ -27,6 +28,7 @@ __all__ = [
     "ENTRY_POINT_GROUP",
     "build_evaluators",
     "get",
+    "judge_instrument",
     "judge_origins",
     "registered",
 ]
@@ -88,6 +90,16 @@ def judge_origins() -> Mapping[str, str]:
 
 def get(name: str) -> Judge:
     return lookup(ENTRY_POINT_GROUP, _load(), name)
+
+
+def judge_instrument(specs: Mapping[str, JudgeSpec]) -> str | None:
+    """What a campaign's graders ARE, over every term — the one digest both the measurement key and
+    the scorer id fold, ``None`` where it declares none. Sorted, since declaration order is not."""
+    if not specs:
+        return None
+    return stable_hash(
+        [[term, get(spec.name).fingerprint(spec)] for term, spec in sorted(specs.items())]
+    )
 
 
 async def _compute(

@@ -26,8 +26,6 @@ campaign_config:
   scoring:
     per_sample: max(0.0, min(1.0, (mean_round_delta + 1.0) / 3.0))
   headline_metric: ability
-  # = the panel size in inner_tasks.yaml. One cell.
-  sp_budget_round: 1
   exclude_nodes: []
   pipeline_overlay: {}
   optimization:
@@ -46,6 +44,10 @@ campaign_config:
     token_budget: null
     # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
     nodes:
+      # = the panel size in inner_tasks.yaml. One cell.
+      adaptive_queue:
+        config:
+          sp_budget_round: 1
       l1_generate:
         config:
           prompt_family: l1_generate_self_optimizing

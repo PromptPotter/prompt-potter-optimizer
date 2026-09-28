@@ -14,7 +14,11 @@ from promptpotter import connectors, judges
 from promptpotter.application import optimizers
 from promptpotter.application.bench.resume_and_fork.replayers import replayers
 from promptpotter.application.datasets.csv_ingest import read_candidate_library_file
-from promptpotter.application.datasets.loaders import resolve_dataset_items, samples_from_dicts
+from promptpotter.application.datasets.loaders import (
+    bank_samples,
+    resolve_dataset_items,
+    samples_from_dicts,
+)
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.pipeline_resolve import (
     dataset_pipeline_declaration,
@@ -268,17 +272,7 @@ def _load_dataset_into_session(
             code="dataset_not_found",
         )
 
-    # Whether a MISSING label disqualifies a row is DERIVED from the set, not declared: if any row
-    # carries one this is a labelled dataset and a row without is broken (drop it, as always); if
-    # none does, the dataset is verifier-graded and dropping on that test empties it entirely.
-    # `harbor` escaped only because it declares an `experiment_file` and returned above; a
-    # labelless dataset arriving through the loader registry or a tenant upload yielded
-    # `session.samples == []` and a run that measured nothing, with nothing raised.
-    labelled = any(item.get("ground_truth") for item in items)
-    valid = [
-        item for item in items if item.get("query") and (item.get("ground_truth") or not labelled)
-    ]
-    session.samples = samples_from_dicts(valid)
+    session.samples = bank_samples(items)
     gt_terms = {r["ground_truth"] for r in items if r.get("ground_truth")}
     config_dir = readable_dataset_dir(session.store, dataset_name)
     # The candidate library is part of the per-pipeline origin; read it through the

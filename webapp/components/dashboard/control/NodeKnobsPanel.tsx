@@ -1,17 +1,16 @@
 "use client";
 // An optimizer's node knobs: editable given `nodes` + `onChange` (a check-in's draft), else the
-// viewed course's, read-only. Rows come from `GET /optimizers/{name}/knobs`, so a knob a manifest
-// adds appears here with no edit; each row names the manifest's value, a paper preset's being its paper's.
+// viewed course's as its pipeline read serves them. Rows come from `GET /optimizers/{name}/knobs`,
+// so a knob a manifest adds appears here with no edit; each names the manifest's value.
 
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import {
-  fetchCampaignDetail,
   fetchOptimizerKnobs,
   fetchOptimizerRoster,
   type KnobRow,
   type ManifestNodeOverlay,
 } from "@/lib/api";
-import { knobText, knobValue, parseKnob } from "@/lib/derivations";
+import { knobRange, knobText, knobValue, parseKnob } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useWorkspace } from "@/lib/workspace";
 import { Badge, Button, CommitInput, Switch } from "@/components/ui";
@@ -30,12 +29,6 @@ export function NodeKnobsPanel({
   const editable = onChange != null;
   const cv = useConnector();
   const { campaignId } = useWorkspace();
-  const detailRead = useRead(
-    !editable && campaignId
-      ? { key: campaignId, fetch: (signal) => fetchCampaignDetail(campaignId, signal) }
-      : null,
-    { surface: "campaign-detail" },
-  );
   const name = optimizer ?? cv.optimizer;
   const knobsRead = useRead(
     name ? { key: name, fetch: (signal) => fetchOptimizerKnobs(name, signal) } : null,
@@ -49,18 +42,16 @@ export function NodeKnobsPanel({
   if (!editable && !campaignId) {
     return <p className="mech-empty">Select a campaign to see its optimizer&apos;s knobs.</p>;
   }
-  if (knobsRead.status === "failed" || detailRead.status === "failed") {
+  if (knobsRead.status === "failed" || (!editable && cv.pipelineStatus === "error")) {
     return <p className="mech-empty">Could not load the optimizer&apos;s knobs.</p>;
   }
-  if (knobsRead.status !== "ready" || detailRead.status === "loading") {
+  if (knobsRead.status !== "ready" || (!editable && cv.optimizerKnobs === null)) {
     return <p className="mech-empty">Loading knobs…</p>;
   }
   const menu = knobsRead.data;
-  const detail = readyData(detailRead);
-  const values: Record<string, ManifestNodeOverlay> | null = editable
-    ? (nodes ?? null)
-    : ((detail?.config.optimization as { nodes?: Record<string, ManifestNodeOverlay> } | undefined)
-        ?.nodes ?? null);
+  // Read-only, the course's knobs as SERVED; editing, the draft's sparse overlay over the manifest.
+  const valueOf = (node: string, k: KnobRow): unknown =>
+    editable ? knobValue(nodes ?? null, node, k) : cv.optimizerKnobs?.[node]?.[k.key];
   const entry = readyData(rosterRead)?.optimizers.find((o) => o.name === menu.optimizer);
   const declared = entry?.paper ? "Paper" : "Default";
 
@@ -85,7 +76,7 @@ export function NodeKnobsPanel({
           <p className="mech-group-desc">{group.kind}</p>
           <ul className="mech-list">
             {group.knobs.map((k) => {
-              const value = knobValue(values, group.node, k);
+              const value = valueOf(group.node, k);
               const changed = JSON.stringify(value) !== JSON.stringify(k.value);
               return (
                 <li key={k.key} className="mech-row">
@@ -100,6 +91,7 @@ export function NodeKnobsPanel({
                   <p className="mech-row-desc">{k.description}</p>
                   <p className="mech-row-default">
                     {declared} {fmtValue(k.value)}
+                    {knobRange(k) ? ` · range ${knobRange(k)}` : ""}
                     {changed ? " · changed" : ""}
                     {editable && changed ? (
                       <Button variant="ghost" onClick={() => set(group.node, k, k.value)}>

@@ -9,9 +9,9 @@ import { Hearts } from "@/components/ui";
 export const TopStrip = memo(function TopStrip() {
   const { dash } = useDashboard();
   const lastQuery = dash?.last_query_elapsed_s ?? null;
-  // Only in improvement-banked-budget mode; the cap is the denominator (3-of-4 vs 3-of-7).
-  const hearts = dash?.hearts ?? null;
-  const livesCap = dash?.run_limits?.lives_cap ?? null;
+  // Only where the optimizer banks stalls; the cap is the denominator (3-of-4 vs 3-of-7).
+  const hearts = dash?.run_standing?.stalls_left ?? null;
+  const livesCap = dash?.run_standing?.stalls_left_cap ?? null;
 
   return (
     <div className="topstrip">

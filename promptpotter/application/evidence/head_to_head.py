@@ -18,7 +18,7 @@ from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.run_records import WallClock
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.archive_queries import load_run
+from promptpotter.infrastructure.store.archive_queries import bench_reads, load_run
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.clock import epoch_seconds
@@ -65,11 +65,16 @@ class HeadToHeadRow(StrictModel):
     # The `loop` bucket alone — the optimizer's own calls, the spend arms differ on by manifest.
     loop_incurred_usd_ratio: float | None
     wall_clock_ratio: float | None
-    # Bench lift per incurred USD; `None` without a lift or a price.
+    # Bench lift per USD the SEARCH incurred (`BenchScore.lift_per_usd`); `None` without a lift,
+    # or where the search carries tokens no rate priced.
     lift_per_incurred_usd: float | None
     # Campaigns whose run overlapped this one's: while both ran they shared the content-addressed
     # cache, so a cell's bill and clock went to whichever reached it first.
     concurrent_with: list[str]
+    # Individuals the archive has graded on these held-out rows, this read's own included: each
+    # one chosen off a headline spends the holdout, so a high count reads optimistic. `None` = no
+    # bench set.
+    bench_reads: int | None
 
 
 class SelectionPair(StrictModel):
@@ -325,8 +330,11 @@ def _read(entry: HeadToHeadEntry) -> _Graded:
             wall_clock_ratio=None,
             lift_per_incurred_usd=None
             if bench is None or spend is None
-            else bench.lift_per_usd(spend.total_incurred_usd),
+            else bench.lift_per_usd(spend),
             concurrent_with=[],
+            bench_reads=None
+            if bench_set is None
+            else bench_reads(stores, dataset_name=campaign.dataset_name, sample_ids=bench_ids),
         ),
         origin_rows=None if bench is None or bench.origin is None else rows_of(bench.origin.run_id),
         selected_rows=(

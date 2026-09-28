@@ -540,7 +540,7 @@
             "title": "Composite Fitness"
           },
           "n_scored": {
-            "description": "Bench rows that carry a verdict; an errored row never does.",
+            "description": "Bench rows carrying a verdict — a miss the prompt caused included — never fewer than the bench set less its split's `tolerance`.",
             "title": "N Scored",
             "type": "integer"
           },
@@ -558,18 +558,6 @@
             "description": "The searchpoint scored — the archive's `prompt_fields_id`.",
             "title": "Sp Hash",
             "type": "string"
-          },
-          "stopped": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "`skip` where the operator ended the pass before its last bench row, or `None` when it scored every one.",
-            "title": "Stopped"
           }
         },
         "required": [
@@ -580,8 +568,7 @@
           "ci_lo",
           "ci_hi",
           "n_scored",
-          "run_id",
-          "stopped"
+          "run_id"
         ],
         "title": "BenchReading",
         "type": "object"
@@ -637,7 +624,7 @@
                 "type": "null"
               }
             ],
-            "description": "Why a reading above is `None`: each pass that stopped short, with the stop and the error it stopped on. `None` when both passes read.",
+            "description": "Why a reading above is `None`: each pass that stopped before its last row, or ended past its split's `tolerance` of rows with no verdict. `None` when both read.",
             "title": "Missing Reason"
           },
           "origin": {
@@ -649,7 +636,7 @@
                 "type": "null"
               }
             ],
-            "description": "`None` where its pass stopped short; `missing_reason` says why."
+            "description": "`None` where its pass read nothing; `missing_reason` says why."
           },
           "selected": {
             "anyOf": [
@@ -660,7 +647,7 @@
                 "type": "null"
               }
             ],
-            "description": "The headline. `None` where its pass stopped short; `missing_reason` says why."
+            "description": "The headline. `None` where its pass read nothing; `missing_reason` says why."
           }
         },
         "required": [
@@ -998,6 +985,15 @@
             "title": "Optimizer",
             "type": "string"
           },
+          "optimizer_knobs": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "description": "That optimizer's knob values per node as the addressed course runs them — the manifest's under the campaign's and the cycle seed's overlays",
+            "title": "Optimizer Knobs",
+            "type": "object"
+          },
           "params": {
             "additionalProperties": true,
             "description": "Resolved config as the engine holds it — the bytes a round document carries as `resolved_pipeline_params`, which makes that field this endpoint's check",
@@ -1029,6 +1025,7 @@
           "connector",
           "backend_type",
           "optimizer",
+          "optimizer_knobs",
           "params",
           "node_config_schema",
           "view",
@@ -2584,14 +2581,14 @@
         "additionalProperties": false,
         "properties": {
           "bench": {
-            "description": "Rows held out as the bench set: no optimizer node ever reads one, and the headline is scored on them.",
+            "description": "Distinct samples held out as the bench set, with every row that repeats one: no optimizer node ever reads one, and the headline is scored on them.",
             "minimum": 0.0,
             "title": "Bench",
             "type": "integer"
           },
           "demo": {
             "default": 0,
-            "description": "Rows reserved as the demo pool — the rows an individual's `shot_ids` name, rendered into its prompt as query and ground truth, never scored.",
+            "description": "Distinct samples reserved as the demo pool — the rows an individual's `shot_ids` name, rendered into its prompt as query and ground truth, never scored.",
             "minimum": 0.0,
             "title": "Demo",
             "type": "integer"
@@ -2600,6 +2597,13 @@
             "default": 0,
             "description": "Seeds which rows fall where. Membership ranks each row by its content (`Sample.key`), never its slot, so a reordered bank holds out the same rows.",
             "title": "Seed",
+            "type": "integer"
+          },
+          "tolerance": {
+            "default": 0,
+            "description": "Bench rows a pass may end with no verdict on — a provider fault, or a cell the formula cannot grade — and still be a reading. Past it the pass reads nothing: a headline over a population other than the one sent is not the bench score.",
+            "minimum": 0.0,
+            "title": "Tolerance",
             "type": "integer"
           }
         },
@@ -3513,7 +3517,7 @@
         "properties": {
           "pipeline_overlay": {
             "additionalProperties": true,
-            "description": "The `nodes.*.config` overlay the fork would carry, as `OperatorForkOverride` sends it",
+            "description": "The `nodes.*.config` overlay the fork would carry, as its `CycleSeed` sends it",
             "title": "Pipeline Overlay",
             "type": "object"
           }
@@ -3642,6 +3646,17 @@
               }
             ]
           },
+          "bench_reads": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bench Reads"
+          },
           "bench_set": {
             "anyOf": [
               {
@@ -3766,7 +3781,8 @@
           "loop_incurred_usd_ratio",
           "wall_clock_ratio",
           "lift_per_incurred_usd",
-          "concurrent_with"
+          "concurrent_with",
+          "bench_reads"
         ],
         "title": "HeadToHeadRow",
         "type": "object"
@@ -3780,10 +3796,58 @@
             "title": "Description",
             "type": "string"
           },
+          "exclusive_maximum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A bound every legal value lies strictly below; null when none",
+            "title": "Exclusive Maximum"
+          },
+          "exclusive_minimum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A bound every legal value lies strictly above; null when none",
+            "title": "Exclusive Minimum"
+          },
           "key": {
             "description": "The knob's name under `nodes.{node}.config`",
             "title": "Key",
             "type": "string"
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The greatest legal value, itself legal; null when none",
+            "title": "Maximum"
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The least legal value, itself legal; null when none",
+            "title": "Minimum"
           },
           "nullable": {
             "description": "Whether null is a legal value (an opt-in knob, off)",
@@ -3821,6 +3885,10 @@
           "type",
           "options",
           "nullable",
+          "minimum",
+          "exclusive_minimum",
+          "maximum",
+          "exclusive_maximum",
           "value"
         ],
         "title": "KnobRow",
@@ -3995,17 +4063,6 @@
             ],
             "description": "Which side of this cut the run CONTINUES on, derived from `trigger` (`FORK_DIRECTION`). `offshoot` = this branch hangs off a line that keeps running; `supersede` = this branch IS the line and the PARENT is what was left behind. Null for roots and inner runs, which were not cut from anything. Served, never derived in the client — the two read identically on disk and only this says them apart."
           },
-          "hearts": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Hearts"
-          },
           "id": {
             "description": "Course: the cycle_id. Candidate: the searchpoint id minted at L1/origin.",
             "title": "Id",
@@ -4054,17 +4111,6 @@
             ],
             "description": "This candidate's fitness under the request's `score:` lens, re-scored server-side from its stored evaluator namespace. Null without a lens, or when the namespace can't satisfy the formula.",
             "title": "Lens Value"
-          },
-          "lives_cap": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lives Cap"
           },
           "mean_fitness_ci_hi": {
             "anyOf": [
@@ -4173,6 +4219,17 @@
             ],
             "description": "Courses only — the ONE server-owned run-state (`derive_run_phase`), the same value `/cycles` serves. Null on a candidate, which has no run of its own."
           },
+          "run_standing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunStanding"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Courses only — the optimizer's standing as the course's last closed round left it, read off the course's own ledger. Null before round 0 closes."
+          },
           "sample_set_accuracy": {
             "anyOf": [
               {
@@ -4216,7 +4273,7 @@
           },
           "stamps_theta": {
             "default": false,
-            "description": "Whether the optimizer fits theta per arm at all. Candidate: the declaration its round's election carried (`RoundResult.stamps_theta`), false on a round that never elected. Course: the campaign-constant declaration of the optimizer it runs (`LiveDashboardState.stamps_theta`), so a course says whether its rounds are won on theta. False: theta is not a column here, so a surface hides it rather than drawing a cold ruler's blank.",
+            "description": "Whether the optimizer fits theta per arm at all. Candidate: the declaration its round's election carried (`RoundResult.stamps_theta`), false on a round that never elected. Course: the declaration its own elections carried, so a course says whether its rounds are won on theta. False: theta is not a column here, so a surface hides it rather than drawing a cold ruler's blank.",
             "title": "Stamps Theta",
             "type": "boolean"
           },
@@ -5033,6 +5090,18 @@
             "title": "Name",
             "type": "string"
           },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The installed package that registered it, as `<distribution>: <entry point>`; null for one shipped with PromptPotter",
+            "title": "Origin"
+          },
           "paper": {
             "anyOf": [
               {
@@ -5054,7 +5123,8 @@
         "required": [
           "name",
           "version",
-          "paper"
+          "paper",
+          "origin"
         ],
         "title": "OptimizerEntry",
         "type": "object"
@@ -5764,6 +5834,45 @@
         ],
         "title": "RunPhase",
         "type": "string"
+      },
+      "RunStanding": {
+        "additionalProperties": false,
+        "description": "Where an optimizer stands after a round, whichever optimizer runs: the rounds since its\nselection last advanced, and the stalls it may still absorb out of its ceiling.",
+        "properties": {
+          "rounds_without_advance": {
+            "title": "Rounds Without Advance",
+            "type": "integer"
+          },
+          "stalls_left": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stalls Left"
+          },
+          "stalls_left_cap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stalls Left Cap"
+          }
+        },
+        "required": [
+          "rounds_without_advance",
+          "stalls_left",
+          "stalls_left_cap"
+        ],
+        "title": "RunStanding",
+        "type": "object"
       },
       "RunsWithParam": {
         "additionalProperties": false,
@@ -9309,7 +9418,7 @@
     },
     "/api/v1/optimizers/{name}/knobs": {
       "get": {
-        "description": "Every knob the manifest's nodes take — type, closed options, the value the manifest\ndeclares — so a settings surface draws one control per knob and writes a campaign's\n``optimization.nodes.{node}.config.{key}``. 404 when no such optimizer is registered.",
+        "description": "Every knob the manifest's nodes take — type, closed options, bounds, the value the manifest\ndeclares — so a settings surface draws one control per knob and writes a campaign's\n``optimization.nodes.{node}.config.{key}``. 404 when no such optimizer is registered.",
         "operationId": "get_optimizer_knobs_api_v1_optimizers__name__knobs_get",
         "parameters": [
           {

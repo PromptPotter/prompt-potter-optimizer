@@ -41,7 +41,8 @@ covered, re-read state from disk — that is what makes turn 0 and turn 100 the 
 
 1. `projects/{tenant}/.workspace/active_session.json` → `{session_id, campaign_id, cycle_id}` —
    the LATEST launch only; parallel runs each say so by their own `run_phase` (`GET /cycles`)
-2. that cycle's `dashboard.json` (`run_phase`, `round`, `best`, `hearts`, `error_count`) + the
+2. that cycle's `dashboard.json` (`round`, `best`, `run_standing`, `error_count`; on disk it holds
+   only `declared_phase`, the runner's claim; the phase to trust is `GET /cycles`' `run_phase`) + the
    newest `rounds/round_NNNN.json`
 3. that cycle's `readout.log` tail — its terminal readout, ANSI-stripped, every launch appended.
    With several runs live, each has its own; `logs/latest-readout-path.txt` names only the newest launch's
@@ -156,7 +157,11 @@ Finished cycle: `campaigns/<id>/log.md` (campaign digest, heatmap, final winner)
 `STOP_REASON_INFO` table, `promptpotter/domain/phases.py`, so the terminal, `log.md`, `review.md`
 and the browser all say the same thing; don't compose a different one here).
 
-### A held round is not proof the candidate failed — check the other estimator
+### A held potter round is not proof the candidate failed — check the other estimator
+
+This section reads potter's own instruments — its sampler, PoBB and the θ gate, all present only
+where the selector stamps θ (`stamps_theta`). A peer's round is ordered, cut and elected by its
+own manifest's nodes, so read those instead; none of what follows carries over.
 
 **The hit sequence is difficulty-ordered, so a tail of 1s is the ORDER, never a surge.**
 `build_round_order` (`intelligence/adaptive_queue_mechanism.py`) puts parent-MISS win-opportunities
@@ -198,7 +203,7 @@ wrong after reading both numbers, ask what the round measured, not which estimat
 ## Configs are the source of truth
 
 The skill carries no parallel default-ladder. `dataset.md` (source, split, sample shape) ·
-`campaign.yaml` (max_rounds, n_variants, sp_budget_round, patiences) · `pipeline.yaml` (pipeline,
+`campaign.yaml` (max_rounds, and the node knobs n_variants, sp_budget_round, patiences) · `pipeline.yaml` (pipeline,
 model, caps). BBEH only: `notebooks/bbeh_potter.ipynb::build_campaign_config()` shadows
 `campaign.yaml` and wins. Model, `reasoning_effort` and the `max_tokens` convention are owned by
 [`docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md)

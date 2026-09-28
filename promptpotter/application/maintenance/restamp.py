@@ -81,8 +81,8 @@ def _iter_round_documents() -> list[pathlib.Path]:
 _Rewrite = Callable[[dict[str, Any]], dict[str, Any]]
 
 
-def _as_delta(pruned: dict[str, Any]) -> dict[str, Any]:
-    """The minted snapshot's rewrite — today's config as the delta from today's defaults."""
+def _as_frozen(pruned: dict[str, Any]) -> dict[str, Any]:
+    """The minted snapshot's rewrite — whole, as the mint freezes it today."""
     return freeze_campaign_config(CampaignConfig.model_validate(pruned))
 
 
@@ -112,12 +112,12 @@ class _Surface(NamedTuple):
 # round document safe — it does not — and `check_round_documents` is what covers it instead.
 _SURFACES: tuple[_Surface, ...] = (
     _Surface(
-        title="Minted snapshots (campaigns/*/campaign.json::config) — rewritten as a delta",
+        title="Minted snapshots (campaigns/*/campaign.json::config) — rewritten whole",
         verb="re-stamped",
         workspace_globs=("*/campaigns/*/campaign.json",),
         key_path=("config",),
         model_cls=CampaignConfig,
-        rewrite=_as_delta,
+        rewrite=_as_frozen,
     ),
     _Surface(
         title="Campaign manifests (campaigns/*/campaign.json) — pruned only",

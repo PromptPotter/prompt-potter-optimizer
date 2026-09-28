@@ -179,11 +179,13 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
         "",
         f"  /ref divides by {h2h.ratio_reference or '—'}, the oldest run carrying a spend and a "
         "wall clock: total and optimizer-only (`loop`) INCURRED USD, then elapsed seconds. "
-        "lift/$ is the bench lift per incurred USD; USD is the bill.",
+        "lift/$ is the bench lift per USD the SEARCH incurred, the bench's own pass excluded; USD "
+        "is the bill. reads counts the individuals ever graded on those held-out rows: each one "
+        "chosen off a headline spends the holdout.",
         f"  {'campaign':<24}  {'optimizer':<9}  {'sel':>3}  {'selected':>8}  {'95% CI':>16}  "
         f"{'origin':>7}  {'95% CI':>16}  {'lift':>7}  {'95% CI':>18}  {'USD':>8}  "
         f"{'tokens':>8}  {'wall s':>7}  {'rounds':>6}  {'USD/ref':>8}  {'loop/ref':>8}  "
-        f"{'wall/ref':>8}  {'lift/$':>7}",
+        f"{'wall/ref':>8}  {'lift/$':>7}  {'reads':>5}",
     ]
     for r in h2h.rows:
         # `x` off the instrument most rows share: its headline is listed, never paired.
@@ -219,6 +221,7 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
                 for x in (r.incurred_usd_ratio, r.loop_incurred_usd_ratio, r.wall_clock_ratio)
             )
             + f"  {'—' if per_usd is None else f'{per_usd:+.2f}':>7}"
+            + f"  {'—' if r.bench_reads is None else r.bench_reads:>5}"
         )
     buckets = list(TOKEN_KIND_BUCKET.values())
     lines += [

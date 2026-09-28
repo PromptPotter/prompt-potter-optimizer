@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter import connectors
-from promptpotter.application.campaign_config import CampaignConfig, freeze_campaign_config
+from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     default_campaign_config,
@@ -134,7 +134,8 @@ def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
     The node overlay is deliberately NOT folded in here: the mint splits it onto the per-campaign
     snapshot at launch (``build_cycle_config``), which is what leaves a REUSED dataset's
     shared file untouched."""
-    return {"campaign_config": freeze_campaign_config(default_campaign_config(draft))}
+    config = default_campaign_config(draft)
+    return {"campaign_config": config.model_dump(mode="json", exclude_defaults=True)}
 
 
 def _build_task_context(draft: DraftCampaign) -> dict[str, Any]:

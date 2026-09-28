@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimizers.fence import fence_untrusted
 from promptpotter.application.optimizers.paper_templates import fill, task_description
-from promptpotter.shared.errors import is_error_result
+from promptpotter.domain.scoring import is_graded
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
@@ -46,7 +46,7 @@ def paradigm_shift_prompt(
 
 
 def _failures(rows: Sequence[Mapping[str, Any]], n: int, rng: random.Random) -> str:
-    failed = [r for r in rows if not is_error_result(r) and float(r["fitness"]) < 1.0]
+    failed = [r for r in rows if is_graded(r) and float(r["fitness"]) < 1.0]
     picked = rng.sample(failed, min(n, len(failed)))
     if not picked:
         return ""

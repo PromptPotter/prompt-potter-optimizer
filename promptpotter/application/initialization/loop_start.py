@@ -40,7 +40,7 @@ from promptpotter.infrastructure.llm.telemetry import (
     set_cycle_ledger,
 )
 from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
-from promptpotter.judges import build_evaluators
+from promptpotter.judges import build_evaluators, judge_instrument
 from promptpotter.shared.errors import graceful
 from promptpotter.shared.statistics import warm_stats_backend
 
@@ -187,7 +187,9 @@ def arm_diagnostic_scoring(
     pipeline_params = configure_and_apply_pipeline(
         session, campaign_config, log=log or (lambda *_a, **_k: None)
     )
-    spec = split_scoring_block(campaign_config.scoring)
+    spec = split_scoring_block(
+        campaign_config.scoring, judge_instrument=judge_instrument(campaign_config.judges)
+    )
     populate_session_scoring(
         session,
         obs=None,

@@ -9,6 +9,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.bench.resume_and_fork.decisions import record_decision
+from promptpotter.application.optimizers.nodes import EliminationReading
 from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
 from promptpotter.application.optimizers.potter.pobb.checks import (
     EliminationContext,
@@ -23,12 +24,33 @@ if TYPE_CHECKING:
 
     from promptpotter.application.optimizers.nodes import CatchUpFn, Panel, RoundContext
     from promptpotter.application.scoring.query_loop import Walk
+    from promptpotter.domain.connector import MeasuredUnit
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.validators import StopSignal
 
 __all__ = ["PoBBRace", "pobb_decision_data"]
+
+
+def _reason(ctx: EliminationContext, unit: MeasuredUnit) -> str:
+    q = f"q{ctx['queries_scored']}/{ctx['total_queries']}"
+    n = ctx["n_priors"]
+    priors = f"(of {n} prior{'' if n == 1 else 's'})"
+    match ctx["gate"]:
+        case EliminationGate.LOCK_IN:
+            return f"leader locked {q}  p_best={ctx['p_best']:.1%} {priors}"
+        case EliminationGate.COLLAPSED:
+            return (
+                f"answer collapsed {q}  one label for every {unit} — "
+                "no measurement of ability to score"
+            )
+        case EliminationGate.EPSILON:
+            leader = ctx.get("leader_label") or ctx["leader_id"][:8] or "?"
+            return (
+                f"eliminated {q}  p_best={ctx['p_best']:.1%} < eps={ctx['epsilon']:.0%}  "
+                f"vs {leader} {priors}"
+            )
 
 
 def pobb_decision_data(
@@ -132,7 +154,7 @@ class PoBBRace:
         candidate_id: str,
         results: list[QueryMeasurement],
         labels: dict[str, str],
-    ) -> EliminationContext | None:
+    ) -> EliminationReading | None:
         """This arm's elimination context, and the decision its cut or lock-in leaves — read off
         the priors BEFORE the arm joins them, which is the pool the stop rule tested against."""
         if signal is None:
@@ -221,7 +243,10 @@ class PoBBRace:
                 ),
                 round=round_num,
             )
-        return elim_ctx
+        if elim_ctx is None:
+            return None
+        unit = self._ctx.cycle.session.backend_client.measured_unit
+        return EliminationReading(reason=_reason(elim_ctx, unit), context=elim_ctx)
 
     def admit(self, candidate_id: str, results: list[QueryMeasurement], sp: JobSearchPoint) -> None:
         self._check.register_completed(results, candidate_id=candidate_id, sp=sp)

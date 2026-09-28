@@ -42,14 +42,16 @@ from promptpotter.domain.results import (
     candidate_label,
 )
 from promptpotter.domain.run_records import CandidateMintedRecord, CheckpointKind
+from promptpotter.domain.scoring import is_graded
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import StopSignal
-from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.statistics import paired_reading
 
 if TYPE_CHECKING:
     from pathlib import Path
     from types import ModuleType
+
+    from pydantic import BaseModel
 
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.bench.resume_and_fork.replayers import (
@@ -182,6 +184,11 @@ class Blocks:
     kind: ClassVar[NodeKind] = NodeKind.SAMPLER
     knobs: ClassVar[type[StrictModel]] = BlocksKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
+    size_knob: ClassVar[str | None] = None
+
+    def draws(self, selected: SelectedOptimizer, pool: int) -> int:
+        knobs = cast("BlocksKnobs", selected.knobs(self.name))
+        return min(knobs.max_blocks, pool // knobs.block_size) * knobs.block_size
 
     def draw(self, ctx: RoundContext, pool: list[Sample]) -> Panel:
         knobs = cast("BlocksKnobs", ctx.cycle.optimizer.knobs(self.name))
@@ -203,11 +210,6 @@ class PairedTKnobs(StrictModel):
         "scores above this one on the cells both measured. Larger → more arms read as beaten → "
         "earlier cuts.",
     )
-    survivors: Annotated[int, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
-        ge=1,
-        description="μ, the arms the race keeps: an arm is cut once this many others are "
-        "significantly better, since it can no longer be among them.",
-    )
     length_penalty: Annotated[float, Knob(Scope.POLICY, Estimand.SELECTION, Estimand.STOPPING)] = (
         Field(
             ge=0.0,
@@ -226,8 +228,7 @@ class _Objective:
     length_penalty: float
     length_norm: int
 
-    def of(self, row: Mapping[str, Any]) -> float:
-        chars = float(row["pipeline_data"]["target_prompt_chars"])
+    def of(self, row: Mapping[str, Any], chars: int) -> float:
         return float(row["fitness"]) - self.length_penalty * chars / self.length_norm
 
 
@@ -243,11 +244,28 @@ def _objective(ctx: RoundContext) -> _Objective:
 
 
 def _cell_objectives(rows: Sequence[Mapping[str, Any]], objective: _Objective) -> dict[str, float]:
-    return {
-        str(sid): objective.of(r)
-        for r in rows
-        if (sid := r.get("sample_id")) is not None and not is_error_result(r)
-    }
+    """One arm's rows, all of one prompt: its length is read off whichever row carries it, since a
+    charged error is graded but banks no ``pipeline_data``."""
+    graded = [(sid, r) for r in rows if (sid := r.get("sample_id")) is not None and is_graded(r)]
+    if not graded:
+        return {}
+    chars = _prompt_chars(rows)
+    if chars is None:
+        raise ValueError(
+            "every graded cell of this arm is a charged error, so none says how long its prompt is"
+        )
+    return {str(sid): objective.of(r, chars) for sid, r in graded}
+
+
+def _prompt_chars(rows: Sequence[Mapping[str, Any]]) -> int | None:
+    return next(
+        (
+            int(pd["target_prompt_chars"])
+            for r in rows
+            if (pd := r.get("pipeline_data")) and pd.get("target_prompt_chars") is not None
+        ),
+        None,
+    )
 
 
 def _rank_survivors(
@@ -284,6 +302,10 @@ def _readings(
     return out
 
 
+def _labels(labels: list[str], cap: int = 2) -> str:
+    return ", ".join(labels[:cap]) + (f" (+{len(labels) - cap})" if len(labels) > cap else "")
+
+
 class PairedTRace(nodes.NoCatchUps):
     """Every live arm walks each block, then at its close each is tested against every other live
     arm; the arms μ others beat are cut together, and once μ or fewer remain the race stops them
@@ -296,6 +318,7 @@ class PairedTRace(nodes.NoCatchUps):
         self,
         knobs: PairedTKnobs,
         *,
+        survivors: int,
         node: str,
         block_size: int,
         n_cells: int,
@@ -307,7 +330,7 @@ class PairedTRace(nodes.NoCatchUps):
         self.node = node
         self._decisions = decisions
         self._alpha = knobs.alpha
-        self._survivors = knobs.survivors
+        self._survivors = survivors
         self._objective = objective
         self._block_size = block_size
         self._n_cells = n_cells
@@ -396,7 +419,7 @@ class PairedTRace(nodes.NoCatchUps):
         candidate_id: str,
         results: list[QueryMeasurement],
         labels: dict[str, str],
-    ) -> Mapping[str, Any] | None:
+    ) -> nodes.EliminationReading | None:
         if signal is None or signal.check_name != self.node:
             return None
         cr = signal.check_result
@@ -412,8 +435,13 @@ class PairedTRace(nodes.NoCatchUps):
             "blocks": -(-cr["total_samples"] // self._block_size),
             "raced_against": walk_order(cr["raced_against"]),
         }
+        where = (
+            f"at block {context['block']}/{context['blocks']} "
+            f"(q{cr['queries_scored']}/{cr['total_samples']})"
+        )
         if signal.outcome is not ArmOutcome.ELIMINATED:
-            return context
+            reason = f"settled {where}: {self._survivors} or fewer left racing"
+            return nodes.EliminationReading(reason=reason, context=context)
         # The rivals are named, not their rows: a replay reads every arm off the rescored round.
         record_decision(
             self._decisions,
@@ -434,7 +462,9 @@ class PairedTRace(nodes.NoCatchUps):
             round=self._round_num,
         )
         context["outscored_by"] = walk_order(cr["outscored_by"])
-        return context
+        outscored, raced = context["outscored_by"], context["raced_against"]
+        reason = f"outscored {where} by {len(outscored)} of {len(raced)}: {_labels(outscored)}"
+        return nodes.EliminationReading(reason=reason, context=context)
 
     def admit(self, candidate_id: str, results: list[QueryMeasurement], sp: JobSearchPoint) -> None:
         return None
@@ -450,8 +480,10 @@ class PairedT:
     abort_lenses: ClassVar[Mapping[str, frozenset[str]]] = {}
 
     def race(self, ctx: RoundContext, panel: Panel, catch_up: CatchUpFn) -> PairedTRace:
+        selected = ctx.cycle.optimizer
         return PairedTRace(
-            cast("PairedTKnobs", ctx.cycle.optimizer.knobs(self.name)),
+            cast("PairedTKnobs", selected.knobs(self.name)),
+            survivors=cast("PopulationKnobs", selected.knobs(PopulationSelector.name)).size,
             node=self.name,
             block_size=panel.block_size,
             n_cells=len(panel.order),
@@ -678,10 +710,11 @@ class PopulationRejoin:
 
 
 class PopulationKnobs(StrictModel):
-    size: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
+    size: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION, Estimand.STOPPING)] = Field(
         ge=2,
         description="μ, the individuals CAPO carries into the next round: the race's survivors, "
-        "best first, cut to this many.",
+        "best first, cut to this many. The paired-t race reads it too: an arm is cut once μ "
+        "others are significantly better, since it can no longer be among them.",
     )
 
 
@@ -694,6 +727,7 @@ class PopulationSelector:
     knobs: ClassVar[type[StrictModel]] = PopulationKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
     stamps_theta: ClassVar[bool] = False
+    reads_parent: ClassVar[bool] = False
 
     def select(self, ctx: RoundContext, measured: Measured, population: Population) -> Selection:
         cycle = ctx.cycle
@@ -788,10 +822,18 @@ class CapoRuntime:
     own_axes: ClassVar[dict[str, set[str]]] = {}
     priced_surface: ClassVar[Mapping[str, int]] = {}
     phases: ClassVar[tuple[nodes.OptimizerPhase, ...]] = ()
+    response_models: ClassVar[Mapping[str, type[BaseModel]]] = {}
 
     def start(
         self, session: Session, config: CampaignConfig, origin_results: list[dict[str, Any]]
     ) -> CapoState:
+        # The objective charges each cell for the scored prompt's length, which a measurement
+        # stamps only off a prompt node's rendered prompt (`sample_measurement.py`).
+        if _prompt_chars(origin_results) is None:
+            raise ValueError(
+                "CAPO's objective charges each cell for its prompt's length, and this pipeline's "
+                "rows carry no target_prompt_chars: it renders no prompt node CAPO could edit"
+            )
         return CapoState()
 
     def prompt_hashes(self, selected: SelectedOptimizer) -> dict[str, str]:
@@ -847,7 +889,7 @@ class CapoRuntime:
         size = cast("PopulationKnobs", selected.knobs(PopulationSelector.name)).size
         offspring = cast("CapoCrossoverKnobs", selected.knobs(CapoCrossover.name)).crossovers
         return nodes.OptimizerPacing(
-            patience=None, lives=None, arms_per_round=size + offspring, limits=()
+            patience=None, stalls_left=None, arms_per_round=size + offspring, limits=()
         )
 
     def opening(self, ctx: RoundContext) -> nodes.RoundOpening:

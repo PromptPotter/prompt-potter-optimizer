@@ -292,8 +292,8 @@ Three things the recipe cannot show you:
 
 ## 6. An optimizer node
 
-One of the optimizer's own LLM nodes — `dispatch/schemas.py::OPTIMIZER_RESPONSE_MODELS`
-enumerates them, and is the only place that count is correct. The JSON declaration format
+One of the optimizer's own LLM nodes — its runtime's `response_models` enumerates the structured
+ones, and is the only place that count is correct. The JSON declaration format
 and registry live in [`developer/node-standard.md`](node-standard.md). A node renders a
 `PromptTemplate` through the same `DispatchHub` fill path as every other node —
 adding a slot it needs is §2.

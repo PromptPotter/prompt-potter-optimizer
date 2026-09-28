@@ -76,7 +76,8 @@ The decisions the models cannot state:
   what decides whether a node is drawn at all:** a sequence sharing steps with `default` is an
   ALTERNATIVE — a controller picks it at the round boundary — and the nodes it introduces tier
   above the chain in the served `view`, reached by an `alternative` edge; one sharing
-  none is a separate PHASE, running on its own occasion; and **a node named by no pipeline is not
+  none is a separate PHASE, running on the occasion the member that opens it chooses, drawn ahead
+  of an optimizer's `loop` rather than inside it; and **a node named by no pipeline is not
   in the flow, so nothing draws it** — being declared is not the same as running, which is why the
   optimizer publishes its check-in node as a one-step pipeline of its own. `derive_pipeline_view`
   reads exactly this, and no manifest declares a `view` of its own.

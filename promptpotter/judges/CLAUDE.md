@@ -163,6 +163,10 @@ measured the same thing.
 **Hash the rubric, never trust a hand-bumped version** — an author who edits a rubric and forgets
 to bump `version` still moves the fingerprint.
 
+**The scorer id folds the same digest** (`judge_instrument`, into `compiler.py::auto_scorer_id`):
+a formula reads the terms a judge banked, so one formula over two graders is two grading
+functions, and a ruler or a head-to-head keyed on the id would pool them.
+
 ## Emit absence, never zero
 
 `compute` returns `float | None`, and `None` is **not** a zero: the materializer omits the key,

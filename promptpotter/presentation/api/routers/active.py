@@ -40,7 +40,6 @@ from promptpotter.presentation.api.deps import (
     StoresDep,
     decode_descend,
 )
-from promptpotter.shared.errors import NotFoundError
 
 active_router = APIRouter()
 
@@ -404,13 +403,10 @@ def get_optimizers() -> OptimizerRoster:
     "/optimizers/{name}/knobs", tags=["Optimizer"], response_model=OptimizerKnobsResponse
 )
 def get_optimizer_knobs(name: str) -> OptimizerKnobsResponse:
-    """Every knob the manifest's nodes take — type, closed options, the value the manifest
+    """Every knob the manifest's nodes take — type, closed options, bounds, the value the manifest
     declares — so a settings surface draws one control per knob and writes a campaign's
     ``optimization.nodes.{node}.config.{key}``. 404 when no such optimizer is registered."""
-    try:
-        return optimizer_knobs(name)
-    except KeyError as exc:
-        raise NotFoundError(f"No optimizer named {name!r}") from exc
+    return optimizer_knobs(name)
 
 
 __all__ = [

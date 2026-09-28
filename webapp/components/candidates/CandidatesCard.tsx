@@ -406,7 +406,7 @@ export function CandidatesCard() {
             </Badge>
           )}
           <ToolbarSep />
-          {/* Display only — the engine gates on θ whatever is lit here. */}
+          {/* Display only — the selector elects on its own objective whatever is lit here. */}
           <ChipGroup label="Bars" joined>
             {HEADLINE_METRICS.map((m) => {
               // Rows carry θ only where the selector fits it; a lit chip would draw no bar.

@@ -17,6 +17,7 @@ import asyncio
 import copy
 import functools
 import logging
+import os
 import random
 import subprocess
 import sys
@@ -239,7 +240,9 @@ def test_an_l4_override_moves_the_prompt_and_hash_of_every_preset() -> None:
         }
     finally:
         set_optimizer_prompt_overrides(None)
-    spec = InnerTaskSpec(inner_dataset="justlogic-d234", seed=3, n_samples=28, n_rounds=4)
+    spec = InnerTaskSpec(
+        inner_dataset="justlogic-d234", optimizer_identity="o", seed=3, n_samples=28, n_rounds=4
+    )
     assert inner_campaign_id(spec, mutated) != inner_campaign_id(spec, {})
 
     potter = resolve_optimizer("potter", {})
@@ -346,10 +349,14 @@ def test_inner_campaign_id_separates_two_candidates_and_is_stable() -> None:
     varied per process would never find its own campaign, so every retry would re-mint and
     the continuation would silently never happen.
     """
+    from promptpotter.application.optimizer_manifest import resolve_optimizer
     from promptpotter.application.runner.inner.spawn import inner_campaign_id
     from promptpotter.application.runner.inner.tasks import InnerTaskSpec
+    from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 
-    spec = InnerTaskSpec(inner_dataset="justlogic-d234", seed=3, n_samples=28, n_rounds=4)
+    spec = InnerTaskSpec(
+        inner_dataset="justlogic-d234", optimizer_identity="o", seed=3, n_samples=28, n_rounds=4
+    )
     c1 = {"l1_generate": {"instruction": "widen the axes"}}
     c2 = {"l1_generate": {"instruction": "narrow the axes"}}
 
@@ -362,8 +369,14 @@ def test_inner_campaign_id_separates_two_candidates_and_is_stable() -> None:
         len({inner_campaign_id(spec, c1), inner_campaign_id(spec, c2), inner_campaign_id(spec, {})})
         == 3
     )
-    # A different cell of the SAME candidate is a different campaign too.
+    # A different cell of the SAME candidate is a different campaign too, and so is one whose
+    # inner optimizer runs another knob — an eliminator's as much as an llm node's.
     assert inner_campaign_id(spec.model_copy(update={"seed": 6}), c1) != inner_campaign_id(spec, c1)
+    cut = {"pobb": ManifestNodeOverlay.model_validate({"config": {"epsilon": 0.3}})}
+    as_run, as_cut = (resolve_optimizer("potter", n).config_digest for n in ({}, cut))
+    assert inner_campaign_id(
+        spec.model_copy(update={"optimizer_identity": as_run}), c1
+    ) != inner_campaign_id(spec.model_copy(update={"optimizer_identity": as_cut}), c1)
     # Recomputation is stable, and key order in the override dict is not part of the identity.
     assert inner_campaign_id(spec, c1) == inner_campaign_id(spec, dict(c1))
     assert inner_campaign_id(spec, {"a": {"x": "1"}, "b": {"y": "2"}}) == inner_campaign_id(
@@ -376,7 +389,8 @@ def test_inner_campaign_id_separates_two_candidates_and_is_stable() -> None:
             "-c",
             "from promptpotter.application.runner.inner.spawn import inner_campaign_id;"
             "from promptpotter.application.runner.inner.tasks import InnerTaskSpec;"
-            "s=InnerTaskSpec(inner_dataset='justlogic-d234',seed=3,n_samples=28,n_rounds=4);"
+            "s=InnerTaskSpec(inner_dataset='justlogic-d234',optimizer_identity='o',seed=3,"
+            "n_samples=28,n_rounds=4);"
             "print(inner_campaign_id(s,{'l1_generate':{'instruction':'widen the axes'}}))",
         ],
         capture_output=True,
@@ -1494,6 +1508,21 @@ def test_a_dead_claimers_cell_is_taken_over(tmp_path: Path, monkeypatch) -> None
     assert feed.claimed_row(spare.key) is None, "the next claimer served a released row"
     taken.release()
 
+    # The row it left can still be held open when the NEXT holder publishes: that refused replace
+    # must not fail the walk that just paid for the measurement.
+    stale = feed.claim(spare.key, shareable=bool)
+    assert stale is not None
+    stale.publish({"predicted": "a"})
+    with open(stale.row_path, encoding="utf-8"), monkeypatch.context() as held:
+        if sys.platform != "win32":
+            held.setattr(Path, "unlink", _refused)
+            held.setattr(os, "replace", lambda *_a: _refused(stale.row_path))
+        stale.release()
+        republished = feed.claim(spare.key, shareable=bool)
+        assert republished is not None
+        republished.publish({"predicted": "b"})
+        republished.release()
+
 
 def test_unscoreable_cells_counts_holes_but_not_stops_or_deprecated_rows() -> None:
     """A HOLE is a cell that was attempted and returned nothing — not a stop, not a retry.
@@ -1849,6 +1878,11 @@ def test_no_held_out_row_reaches_a_round_panel_or_an_archive_view() -> None:
     assert len(child) == 3 and set(child) <= demo_ids
     # A row's CONTENT holds it out, not its slot: the same bank in another order agrees.
     assert {s.id for s in partition_bank(bank[::-1], split).bench} == {s.id for s in part.bench}
+    # A sample the bank repeats is ONE sample, so no copy of a bench row sits in the search pool.
+    twins = [*bank, *(s.model_copy(update={"id": 60 + s.id}) for s in bank)]
+    doubled = partition_bank(twins, split)
+    assert {s.key for s in doubled.bench}.isdisjoint(s.key for s in doubled.search)
+    assert len(doubled.bench) == 2 * split.bench
 
     # Archive evidence naming every held-out cell cannot pull one into the panel.
     contaminating = [Observation("bench_arm", sid, 0.0) for sid in held]
@@ -2291,7 +2325,8 @@ def test_narrowing_an_enum_never_deletes_the_values_it_unticked() -> None:
 def test_the_drafts_CHAIN_reaches_the_mint_on_a_reused_dataset(tmp_path: Path) -> None:
     """The operator picks LLM-only and the campaign measures the full pipeline. A fresh upload
     commits its own `pipeline.yaml`, so `pipelines.default` IS the chosen chain; a REUSED dataset
-    writes no file, and nothing else carried `draft.pipeline_steps` to the run."""
+    writes no file, and nothing else carried `draft.pipeline_steps` to the run — nor the optimizer
+    the picker chose, so the shared file's ran under the draft's name."""
     from promptpotter.application.jobs.launcher.mint_and_start import build_cycle_config
     from promptpotter.connectors import DEFAULT_CONNECTOR, get
     from promptpotter.infrastructure.store.io import write_yaml
@@ -2310,12 +2345,16 @@ def test_the_drafts_CHAIN_reaches_the_mint_on_a_reused_dataset(tmp_path: Path) -
     )
     session = types.SimpleNamespace(pipeline_schema=schema)
 
-    chosen = build_cycle_config(cast(Any, session), root, pipeline_steps=["llm_only"])
+    chosen = build_cycle_config(
+        cast(Any, session), root, optimization={"optimizer": "capo"}, pipeline_steps=["llm_only"]
+    )
     assert sorted(chosen.exclude_nodes) == ["rerank", "web_search"]
     assert schema.active_steps_excluding(chosen.exclude_nodes) == ["llm_only"]
+    assert chosen.optimization.optimizer == "capo"
     # A draft that never touched the toggle leaves the dataset's answer alone — excluding the
     # complement of "nothing chosen" would close the whole pipeline.
-    assert build_cycle_config(cast(Any, session), root, pipeline_steps=[]).exclude_nodes == []
+    untouched = build_cycle_config(cast(Any, session), root, optimization={}, pipeline_steps=[])
+    assert untouched.exclude_nodes == []
 
 
 def test_an_axis_no_agent_moves_is_SHUT_rather_than_exempt() -> None:
@@ -2664,14 +2703,89 @@ def test_answering_in_TEXT_sends_no_contract_to_answer_INTO() -> None:
     assert resolved_output_schemas(schema, text_point)["llm_only"] is None
 
 
+def _frozen_config(**fields: Any) -> dict[str, Any]:
+    """A manifest's `config` as a mint freezes it, over the default connector's loop knobs."""
+    from promptpotter.application.campaign_config import (
+        freeze_campaign_config,
+        load_campaign_config,
+    )
+    from promptpotter.connectors import DEFAULT_CONNECTOR, get
+
+    defaults = dict(get(DEFAULT_CONNECTOR).default_optimization)
+    optimization = {**defaults, **fields.pop("optimization", {})}
+    return freeze_campaign_config(load_campaign_config({"optimization": optimization, **fields}))
+
+
+def test_a_campaign_runs_the_config_it_froze_whatever_its_dataset_file_says_later(
+    built_stores: Any,
+) -> None:
+    """The dataset file seeds the NEXT campaign. Read at resume, it switched a potter campaign to
+    whatever optimizer a later edit named, and a mint's `--config` reached `campaign.json` but not
+    the loop — every surface showing one configuration while another ran."""
+    from promptpotter.application.pipeline_resolve import resolve_campaign_config
+    from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
+
+    stores = built_stores
+    write_yaml(
+        stores.tenant_datasets.dataset_dir("ds") / "campaign.yaml",
+        {"campaign_config": _frozen_config(optimization={"optimizer": "capo", "max_rounds": 3})},
+    )
+    campaign = Campaign(
+        campaign_id="ds__000001",
+        dataset_name="ds",
+        created_at="2026-09-27T00:00:00Z",
+        root_cycle_id="cycle_root",
+        owner_user_id=str(stores.identity.user_id),
+        config=_frozen_config(
+            optimization={"max_rounds": 12},
+            optimizer_narrowing={"a": {"param_keys": ["temperature"]}, "b": {"param_keys": ["k"]}},
+        ),
+    )
+    stores.campaigns.create_campaign(campaign)
+    stores.campaigns.create(campaign.root_hop, {})
+    ran = resolve_campaign_config(stores, campaign, campaign.root_hop)
+    assert (ran.optimization.optimizer, ran.optimization.max_rounds) == ("potter", 12)
+
+    seed = CycleSeed(
+        optimizer_narrowing={"a": {"param_keys": []}},
+        config_overrides=ConfigOverrides(max_rounds=4),
+    )
+    stores.campaigns.write_cycle_seed(campaign.root_hop, seed)
+    forked = resolve_campaign_config(stores, campaign, campaign.root_hop)
+    assert forked.optimization.max_rounds == 4
+    assert [forked.optimizer_narrowing[n].param_keys for n in "ab"] == [[], ["k"]]
+
+    # A frozen peer runs its manifest under ITS overlay: CAPO's μ races beside the offspring.
+    from promptpotter.application.campaign_config import load_campaign_config
+    from promptpotter.application.optimizer_manifest import select_optimizer
+    from promptpotter.application.run_observers import build_campaign_emitter
+
+    capo = load_campaign_config(
+        _frozen_config(
+            optimization={"optimizer": "capo", "nodes": {"population": {"config": {"size": 4}}}}
+        )
+    )
+    session = types.SimpleNamespace(
+        hop=CycleHop(campaign_id="camp_capo", cycle_id="cycle_capo"),
+        tenant_root=str(stores.base_dir),
+        session_id="sess_capo",
+        backend_client=types.SimpleNamespace(max_cells_in_flight=2, measured_unit="sample"),
+        samples=[],
+    )
+    emitter = build_campaign_emitter(cast(Any, session), capo, origin_accuracy=None)
+    assert emitter is not None
+    crossovers = select_optimizer(capo.optimization).node_config("capo_crossover")["crossovers"]
+    assert emitter.state.arms_per_round == 4 + crossovers
+
+
 def test_the_campaign_list_names_the_model_its_root_course_runs(built_stores: Any) -> None:
     """Sibling campaigns on one slug differ only in what their roots run, so the list row is where
     an operator tells them apart. Three layers name a model here; the root's seed is the one that
-    runs, and a list reading the shared file or the frozen delta names the wrong model with every
+    runs, and a list reading the shared file or the frozen config names the wrong model with every
     row rendering. The campaign read without `at` skipped that same seed."""
     from promptpotter.application.evidence.subjects import SubjectSpec
     from promptpotter.application.pipeline_resolve import resolve_pipeline_for_campaign
-    from promptpotter.connectors import DEFAULT_CONNECTOR, get
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.run_records import CycleSeed
     from promptpotter.presentation.api.routers.campaigns.manifests import list_campaigns
@@ -2685,17 +2799,13 @@ def test_the_campaign_list_names_the_model_its_root_course_runs(built_stores: An
             "pipelines": {"default": ["llm_only"]},
         },
     )
-    write_yaml(
-        dataset / "campaign.yaml",
-        {"campaign_config": {"optimization": dict(get(DEFAULT_CONNECTOR).default_optimization)}},
-    )
     campaign = Campaign(
         campaign_id="ds__000001",
         dataset_name="ds",
         created_at="2026-09-17T00:00:00Z",
         root_cycle_id="cycle_root",
         owner_user_id=str(stores.identity.user_id),
-        config={"pipeline_overlay": {"llm_only": {"model": "B"}}},
+        config=_frozen_config(pipeline_overlay={"llm_only": {"model": "B"}}),
     )
     stores.campaigns.create_campaign(campaign)
     stores.campaigns.create(campaign.root_hop, {})
@@ -2723,7 +2833,7 @@ def test_a_new_runs_the_campaign_it_minted_when_another_mint_lands_mid_launch(
     """Every mint rewrites the tenant's active pointer, and `new` awaits the backend probe between
     its mint and its run. Read back there, two launches in one second swapped campaigns: each ran
     its own model under the other's manifest and cycle, with every surface rendering."""
-    from promptpotter.connectors import DEFAULT_CONNECTOR, get
+    from promptpotter.connectors import DEFAULT_CONNECTOR
     from promptpotter.domain.campaign import Campaign
     from promptpotter.infrastructure.store.session_pointer import save_active_pointer
     from promptpotter.presentation.cli.commands import new as new_cmd
@@ -2738,10 +2848,6 @@ def test_a_new_runs_the_campaign_it_minted_when_another_mint_lands_mid_launch(
             "pipelines": {"default": ["llm_only"]},
         },
     )
-    write_yaml(
-        dataset / "campaign.yaml",
-        {"campaign_config": {"optimization": dict(get(DEFAULT_CONNECTOR).default_optimization)}},
-    )
 
     def mint(model: str) -> CycleHop:
         hop = CycleHop(campaign_id=f"ds__{model}", cycle_id=f"cycle_{model}")
@@ -2752,7 +2858,7 @@ def test_a_new_runs_the_campaign_it_minted_when_another_mint_lands_mid_launch(
                 created_at="2026-09-24T00:00:00Z",
                 root_cycle_id=hop.cycle_id,
                 owner_user_id=str(stores.identity.user_id),
-                config={"pipeline_overlay": {"llm_only": {"model": model}}},
+                config=_frozen_config(pipeline_overlay={"llm_only": {"model": model}}),
             )
         )
         stores.campaigns.create(hop, {"parent_session_id": f"s_{model}"})
@@ -3626,7 +3732,7 @@ def test_the_l4_dataset_is_recognized_as_one(tmp_path: Path) -> None:
             n_scored=40,
         )
         ran = select_optimizer(cell.optimization)
-        assert shown.node_digests == ran.node_digests
+        assert shown.config_digest == ran.config_digest
         assert shown.knobs("escalation") == ran.knobs("escalation")
         assert {n.name for n in graph.config_nodes if n.tunes_llm} == set(ran.llm_nodes)
 
@@ -3881,6 +3987,7 @@ async def test_a_cell_that_ran_without_a_grade_still_bills_what_it_spent() -> No
     and ``measure_sample`` is its one catcher. The success path bills ``step_tokens``; the raise
     had nothing to bill with, so a verifier timeout banked the hole and dropped the agent's spend —
     the campaign ceiling under-counted and the sidebar read $0.00 for a cell that cost money."""
+    from promptpotter.application.scoring.formula import compile_scorer
     from promptpotter.application.scoring.sample_measurement import measure_sample
     from promptpotter.domain.run_records import TokenUsageRecord
     from promptpotter.infrastructure.backend import BackendClient
@@ -3916,6 +4023,9 @@ async def test_a_cell_that_ran_without_a_grade_still_bills_what_it_spent() -> No
         pipeline_schema=types.SimpleNamespace(nodes=[]),
         state=types.SimpleNamespace(ledger=None),
         backend_client=client,
+        scoring=types.SimpleNamespace(
+            scorer=compile_scorer("max(0.0, min(1.0, env_reward))", verifier_graded=True)
+        ),
     )
     token = telemetry.set_cycle_ledger(ledger)  # type: ignore[arg-type]
     try:
@@ -4454,7 +4564,7 @@ def test_a_rounds_cost_reaches_the_markdown_digest_too() -> None:
         )
 
     served = round_result(3, optimizer_facts=list(facts))
-    assert build_round_summary(served, []).optimizer_facts == list(facts)
+    assert build_round_summary(served, [], best_so_far=None).optimizer_facts == list(facts)
     block = _render_round(digest(None), formula=None)
     assert f"- {facts[0].label}: {facts[0].text}" in block and f"> {facts[1].text}" in block
     # A cycle with no dashboard on disk — a foreign fork sibling — says nothing rather than $0.
@@ -4773,7 +4883,7 @@ def test_the_bench_pass_bills_and_clocks_under_its_own_name(built_stores, tmp_pa
     from promptpotter.domain.bench import DatasetSplit, partition_bank
     from promptpotter.domain.pipeline_schema import NodePromptInfo, NodeType, PipelineNode
     from promptpotter.domain.run_records import TokenUsageRecord
-    from promptpotter.domain.spend import SpendRollup, TokenAccount
+    from promptpotter.domain.spend import TokenAccount
     from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.llm import telemetry
     from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -4834,7 +4944,7 @@ def test_the_bench_pass_bills_and_clocks_under_its_own_name(built_stores, tmp_pa
     )
 
     async def _passes() -> None:
-        await score_on_bench(session, sp, round_num=0, cb=cb, spend=SpendRollup())
+        await score_on_bench(session, sp, round_num=0, cb=cb)
         with telemetry.filed_as("diagnostic"):
             await score_search_point(
                 sp,
@@ -5007,7 +5117,6 @@ def test_a_backend_retry_is_served_with_the_reason_it_happened(tmp_path: Path) -
         state_path=None,
         hop=CycleHop(campaign_id="c", cycle_id="cy"),
         session_id="s",
-        patience=3,
         arms_per_round=2,
         sp_budget_round=20,
         headline_metric="composite",
@@ -5052,7 +5161,6 @@ def test_the_parent_rescore_ticks_the_run_without_minting_a_candidate(tmp_path: 
         state_path=None,
         hop=CycleHop(campaign_id="c", cycle_id="cy"),
         session_id="s",
-        patience=3,
         arms_per_round=2,
         sp_budget_round=20,
         headline_metric="composite",

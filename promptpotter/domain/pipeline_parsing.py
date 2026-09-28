@@ -157,12 +157,12 @@ def derive_pipeline_view(
     """The graph the engine actually runs, read off the two blocks that declare it, each node
     carrying the ``description`` its declaration gives.
 
-    ``default`` is the chain a sample runs. A node declared but named by no pipeline runs
-    once ahead of it, so it joins the chain without being a member of anything that
-    repeats. Every other pipeline is an ALTERNATIVE a controller picks at the round
-    boundary: the nodes it introduces are placed at its depth, and the depths order by
-    containment, since a deeper alternative re-runs the shallower one's steps. A pipeline
-    with no alternatives is one straight tier.
+    ``default`` is the chain a sample runs, and an optimizer manifest's repeats once per round.
+    A pipeline sharing no step with it is a PHASE its optimizer opens on its own occasion (CAPO's
+    initial population), drawn ahead of the chain and outside the repeat. Every other pipeline
+    is an ALTERNATIVE a controller picks at the round boundary: the nodes it introduces are
+    placed at its depth, and the depths order by containment, since a deeper alternative re-runs
+    the shallower one's steps. A target pipeline with no alternatives is one straight tier.
     """
     declared = list(nodes)
     chain = [n for n in (pipelines.get("default") or declared) if n in nodes]
@@ -224,10 +224,10 @@ def derive_pipeline_view(
     sequence = ["input", *spine, "output"]
     for i in range(len(sequence) - 1):
         _edge(sequence[i], sequence[i + 1], "forward")
-    # An alternative re-runs the chain, which is what makes the chain repeat — so a view
-    # carrying any tier above 0 always carries this edge too, and a renderer may lay a
-    # loopless view out as a straight rail knowing every node on it is tier 0.
-    if introduced and chain:
+    # The bench walks an optimizer's chain once per round, and an alternative re-runs a chain — so
+    # a loopless view is a target pipeline, which a renderer may lay out as a straight rail.
+    repeats = bool(introduced) or any(n.wire_type in MEMBER_KINDS for n in nodes.values())
+    if repeats and chain:
         _edge(chain[-1], chain[0], "loop")
     for fresh, seq in introduced:
         for step in fresh:

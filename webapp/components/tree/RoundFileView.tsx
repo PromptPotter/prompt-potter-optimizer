@@ -47,9 +47,9 @@ export function RoundFileView({ doc, raw }: Props) {
           <span>accuracy {fmtPct1(doc.accuracy)} {matched != null && (<span className="round-file-dim"><Term content="The parent — the origin at round 0, the prior round's winner after — re-scored on the samples this round's winner measured. The floor the promotion gate used.">(matched parent {fmtPct1(matched)})</Term></span>)}</span>
           <span>composite {fmtNum(doc.composite_fitness)}</span>
           <span>n {doc.total ?? "—"}</span>
-          {typeof doc.ability?.theta === "number" && (
+          {stampsTheta && typeof doc.ability?.theta === "number" && (
             <Term
-              content={`Ability of the adopted lineage on the cycle's fixed δ ruler — ${stampsTheta ? "the subset-invariant series the round was won on" : "measured by the bench; this optimizer does not elect on it"}. The cell count is how much of that ruler was real when this round was read.`}
+              content="Ability of the adopted lineage on the cycle's fixed δ ruler — the subset-invariant series the round was won on. The cell count is how much of that ruler was real when this round was read."
             >
               θ {fmtSigned(doc.ability.theta, 3)}{doc.ability.ruler_n > 0 ? ` (${doc.ability.ruler_n} cells)` : ""}
             </Term>

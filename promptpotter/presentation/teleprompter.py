@@ -58,13 +58,6 @@ __all__ = ["Loop", "Node", "PromptPotterOpt"]
 
 
 _DEFAULT_OPTIMIZER: str = OptimizationConfig.model_fields["optimizer"].default
-# What `Loop(nodes=None)` lays on the default optimizer's manifest (potter's); every other
-# optimizer runs its own as declared.
-_POTTER_NODES: dict[str, dict[str, Any]] = {
-    "l1_generate": {"n_variants": 6},
-    "pobb": {"epsilon": 0.2},
-    "escalation": {"l1_patience": 0, "l2_patience": 2, "l3_patience": 1},
-}
 
 
 @dataclass(frozen=True)
@@ -74,17 +67,11 @@ class Loop:
     optimizer: str = _DEFAULT_OPTIMIZER
     """Which optimizer proposes: any name ``optimizer_roster()`` lists."""
 
-    nodes: Mapping[str, Mapping[str, Any]] | None = None
+    nodes: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     """Knobs on that optimizer's nodes, ``{node: {knob: value}}``, refused at construction when
-    the manifest does not take them. ``None`` runs the manifest as declared, potter's with
-    :data:`_POTTER_NODES` laid on."""
+    the manifest does not take them; the manifest's declared values run everywhere else."""
 
     max_rounds: int = 5
-    samples_per_round: int = 20
-    """How many trainset rows each candidate is scored on per round — the adaptive queue picks
-    the informative ones out of the whole set. The cost knob: a round costs roughly
-    ``arms x samples_per_round`` calls before the eliminator starts cutting."""
-
     degradation_threshold: float = 0.4
     elimination_n_min: int = 4
     spend_budget_usd: float | None = None
@@ -94,10 +81,7 @@ class Loop:
         resolve_optimizer(self.optimizer, self._overlay())
 
     def _overlay(self) -> dict[str, ManifestNodeOverlay]:
-        nodes = self.nodes
-        if nodes is None:
-            nodes = _POTTER_NODES if self.optimizer == _DEFAULT_OPTIMIZER else {}
-        return {node: ManifestNodeOverlay(config=dict(knobs)) for node, knobs in nodes.items()}
+        return {node: ManifestNodeOverlay(config=dict(knobs)) for node, knobs in self.nodes.items()}
 
     def _optimization(self) -> dict[str, Any]:
         return {
@@ -283,7 +267,6 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
                     # number through. Overriding `scoring` composes evaluators on top of it.
                     "scoring": self.scoring,
                     "headline_metric": "accuracy",
-                    "sp_budget_round": self.loop.samples_per_round,
                     "optimization": self.loop._optimization(),
                 }
             },

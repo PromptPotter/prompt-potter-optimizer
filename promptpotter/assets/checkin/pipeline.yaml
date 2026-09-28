@@ -24,7 +24,6 @@ nodes:
         provider: [openrouter, groq, openai, anthropic]
     config:
       temperature: 0.3
-      output_format: json
       prompt_family: checkin
       prompt_version: 2
       reasoning_effort: high

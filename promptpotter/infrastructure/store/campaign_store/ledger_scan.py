@@ -21,6 +21,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from promptpotter.domain.dashboard_rows import RunStanding
 from promptpotter.domain.phases import CampaignPhase, RunPhase
 from promptpotter.domain.results import ArmOutcome
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler
@@ -226,6 +227,16 @@ def scan_ledger_round_closes(ledger_path: Path) -> dict[int, LedgerRoundClose]:
         except ValidationError:
             continue
     return out
+
+
+def scan_ledger_run_standing(ledger_path: Path) -> RunStanding | None:
+    """The optimizer's standing as the LAST displayed round left it, or ``None`` before round 0
+    has closed — a finished run's answer as much as a live one's."""
+    standing: RunStanding | None = None
+    for rec in iter_jsonl(ledger_path, record_types=frozenset({"phase"})):
+        if rec.get("phase") == "round" and rec.get("event") == "display":
+            standing = RunStanding.model_validate(rec["payload"]["run_standing"])
+    return standing
 
 
 _Span = tuple[float, float]
@@ -441,5 +452,6 @@ __all__ = [
     "scan_ledger_decisions",
     "scan_ledger_elections",
     "scan_ledger_round_closes",
+    "scan_ledger_run_standing",
     "scan_ledger_wall_clock",
 ]

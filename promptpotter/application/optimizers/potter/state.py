@@ -78,6 +78,7 @@ class PotterState:
         l1_yield: float,
         l1_parse_failure: str | None,
         prompt_hashes: dict[str, str],
+        axis_memory_peaked: list[str],
     ) -> OptimizerState:
         """What a round document banks — a copy, so a later fire cannot rewrite a closed round."""
         return OptimizerState(
@@ -87,6 +88,7 @@ class PotterState:
                 memory=self.memory.model_copy(deep=True),
                 l1_yield=l1_yield,
                 l1_parse_failure=l1_parse_failure,
+                axis_memory_peaked=axis_memory_peaked,
             ),
         )
 
@@ -95,6 +97,7 @@ class PotterState:
             l1_yield=1.0,
             l1_parse_failure=None,
             prompt_hashes=compute_optimizer_prompt_hashes(selected),
+            axis_memory_peaked=[],
         )
 
     def replay(self, last: RoundResult) -> None:

@@ -13,9 +13,11 @@ from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.application.views.render.prefix_reading import prefix_reading
 from promptpotter.application.views.view_models import AnyView
 from promptpotter.domain.connector import MeasuredUnit
+from promptpotter.domain.dashboard_rows import RunStanding
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.results import (
+    ArmOutcome,
     ScoreboardRankKey,
     candidate_label,
     overlap_series,
@@ -41,6 +43,7 @@ from promptpotter.infrastructure.projections.live_state import (
 )
 from promptpotter.infrastructure.store.io import write_text
 from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.judges import judge_instrument
 from promptpotter.presentation.terminal.ansi import to_text
 from promptpotter.presentation.terminal.live.candidate import (
     fmt_individual_header,
@@ -118,11 +121,12 @@ class LiveDisplay(Projection):
         self._round_best_label: str | None = None
         self._round_started_at: float | None = None
         self._standing_printed_for: str = ""
-        # A block race's round: arms racing per block, each block's decided arms (how many
-        # outscored each, `None` once settled), the arms headed. Empty on a round raced in turn.
+        # A block race's round: arms racing per block, each block's decided arms (whether each
+        # was cut), the arms headed. Empty on a round raced in turn.
         self._block_racing: dict[int, int] = {}
-        self._block_decided: dict[int, list[tuple[str, int | None]]] = {}
+        self._block_decided: dict[int, list[tuple[str, bool]]] = {}
         self._blocks_of = 0
+        self._block_size = 1
         self._headed: set[int] = set()
         self._pending_calls: dict[str, int] = {}
         self._readout: Path | None = None
@@ -142,7 +146,9 @@ class LiveDisplay(Projection):
             origin_acc=origin_acc,
             patience=select_optimizer(campaign_config.optimization).pacing.patience,
             pipeline_schema=session.pipeline_schema,
-            scoring_formula=split_scoring_block(campaign_config.scoring).per_sample,
+            scoring_formula=split_scoring_block(
+                campaign_config.scoring, judge_instrument=judge_instrument(campaign_config.judges)
+            ).per_sample,
             measured_unit=session.backend_client.measured_unit,
         )
 
@@ -196,7 +202,8 @@ class LiveDisplay(Projection):
                 ctx = payload.get("phase_ctx")
                 if isinstance(ctx, dict):
                     self._phase_ctx.update(ctx)
-                self.on_round_complete(round_result, int(payload.get("stall") or 0))
+                standing = RunStanding.model_validate(payload["run_standing"])
+                self.on_round_complete(round_result, standing.rounds_without_advance)
             return
         self.on_phase(
             PhaseEvent(
@@ -512,11 +519,11 @@ class LiveDisplay(Projection):
         lines = []
         for n, racing in sorted(self._block_racing.items()):
             decided = self._block_decided.get(n, [])
-            cut = [f"{label} (by {by})" for label, by in decided if by is not None]
+            cut = [label for label, was_cut in decided if was_cut]
             settled = " · settled" if len(cut) < len(decided) else ""
             lines.append(
                 f"block {n}/{self._blocks_of}: {racing} raced · "
-                f"{'outscored ' + ', '.join(cut) if cut else 'none cut'} · "
+                f"{'cut ' + ', '.join(cut) if cut else 'none cut'} · "
                 f"{racing - len(cut)} survive{settled}"
             )
         return lines
@@ -534,6 +541,7 @@ class LiveDisplay(Projection):
             if block["n"] not in self._block_racing:
                 self._block_racing[block["n"]] = block["racing"]
                 self._blocks_of = block["of"]
+                self._block_size = block["size"]
                 self._write(
                     f"  {DIM}▦ block {block['n']}/{block['of']} · {block['size']} cells · "
                     f"{block['racing']} arms racing{RESET}"
@@ -548,11 +556,12 @@ class LiveDisplay(Projection):
     def on_candidate_scored(self, idx: int, total: int, scores: dict[str, Any]) -> None:
         w = 66
         label = scores.get("label") or candidate_label(self._core.round_num, idx)
-        elim = scores.get("elimination_context") or {}
-        if self._block_racing and "block" in elim:
-            outscored = elim.get("outscored_by")
-            self._block_decided.setdefault(int(elim["block"]), []).append(
-                (label, None if outscored is None else len(outscored))
+        outcome = scores.get("outcome")
+        if self._block_racing and outcome in (ArmOutcome.ELIMINATED, ArmOutcome.LOCKED_IN):
+            # A block race stops an arm at a block's close, so its rows name the block.
+            block = -(-int(scores["scored_samples"]) // self._block_size)
+            self._block_decided.setdefault(block, []).append(
+                (label, outcome == ArmOutcome.ELIMINATED)
             )
         summary = individual_summary_from_dict(scores, unit=self.measured_unit)
 

@@ -331,8 +331,9 @@ function innerFacts(node: LineageNode | null, cycleId: string): [string, string]
 
 function innerStats(node: LineageNode | null, origin: number | null, best: number | null) {
   const stats: RowStat[] = [accuracyStat(origin, best, node)];
-  if (node?.hearts != null && node.lives_cap != null) {
-    stats.push({ label: "Lives", value: `${node.hearts} / ${node.lives_cap}` });
+  const standing = node?.run_standing;
+  if (standing?.stalls_left != null && standing.stalls_left_cap != null) {
+    stats.push({ label: "Lives", value: `${standing.stalls_left} / ${standing.stalls_left_cap}` });
   }
   return stats;
 }

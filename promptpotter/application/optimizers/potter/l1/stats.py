@@ -166,13 +166,14 @@ def _behavior_per_round(
             l1_out.append([])
             l2_out.append([])
             continue
+        payload = round_data.optimizer_state.payload_as(PotterRoundState)
         ctx = ValidatorContext(
             round_num=round_num,
             prior_rounds=list(prior_audits),
-            l1_layout=round_data.optimizer_state.payload_as(PotterRoundState).memory.l1_layout,
+            l1_layout=payload.memory.l1_layout,
             context_object=context_object,
             exploration_budget=budget,
-            peaked_axes=frozenset(round_data.axis_memory_peaked),
+            peaked_axes=frozenset(payload.axis_memory_peaked),
         )
         l1_out.append(run_all_checks(audit, ctx))
         l2_out.append(run_all_l2_checks(audit, ctx))

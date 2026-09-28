@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.sample import Sample
+from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 
 __all__ = [
@@ -24,19 +25,26 @@ __all__ = [
 class DatasetSplit(StrictModel):
     bench: int = Field(
         ge=0,
-        description="Rows held out as the bench set: no optimizer node ever reads one, and the "
-        "headline is scored on them.",
+        description="Distinct samples held out as the bench set, with every row that repeats "
+        "one: no optimizer node ever reads one, and the headline is scored on them.",
     )
     demo: int = Field(
         0,
         ge=0,
-        description="Rows reserved as the demo pool — the rows an individual's `shot_ids` name, "
-        "rendered into its prompt as query and ground truth, never scored.",
+        description="Distinct samples reserved as the demo pool — the rows an individual's "
+        "`shot_ids` name, rendered into its prompt as query and ground truth, never scored.",
     )
     seed: int = Field(
         0,
         description="Seeds which rows fall where. Membership ranks each row by its content "
         "(`Sample.key`), never its slot, so a reordered bank holds out the same rows.",
+    )
+    tolerance: int = Field(
+        0,
+        ge=0,
+        description="Bench rows a pass may end with no verdict on — a provider fault, or a cell "
+        "the formula cannot grade — and still be a reading. Past it the pass reads nothing: a "
+        "headline over a population other than the one sent is not the bench score.",
     )
 
 
@@ -56,28 +64,32 @@ class BankPartition:
 
 def partition_bank(bank: Sequence[Sample], split: DatasetSplit | None) -> BankPartition:
     """Each part keeps the bank's own order, so a prefix of the search pool is still the draw
-    ``sample_dataset`` promises. No split declared ⇒ the whole bank is the search pool."""
+    ``sample_dataset`` promises. No split declared ⇒ the whole bank is the search pool. The split
+    ranks DISTINCT samples, so every copy of one lands on the side the sample does."""
     if split is None:
         return BankPartition(split=None, search=tuple(bank), bench=(), demo=())
+    keys = sorted(
+        {s.key for s in bank}, key=lambda k: hashlib.sha256(f"{split.seed}:{k}".encode()).digest()
+    )
     held = split.bench + split.demo
-    if held >= len(bank):
+    if held >= len(keys):
         raise ValueError(
-            f"dataset_split holds out {held} of a {len(bank)}-row bank (bench {split.bench}, "
-            f"demo {split.demo}), which leaves the search no rows to draw."
+            f"dataset_split holds out {held} of the {len(keys)} distinct samples in a "
+            f"{len(bank)}-row bank (bench {split.bench}, demo {split.demo}), which leaves the "
+            "search none to draw."
         )
-    ranked = sorted(bank, key=lambda s: hashlib.sha256(f"{split.seed}:{s.key}".encode()).digest())
-    bench_ids = {s.id for s in ranked[: split.bench]}
-    demo_ids = {s.id for s in ranked[split.bench : held]}
-    if unlabelled := sorted(s.id for s in bank if s.id in demo_ids and s.ground_truth is None):
+    bench_keys = set(keys[: split.bench])
+    demo_keys = set(keys[split.bench : held])
+    if unlabelled := sorted(s.id for s in bank if s.key in demo_keys and s.ground_truth is None):
         raise ValueError(
             f"demo rows {unlabelled} carry no ground truth, so they cannot render as a shot: a "
             "verifier-graded bank declares no demo pool."
         )
     return BankPartition(
         split=split,
-        search=tuple(s for s in bank if s.id not in bench_ids and s.id not in demo_ids),
-        bench=tuple(s for s in bank if s.id in bench_ids),
-        demo=tuple(s for s in bank if s.id in demo_ids),
+        search=tuple(s for s in bank if s.key not in bench_keys and s.key not in demo_keys),
+        bench=tuple(s for s in bank if s.key in bench_keys),
+        demo=tuple(s for s in bank if s.key in demo_keys),
     )
 
 
@@ -96,12 +108,11 @@ class BenchReading(StrictModel):
         description="The 95% band on `composite_fitness`, drawn from the same per-row values."
     )
     ci_hi: float | None
-    n_scored: int = Field(description="Bench rows that carry a verdict; an errored row never does.")
-    run_id: str = Field(description="The archive run its bench rows were filed under.")
-    stopped: str | None = Field(
-        description="`skip` where the operator ended the pass before its last bench row, or "
-        "`None` when it scored every one."
+    n_scored: int = Field(
+        description="Bench rows carrying a verdict — a miss the prompt caused included — never "
+        "fewer than the bench set less its split's `tolerance`."
     )
+    run_id: str = Field(description="The archive run its bench rows were filed under.")
 
 
 class BenchScore(StrictModel):
@@ -111,14 +122,14 @@ class BenchScore(StrictModel):
 
     bench_size: int
     origin: BenchReading | None = Field(
-        description="`None` where its pass stopped short; `missing_reason` says why."
+        description="`None` where its pass read nothing; `missing_reason` says why."
     )
     selected: BenchReading | None = Field(
-        description="The headline. `None` where its pass stopped short; `missing_reason` says why."
+        description="The headline. `None` where its pass read nothing; `missing_reason` says why."
     )
     missing_reason: str | None = Field(
-        description="Why a reading above is `None`: each pass that stopped short, with the stop "
-        "and the error it stopped on. `None` when both passes read."
+        description="Why a reading above is `None`: each pass that stopped before its last row, "
+        "or ended past its split's `tolerance` of rows with no verdict. `None` when both read."
     )
     lift: float | None = Field(
         description="`selected` over `origin` in `composite_fitness`, paired per bench row both "
@@ -127,7 +138,8 @@ class BenchScore(StrictModel):
     lift_ci_lo: float | None
     lift_ci_hi: float | None
 
-    def lift_per_usd(self, incurred_usd: float) -> float | None:
-        """The headline priced in what its cycle incurred, never billed: a replayed cell is billed
-        nothing, which would price arriving second rather than the search."""
-        return None if self.lift is None or incurred_usd <= 0.0 else self.lift / incurred_usd
+    def lift_per_usd(self, spend: SpendRollup) -> float | None:
+        """The headline priced in what its SEARCH incurred, never billed — a replayed cell is billed
+        nothing, which would price arriving second — and never the bench's own pass."""
+        usd = spend.search_incurred_usd
+        return None if self.lift is None or usd is None or usd <= 0.0 else self.lift / usd

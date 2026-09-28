@@ -100,7 +100,8 @@ from promptpotter.presentation.teleprompter import Loop
 
 loop = Loop(
     optimizer="potter",       # which optimizer proposes — any name optimizer_roster() lists
-    nodes={                   # that optimizer's node knobs; None keeps its defaults
+    nodes={                   # that optimizer's node knobs; omitted keeps its manifest's
+        "adaptive_queue": {"sp_budget_round": 20},  # rows each candidate is scored on — the cost knob
         "l1_generate": {"n_variants": 6},       # candidates generated per round
         "escalation": {"l1_patience": 0,        # L1 mutates the winner
                        "l2_patience": 2,        # L2 observes the history, re-aims L1
@@ -108,7 +109,6 @@ loop = Loop(
         "pobb": {"epsilon": 0.2},               # how aggressively trailing candidates are killed
     },
     max_rounds=5,
-    samples_per_round=20,     # rows each candidate is scored on — the cost knob
     elimination_n_min=4,      # samples a candidate gets before it may be pruned
     spend_budget_usd=None,    # a ceiling the run stops at; None runs uncapped
 )
@@ -117,8 +117,9 @@ loop = Loop(
 The three layers are potter's. `optimizer="capo"` (or `gepa`, `levi`) swaps the proposer and
 keeps everything around it; its `nodes` are that manifest's knobs, which
 `GET /optimizers/{name}/knobs` lists, and a knob the manifest does not take is refused when the
-`Loop` is built. The values above are an illustration, not the defaults — those live on the
-`Loop` dataclass itself and move without this page hearing about it. Read them off the fields.
+`Loop` is built. The values above are an illustration, not the defaults: omitting `nodes` runs
+the named manifest as declared, the same defaults every other entry point runs it at, and the loop
+fields' own defaults live on the `Loop` dataclass. Read them off the fields.
 
 ## The node is your program
 

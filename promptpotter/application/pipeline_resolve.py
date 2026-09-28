@@ -6,17 +6,13 @@ from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from promptpotter import connectors
 from promptpotter.application.campaign_config import (
     CampaignConfig,
-    apply_inherited_overlay,
+    apply_cycle_seed,
     load_campaign_config,
-)
-from promptpotter.application.datasets.authored import (
-    dataset_campaign_path,
-    load_dataset_campaign_config,
 )
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
@@ -32,11 +28,11 @@ from promptpotter.application.datasets.prompts import (
     load_node_prompt,
 )
 from promptpotter.application.evidence.subjects import SubjectSpec
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.runner.inner.tasks import inner_tasks_path, load_inner_tasks
 from promptpotter.config.settings import (
     PROMPT_STRING_FIELDS,
 )
-from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_overlay import fold_output_contract, node_config_items
 from promptpotter.domain.pipeline_parsing import (
@@ -72,7 +68,7 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.io import read_yaml_optional, stat_key
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.judges import get as get_judge
+from promptpotter.judges import judge_instrument
 from promptpotter.shared.errors import (
     CellUnscoreableError,
     PayloadInvalidError,
@@ -439,13 +435,7 @@ def _identity_contributions(
         # Attached to the TERMINAL step: a judge grades the pipeline's answer, and that is the
         # node the answer comes out of. Any stable node would move the hash, but this one says
         # what the fingerprint actually qualifies.
-        node = active[-1]
-        out.setdefault(node, {})[JUDGE_INSTRUMENT_KEY] = stable_hash(
-            [
-                [term, get_judge(spec.name).fingerprint(spec)]
-                for term, spec in sorted(judges.items())
-            ]
-        )
+        out.setdefault(active[-1], {})[JUDGE_INSTRUMENT_KEY] = judge_instrument(judges)
     return out
 
 
@@ -618,6 +608,10 @@ class CampaignPipelineResponse(StrictModel):
         description="The optimizer manifest the addressed course runs — the one answer a surface "
         "reads which optimizer's graph, knobs and analytics apply by, a check-in's draft included"
     )
+    optimizer_knobs: dict[str, dict[str, Any]] = Field(
+        description="That optimizer's knob values per node as the addressed course runs them — "
+        "the manifest's under the campaign's and the cycle seed's overlays"
+    )
     params: dict[str, Any] = Field(
         description="Resolved config as the engine holds it — the bytes a round document carries "
         "as `resolved_pipeline_params`, which makes that field this endpoint's check"
@@ -717,42 +711,32 @@ def resolved_output_schemas(
     return out
 
 
-def _config_floor(campaign: Campaign, dataset_dir: Path | None) -> CampaignConfig:
-    """The base the frozen delta layers onto, in falling preference: the dataset template, the
-    snapshot itself, the connector's defaults. There is no blank ``CampaignConfig`` to fall to —
-    ``optimization.degradation_threshold`` is required — and a campaign outlives its dataset dir."""
-    template = dataset_campaign_path(dataset_dir) if dataset_dir else None
-    if template is not None and template.is_file():
-        return load_dataset_campaign_config(template)
-    if campaign.config:
-        return load_campaign_config(campaign.config)
-    defaults = connectors.get(campaign.backend_type or DEFAULT_CONNECTOR).default_optimization
-    return load_campaign_config({"optimization": dict(defaults)})
-
-
 def _dataset_dir_of(stores: Stores, campaign: Campaign) -> Path | None:
     try:
         return readable_dataset_dir(stores, campaign.dataset_name)
     except DatasetAccessError:
-        # A campaign outlives its dataset dir; `_config_floor` says what answers instead.
+        # A campaign outlives its dataset dir; its frozen config still answers.
         return None
 
 
-def _inherited_config(
-    campaign: Campaign, dataset_dir: Path | None, seed: CycleSeed | None
-) -> CampaignConfig:
-    return apply_inherited_overlay(
-        _config_floor(campaign, dataset_dir), campaign.config or {}, seed
-    )
+def _cycle_config(campaign: Campaign, seed: CycleSeed | None) -> CampaignConfig:
+    try:
+        frozen = load_campaign_config(campaign.config)
+    except ValidationError as exc:
+        raise StoredConfigInvalidError(
+            path=f"campaigns/{campaign.campaign_id}/campaign.json::config",
+            reason=f"{exc.error_count()} field(s) invalid — {exc.errors()[0]['msg']}",
+        ) from exc
+    return apply_cycle_seed(frozen, seed)
 
 
 def resolve_campaign_config(
     stores: Stores, campaign: Campaign, hop: CycleHop | None
 ) -> CampaignConfig:
-    """What a campaign RUNS under: its frozen declaration over the live dataset file, a cycle seed's
-    narrowing last (``hop=None`` reads none). Resume, ``ab`` and the served pipeline all ask it."""
+    """What a campaign RUNS under: the config it froze at mint under a cycle seed (``hop=None``
+    reads none). Resume, ``ab`` and the served pipeline all ask it; no dataset file is read."""
     seed = stores.campaigns.read_cycle_seed(hop) if hop is not None else None
-    return _inherited_config(campaign, _dataset_dir_of(stores, campaign), seed)
+    return _cycle_config(campaign, seed)
 
 
 def _authoring_draft(stores: Stores, campaign: Campaign) -> DraftCampaign | None:
@@ -844,7 +828,7 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: SubjectSpec) -> _Cam
         raw = dataset_pipeline_declaration(stores, dataset_dir, experiment_outside_run(dataset_dir))
     schema = parse_pipeline_response(raw or {"nodes": {}, "pipelines": {"default": []}})
     seed = stores.campaigns.read_cycle_seed(hop)
-    cfg = _inherited_config(campaign, dataset_dir, seed)
+    cfg = _cycle_config(campaign, seed)
     active, filtered = _resolve_active_schema(
         schema,
         exclude=list(cfg.exclude_nodes),
@@ -872,6 +856,11 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: SubjectSpec) -> _Cam
         raw=raw,
         seed=seed,
     )
+
+
+def _optimizer_knobs(cfg: CampaignConfig) -> dict[str, dict[str, Any]]:
+    selected = select_optimizer(cfg.optimization)
+    return {n: selected.knobs(n).model_dump(mode="json") for n in selected.member_nodes}
 
 
 def resolve_pipeline_for_draft(
@@ -911,6 +900,7 @@ def resolve_pipeline_for_draft(
         connector=draft.connector,
         backend_type=draft.connector,
         optimizer=m.cfg.optimization.optimizer,
+        optimizer_knobs=_optimizer_knobs(m.cfg),
         params=params,
         node_config_schema=rows,
         view=m.filtered.view,
@@ -984,6 +974,7 @@ def resolve_pipeline_for_campaign(
         # The campaign's FROZEN kind — one `pipeline.yaml` serves every campaign on the slug.
         backend_type=campaign.backend_type,
         optimizer=m.cfg.optimization.optimizer,
+        optimizer_knobs=_optimizer_knobs(m.cfg),
         params=params,
         node_config_schema=rows,
         view=m.filtered.view,
@@ -1056,11 +1047,6 @@ def _runs_with_key(
     stores: Stores, campaign: Campaign, root: Path, draft: DraftCampaign | None
 ) -> tuple[Any, ...]:
     dataset_dir = _dataset_dir_of(stores, campaign)
-    dataset_files = (
-        (dataset_pipeline_path(dataset_dir), dataset_campaign_path(dataset_dir))
-        if dataset_dir is not None
-        else ()
-    )
     layout = CycleLayout(root)
     return (
         stable_hash(campaign.config),
@@ -1068,7 +1054,7 @@ def _runs_with_key(
         campaign.dataset_name,
         campaign.root_cycle_id,
         dataset_dir,
-        *(stat_key(p) for p in dataset_files),
+        stat_key(dataset_pipeline_path(dataset_dir)) if dataset_dir is not None else None,
         stat_key(layout.resolved_pipeline),
         stat_key(layout.ledger),
         None if draft is None else stable_hash(draft.to_disk()),

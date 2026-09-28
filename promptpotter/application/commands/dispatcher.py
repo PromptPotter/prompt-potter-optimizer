@@ -17,6 +17,7 @@ from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     cleanup_stub_fork_if_empty,
     mint_operator_fork,
 )
+from promptpotter.application.campaign_config import CampaignConfig, apply_cycle_seed
 from promptpotter.application.commands.payloads import (
     KIND_OF_PAYLOAD,
     ArchiveCampaignPayload,
@@ -54,6 +55,7 @@ from promptpotter.application.datasets.dataset_replace import (
 from promptpotter.application.diagnostics.verify import verify_candidate
 from promptpotter.application.jobs.launcher.admission import launch
 from promptpotter.application.jobs.launcher.mint_and_start import (
+    dataset_campaign_config,
     mint_campaign_command,
     start_run_command,
 )
@@ -70,6 +72,8 @@ from promptpotter.application.maintenance.archive_maintenance import (
     purge_cold_store,
     restore_measurement_archive,
 )
+from promptpotter.application.optimizer_manifest import select_optimizer
+from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.runner.origin_gate import GateDecision, submit_gate_decision
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign
@@ -90,6 +94,7 @@ from promptpotter.infrastructure.llm.telemetry import (
     set_cycle_ledger,
 )
 from promptpotter.infrastructure.runtime_flags import write_sample_lookahead
+from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     inner_sandboxes_dir,
@@ -130,15 +135,18 @@ class _IdempotentMatch(StrictModel):
     offset: int
 
 
-def _parse_cycle_seed(raw: object) -> CycleSeed:
+def _parse_cycle_seed(raw: object, campaign: CampaignConfig) -> CycleSeed:
     """Stamps the C0 lineage provenance ``origin_source="fork_seed"``: every operator fork
-    carries a seed, and the wire schema ``OperatorForkOverride`` does not carry the tag."""
+    carries a seed, and the wire schema does not carry the tag. Its node knobs resolve against
+    the campaign's manifest here, so a refused one is refused before a fork is minted."""
     if not isinstance(raw, dict):
         raise PayloadInvalidError("payload.seed (object) is required.")
     try:
-        return CycleSeed.model_validate({**raw, "origin_source": "fork_seed"})
+        seed = CycleSeed.model_validate({**raw, "origin_source": "fork_seed"})
     except ValidationError as exc:
         raise PayloadInvalidError(f"payload.seed invalid: {exc}") from exc
+    select_optimizer(apply_cycle_seed(campaign, seed).optimization)
+    return seed
 
 
 def _slugify_backend_id(name: str) -> str:
@@ -557,15 +565,15 @@ class CommandDispatcher:
 
             return Applier(_apply_verify)
         if isinstance(payload, ForkCyclePayload):
-            seed = _parse_cycle_seed(payload.seed)
+            seed = _parse_cycle_seed(
+                payload.seed, resolve_campaign_config(self._stores, campaign, None)
+            )
             # Steering the model OUTSIDE what the node permits (nothing declared = nothing
             # sanctioned) is the ADR-0005 §4 babysit action, a distinct cap above the
             # `campaign.run` fork. A PERMITTED steer is a clean human fork. The same call
             # answers `POST /campaigns/{id}/fork-preview`, so the pre-confirm warning and this
             # gate cannot disagree.
-            disallowed = steers_disallowed_model(
-                campaign.config if campaign else None, seed.pipeline_overlay
-            )
+            disallowed = steers_disallowed_model(campaign.config, seed.pipeline_overlay)
             if disallowed and not has_capability(self._stores.identity, CAMPAIGN_BABYSIT_CAP):
                 logger.warning(
                     "fork-cycle disallowed-model steer denied for principal %s (missing %s)",
@@ -778,6 +786,11 @@ class CommandDispatcher:
         webapp discovers the new ids by polling ``/api/v1/active`` either way."""
 
         registry = self._require_job_registry()
+        # Refused here, before a slot is asked for: a queued mint would refuse it only later.
+        dataset_campaign_config(
+            readable_dataset_dir(self._stores, payload.dataset_name),
+            optimization=payload.optimization_sent,
+        )
         # Campaign-from-origin rides the check-in path, not this workspace verb, so there is no
         # origin_override here. Its PotterErrors map centrally in `_record_and_apply`.
         await launch(
@@ -790,6 +803,7 @@ class CommandDispatcher:
                 job_registry=registry,
                 job=job,
                 limits=payload,
+                optimization=payload.optimization_sent,
             ),
         )
 

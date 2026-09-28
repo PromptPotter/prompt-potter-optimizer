@@ -697,8 +697,8 @@ class PipelineSchema(StrictModel):
     # round runs. Identity stays on `nodes`: folding these into `sp_hash` re-keys every
     # banked measurement. Empty means "same as `nodes`"; read it through `config_nodes`.
     declared_nodes: list[PipelineNode] = Field(default_factory=list)
-    # Every declared sequence by name, `default` included. An optimizer's controller picks among
-    # the others; the manifest digest folds them.
+    # Every declared sequence by name, `default` included. The others are an optimizer's own members'
+    # to run — a controller's alternatives, a phase; the manifest digest folds them.
     pipelines: dict[str, list[str]] = Field(default_factory=dict)
     available_models: list[str] = Field(default_factory=list)
     view: PipelineView | None = None

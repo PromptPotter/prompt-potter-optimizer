@@ -44,7 +44,7 @@ names what nothing may search."""
 assert PARAM_FORBIDDEN_KEYS <= WHO_ANSWERS_KEYS
 
 
-PARAM_SCOPE_KEYS: frozenset[str] = frozenset(
+PARAM_SCOPE_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
     {"temperature", "max_tokens", "reasoning_effort", "top_p"}
 )
 """Per-node LLM-call tunable axes (non-prompt). Drives param-scope discipline + continuous_envelope."""

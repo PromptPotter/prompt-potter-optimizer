@@ -11,7 +11,12 @@ from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.dashboard_rows import LiveCandidate, OptimizerLimit, RoundSummary
+from promptpotter.domain.dashboard_rows import (
+    LiveCandidate,
+    OptimizerLimit,
+    RoundSummary,
+    RunStanding,
+)
 from promptpotter.domain.phases import DashboardState, RunPhase
 from promptpotter.domain.results import HeadlineMetric, OverlapReading
 from promptpotter.domain.spend import SpendRollup
@@ -117,9 +122,6 @@ class RunLimits(StrictModel):
     max_rounds: int | None = None
     spend_budget_usd: float | None = None
     token_budget: int | None = None
-    # DENOMINATOR for the live ``hearts`` count — without it ``hearts: 3`` is scaleless, and in
-    # lives mode ``max_rounds`` is null. ``None`` where the optimizer keeps no lives bank.
-    lives_cap: int | None = None
     # The optimizer's own run-bounding knobs (`OptimizerPacing.limits`), in its own words.
     optimizer: list[OptimizerLimit] = Field(default_factory=list)
 
@@ -207,11 +209,9 @@ class LiveDashboardState(StrictModel):
 
     round: int = 0
     candidate: str = ""
-    patience: str = ""
-    # Banked lives in improvement-banked-budget mode; ``None`` when lives is off (the UI
-    # then shows the round counter). A per-round marker, not a ceiling — hence not in
-    # ``run_limits``.
-    hearts: int | None = None
+    # The last closed round's; ``None`` until round 0 closes. A per-round marker, not a
+    # ceiling — hence not in ``run_limits``.
+    run_standing: RunStanding | None = None
 
     rounds: list[RoundSummary] = Field(default_factory=list)
 
@@ -222,8 +222,9 @@ class LiveDashboardState(StrictModel):
     # The headline for every optimizer: the selection and the origin graded on the held-out bench
     # set. Null until the bench pass lands; a split holding nothing out says so in `missing_reason`.
     bench_score: BenchScore | None = None
-    # That lift per incurred dollar (`BenchScore.lift_per_usd`, `evidence`'s rule too), settled in
-    # ``compose``: spend moves on every call, and a browser dividing the two divides two polls.
+    # That lift per dollar the SEARCH incurred (`BenchScore.lift_per_usd`, `evidence`'s rule too),
+    # settled in ``compose``: spend moves on every call, and a browser dividing the two divides
+    # two polls.
     bench_lift_per_incurred_usd: float | None = None
     composite_fitness_formula: str | None = None
     # The same formula as ``{evaluator: coefficient}``, where it IS a weighted sum — what the mask
@@ -356,7 +357,6 @@ class LiveDashboardState(StrictModel):
         *,
         hop: CycleHop,
         session_id: str,
-        patience: int | None,
         arms_per_round: int | None,
         sp_budget_round: int,
         langfuse_trace_url: str | None,
@@ -372,7 +372,6 @@ class LiveDashboardState(StrictModel):
             "state_since": utcnow_iso(),
             "arms_per_round": arms_per_round,
             "sp_budget_round": sp_budget_round,
-            "patience": f"0/{patience}" if patience is not None else "",
             # Not carried from `prior` and not deferred to INIT:exit — round 0 runs before any
             # INIT event reaches the ledger, so waiting mis-headlines the whole origin pass.
             "headline_metric": headline_metric,

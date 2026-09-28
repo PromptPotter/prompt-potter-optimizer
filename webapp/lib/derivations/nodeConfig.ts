@@ -1,5 +1,5 @@
 // The one node-config row model and its two emitters, one per transport: search-space → the draft
-// `pipeline_overlay` (split at mint by `launcher.split_overlay`); values → `OperatorForkOverride.pipeline_overlay`.
+// `pipeline_overlay` (split at mint by `launcher.split_overlay`); values → the fork seed's `pipeline_overlay`.
 // An OPTIMIZER node's knobs are the third reading: a served `KnobRow` typed in as text.
 
 import type { DraftPatch, KnobRow, ModelCapability, NodeConfigParam } from "@/lib/api";
@@ -229,7 +229,7 @@ function sameMembers(a: readonly string[], b: readonly string[]): boolean {
 }
 
 /** An absent `param_allowed_values` entry resolves to the DECLARATION. The draft wraps this in a
- *  `DraftPatch`; the steer fork sends it bare as `OperatorForkOverride.optimizer_narrowing`. */
+ *  `DraftPatch`; the steer fork sends it bare as its seed's `optimizer_narrowing`. */
 export function nodeNarrowing(rows: ConfigRow[]): NodeSearchNarrowing {
   const paramKeys: string[] = [];
   const allowedValues: Record<string, string[]> = {};
@@ -367,6 +367,25 @@ export function knobText(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
+function withinBounds(knob: KnobRow, n: number): boolean {
+  return (
+    (knob.minimum === null || n >= knob.minimum) &&
+    (knob.exclusive_minimum === null || n > knob.exclusive_minimum) &&
+    (knob.maximum === null || n <= knob.maximum) &&
+    (knob.exclusive_maximum === null || n < knob.exclusive_maximum)
+  );
+}
+
+/** The served bounds as an interval, `null` for an unbounded knob. */
+export function knobRange(knob: KnobRow): string | null {
+  const low = knob.exclusive_minimum ?? knob.minimum;
+  const high = knob.exclusive_maximum ?? knob.maximum;
+  if (low === null && high === null) return null;
+  const open = knob.exclusive_minimum !== null || low === null ? "(" : "[";
+  const close = knob.exclusive_maximum !== null || high === null ? ")" : "]";
+  return `${open}${low ?? "−∞"}, ${high ?? "∞"}${close}`;
+}
+
 /** What *text* means under the knob's served type; `undefined` is text that cannot commit. Blank
  * is `null` only where the knob is nullable — an opt-in knob, off. */
 export function parseKnob(knob: KnobRow, text: string): unknown {
@@ -376,7 +395,8 @@ export function parseKnob(knob: KnobRow, text: string): unknown {
   if (knob.type === "integer" || knob.type === "number") {
     const n = Number(t);
     if (!Number.isFinite(n)) return undefined;
-    return knob.type === "integer" && !Number.isInteger(n) ? undefined : n;
+    if (knob.type === "integer" && !Number.isInteger(n)) return undefined;
+    return withinBounds(knob, n) ? n : undefined;
   }
   const parsed = parseNested(t);
   return parsed === "" ? undefined : parsed;

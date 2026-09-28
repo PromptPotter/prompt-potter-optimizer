@@ -16,7 +16,11 @@ from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     _mint_fork,
     cleanup_stub_fork_if_empty,
 )
-from promptpotter.application.campaign_config import CampaignConfig, merge_node_overlays
+from promptpotter.application.campaign_config import (
+    CampaignConfig,
+    apply_config_overrides,
+    apply_cycle_seed,
+)
 from promptpotter.application.initialization.loop_start import init_optimization_loop
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.exploration import parent_level_trajectory
@@ -41,6 +45,7 @@ from promptpotter.application.run_phase_control import declare_run_phase
 from promptpotter.application.runner.bench import (
     BenchPass,
     bench_selection,
+    graded,
     nothing_held_out,
     score_on_bench,
 )
@@ -66,7 +71,6 @@ from promptpotter.domain.pipeline_overlay import (
 from promptpotter.domain.results import CycleResult, RoundResult, round_clocks
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_records import (
-    ConfigOverrides,
     CycleSeed,
     ErrorRecord,
     ForkSpec,
@@ -88,6 +92,7 @@ from promptpotter.infrastructure.runtime_flags import (
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_wall_clock
 from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.judges import judge_instrument
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ResumeDivergenceError
 from promptpotter.shared.hashing import dataset_hash
@@ -174,32 +179,6 @@ def _arm_run_controls(
     session.budget_tripped = gate.tripped
     session.spend_used = lambda: gate.book.usd_spent
     return gate
-
-
-def _apply_config_overrides(
-    config: CampaignConfig,
-    overrides: ConfigOverrides,
-) -> CampaignConfig:
-    """Snapshot the fork's effective config — parent frozen config plus absolute overrides, never a
-    mutation. Reassigning it at the runner seam is what propagates to every reader."""
-    # No budget arm here: a seed's budget is one layer of the run's declaration, composed and
-    # ADMITTED before launch (`jobs/quota.py::declare_run_ceiling`). Applied here too it
-    # would be a second composition — and an auto-rebase's overrides would move a ceiling the
-    # account never admitted.
-    opt_updates: dict[str, Any] = (
-        {"max_rounds": overrides.max_rounds} if overrides.max_rounds is not None else {}
-    )
-    if overrides.nodes:
-        opt_updates["nodes"] = merge_node_overlays(config.optimization.nodes, overrides.nodes)
-    # `scoring` sits on CampaignConfig itself, not under `optimization` — the one override whose
-    # home is the outer model, so it rides its own bucket rather than being folded into a nested
-    # copy that would silently drop it.
-    top_updates: dict[str, Any] = {"scoring": overrides.scoring} if overrides.scoring else {}
-    if not opt_updates and not top_updates:
-        return config
-    if opt_updates:
-        top_updates["optimization"] = config.optimization.model_copy(update=opt_updates)
-    return config.model_copy(update=top_updates)
 
 
 def _read_cycle_seed(session: Session) -> CycleSeed | None:
@@ -303,7 +282,7 @@ async def _prepare_run(
         )
     if seed is not None:
         # Onto a FRESH config snapshot, reassigned before any downstream call.
-        campaign_config = _apply_config_overrides(campaign_config, seed.config_overrides)
+        campaign_config = apply_cycle_seed(campaign_config, seed)
         if (
             overlay_sets_model_outside_allowed(
                 seed.pipeline_overlay,
@@ -371,7 +350,9 @@ async def _prepare_run(
     return _PreparedRun(
         origin=origin,
         campaign_config=campaign_config,
-        scoring_spec=split_scoring_block(campaign_config.scoring),
+        scoring_spec=split_scoring_block(
+            campaign_config.scoring, judge_instrument=judge_instrument(campaign_config.judges)
+        ),
         halt_at_accuracy=limits.halt_at_accuracy,
     )
 
@@ -609,8 +590,11 @@ async def _run_single_cycle(
         # rebuild cannot leave it on a stale ref.
         budget_gate = _arm_run_controls(session, observers, campaign_config)
         if session.scoring.require_partition().bench and origin.resolved_origin is not None:
-            # The reference, read before any search; its price is set aside, so the pass that
-            # grades the selection still fits under the ceiling the search spends against.
+            # The reference, read before any search; its price — priced cold, replayed rows at
+            # what they would have cost — is set aside, so the pass that grades the selection
+            # still fits under the ceiling the search spends against.
+            spend = observers.dashboard.state.spend
+            usd_before, tokens_before = spend.total_incurred_usd, spend.total_tokens_used
             origin_bench = await score_on_bench(
                 session,
                 origin.resolved_origin.to_job_search_point(
@@ -621,9 +605,12 @@ async def _run_single_cycle(
                 ),
                 round_num=0,
                 cb=cb,
-                spend=observers.dashboard.state.spend,
             )
-            budget_gate.book.set_aside(origin_bench.incurred_usd, origin_bench.billed_tokens)
+            budget_gate.book.set_aside(
+                spend.total_incurred_usd - usd_before, spend.total_tokens_used - tokens_before
+            )
+            if campaign_config.bench_each_round:
+                graded(cb, origin_bench)
         elif not session.scoring.require_partition().bench:
             unheld = nothing_held_out(cb)
         stop_reason, cycle_error = await run_round_loop(
@@ -684,9 +671,7 @@ async def _run_single_cycle(
     ):
         budget_gate.book.set_aside(0.0, 0)
         try:
-            bench = await bench_selection(
-                cycle, session, origin=origin_bench, cb=cb, spend=observers.dashboard.state.spend
-            )
+            bench = await bench_selection(cycle, session, origin=origin_bench, cb=cb)
         except RUN_STOPS as stop:
             # Only a pause escapes the pass; it keeps the cycle resumable, and the resume takes
             # the pass again.
@@ -741,7 +726,7 @@ def _mint_and_rebase_fork(
     parent_cycle_id = session.state.cycle_id
     seed: CycleSeed | None = None
     if rebase_req.config_overrides is not None:
-        campaign_config = _apply_config_overrides(prep.campaign_config, rebase_req.config_overrides)
+        campaign_config = apply_config_overrides(prep.campaign_config, rebase_req.config_overrides)
         prep = replace(prep, campaign_config=campaign_config)
         # No `origin_prompt_fields`: a rebase replays its origin from the parent's round, so it
         # has no C0 provenance to stamp.

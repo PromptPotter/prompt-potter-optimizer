@@ -88,6 +88,7 @@ from promptpotter.domain.dashboard_rows import (
     OptimizerLimit,
     RoundSummary,
     RoundSummaryCandidate,
+    RunStanding,
 )
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.opt_search_point import (
@@ -225,6 +226,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     DashboardError,
     OptimizerLimit,
     RunLimits,
+    RunStanding,
     CatchUpLogEntry,
     RacingBlock,
     LiveCandidate,

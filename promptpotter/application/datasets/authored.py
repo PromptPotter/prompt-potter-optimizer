@@ -20,6 +20,7 @@ from promptpotter.application.scoring.formula import compile_scorer, split_scori
 from promptpotter.domain.scoring import CellScorer
 from promptpotter.infrastructure.store.dataset_access import dataset_pipeline_path
 from promptpotter.infrastructure.store.io import read_yaml_optional
+from promptpotter.judges import judge_instrument
 from promptpotter.shared.errors import StoredConfigInvalidError
 
 
@@ -105,9 +106,8 @@ def dataset_cell_scorer(dataset_dir: Path) -> tuple[CellScorer, str]:
     (``runner/inner/ruler.py`` — the outer session's scorer names a measurand the inner rows do
     not carry) and the dataset-scope heatmap. A campaign that HAS a scorer uses its own; this is
     not a fallback for one that forgot to compile."""
-    spec = split_scoring_block(
-        load_dataset_campaign_config(dataset_campaign_path(dataset_dir)).scoring
-    )
+    config = load_dataset_campaign_config(dataset_campaign_path(dataset_dir))
+    spec = split_scoring_block(config.scoring, judge_instrument=judge_instrument(config.judges))
     # No bank here to read the shape off, and none is needed: this compiles a formula a campaign's
     # own init already refused-or-accepted against its samples.
     return compile_scorer(spec.per_sample, spec.per_cell, verifier_graded=False), spec.scorer_id

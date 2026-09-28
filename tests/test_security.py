@@ -17,6 +17,30 @@ from typing import Any
 import pytest
 
 
+def test_the_check_in_model_reads_no_held_out_row(built_stores: Any, tmp_path: Path) -> None:
+    """The origin resolver is an LLM handed sample rows WITH their labels, and it writes the prompt
+    every optimizer starts from. A bench row in its preview is the headline's exam read by the one
+    authoring the answer sheet: every number renders, only higher, and no rerun unreads it."""
+    from promptpotter.application.datasets.ingest import draft_from_dataset
+    from promptpotter.application.datasets.origin_resolve import build_origin_consultation
+    from promptpotter.domain.bench import DatasetSplit, partition_bank
+    from promptpotter.domain.sample import Sample
+
+    bank = [Sample(id=i, query=f"claim {i}", ground_truth="TRUE") for i in range(40)]
+    built_stores.tenant_datasets.save_benchmark_rows("heldout", bank)
+    dataset_dir = tmp_path / "heldout"
+    dataset_dir.mkdir()
+    (dataset_dir / "campaign.yaml").write_text(
+        "campaign_config:\n  scoring: label_match(predicted, ground_truth)\n"
+        "  dataset_split:\n    bench: 30\n  optimization:\n    degradation_threshold: 0.4\n",
+        encoding="utf-8",
+    )
+    draft = draft_from_dataset(stores=built_stores, dataset_dir=dataset_dir, dataset_name="heldout")
+    content, _ = build_origin_consultation(draft)
+    held = partition_bank(bank, DatasetSplit(bench=30)).bench
+    assert not [s.id for s in held if f'"{s.query}"' in content], "a bench row reached the resolver"
+
+
 def test_path_builders_reject_traversal(tmp_path: Path) -> None:
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.infrastructure.store.layout import (
@@ -316,7 +340,9 @@ async def test_cell_envelope_cancels_the_inner_campaign(tmp_path: Path, monkeypa
             spawn_cycle_id="cycle_deadbeef0000",
             asking_cycle_id="cycle_deadbeef0000",
             # No inner dataset resolved: the stubbed inner run never reads one.
-            cells=InnerCells(panel=load_inner_tasks(tmp_path / "inner_tasks.yaml"), by_dataset={}),
+            cells=InnerCells(
+                panel=load_inner_tasks(tmp_path / "inner_tasks.yaml"), by_dataset={}, identity="o"
+            ),
         )
     )
     llm_telemetry._CYCLE_LEDGER.set(_RecordingLedger())  # type: ignore[arg-type]

@@ -57,7 +57,7 @@ async def measure_overlap(
     panel = origin_panel(
         measured_cells(origin.rows),
         poolable={s.id for s in scoring_pool},
-        size=cycle.config.sp_budget_round,
+        size=cycle.optimizer.round_cells(len(scoring_pool)),
     )
     if not panel:
         logger.info(

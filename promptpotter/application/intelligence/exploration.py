@@ -18,7 +18,8 @@ from promptpotter.domain.ruler import (
     anchor_id_of,
     ruler_entry,
 )
-from promptpotter.shared.errors import RulerCoverageError, is_error_result
+from promptpotter.domain.scoring import is_graded
+from promptpotter.shared.errors import RulerCoverageError
 
 if TYPE_CHECKING:
     from promptpotter.domain.results import RoundResult
@@ -732,14 +733,13 @@ def graduate_ruler_model(
 def observations_from_results(
     results_by_id: Mapping[str, Sequence[Mapping[str, Any]]],
 ) -> list[Observation]:
-    """The ONE walk from ``{candidate_id: rows}`` to observations, skipping unscored and errored
-    cells. Four inline copies of it existed; two fits that skip different sets disagree about the
-    scale, and nothing anywhere would have said so."""
+    """The ONE walk from ``{candidate_id: rows}`` to observations, over the rows carrying a verdict
+    (``is_graded``): two fits that skip different sets disagree about the scale in silence."""
     return [
         Observation(candidate_id=cid, sample_id=int(sid), response=graded_response(r))
         for cid, results in results_by_id.items()
         for r in results
-        if (sid := r.get("sample_id")) is not None and not is_error_result(r)
+        if (sid := r.get("sample_id")) is not None and is_graded(r)
     ]
 
 

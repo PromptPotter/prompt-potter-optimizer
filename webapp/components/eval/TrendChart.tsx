@@ -10,18 +10,15 @@ import { useMediaQuery } from "@/lib/hooks/useMediaQuery";
 
 ensureChartRegistered();
 
-// The bench (origin and selection on held-out rows) is the headline for every optimizer; the round
-// line is the search-pool composite, θ only where a round elects on it. `compact` is a DENSITY.
+// The bench (each graded selection on held-out rows) is the headline for every optimizer; the
+// round line is the search-pool composite, θ only where a round elects on it. `compact` is a DENSITY.
 export const TrendChart = memo(function TrendChart({ compact = false }: { compact?: boolean }) {
   const { dash, isLive } = useDashboard();
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   // Subscribe to the theme so a flip pulls fresh canvas inks.
   useThemeVersion();
   const bench = dash?.bench_score;
-  const { points } = useMemo(
-    () => fitnessTrend(dash?.rounds, dash?.best, bench),
-    [dash?.rounds, dash?.best, bench],
-  );
+  const { points } = useMemo(() => fitnessTrend(dash?.rounds), [dash?.rounds]);
   const curData = points.map((p) => p.composite);
   const benchData = points.map((p) => p.bench);
   const thetaData = points.map((p) => p.theta);
@@ -74,7 +71,7 @@ export const TrendChart = memo(function TrendChart({ compact = false }: { compac
     },
   });
   const ariaLabel = `Round composite on the search pool per round${
-    hasBench ? ", with the bench score of the origin and the selection on held-out rows" : ""
+    hasBench ? ", with the bench score of each graded selection on held-out rows" : ""
   }${hasTheta ? ", with ability θ" : ""}`;
 
   return (

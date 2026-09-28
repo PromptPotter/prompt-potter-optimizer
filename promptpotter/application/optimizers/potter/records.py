@@ -124,6 +124,8 @@ class PotterRoundState(RoundPayload, manifest=POTTER_MANIFEST):
     # Why this round's L1 output was unparseable (zero candidates), or None. The round owns it:
     # a parse failure yields no candidate to charge. One of `domain/optimizer_state.py`'s three.
     l1_parse_failure: str | None = None
+    # The AxisIndex's peaked axes as L1 proposed, which no later reading of the index rebuilds.
+    axis_memory_peaked: list[str] = Field(default_factory=list)
 
     def feedback(self) -> CritiqueReadout | None:
         return self.critique

@@ -260,7 +260,7 @@ def get_campaign_pipeline(
 
 class ForkPreviewRequest(StrictModel):
     pipeline_overlay: dict[str, Any] = Field(
-        description="The `nodes.*.config` overlay the fork would carry, as `OperatorForkOverride` sends it"
+        description="The `nodes.*.config` overlay the fork would carry, as its `CycleSeed` sends it"
     )
 
 

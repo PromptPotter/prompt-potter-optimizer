@@ -69,6 +69,8 @@ async def measure_population(
     population: Population,
     panel: Panel,
     eliminator: Eliminator | None,
+    *,
+    reads_parent: bool,
 ) -> Measured:
     cycle = ctx.cycle
     schema = cycle.session.pipeline_schema
@@ -83,9 +85,11 @@ async def measure_population(
         for ind in population.individuals
         if ind.lineage.id in rows and ind.lineage.id not in aborted_ids
     ]
-    # On the round's WHOLE panel, never the cells the arms reached: a held round's headline IS
-    # this re-score, and a narrower set hands it the denominator of whatever the eliminator cut.
-    parent = await rescore_parent(cycle, panel.cells, callbacks=ctx.callbacks)
+    # On the round's WHOLE panel for a selector that reads it: a held round's headline IS this
+    # re-score, and a narrower set hands it the denominator of whatever the eliminator cut.
+    reached = {int(r["sample_id"]) for arm in rows.values() for r in arm}
+    cells = panel.cells if reads_parent else [s for s in panel.cells if int(s.id) in reached]
+    parent = await rescore_parent(cycle, cells, callbacks=ctx.callbacks)
     # Spent where the round's scoring ends, never in a `finally` (an unwound round did not score);
     # round 0 spends it in `round.py::emit_origin_round`, and the two cannot fire for one round.
     if cycle.session.sample_lookahead_consume is not None:
@@ -441,7 +445,7 @@ def _conclude_candidate(
 
     scored = close_walk(walk)
     results, signal = scored.results, scored.signal
-    elimination_context = (
+    elimination = (
         race.judge(signal, candidate_id=opt_sp_c.lineage.id, results=results, labels=labels)
         if race is not None
         else None
@@ -473,7 +477,8 @@ def _conclude_candidate(
         run_id=scored.run_id,
         outcome=walk_outcome(scored),
         resolved_pipeline_params=candidate_sp.config_params,
-        elimination_context=dict(elimination_context) if elimination_context else None,
+        elimination_context=None if elimination is None else dict(elimination.context),
+        elimination_reason=None if elimination is None else elimination.reason,
         breakage=breakage,
     )
     return report, results

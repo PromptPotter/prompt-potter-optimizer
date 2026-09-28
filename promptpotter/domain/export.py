@@ -63,7 +63,8 @@ class ExportMeasurement(StrictModel):
         description="The parent's `accuracy` on its own panel; `None` unless the winner covered it.",
     )
     # Subset-invariant ability, with the δ scale it was read on — an exported θ naming no ruler
-    # is a level nothing outside this cycle can be compared against. ``None`` when never fit.
+    # is a level nothing outside this cycle can be compared against. ``None`` when never fit, or
+    # where the winner's selector stamps no θ.
     ability: AbilityReading | None = None
     origin_accuracy: float | None
     # ``None`` where the origin was never scored — the level ``composite_fitness`` is compared
@@ -188,7 +189,7 @@ def build_prompt_export(
             reference_lift_ci_lo=selected.reference_lift_ci_lo if selected else None,
             reference_lift_ci_hi=selected.reference_lift_ci_hi if selected else None,
             reference_accuracy=selected.reference_accuracy if selected else None,
-            ability=winner.ability,
+            ability=winner.ability if winner.stamps_theta else None,
             origin_accuracy=origin_accuracy,
             origin_composite_fitness=origin_composite_fitness,
         ),

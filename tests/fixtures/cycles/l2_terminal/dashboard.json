@@ -11,8 +11,11 @@
   "stop_reason": "max_rounds",
   "round": 4,
   "candidate": "",
-  "patience": "1/0",
-  "hearts": null,
+  "run_standing": {
+    "rounds_without_advance": 1,
+    "stalls_left": null,
+    "stalls_left_cap": null
+  },
   "rounds": [
     {
       "round": 0,
@@ -899,7 +902,6 @@
     "max_rounds": 4,
     "spend_budget_usd": 1000.0,
     "token_budget": null,
-    "lives_cap": null,
     "optimizer": [
       {
         "node": "escalation",

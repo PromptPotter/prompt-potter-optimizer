@@ -5,7 +5,7 @@ import {
   fetchForkPreview,
   postSteerFork,
   type RunLimitOverrides,
-  type OperatorForkOverride,
+  type ForkSeed,
 } from "@/lib/api";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useCommand } from "@/lib/hooks/useCommand";
@@ -108,7 +108,7 @@ export function SteerForkPanel({
 
   const confirm = () => {
     if (!campaignId || !cycleId) return;
-    const forkSeed: OperatorForkOverride = {
+    const forkSeed: ForkSeed = {
       origin_prompt_fields: editedPrompt.current ?? seedPrompt,
       pipeline_overlay: editedOverlay.current ?? overlay,
       config_overrides: limits.current,

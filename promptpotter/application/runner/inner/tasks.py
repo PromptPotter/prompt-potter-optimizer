@@ -225,6 +225,8 @@ class InnerTaskSpec(StrictModel):
     model_config = ConfigDict(frozen=True)
 
     inner_dataset: str
+    # `InnerCells.identity`: the optimizer the cell runs, overlays and manifest alike.
+    optimizer_identity: str
     seed: int
     n_samples: int
     n_samples_origin: int | None = None
@@ -270,19 +272,30 @@ def load_inner_tasks(path: Path) -> InnerTasks:
 
 
 def _inner_manifest_nodes(
+    optimizer: str,
     own: Mapping[str, ManifestNodeOverlay],
     nodes: Mapping[str, ManifestNodeOverlay],
     depth_nodes: Mapping[str, ManifestNodeOverlay],
+    *,
+    n_samples: int | None,
 ) -> dict[str, ManifestNodeOverlay]:
-    """The overlay an inner cell runs its manifest under: the inner dataset's *own*, then the
-    panel's ``inner_nodes``, then its ``inner_depth_nodes``."""
-    return merge_node_overlays(merge_node_overlays(own, nodes), depth_nodes)
+    """The overlay an inner cell runs *optimizer* under: the inner dataset's *own*, then the
+    panel's ``inner_nodes``, then its ``inner_depth_nodes``, then its per-round cell count on the
+    sampler's ``size_knob`` — ``None`` leaves that last out, which is what the identity hashes."""
+    merged = merge_node_overlays(merge_node_overlays(own, nodes), depth_nodes)
+    sampler = resolve_optimizer(optimizer, merged).sampler
+    if n_samples is None or sampler.size_knob is None:
+        return merged
+    size = {sampler.name: ManifestNodeOverlay(config={sampler.size_knob: n_samples})}
+    return merge_node_overlays(merged, size)
 
 
 def _select_inner_optimizer(
     campaign_config: Mapping[str, Any],
     nodes: Mapping[str, ManifestNodeOverlay],
     depth_nodes: Mapping[str, ManifestNodeOverlay],
+    *,
+    n_samples: int | None,
 ) -> SelectedOptimizer:
     """The manifest an inner cell runs, under the overlay it runs it with — what every L4 arm
     mutates. A template naming none runs the default manifest."""
@@ -291,9 +304,9 @@ def _select_inner_optimizer(
         node: ManifestNodeOverlay.model_validate(raw)
         for node, raw in (opt.get("nodes") or {}).items()
     }
+    name = opt.get("optimizer", OptimizationConfig.model_fields["optimizer"].default)
     return resolve_optimizer(
-        opt.get("optimizer", OptimizationConfig.model_fields["optimizer"].default),
-        _inner_manifest_nodes(own, nodes, depth_nodes),
+        name, _inner_manifest_nodes(name, own, nodes, depth_nodes, n_samples=n_samples)
     )
 
 
@@ -321,6 +334,9 @@ class InnerCells:
 
     panel: InnerTasks
     by_dataset: Mapping[str, InnerCell]
+    # The cells' `config_digest` without the panel's depth: what their optimizer IS, never how far
+    # a cell runs, so a deepened cell continues its campaign.
+    identity: str
 
     @property
     def optimizer(self) -> SelectedOptimizer:
@@ -379,23 +395,30 @@ def resolve_inner_cells(stores: Stores, panel: InnerTasks) -> InnerCells:
     would measure an arm on nodes the arm never touched."""
     cfg = panel.inner_benchmark_config
     by_dataset: dict[str, InnerCell] = {}
+    runs: dict[str, str] = {}
     for name in sorted(panel.datasets):
         dataset_dir = readable_dataset_dir(stores, name)
         campaign = read_campaign_config_file(dataset_campaign_path(dataset_dir))
         by_dataset[name] = InnerCell(
             campaign_config=campaign,
             pipeline=read_yaml_optional(dataset_pipeline_path(dataset_dir)),
-            optimizer=_select_inner_optimizer(campaign, cfg.inner_nodes, cfg.inner_depth_nodes),
+            optimizer=_select_inner_optimizer(
+                campaign,
+                cfg.inner_nodes,
+                cfg.inner_depth_nodes,
+                n_samples=cfg.n_samples_per_inner_round,
+            ),
         )
-    runs = {name: (c.optimizer.name, c.optimizer.node_digests) for name, c in by_dataset.items()}
+        identity = _select_inner_optimizer(campaign, cfg.inner_nodes, {}, n_samples=None)
+        runs[name] = identity.config_digest
     if any(run != runs[min(runs)] for run in runs.values()):
-        named = {name: run[0] for name, run in runs.items()}
+        named = {name: c.optimizer.name for name, c in by_dataset.items()}
         raise ValueError(
             f"the panel's inner datasets run different inner optimizers ({named}). One panel "
             "measures one optimizer configuration: give its cells datasets whose optimization "
             "agrees, or split the panel."
         )
-    return InnerCells(panel=panel, by_dataset=by_dataset)
+    return InnerCells(panel=panel, by_dataset=by_dataset, identity=runs[min(runs)])
 
 
 def resolve_inner_task(ctx: InnerSpawnContext, query: str) -> InnerTaskSpec:
@@ -420,6 +443,7 @@ def resolve_inner_task(ctx: InnerSpawnContext, query: str) -> InnerTaskSpec:
         )
     return InnerTaskSpec(
         inner_dataset=panel.dataset_for(cell),
+        optimizer_identity=ctx.cells.identity,
         seed=cell.inner_dataset_seed,
         n_samples=cfg.n_samples_per_inner_round,
         n_samples_origin=cfg.n_samples_origin,
@@ -462,7 +486,13 @@ def inner_instrument_config(
         # not of the optimizer prompt under test — noise entering as a units change. Off here
         # only; a top-level campaign keeps the graduation, which is where it earns its keep.
         "enable_2pl_graduation": False,
-        "nodes": _inner_manifest_nodes(base.optimization.nodes, spec.nodes, spec.depth_nodes),
+        "nodes": _inner_manifest_nodes(
+            base.optimization.optimizer,
+            base.optimization.nodes,
+            spec.nodes,
+            spec.depth_nodes,
+            n_samples=spec.n_samples,
+        ),
     }
     if spec.inner_optimizer_temperature is not None:
         # The clamp's seed is the CELL's, matching the target model's, so every candidate measured
@@ -480,7 +510,6 @@ def inner_instrument_config(
     po[llm_node] = node
     return base.model_copy(
         update={
-            "sp_budget_round": min(spec.n_samples, n_scored),
             "sp_budget_origin": n_scored,
             # The drawn cell IS the bank: the outer loop grades an instrument, so none holds out.
             "dataset_split": None,

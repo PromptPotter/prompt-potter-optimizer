@@ -12,7 +12,7 @@ cells: `noise-floor --k 3` of the unchanged C0 scored 7, 7 and 6 of ten and flip
 between draws. An edit had to move more cells than that noise to register at all.
 
 This cut doubles the bank. The origin is measured on all twenty (`sp_budget_origin`), each
-candidate on fifteen per round (`sp_budget_round`), and the origin prompt is s10's C0 unchanged.
+candidate on fifteen per round (`adaptive_queue.sp_budget_round`), and the origin prompt is s10's C0 unchanged.
 
 ## The cut
 

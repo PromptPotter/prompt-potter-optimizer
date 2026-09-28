@@ -16,7 +16,6 @@ from promptpotter.application.runner.inner.tasks import (
     resolve_inner_cells,
 )
 from promptpotter.application.scoring import metrics, selection
-from promptpotter.config.prompt_blocks import block_library
 from promptpotter.connectors.protocol import Connector, InProcessWorkload
 from promptpotter.domain.l4 import proxies
 from promptpotter.domain.l4.inner_origin import INNER_ORIGIN_KEY
@@ -88,8 +87,8 @@ def _identity_config(
     stores: Stores, _dataset_dir: Path, experiment: Mapping[str, Any] | None
 ) -> dict[str, dict[str, Any]]:
     """The inner optimizer's effective-revision fingerprint: which manifest the inner cells run and
-    what each of its llm nodes resolves to, the source deciding what its prompts say, the estimator
-    source, and every inner dataset's own config. In the recursion the optimizer IS the
+    every node's resolved config, the source deciding what its prompts say, the estimator source,
+    and every inner dataset's own config. In the recursion the optimizer IS the
     instrument, so two optimizers' inner cells must never pool under one key. Not the task list —
     each task is its own sample's ``source_pin`` (:func:`_extract_experiment`), so adding one to
     ``inner_tasks.yaml`` voids none of the cells already banked. Carried on the first node of the
@@ -113,26 +112,11 @@ def _identity_config(
         "config": (experiment or {}).get("inner_benchmark_config") or {},
         "datasets": datasets,
     }
-    # NARROW on purpose: a node description, a widened `available_models` or a schema regenerated
-    # for an unrelated node must not void a panel. The PARSED manifest, never its bytes.
-    inner_optimizer = {
-        "manifest": inner.name,
-        "version": inner.version,
-        "nodes": inner.node_digests,
-    }
     # What the inner optimizer's prompts SAY, and which of its panels fill each one: both are
-    # code, so nothing above reaches them — see `OptimizerRuntime.source_digest`.
+    # code, so the parsed manifest's digest (`InnerCells.identity`) cannot reach them.
     panel_text = inner.runtime.source_digest(*measurement_modules())
     fingerprint = stable_hash(
-        [
-            inner_optimizer,
-            panel_text,
-            # The block library is prompt MATERIAL stored as data, which no source digest reads —
-            # hashed as data, like the manifest above.
-            block_library(),
-            _measurement_source_digest(),
-            inner_spec,
-        ]
+        [cells.identity, panel_text, _measurement_source_digest(), inner_spec]
     )[:12]
     return {cells.chain[0]: {INNER_ORIGIN_KEY: fingerprint}}
 

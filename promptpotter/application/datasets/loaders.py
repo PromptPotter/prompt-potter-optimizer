@@ -64,14 +64,24 @@ def samples_from_dicts(items: list[dict[str, Any]]) -> list[Sample]:
     return [Sample.from_dict(item, fallback_id=i) for i, item in enumerate(items)]
 
 
+def bank_samples(items: list[dict[str, Any]]) -> list[Sample]:
+    """The bank a run measures off its dataset's items — every reader that partitions it must
+    start here, or two partitions of one split disagree about which rows it held out.
+
+    Whether a MISSING label disqualifies a row is DERIVED from the set, not declared: if any row
+    carries one this is a labelled dataset and a row without is broken; if none does, the dataset
+    is verifier-graded and dropping on that test would empty it."""
+    labelled = any(item.get("ground_truth") for item in items)
+    return samples_from_dicts(
+        [item for item in items if item.get("query") and (item.get("ground_truth") or not labelled)]
+    )
+
+
 def sample_dataset(dataset: list[Sample], sample_size: int) -> list[Sample]:
     """Top-``sample_size`` slice; the bank is already shuffled at creation, so no second RNG. A size above
-    the bank yields ALL of it — deliberate, and what ``sp_budget_origin`` above ``sp_budget_round`` needs."""
+    the bank yields ALL of it — deliberate, and what a wide ``sp_budget_origin`` needs."""
     if sample_size <= 0:
-        # Both budgets land here (`sp_budget_round` per round, `origin_budget()` at C0), so
-        # the message names neither — it named `sp_budget_round` and sent anyone hitting it
-        # off the origin path to the wrong knob.
-        raise ValueError(f"eval budget must be > 0, got {sample_size}")
+        raise ValueError(f"sp_budget_origin must be > 0, got {sample_size}")
     return dataset[:sample_size]
 
 

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.infrastructure.store.io import append_jsonl, write_jsonl
 from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
 from promptpotter.infrastructure.store.read_model import iter_jsonl
-from promptpotter.shared.instrument import instrument_mode
+from promptpotter.shared.instrument import MeasurementRole, instrument_mode
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
 __all__ = [
+    "bench_reads",
     "capture_evidence_epoch",
     "cold_payload_bytes",
     "cold_payload_size",
@@ -115,6 +116,21 @@ def load_run(stores: Stores, run_id: str) -> dict[str, Any] | None:
 def run_signatures(stores: Stores) -> dict[str, tuple[int, int]]:
     """Change-tokens for every run detail, one scan — see `MeasurementArchive.detail_signatures`."""
     return stores.archive.detail_signatures()
+
+
+def bench_reads(stores: Stores, *, dataset_name: str, sample_ids: frozenset[int]) -> int:
+    """How many individuals the archive has graded on any of *sample_ids* under the bench's role.
+    The RAW index, never the evidence epoch: a holdout was spent by every read, seen or not."""
+    graded: set[str] = set()
+    for entry in stores.archive.list_all(dataset_name=dataset_name):
+        if (
+            entry.get("name") != MeasurementRole.BENCH
+            or (detail := stores.archive.load_by_id(entry["run_id"])) is None
+        ):
+            continue
+        if any(row.get("sample_id") in sample_ids for row in detail["measurements"]):
+            graded.add(str(entry.get("prompt_fields_id") or entry["run_id"]))
+    return len(graded)
 
 
 def list_runs(

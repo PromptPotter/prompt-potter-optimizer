@@ -44,7 +44,7 @@ export type RunLimitOverrides = Partial<
 >;
 // `optimizer_narrowing` overrides the campaign's mint-time narrowing for this cycle only; absent
 // inherits it unchanged.
-export type OperatorForkOverride = Partial<
+export type ForkSeed = Partial<
   Omit<CycleSeed, "origin_source" | "config_overrides">
 > & { config_overrides?: ConfigOverrides };
 // `keepRounds` makes it `operator_rewind` (lifts rounds 0..round-1, the terminal's `resume --rewind
@@ -55,7 +55,7 @@ export async function postSteerFork(
   round: number,
   candidateId: string,
   opts: {
-    seed: OperatorForkOverride;
+    seed: ForkSeed;
     steeredBy?: string;
     keepRounds?: boolean;
     pauseFirst: boolean;

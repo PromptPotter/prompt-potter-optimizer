@@ -12,9 +12,10 @@ from promptpotter.application.intelligence.exploration import (
 from promptpotter.application.intelligence.hard_sample_sorter import (
     build_hard_samples_artifact_from_observations,
 )
+from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.domain.measurement_provenance import entry_grade, meets_grade
+from promptpotter.domain.scoring import is_graded
 from promptpotter.infrastructure.store import archive_queries
-from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.domain.scoring import CellScorer
@@ -67,10 +68,11 @@ def _run_cells(
     detail = archive_queries.load_run(stores, run_id)
     if detail is None:
         return ()
+    rows = rescore_results([dict(item) for item in detail.get("measurements", [])], scorer)
     cells = tuple(
-        (int(sid), scorer.objective(item))
-        for item in detail.get("measurements", [])
-        if (sid := item.get("sample_id")) is not None and not is_error_result(item)
+        (int(sid), float(row["objective"]))
+        for row in rows
+        if (sid := row.get("sample_id")) is not None and is_graded(row)
     )
     if len(_CELLS) >= _CELLS_MAX:
         _CELLS.clear()

@@ -57,10 +57,10 @@ def build_campaign_config(
     nodes: dict[str, Any] = {"escalation": {"config": {"escalation_ladder": "l1"}}}
     if n_variants:
         nodes["l1_generate"] = {"config": {"n_variants": n_variants}}
+    if sp_budget_round is not None:
+        nodes["adaptive_queue"] = {"config": {"sp_budget_round": sp_budget_round}}
     optimization: dict[str, Any] = {"max_rounds": max_rounds or 5, "nodes": nodes}
     overrides: dict[str, Any] = {"optimization": optimization}
-    if sp_budget_round is not None:
-        overrides["sp_budget_round"] = sp_budget_round
     return load_dataset_campaign_config(_BBEH_CAMPAIGN_YAML, overrides=overrides)
 
 
@@ -172,7 +172,7 @@ async def run_bbeh_campaign(
                 "optimizer": "promptpotter",
                 "max_rounds": opt_cfg.max_rounds,
                 "n_variants": select_optimizer(opt_cfg).pacing.arms_per_round,
-                "sp_budget_round": campaign_config.sp_budget_round,
+                "sp_budget_round": select_optimizer(opt_cfg).round_cells(len(train_pool)),
                 "model_id": target_model,
                 "n_train": len(train_pool),
                 "train_accuracy": round(train_acc, 4) if train_acc is not None else None,

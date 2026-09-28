@@ -15,6 +15,8 @@ const round = (r: number, selection: number[]): RoundSummary =>
     composite_fitness: 0,
     total: 0,
     ability: null,
+    best_so_far: null,
+    bench: null,
     improved: null,
     electable_count: null,
     verdict_reason: null,

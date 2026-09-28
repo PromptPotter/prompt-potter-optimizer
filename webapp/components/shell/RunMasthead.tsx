@@ -48,7 +48,7 @@ export function RunMasthead({
   );
 
   const spark = useMemo(() => {
-    const { best: ys } = fitnessTrend(dash?.rounds, dash?.best);
+    const ys = fitnessTrend(dash?.rounds).best.filter((y): y is number => y != null);
     if (ys.length < 2) return null;
     const W = 120;
     const H = 26;
@@ -59,7 +59,7 @@ export function RunMasthead({
       .map((y, i) => `${i === 0 ? "M" : "L"}${toX(i).toFixed(1)},${toY(y).toFixed(1)}`)
       .join("");
     return { path, area: `${path} L${W},${H} L0,${H} Z`, W, H };
-  }, [dash?.rounds, dash?.best]);
+  }, [dash?.rounds]);
 
   const title = run ? campaignTitle(run.campaign) : null;
   // Backing out is the remote's drill button; this only says where the view is.
@@ -161,7 +161,7 @@ export function RunMasthead({
           </span>
           {/* The headline: the selection graded on held-out rows; BEST beside it is the optimizer's own. */}
           <span className="chip">
-            <span className="chip-lbl">Bench</span>
+            <span className="chip-lbl">{bench.label}</span>
             {bench.value}
             {bench.sub && <span className="chip-of"> {bench.sub}</span>}
           </span>

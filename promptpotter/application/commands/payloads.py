@@ -4,6 +4,7 @@ from typing import Any, Literal
 
 from pydantic import Field, SerializerFunctionWrapHandler, model_serializer, model_validator
 
+from promptpotter.application.datasets.draft_campaign import OptimizationOverrides
 from promptpotter.application.datasets.draft_patch import EditDraftPatch
 from promptpotter.application.runner.origin_gate import GateDecision
 from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
@@ -255,6 +256,23 @@ class SetConcurrentCyclesPayload(CommandPayload):
 
 class MintCampaignPayload(CommandPayload, LaunchLimits):
     dataset_name: str = Field(min_length=1, max_length=64)
+    optimization: OptimizationOverrides | None = Field(
+        default=None,
+        description="Laid over the dataset's own `optimization` before the mint freezes it; only "
+        "the fields sent move anything",
+    )
+
+    @property
+    def optimization_sent(self) -> dict[str, Any]:
+        opt = self.optimization
+        return {} if opt is None else opt.model_dump(mode="json", exclude_unset=True)
+
+    @model_serializer(mode="wrap")
+    def _record_what_was_sent(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """The ``CommandRecord`` carries this dump; a default there records a knob nobody set."""
+        data: dict[str, Any] = handler(self)
+        data["optimization"] = self.optimization_sent or None
+        return data
 
     @model_validator(mode="after")
     def _name_is_a_dataset_name(self) -> MintCampaignPayload:

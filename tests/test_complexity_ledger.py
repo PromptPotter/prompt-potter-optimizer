@@ -249,6 +249,10 @@ LEDGER_BASELINE = {
     # +2: GEPA's split on the sampler that draws it — `minibatch.size` (b) and `pareto_share`, the
     # share of the pool held as the Pareto set. No sampler knob draws a fresh subset beside a fixed
     # one: CAPO's blocks and LEVI's proxy are both one fixed panel.
+    # +1: `bench_each_round` — a bench pass per selecting round costs about a round's own panel,
+    # so the per-round bench series is the operator's spend to opt into; no knob priced it before.
+    # -1: `paired_t.survivors` folds into `population.size` — μ is one number, which the race reads
+    # off the selector; a no-race ablation drops the eliminator and still keeps the population.
     "config_leaf_fields": 71,
     # +1: `QUEUE_MAX_WAIT_S` — how long a launch may wait in line before it is withdrawn. It is a
     # setting and not a constant because it is the one queue number a HOST has to be able to
@@ -347,7 +351,13 @@ LEDGER_BASELINE = {
     # on, or a stop, yields no reading, and the headline serves the stop and its error instead.
     # -80: `optimizer_state.payload` is a `RoundPayload` each optimizer registers from its own
     # package, so the bench's result no longer declares potter's, CAPO's, LEVI's and GEPA's.
-    "cycle_result_fields": 235,
+    # +1: `ScoredCandidate.elimination_reason` — the eliminator's own words for a stop. The context
+    # beside it is that eliminator's opaque payload, so no surface can word a cut it does not know.
+    # -1: `axis_memory_peaked` rides potter's payload again — only potter's review reads it, and a
+    # neutral round document names no optimizer's index reading.
+    # -2: `BenchReading.stopped` — a pass that stopped short is no reading, so no reading can
+    # carry a stop.
+    "cycle_result_fields": 233,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
@@ -666,7 +676,16 @@ LEDGER_BASELINE = {
     # +1: an installed optimizer whose campaign ends without the bench pass leaves the head-to-head
     # with no headline while every round renders; driven through `scripts/offline_run.py`, the one
     # end-to-end run of every optimizer that spends nothing (test_numerics § 4).
-    "test_functions": 222,
+    # +1: a GEPA pool member lacking a verdict on a Pareto-set cell — the seat included — is
+    # refused on the record, or its aggregate ranks it on cells it skipped (test_numerics § 4).
+    # -1: the frozen-ceiling and seed-narrowing cases fold into one: `campaign.json` now holds the
+    # whole config, so a resume that reads the dataset file at all runs an optimizer or a ceiling
+    # the campaign never declared, every surface rendering (test_integrity § 4).
+    # +1: a denominator dropping the cells a prompt refused or broke pays it accuracy for failing
+    # exactly where it could not answer, and every rate renders (test_numerics § 2).
+    # +1: a held-out row in the check-in model's preview is the bench read by the one authoring
+    # the origin — every number renders, only higher, and no rerun unreads it (test_security).
+    "test_functions": 224,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -785,7 +804,20 @@ LEDGER_BASELINE = {
     # it now yields no reading, and every surface reads the reason instead of composing one.
     # +1: `PipelineViewNode.description` — the node's own declared explainer, served on the view so
     # the graph's tooltip is every manifest's and no webapp table keys one by potter's node ids.
-    "served_fields": 731,
+    # +2: `RunStanding` (3) replaces `LineageNode.hearts` / `.lives_cap` (-2, +1 `run_standing`) —
+    # one neutral standing every optimizer fills, carrying the rounds-without-advance count the
+    # tree never served, read off the ledger rather than a projection of it.
+    # +4: `KnobRow.minimum` / `exclusive_minimum` / `maximum` / `exclusive_maximum` — a member's
+    # own bounds, so the knob editor refuses the value the run would refuse instead of sending it;
+    # JSON Schema's four keywords, because an inclusive and an exclusive bound are different answers.
+    # +1: `CampaignPipelineResponse.optimizer_knobs` — the knob values a course's optimizer RUNS,
+    # seed included; the knobs dialog laid `campaign.json`'s overlay over the manifest instead and
+    # showed the manifest's defaults for every knob the dataset file had set.
+    # +1: `OptimizerEntry.origin` — the package that registered an optimizer, so the picker stops
+    # calling every paperless one "PromptPotter's own".
+    # +1: `HeadToHeadRow.bench_reads` — how many individuals were ever graded on a held-out set;
+    # a holdout is spent by reuse, and no other field can say when a fresh split is due.
+    "served_fields": 740,
 }
 
 

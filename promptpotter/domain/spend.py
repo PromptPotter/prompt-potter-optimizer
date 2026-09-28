@@ -19,6 +19,7 @@ from promptpotter.shared.instrument import MeasurementRole
 
 __all__ = [
     "ROLE_SPEND_KIND",
+    "SEARCH_KINDS",
     "TOKEN_KIND_BUCKET",
     "BudgetChange",
     "SpendBucket",
@@ -274,6 +275,16 @@ class SpendRollup(StrictModel):
         an understated cost and read cheapness that never happened, so such a cell is refused."""
         return sum(b.incurred_unpriced_tokens for b in self.buckets)
 
+    @property
+    def search_incurred_usd(self) -> float | None:
+        """What the SEARCH incurred (``SEARCH_KINDS``), replays priced — ``None`` where a search
+        bucket carries tokens no rate priced, since dividing by an understated cost reads cheapness
+        nobody bought."""
+        search: list[SpendBucket] = [getattr(self, TOKEN_KIND_BUCKET[k]) for k in SEARCH_KINDS]
+        if any(b.incurred_unpriced_tokens for b in search):
+            return None
+        return sum(b.incurred_usd for b in search)
+
 
 TOKEN_KIND_BUCKET: dict[TokenUsageKind, str] = {
     "optimizer": "loop",
@@ -294,3 +305,7 @@ assert set(TOKEN_KIND_BUCKET) == set(get_args(TokenUsageKind)), (
 assert set(TOKEN_KIND_BUCKET.values()) <= set(SpendRollup.model_fields), (
     "TOKEN_KIND_BUCKET names a bucket SpendRollup does not declare"
 )
+
+SEARCH_KINDS: tuple[TokenUsageKind, ...] = ("optimizer", "backend", "judge")
+"""The spend that FINDS a result — what a lift is priced in. The bench's pass is the instrument
+grading the result, and a diagnostic asks a question about it; neither is the search's."""

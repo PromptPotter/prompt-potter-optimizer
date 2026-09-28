@@ -72,6 +72,13 @@ class AdaptiveQueueKnobs(StrictModel):
     """The sampler's. Turn resubset off to freeze the sample basis at campaign start: one fixed
     subset, fixed order, identical for every round and candidate."""
 
+    sp_budget_round: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
+        ge=1,
+        description="Per-round eval budget — how many cells each candidate is scored on per "
+        "round. The search pool is the bank; each round `select_round_subset` picks this many "
+        "informative cells from it. Not the pool's size.",
+    )
+
     per_round_resubset: Annotated[bool, Knob(Scope.POLICY, Estimand.SELECTION, Estimand.GATE)] = (
         Field(
             description=(

@@ -193,7 +193,7 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
     StopReason.LIVES_EXHAUSTED: StopReasonInfo(
         "Out of lives", StopOutcome.SUCCESS, False, False, ""
     ),
-    StopReason.HARD_CAP: StopReasonInfo("Round cap", StopOutcome.SUCCESS, False, False, ""),
+    StopReason.HARD_CAP: StopReasonInfo("Arm cap", StopOutcome.SUCCESS, False, False, ""),
     StopReason.DIAG_COMPLETE: StopReasonInfo(
         "Diagnostic complete", StopOutcome.SUCCESS, False, False, ""
     ),

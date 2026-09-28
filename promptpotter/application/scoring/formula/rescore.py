@@ -17,8 +17,9 @@ def rescore_results(results: list[dict[str, Any]], scorer: CellScorer) -> list[d
     correctness it is composed OF (``compiler.py::objective_namespace`` binds ``fitness``), so the
     order is the dependency.
 
-    **ERRORED** — stamped ``0.0`` as a DISPLAY convention. **No estimator may read it as a
-    verdict**; every consumer meaning "measurement" filters the typed ``error_category`` instead.
+    **ERRORED** — stamped ``0.0`` without the formula, which may parse ``predicted`` and an error
+    row has none. Whether that 0.0 is a MISS or a display convention is ``is_graded``'s call
+    (``domain/scoring.py``): an error the configuration caused is its miss, a provider's is nothing.
 
     **UNSCORED** — the backend answered and this formula cannot grade the answer. Both keys are
     REMOVED and ``unscored`` carries the missing term's own message. Removed rather than left alone

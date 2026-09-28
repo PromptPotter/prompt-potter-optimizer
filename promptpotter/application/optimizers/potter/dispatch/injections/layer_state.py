@@ -13,6 +13,9 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     Item,
     signal,
 )
+from promptpotter.application.optimizers.potter.dispatch.injections.catalogues import (
+    withheld_l1_panels,
+)
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     L1_LAYOUT_SLOTS,
     NODE_LAYOUTS,
@@ -22,6 +25,7 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import (
 )
 from promptpotter.application.optimizers.potter.escalation.state import ExplorationBudget
 from promptpotter.application.views.render.optimizer_prompt_text import (
+    critique_axes,
     format_l1_critique_for_prompt,
 )
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
@@ -158,7 +162,9 @@ def _r_l1_layout(b: InjectionBundle) -> list[Item]:
     the only ones a move can gain the prompt."""
     layout = b.memory.l1_layout
     lines = [f"  {slot}: {', '.join(layout.slot(slot)) or '(empty)'}" for slot in L1_LAYOUT_SLOTS]
-    if unplaced := sorted(NODE_LAYOUTS["l1_generate"].possible - set(layout.all_placeholders())):
+    # Less what the campaign cannot fill, which `l1_layout`'s own enum leaves out too.
+    offered = NODE_LAYOUTS["l1_generate"].possible - withheld_l1_panels(b)
+    if unplaced := sorted(offered - set(layout.all_placeholders())):
         lines.append(f"  available, not shown: {', '.join(unplaced)}")
     return [Item("CURRENT L1 LAYOUT — what l1_generate reads today:\n" + "\n".join(lines))]
 
@@ -195,7 +201,9 @@ def _r_task_context(b: InjectionBundle) -> list[Item]:
     citable=True,
 )
 def _r_critique(b: InjectionBundle) -> list[Item]:
-    return [Item(format_l1_critique_for_prompt(b.digest.critique, b.pipeline_schema))]
+    schema = b.pipeline_schema
+    axes = None if schema is None else critique_axes(schema, offers_shots=b.offers_shots)
+    return [Item(format_l1_critique_for_prompt(b.digest.critique, axes))]
 
 
 _REBASE_CAPABILITY_TEXT = (

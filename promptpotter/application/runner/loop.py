@@ -42,7 +42,9 @@ from promptpotter.shared.errors import PromptCompositionError
 logger = logging.getLogger(__name__)
 
 
-HARD_CAP: int = 100  # runaway-loop guard for max_rounds=None + non-converging L2/L3
+# Runaway-loop guard for a run neither a round cap nor its controller stops, counted in ARMS raced
+# rather than rounds: a one-child optimizer gets as many proposals as a five-arm one.
+HARD_CAP_ARMS: int = 500
 
 
 def set_round_cap(config: CampaignConfig, max_rounds: int | None) -> CampaignConfig:
@@ -103,10 +105,11 @@ async def run_round_loop(
             cap = _armed_round_cap(session, config)
             if cap != config.optimization.max_rounds:
                 config = cycle.config = set_round_cap(config, cap)
-            # None ⇒ unlimited; HARD_CAP is the real ceiling either way.
-            max_rounds = cap if cap is not None else HARD_CAP
-            if clean_rounds >= max_rounds or round_num >= HARD_CAP:
-                break
+            if cap is not None and clean_rounds >= cap:
+                return StopReason.MAX_ROUNDS, None
+            # Off the rounds on record, so a resume counts the arms its priors raced.
+            if sum(len(rr.candidate_scores) for rr in cycle.rounds) >= HARD_CAP_ARMS:
+                return StopReason.HARD_CAP, None
             # Pause cooperation: exit cleanly at the round boundary when the
             # operator set the pause flag. The scoring phase (run_walks)
             # checks the same predicate, so a mid-round pause lands once the
@@ -127,10 +130,10 @@ async def run_round_loop(
                 return StopReason.PAUSED, None
 
             logger.debug(
-                "Round %d (clean=%d/%d, acc=%s)",
+                "Round %d (clean=%d/%s, acc=%s)",
                 round_num,
                 clean_rounds,
-                max_rounds,
+                cap,
                 cycle.tracking.current_accuracy,
             )
 
@@ -146,7 +149,7 @@ async def run_round_loop(
 
             # The calendar cap's half of "no round will follow this one". The controller's half
             # can only be known after the round is scored, so `execute_round` asks it there.
-            is_final_round = clean_rounds + 1 >= max_rounds
+            is_final_round = cap is not None and clean_rounds + 1 >= cap
 
             # Sampled BEFORE the round is scored, because the warm now happens inside scoring
             # (`calibrate_ruler`, ahead of the election that needs it). Read after
@@ -196,8 +199,6 @@ async def run_round_loop(
                     )
                 return StopReason.DIAG_COMPLETE, None
 
-        return (StopReason.HARD_CAP if round_num >= HARD_CAP else StopReason.MAX_ROUNDS), None
-
     except RUN_STOPS as stop:
         return run_stop_reason(stop), None
     except KeyboardInterrupt as exc:
@@ -243,4 +244,4 @@ async def run_round_loop(
         )
 
 
-__all__ = ["HARD_CAP", "run_round_loop", "set_round_cap"]
+__all__ = ["HARD_CAP_ARMS", "run_round_loop", "set_round_cap"]

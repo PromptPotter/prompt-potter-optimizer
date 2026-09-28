@@ -203,10 +203,11 @@ def _annotation_ids(unit: ast.AST) -> set[int]:
 
 
 class _Package:
-    """The package's modules, parsed on demand, for resolving a name to where it is DEFINED."""
+    """The package's modules, parsed on demand, for resolving a name to where it is DEFINED —
+    beside the *hashed* trees handed in, which may live outside it, as a plugin's do."""
 
-    def __init__(self) -> None:
-        self._scopes: dict[str, _Scope | None] = {}
+    def __init__(self, hashed: Iterable[tuple[str, ast.Module]]) -> None:
+        self._scopes: dict[str, _Scope | None] = {m: _scope(tree) for m, tree in hashed}
 
     def scope(self, module: str) -> _Scope | None:
         if module not in self._scopes:
@@ -284,11 +285,9 @@ def optimizer_prompt_shapers(
     scanned = [m for m in hashed if m.__name__ not in whole]
     covered_names = whole | {m.__name__ for m in (*scanned, *covered)} | PLUMBING_MODULES
     marked = {(m, name) for m, unit in units if (name := _unit_name(unit))}
-    package = _Package()
-    checked = [
-        *units,
-        *((m.__name__, ast.parse(Path(str(m.__file__)).read_text("utf-8"))) for m in scanned),
-    ]
+    trees = [(m.__name__, ast.parse(Path(str(m.__file__)).read_text("utf-8"))) for m in scanned]
+    package = _Package(trees)
+    checked = [*units, *trees]
     breaches = sorted(
         {
             f"{target[0]}.{target[1]} (read by {module})"

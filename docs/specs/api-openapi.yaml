@@ -773,6 +773,7 @@ paths:
         '202': { $ref: '#/components/responses/CommandAccepted' }
         '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
         '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '404': { $ref: '#/components/responses/CommandTargetNotFound' }
         '422': { $ref: '#/components/responses/PayloadInvalid' }
         '503': { $ref: '#/components/responses/BackendUnreachable' }
 
@@ -840,7 +841,7 @@ paths:
     post:
       operationId: changeSampleBudget
       x-status: declared-not-wired  # no handler; POST 404s `command_kind_unknown`
-      summary: Adjust the per-round PoBB sample budget (`sp_budget_round`) mid-flight.
+      summary: Adjust potter's per-round sample budget (`adaptive_queue.sp_budget_round`) mid-flight.
       tags: [budget]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1568,14 +1569,18 @@ paths:
         manifest `member` and null before a reading; `catch_up_log[]` names the
         member too. `bench_score` (`BenchScore`) is the headline, folded from the
         `bench:scored` phase record and null until the bench pass grades the
-        selection. `run_limits` holds the bench's ceilings, the lives bank's
-        `lives_cap`, and `optimizer[]` — the run-bounding knobs the selected
-        optimizer declares (`OptimizerLimit`), empty where it declares none.
+        selection. `run_limits` holds the bench's ceilings and `optimizer[]` — the
+        run-bounding knobs the selected optimizer declares (`OptimizerLimit`), empty
+        where it declares none. `run_standing` (`RunStanding`) is where the optimizer
+        stands after the last closed round — rounds without advance, and the stalls
+        it may still absorb out of their cap — null before round 0 closes.
         `rounds[].optimizer_facts` are the optimizer's own words about each closed
-        round (`OptimizerFact`); `state: optimizer_step` names a phase the optimizer
-        declares for itself, its words in `optimizer_step`.
-
-        DECLARED, not yet written: `stall` replaces the `patience` string.
+        round (`OptimizerFact`); `rounds[].best_so_far` is the BEST line as each
+        round closed, and `rounds[].bench` the bench's `BenchReading` of the
+        selection that round declared — the origin, the final pick, and under
+        `bench_each_round` every round that selected; `state: optimizer_step`
+        names a phase the optimizer declares for itself, its words in
+        `optimizer_step`.
       tags: [cycles]
       parameters:
         - name: campaign_id
@@ -2327,6 +2332,12 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+        '404':
+          description: No optimizer of that name is registered (`optimizer_unknown`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /optimizers:
     get:
@@ -2360,11 +2371,13 @@ paths:
                     items:
                       type: object
                       additionalProperties: false
-                      required: [name, version, paper]
+                      required: [name, version, paper, origin]
                       properties:
                         name: { type: string }
                         version: { type: string }
                         paper: { type: [string, 'null'] }
+                        # The package that registered it; null for one PromptPotter ships.
+                        origin: { type: [string, 'null'] }
 
   /optimizers/{name}/knobs:
     get:
@@ -2410,7 +2423,17 @@ paths:
                           items:
                             type: object
                             additionalProperties: false
-                            required: [key, description, type, options, nullable, value]
+                            required:
+                              - key
+                              - description
+                              - type
+                              - options
+                              - nullable
+                              - minimum
+                              - exclusive_minimum
+                              - maximum
+                              - exclusive_maximum
+                              - value
                             properties:
                               key: { type: string }
                               description: { type: string }
@@ -2419,6 +2442,12 @@ paths:
                                 type: [array, 'null']
                                 items: { type: string }
                               nullable: { type: boolean }
+                              # The member's own bounds, as its knob model declares them, so a
+                              # surface refuses what the run would before sending it.
+                              minimum: { type: [number, 'null'] }
+                              exclusive_minimum: { type: [number, 'null'] }
+                              maximum: { type: [number, 'null'] }
+                              exclusive_maximum: { type: [number, 'null'] }
                               value: {}
         '404':
           description: No such manifest ships with this install.
@@ -2998,8 +3027,15 @@ components:
             candidate, so the candidate edge alone does not identify an inner run.
         best_accuracy: { type: [number, "null"] }
         origin_accuracy: { type: [number, "null"] }
-        hearts: { type: [integer, "null"] }
-        lives_cap: { type: [integer, "null"] }
+        run_standing:
+          description: |
+            The optimizer's standing as the course's last closed round left it, read
+            off the course's own ledger; null before round 0 closes.
+          type: [object, "null"]
+          properties:
+            rounds_without_advance: { type: integer }
+            stalls_left: { type: [integer, "null"] }
+            stalls_left_cap: { type: [integer, "null"] }
 
     RayItem:
       type: object
@@ -3242,7 +3278,7 @@ components:
     BenchReading:
       type: object
       additionalProperties: false
-      required: [round, sp_hash, accuracy, composite_fitness, ci_lo, ci_hi, n_scored, run_id, stopped]
+      required: [round, sp_hash, accuracy, composite_fitness, ci_lo, ci_hi, n_scored, run_id]
       description: One individual scored on the whole bench set under the campaign's formula.
       properties:
         round: { type: integer, description: The round whose selection this is; 0 is the origin. }
@@ -3251,20 +3287,32 @@ components:
         composite_fitness: { type: [number, 'null'] }
         ci_lo: { type: [number, 'null'] }
         ci_hi: { type: [number, 'null'] }
-        n_scored: { type: integer }
+        n_scored:
+          type: integer
+          description: |
+            Bench rows carrying a verdict, a miss the prompt caused included; never fewer than
+            the bench set less its split's `tolerance` — a pass past it is no reading.
         run_id: { type: string, description: The archive run its bench rows were filed under. }
-        stopped:
-          type: [string, 'null']
-          description: Why the pass ended before its last bench row; null when it scored every one.
 
     BenchScore:
       type: object
       additionalProperties: false
-      required: [bench_size, origin, selected, lift, lift_ci_lo, lift_ci_hi]
+      required: [bench_size, origin, selected, missing_reason, lift, lift_ci_lo, lift_ci_hi]
       properties:
         bench_size: { type: integer }
-        origin: { $ref: '#/components/schemas/BenchReading' }
-        selected: { $ref: '#/components/schemas/BenchReading' }
+        origin:
+          oneOf:
+            - $ref: '#/components/schemas/BenchReading'
+            - type: 'null'
+        selected:
+          oneOf:
+            - $ref: '#/components/schemas/BenchReading'
+            - type: 'null'
+        missing_reason:
+          type: [string, 'null']
+          description: |
+            Why a reading is null: each pass that stopped before its last row, or ended past its
+            split's `tolerance` of rows with no verdict. Null when both read.
         lift:
           type: [number, 'null']
           description: |
@@ -3504,14 +3552,16 @@ components:
                 seed carrying `origin_prompt_fields`: the lifted round 0 already
                 IS the origin, so declaring a second one is contradictory.
             seed:
-              $ref: '#/components/schemas/OperatorForkOverride'
+              $ref: '#/components/schemas/CycleSeed'
 
-    OperatorForkOverride:
+    CycleSeed:
       type: object
       additionalProperties: false
       description: |
-        The edited-searchpoint origin override that makes a fork's origin =
-        chosen searchpoint + operator edits. Required on every operator fork.
+        `domain/run_records.py::CycleSeed` as a fork sends it — the chosen
+        starting point that makes a fork's origin = chosen searchpoint +
+        operator edits. `origin_source` is not sent: the dispatcher stamps
+        `fork_seed`. Required on every operator fork.
         Under `keep_rounds` the origin is the LIFTED round 0 instead, so only the
         override half of this applies and `origin_prompt_fields` is refused.
         Persisted to the fork's ledger as a read-once `CycleSeedRecord` (read at
@@ -3571,8 +3621,8 @@ components:
         (1) the bench's run limits (`max_rounds`/`spend_budget_usd`/`token_budget`)
         — ABSOLUTE values the reconcile dialog re-sets (defaults to the parent's
         remaining, e.g. "3 of 6 rounds left"); (2) `nodes`, the fork's delta over
-        the selected optimizer manifest — every optimizer knob (potter's patiences,
-        its PoBB ε, its resubset toggle, `schema_field_rename`); (3) the composite
+        the selected optimizer manifest — every knob its nodes take, which
+        `GET /optimizers/{name}/knobs` lists; (3) the composite
         criterion (`scoring`), which sits on `CampaignConfig` itself rather than
         under `optimization`. Every policy knob invalidates search comparability,
         so a fork-at-offset-0 is how you A/B one without touching the manifest or
@@ -3599,10 +3649,10 @@ components:
           description: |
             The fork's delta over the selected optimizer manifest, keyed by node name —
             `{node: {config: {...}}}`, the shape a target pipeline's overlay takes.
-            Every optimizer knob rides here (potter's patiences, `pobb_*`, the
-            resubset toggle, `schema_field_rename`); the fields around it are the
-            bench's own. No field here switches the manifest: a head-to-head between
-            optimizers is two campaigns, not a fork.
+            Every optimizer knob rides here, resolved against the campaign's manifest
+            before the fork is minted (an unknown node or a refused value is a 422);
+            the fields around it are the bench's own. No field here switches the
+            manifest: a head-to-head between optimizers is two campaigns, not a fork.
           additionalProperties:
             type: object
             additionalProperties: false
@@ -3688,6 +3738,15 @@ components:
             with the origin's exact prompt fields, then `start-checkin` seeds C0
             (`campaign_origin` lineage). This verb mints the dataset's own
             authored origin only.
+        optimization:
+          $ref: '#/components/schemas/OptimizationOverrides'
+          description: |
+            Which optimizer this campaign runs and its knobs, laid over the
+            dataset's `campaign.yaml::optimization` before the mint freezes it —
+            only the fields SENT move anything. Validated as the check-in's and
+            the terminal's `--set` are, by the one resolution a run takes: an
+            optimizer this install lacks is a 404 `optimizer_unknown`, a knob its
+            manifest refuses a 422. Omitted, the dataset's own declaration runs.
 
     StartRunPayload:
       allOf:
@@ -4169,7 +4228,7 @@ components:
       additionalProperties: false
       description: |
         The in-progress steer, and only the half the verdict reads. The rest of an
-        `OperatorForkOverride` — the origin prompt, the narrowing, the reconciled
+        `CycleSeed` — the origin prompt, the narrowing, the reconciled
         limits — decides nothing here, and asking for it would let a caller believe
         the answer covered them.
       properties:
@@ -4178,7 +4237,7 @@ components:
           additionalProperties: true
           description: |
             The `nodes.*.config` value overlay the fork would carry, exactly as
-            `OperatorForkOverride.pipeline_overlay` sends it.
+            `CycleSeed.pipeline_overlay` sends it.
 
     ForkPreviewResponse:
       type: object
@@ -4219,8 +4278,8 @@ components:
       type: object
       required:
         [campaign_id, cycle_id, dataset_name, connector, backend_type,
-         optimizer, node_config_schema, node_output_schema, model_capabilities,
-         params, reach, is_single_node]
+         optimizer, optimizer_knobs, node_config_schema, node_output_schema,
+         model_capabilities, params, reach, is_single_node]
       description: One campaign's resolved pipeline at one searchpoint — the answer, not the parts.
       properties:
         campaign_id: { type: string }
@@ -4231,6 +4290,16 @@ components:
             (`optimization.optimizer`), resolved through the same config layers
             as `params` — the one answer a surface reads which optimizer's
             graph, knobs and analytics apply by, a check-in's draft included.
+        optimizer_knobs:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: true
+          description: |
+            That optimizer's knob values per node as the addressed course runs
+            them — the manifest's under the campaign's `optimization.nodes` and
+            the cycle seed's — so a knob surface reads the resolution rather
+            than laying `campaign.json` over the manifest itself.
         cycle_id:
           type: [string, 'null']
           description: The hop actually resolved; null for a campaign-level read.
@@ -4289,9 +4358,12 @@ components:
       description: |
         The campaign-config knobs a draft carries, as one object — materialized
         into the committed `campaign.yaml::optimization` block. Operator-facing
-        (UI) vocabulary. Sent whole on `DraftCampaign`; on the edit patch any
-        subset is shallow-merged onto the current value (a new knob is one property
-        here, not a fresh field threaded through every surface).
+        (UI) vocabulary. Sent whole on `DraftCampaign`; on the edit patch and on
+        `mint-campaign` any subset is merged depth-first onto the current value —
+        `nodes` node by node and knob by knob, and naming another `optimizer`
+        drops the previous one's `nodes` — then resolved against the manifest it
+        selects (a new knob is one property here, not a fresh field threaded
+        through every surface).
       properties:
         max_rounds:
           type: integer

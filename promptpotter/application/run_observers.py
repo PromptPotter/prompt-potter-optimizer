@@ -14,6 +14,7 @@ from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.views.ingress import from_phase_event
 from promptpotter.application.views.view_models import ViewContext
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.dashboard_rows import RunStanding
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import (
     CycleRecord,
@@ -87,14 +88,12 @@ def build_campaign_emitter(
     cycle to seed prior trajectory from; ``None`` seeds from the cycle's own dir. ``None`` back
     when the session carries no cycle to write into, which the return type states."""
     selected = select_optimizer(campaign_config.optimization)
-    pacing = selected.pacing
     return LiveDashboardProjection.for_session(
         session.hop,
         tenant_root=session.tenant_root,
         session_id=session.session_id,
-        patience=pacing.patience,
-        arms_per_round=pacing.arms_per_round,
-        sp_budget_round=campaign_config.sp_budget_round,
+        arms_per_round=selected.pacing.arms_per_round,
+        sp_budget_round=selected.round_cells(len(session.samples)),
         headline_metric=campaign_config.headline_metric,
         langfuse_trace_url=langfuse_trace_url,
         resumed_from_round=resumed_from_round,
@@ -113,13 +112,11 @@ def run_limits_from(config: CampaignConfig) -> RunLimits:
     once the held ceiling is set on it: earlier is the unadmitted config, and the ledger's own
     INIT record lands after the entire origin has scored."""
     opt = config.optimization
-    pacing = select_optimizer(opt).pacing
     return RunLimits(
         max_rounds=opt.max_rounds or None,
         spend_budget_usd=opt.spend_budget_usd,
         token_budget=opt.token_budget,
-        lives_cap=pacing.lives[1] if pacing.lives is not None else None,
-        optimizer=list(pacing.limits),
+        optimizer=list(select_optimizer(opt).pacing.limits),
     )
 
 
@@ -254,15 +251,13 @@ class RunCallbacks:
             )
         )
 
-    def on_round_complete(
-        self, round_result: RoundResult, stall: int, hearts: int | None = None
-    ) -> None:
+    def on_round_complete(self, round_result: RoundResult, standing: RunStanding) -> None:
         # ``event="display"`` keeps ``EscalationFSM.fold`` reading only the lean ``event="complete"`` audit emit.
         # The full ``RoundResult`` rides ``live_round_result`` (in-memory-only) for
         # the live subscribers; disk persists only the three scalars the SSE→webapp
         # chat reads — the fat arrays are already in round_NNNN.json + dashboard.json.
-        # ``stall`` / ``hearts`` are the optimizer's standing (``WorkingState.standing``).
-        self._phase_ctx.hearts = hearts
+        # The standing persists here, the one record the lineage tree reads it back from.
+        self._phase_ctx.run_standing = standing
         self._emit(
             PhaseRecord(
                 phase="round",
@@ -275,8 +270,7 @@ class RunCallbacks:
                         "accuracy": round_result.accuracy,
                         "composite_fitness": float(round_result.composite_fitness),
                     },
-                    "stall": stall,
-                    "hearts": hearts,
+                    "run_standing": standing.model_dump(),
                     "phase_ctx": self._phase_ctx.ledger_anchors(),
                 },
             )

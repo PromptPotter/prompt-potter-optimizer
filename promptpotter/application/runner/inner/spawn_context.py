@@ -16,7 +16,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from promptpotter.application.optimizer_manifest import bind_inner_optimizer
+from promptpotter.application.optimizer_manifest import bind_inner_optimizer, select_optimizer
 from promptpotter.application.runner.inner.tasks import (
     InnerCells,
     InnerTasks,
@@ -82,17 +82,17 @@ def _resolve_outer_panel(
     if not panel_path.is_file():
         return None
     panel = InnerTasks.model_validate(session.backend_client.workload.experiment)
-    # The panel (`inner_tasks.yaml`) and the round budget (`campaign.yaml::sp_budget_round`) are
-    # ONE declaration in two files. A budget BELOW the panel narrows it silently, and under
-    # `per_round_resubset` rounds then draw different cells — candidates compared on bases that
-    # never matched. `_check_sp_budget_vs_dataset` warns in the other direction only.
-    if campaign_config.sp_budget_round != len(panel.tasks):
+    # The panel (`inner_tasks.yaml`) and the outer sampler's draw are ONE declaration in two
+    # files. A draw BELOW the panel narrows it silently, and a resubsetting sampler then draws
+    # different cells per round — candidates compared on bases that never matched.
+    selected = select_optimizer(campaign_config.optimization)
+    if (drawn := selected.round_cells(len(panel.tasks))) != len(panel.tasks):
         raise ValueError(
             f"{dataset_dir.name} declares a {len(panel.tasks)}-cell inner panel "
-            f"({panel_path.name}) but budgets sp_budget_round="
-            f"{campaign_config.sp_budget_round} per round. The outer panel is a CENSUS, not "
-            "a sample: every candidate must run every cell or the comparison is not paired. "
-            "Set sp_budget_round to the cell count, or change the panel."
+            f"({panel_path.name}) but its optimizer's sampler `{selected.sampler.name}` draws "
+            f"{drawn} per round. The outer panel is a CENSUS, not a sample: every candidate "
+            "must run every cell or the comparison is not paired. Size the sampler to the "
+            "cell count, or change the panel."
         )
     return panel
 

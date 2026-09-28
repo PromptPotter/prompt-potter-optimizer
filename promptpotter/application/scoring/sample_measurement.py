@@ -27,7 +27,13 @@ from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_schema import WebSpendBound
 from promptpotter.domain.results_health import classify_result, terminal_node
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import QueryMeasurement, extract_item_label, is_hit, turn_scalars
+from promptpotter.domain.scoring import (
+    CellScorer,
+    QueryMeasurement,
+    extract_item_label,
+    is_hit,
+    turn_scalars,
+)
 from promptpotter.domain.spend import StepTokenUsage, TokenAccount
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
 from promptpotter.infrastructure.llm.pricing import rate_ceiling
@@ -397,10 +403,11 @@ def _error_result(
     error_msg: str,
     *,
     category: ErrorCategory,
+    scorer: CellScorer,
 ) -> QueryMeasurement:
     """``category`` is the typed error channel and owns "this sample errored"; ``error`` is the human
-    message. Error rows carry no ``hit``/``score`` — those belong to ``rescore_results`` alone."""
-    return QueryMeasurement(
+    message. Stamped by ``rescore_results`` like every row, since a charged error is a verdict."""
+    row = QueryMeasurement(
         sample_id=sample.id,
         sample_key=sample.key,
         query=sample.query,
@@ -411,6 +418,8 @@ def _error_result(
         error_category=category,
         pipeline_data=None,
     )
+    rescore_results([cast("dict[str, Any]", row)], scorer)
+    return row
 
 
 def _extract_upstream_detail(exc: httpx.HTTPStatusError) -> str:
@@ -484,6 +493,8 @@ async def measure_sample(
     ground_truth = sample.ground_truth or ""
 
     pipeline_schema = session.pipeline_schema
+    scorer = session.scoring.scorer
+    assert scorer is not None, "session.scoring.scorer required for measurement"
 
     try:
         wire_params = interpolate_pipeline_params(pipeline_params or {}, sample.model_dump())
@@ -558,6 +569,7 @@ async def measure_sample(
                 sample,
                 "Backend returned ERROR as candidate — pipeline internal failure for this query.",
                 category=ErrorCategory.PIPELINE,
+                scorer=scorer,
             )
         gt_rank, n_candidates = rank_ground_truth(ranked, predicted, ground_truth)
 
@@ -637,9 +649,8 @@ async def measure_sample(
             )
         )
 
-        assert session.scoring.scorer is not None, "session.scoring.scorer required for measurement"
         try:
-            rescore_results([result], session.scoring.scorer)
+            rescore_results([result], scorer)
         except ScoringFormulaError as exc:
             # A formula CONTRACT bug — it raised, or returned a non-finite. Deterministic, so every
             # cell fails it, and the row is marked so the run stops rather than grading a campaign
@@ -649,15 +660,16 @@ async def measure_sample(
             logger.warning("measure_sample could not score %s: %s", query[:60], exc)
             result["error"] = str(exc)
             result["error_category"] = ErrorCategory.PIPELINE
+            rescore_results([result], scorer)
         return result  # type: ignore[return-value]
     except httpx.HTTPStatusError as exc:
         category, error_msg = _classify_http_error(exc)
         logger.warning("measure_sample for %s: %s", query[:60], error_msg)
-        return _error_result(sample, error_msg, category=category)
+        return _error_result(sample, error_msg, category=category, scorer=scorer)
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
         error_msg = f"{exc} — Backend may be down or unreachable."
         logger.warning("measure_sample CONNECTION for %s: %s", query[:60], error_msg)
-        return _error_result(sample, error_msg, category=ErrorCategory.CONNECTION)
+        return _error_result(sample, error_msg, category=ErrorCategory.CONNECTION, scorer=scorer)
     except (KeyboardInterrupt, asyncio.CancelledError, SendRefusedError):
         # A refused send is refused for every cell after it: a stop, never a row.
         raise
@@ -666,13 +678,13 @@ async def measure_sample(
         # two — a cut we made, or a reward the backend never produced — and a repair reads them apart.
         # What it paid was billed where it was admitted: an ungraded cell is not a free one.
         logger.warning("measure_sample %s for %s: %s", exc.category.value, query[:60], exc)
-        return _error_result(sample, str(exc), category=exc.category)
+        return _error_result(sample, str(exc), category=exc.category, scorer=scorer)
     except Exception as exc:
         # Named by TYPE: a bare `TimeoutError()` has no message, and banked as its `str` it read
         # "unknown error" on every surface while the cause sat one attribute away.
         failure = f"{type(exc).__name__}: {exc}"
         logger.warning("measure_sample failed for %s: %s", query[:60], failure, exc_info=True)
-        return _error_result(sample, failure, category=ErrorCategory.UNKNOWN)
+        return _error_result(sample, failure, category=ErrorCategory.UNKNOWN, scorer=scorer)
 
 
 def find_gt_rank(result: Mapping[str, Any]) -> int | None:

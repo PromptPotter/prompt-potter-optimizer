@@ -19,6 +19,8 @@ export interface ConnectorView {
   backendType: string | null;
   // The optimizer manifest the course runs; null until the resolution lands.
   optimizer: string | null;
+  // That optimizer's knob values per node as the course runs them; null until it lands.
+  optimizerKnobs: Record<string, Record<string, unknown>> | null;
   view: PipelineView | null;
   // Never infer the read's state from `view` being null.
   pipelineStatus: PipelineStatus;

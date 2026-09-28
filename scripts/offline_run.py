@@ -65,16 +65,17 @@ LABELS = ("TRUE", "FALSE", "Uncertain")
 
 # Bench knobs every optimizer runs under; each optimizer's own knobs are its manifest's.
 BENCH: dict[str, Any] = {
-    "sp_budget_round": 20,
     "sp_budget_origin": 14,
     "dataset_split": {"bench": 10, "demo": 10},
 }
+# A round's panel, where the optimizer's sampler sizes it with one knob (`Sampler.size_knob`).
+ROUND_CELLS = 20
 # Scale-downs of a paper configuration to a bank of a few hundred rows, so a race cuts and an
 # archive fills within a few rounds. An optimizer absent here runs as its manifest declares.
 SCALED: dict[str, dict[str, dict[str, Any]]] = {
     "capo": {
         "blocks": {"config": {"block_size": 5, "max_blocks": 4}},
-        "paired_t": {"config": {"alpha": 0.2, "survivors": 2}},
+        "paired_t": {"config": {"alpha": 0.2}},
         "population": {"config": {"size": 4}},
         "capo_crossover": {"config": {"crossovers": 2}},
         "few_shot": {"config": {"k_max": 2}},
@@ -533,6 +534,11 @@ def campaign_config(optimizer: str, rounds: int) -> CampaignConfig:
         opt["nodes"] = SCALED.get(optimizer, {})
         # Its draws follow the campaign's id unless a clamp seeds them, and every run mints an id.
         opt["determinism"] = {"seed": 0}
+    sampler = select_optimizer(load_campaign_config(raw).optimization).sampler
+    if sampler.size_knob is not None:
+        nodes = opt.setdefault("nodes", {})
+        block = nodes[sampler.name] = dict(nodes.get(sampler.name) or {})
+        block["config"] = {**(block.get("config") or {}), sampler.size_knob: ROUND_CELLS}
     return load_campaign_config(raw)
 
 

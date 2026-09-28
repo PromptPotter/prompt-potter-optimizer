@@ -79,11 +79,13 @@ function OptimizerSetupInner({
             ariaLabel="Optimizer"
           />
           <p className="optimizer-pick-cite">
-            {entry?.paper
-              ? `Runs ${entry.paper} at its paper configuration, version ${entry.version}.`
-              : entry
-                ? `PromptPotter's own optimizer, version ${entry.version}.`
-                : null}
+            {!entry
+              ? null
+              : entry.paper
+                ? `Runs ${entry.paper} at its paper configuration, version ${entry.version}.`
+                : entry.origin === null
+                  ? `PromptPotter's own optimizer, version ${entry.version}.`
+                  : `Installed from ${entry.origin}, version ${entry.version}.`}
           </p>
         </div>
       ) : (

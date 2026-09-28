@@ -4,7 +4,6 @@ through its entry points alone: a random panel, a rephrasing llm node, a keep-th
 from __future__ import annotations
 
 import asyncio
-import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,14 +11,14 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar, cast
 
 from pydantic import Field
 
+from fixture_optimizer import operators
 from promptpotter.application.bench.resume_and_fork.decisions import GatingMode, record_decision
 from promptpotter.application.campaign_config import Estimand, Knob, Scope
 from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.paper_templates import (
     ask,
-    fill,
     marked,
-    task_description,
+    preset_source_digest,
     unmarked,
     walk_rng,
 )
@@ -29,10 +28,11 @@ from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import CandidateProposal, OptimizerFact, candidate_label
 from promptpotter.domain.run_records import CandidateMintedRecord, CheckpointKind
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.shared.hashing import module_source_digest
 
 if TYPE_CHECKING:
     from types import ModuleType
+
+    from pydantic import BaseModel
 
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.bench.resume_and_fork.replayers import Replayer
@@ -109,6 +109,10 @@ class Draw:
     kind: ClassVar[NodeKind] = NodeKind.SAMPLER
     knobs: ClassVar[type[StrictModel]] = DrawKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
+    size_knob: ClassVar[str | None] = "size"
+
+    def draws(self, selected: SelectedOptimizer, pool: int) -> int:
+        return min(cast("DrawKnobs", selected.knobs(self.name)).size, pool)
 
     def draw(self, ctx: RoundContext, pool: list[Sample]) -> Panel:
         size = cast("DrawKnobs", ctx.cycle.optimizer.knobs(self.name)).size
@@ -134,12 +138,7 @@ class Rephrase:
         cycle = ctx.cycle
         n = cast("RephraseKnobs", cycle.optimizer.knobs(self.name)).variants
         parent = cycle.opt_sp
-        prompt = fill(
-            cycle,
-            self.name,
-            task_description=task_description(cycle),
-            instruction=parent.instruction,
-        )
+        prompt = operators.rephrase_prompt(cycle, self.name, instruction=parent.instruction)
         answers = await asyncio.gather(*(ask(ctx, self.name, i, prompt) for i in range(n)))
         proposals = []
         for i, raw in enumerate(answers):
@@ -186,6 +185,7 @@ class Keep:
     knobs: ClassVar[type[StrictModel]] = KeepKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
     stamps_theta: ClassVar[bool] = False
+    reads_parent: ClassVar[bool] = True
 
     def select(self, ctx: RoundContext, measured: Measured, population: Population) -> Selection:
         state = _state(ctx.state)
@@ -218,6 +218,7 @@ class FixtureRuntime:
     own_axes: ClassVar[dict[str, set[str]]] = {}
     priced_surface: ClassVar[Mapping[str, int]] = {}
     phases: ClassVar[tuple[nodes.OptimizerPhase, ...]] = ()
+    response_models: ClassVar[Mapping[str, type[BaseModel]]] = {}
     checkpoint_gating: ClassVar[Mapping[CheckpointKind, GatingMode]] = {
         FixtureCheckpointKind.KEPT: GatingMode.ARCHIVAL
     }
@@ -235,8 +236,7 @@ class FixtureRuntime:
         return None
 
     def source_digest(self, *covered: ModuleType) -> str:
-        # `paper_templates.preset_source_digest` scans the promptpotter package alone.
-        return module_source_digest(sys.modules[__name__])
+        return preset_source_digest(operators, *covered)
 
     def override_param_types(self, node: str) -> dict[str, str]:
         return {}
@@ -270,7 +270,7 @@ class FixtureRuntime:
 
     def pacing(self, selected: SelectedOptimizer) -> nodes.OptimizerPacing:
         n = cast("RephraseKnobs", selected.knobs(Rephrase.name)).variants
-        return nodes.OptimizerPacing(patience=None, lives=None, arms_per_round=n, limits=())
+        return nodes.OptimizerPacing(patience=None, stalls_left=None, arms_per_round=n, limits=())
 
     def opening(self, ctx: RoundContext) -> nodes.RoundOpening:
         return nodes.standing_opening(ctx)

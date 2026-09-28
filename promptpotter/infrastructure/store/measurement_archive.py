@@ -533,10 +533,13 @@ class CellClaim:
 
     def publish(self, row: dict[str, Any]) -> None:
         """Share *row* with every waiter — or, where no replay could serve it, let them measure."""
-        if self._shareable(row):
-            write_json(self.row_path, row)
-        else:
+        if not self._shareable(row):
             self.release()
+            return
+        # Windows refuses the replace while a waiter reads a row a past holder left there — the same
+        # cell, already shareable, so the waiters keep it and this walk keeps its own.
+        with contextlib.suppress(PermissionError):
+            write_json(self.row_path, row)
 
     def release(self) -> None:
         """Idempotent. The row goes first: one standing with the lock free is no live holder's."""

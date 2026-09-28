@@ -15,7 +15,7 @@ from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
 from promptpotter.domain.run_records import ErrorRecord
-from promptpotter.domain.scoring import is_answer_collapsed, is_hit
+from promptpotter.domain.scoring import is_answer_collapsed, is_graded, is_hit
 from promptpotter.domain.search_point import strip_rendered_prompt
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
@@ -246,6 +246,8 @@ class ScoredCandidate(StrictModel):
     # The eliminator's own reading of an arm it stopped, opaque to the bench: its keys are the
     # eliminator's (potter's are `pobb/checks.py::EliminationContext`).
     elimination_context: dict[str, Any] = Field(default_factory=dict)
+    # Why the eliminator stopped this arm, in its own words — the line every surface prints.
+    elimination_reason: str | None = None
     degradation_context: DegradationContext = Field(default_factory=DegradationContext)
     # The individual this arm's lift is read against, over the cells it touched — which one is
     # `OptimizationConfig.lift_reference`. ``None`` where the arm was never read against one.
@@ -568,11 +570,9 @@ def overlap_series(overlap: OverlapReading | None) -> str:
 
 
 def measured_cells(rows: Sequence[Mapping[str, Any]]) -> set[int]:
-    """Which samples a row set carries a SCOREABLE verdict for. An errored cell is not coverage —
-    counting it would put a member on the overlap set holding a hole."""
-    return {
-        int(sid) for r in rows if (sid := r.get("sample_id")) is not None and not is_error_result(r)
-    }
+    """Which samples a row set carries a verdict for (``is_graded``). A row carrying none is not
+    coverage — counting it would put a member on the overlap set holding a hole."""
+    return {int(sid) for r in rows if (sid := r.get("sample_id")) is not None and is_graded(r)}
 
 
 def is_floor_pinned(rows: Sequence[Mapping[str, Any]]) -> bool:
@@ -586,13 +586,13 @@ def is_floor_pinned(rows: Sequence[Mapping[str, Any]]) -> bool:
     Distinct from ``scoring.py::is_answer_collapsed``, which is about the arm saying ONE THING and
     is a PoBB cut. An arm can be floor-pinned while answering differently every time — that is
     simply an arm getting everything wrong, which is measurable, electable, and still not a θ.
-    Errored cells are excluded: they are absence, and ``graded_response`` raises on an unstamped
-    row rather than reading it as a zero, so a 0.0 reaching here was really scored 0.0.
+    Its population is the θ fit's (``is_graded``): a row carrying no verdict is absence, and a 0.0
+    reaching here was really scored 0.0.
 
     Reads ``fitness``, never ``objective``: a ``per_cell`` composite charges a miss a share of its
     cost (``formula/compiler.py::MISS_COST_SHARE``), so an all-miss arm's composite is not zero.
     """
-    graded = [r for r in rows if not is_error_result(r) and "fitness" in r]
+    graded = [r for r in rows if is_graded(r) and "fitness" in r]
     return bool(graded) and all(float(r["fitness"]) <= 0.0 for r in graded)
 
 
@@ -880,8 +880,6 @@ class RoundResult(StrictModel):
     overlap_results: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     # --- computed post-scoring ---
     diagnostics: RoundDiagnostics | None = None
-    # The bench's AxisIndex peaked set at close, which no round document could otherwise rebuild.
-    axis_memory_peaked: list[str] = Field(default_factory=list)
     # Stamped at round close — the sole compute site; every surface renders this one.
     health: DegradationHealth | None = None
     # --- stamped as the round closes (the document's own fields) ---
@@ -943,21 +941,21 @@ class RoundResult(StrictModel):
         """What one edit did to its parent's cells, paired: the cells it GAINED and the ones it
         LOST. An accuracy nets the two into one number, so an edit that cracks a cell its parent
         cannot solve and breaks one it could reads as a tie — and on a small near-deterministic
-        panel those two cells are the round's whole signal. An errored row on either side pairs
-        nothing, since a failed measurement is not an outcome; empty where no reference was banked."""
+        panel those two cells are the round's whole signal. A row carrying no verdict on either side
+        pairs nothing (``is_graded``); empty where no reference was banked."""
         arm = next((c for c in self.candidate_scores if c.candidate_id == candidate_id), None)
         reference = self.reference_results.get(arm.reference_id or "", []) if arm else []
         parent_hit = {
             sid: is_hit(r.get("fitness"))
             for r in reference
-            if (sid := r.get("sample_id")) is not None and not is_error_result(r)
+            if (sid := r.get("sample_id")) is not None and is_graded(r)
         }
         gained: list[int] = []
         lost: list[int] = []
         kept: list[int] = []
         for r in self.all_candidate_results.get(candidate_id) or []:
             sid = r.get("sample_id")
-            if not isinstance(sid, int) or sid not in parent_hit or is_error_result(r):
+            if not isinstance(sid, int) or sid not in parent_hit or not is_graded(r):
                 continue
             hit = is_hit(r.get("fitness"))
             if hit and not parent_hit[sid]:

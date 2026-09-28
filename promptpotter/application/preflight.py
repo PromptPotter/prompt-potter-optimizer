@@ -32,24 +32,21 @@ class PreflightWarning:
 def _check_sp_budget_vs_dataset(
     config: CampaignConfig, dataset: list[Sample]
 ) -> PreflightWarning | None:
-    # Only the PER-ROUND budget is checked against the bank. An origin budget above the
-    # bank is not a misconfiguration: `sp_budget_origin` defaults ABOVE `sp_budget_round`
-    # (DEFAULT_ORIGIN_BUDGET), `sample_dataset` is a prefix slice, and "score the origin
-    # on everything there is" is exactly what a wide-origin default wants on a small bank.
-    # Warning on it told every small-bank dataset to lower a knob nobody set, on every run.
-    # `sp_budget_round > bank` IS a real finding — it means the adaptive queue mechanism
-    # has no bank to select from and every round re-scores the same full set.
-    n = config.sp_budget_round
+    # Only the PER-ROUND draw is checked against the bank. An origin budget above the bank is
+    # not a misconfiguration: `sample_dataset` is a prefix slice, and "score the origin on
+    # everything there is" is exactly what a wide-origin default wants on a small bank.
+    # A round asking more cells than the bank holds IS a finding: its sampler has nothing to
+    # select from and every round re-scores the same full set.
     m = len(dataset)
+    n = select_optimizer(config.optimization).round_cells(m)
     if m > 0 and n > m:
         return PreflightWarning(
             code="sp_budget_exceeds_dataset",
             title=f"per-round eval budget ({n}) exceeds bank size ({m})",
             detail=(
                 f"The bank (full train split) has only {m} samples, so every round "
-                f"scores on all {m} and `select_round_subset` has nothing to select "
-                f"from — the adaptive queue mechanism is inert. Lower sp_budget_round "
-                f"to below {m}, or grow the dataset."
+                f"scores on all {m} and the sampler has nothing to select from. Lower "
+                f"its per-round budget to below {m}, or grow the dataset."
             ),
         )
     return None

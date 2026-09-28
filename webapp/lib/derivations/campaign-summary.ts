@@ -16,6 +16,7 @@ import { runPhaseLabel, runPhaseMark, type RunPhaseMark } from "@/lib/run-phase"
 import {
   fmtAgo,
   fmtDateTime,
+  fmtFitness,
   fmtPct0,
   fmtSigned,
   fmtTokens,
@@ -69,17 +70,19 @@ export function spendLabel(c: CampaignSummary): string {
   return `${spendFloor(c)}${fmtUsdCents(c.spend_used_usd)}`;
 }
 
-// The headline: the selection graded on held-out rows no optimizer node read. Every value served,
-// and a pass that stopped short shows the served reason in place of a number.
+// The headline: the selection graded on held-out rows no optimizer node read. It is the campaign's
+// COMPOSITE, a 0–1 score and never a rate, so accuracy rides beside it; every value served, and a
+// pass that read nothing shows the served reason in place of a number.
 export function benchStat(bench: BenchScore): RowStat {
   const { selected, origin, missing_reason } = bench;
   return {
-    label: "Bench",
-    value: selected === null ? "—" : fmtPct0(selected.composite_fitness),
+    label: "Bench composite",
+    value: selected === null ? "—" : fmtFitness(selected.composite_fitness),
     sub:
       missing_reason !== null
         ? missing_reason
-        : `origin ${origin === null ? "—" : fmtPct0(origin.composite_fitness)} · ` +
+        : `accuracy ${fmtPct0(selected?.accuracy)} · origin ` +
+          `${origin === null ? "—" : fmtFitness(origin.composite_fitness)} · ` +
           `lift ${fmtSigned(bench.lift)} · ${bench.bench_size} held-out rows`,
   };
 }
@@ -93,7 +96,7 @@ export function benchReading(
   if (bench) return benchStat(bench);
   const sub =
     runPhase === "terminal" ? "not graded — the run ended first" : "graded when the run ends";
-  return { label: "Bench", value: "—", sub };
+  return { label: "Bench composite", value: "—", sub };
 }
 
 // The θ clause only where the served node elects on θ: a peer optimizer's rounds are not.
@@ -254,8 +257,9 @@ export function campaignCard(
       node,
     ),
   ];
-  if (node?.hearts != null && node.lives_cap != null) {
-    stats.push({ label: "Lives", value: `${node.hearts} / ${node.lives_cap}` });
+  const standing = node?.run_standing;
+  if (standing?.stalls_left != null && standing.stalls_left_cap != null) {
+    stats.push({ label: "Lives", value: `${standing.stalls_left} / ${standing.stalls_left_cap}` });
   }
 
   return {

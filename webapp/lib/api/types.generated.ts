@@ -200,6 +200,8 @@ export interface RoundSummary {
   composite_fitness: number;
   total: number;
   ability: AbilityReading | null;
+  best_so_far: number | null;
+  bench: BenchReading | null;
   improved: boolean | null;
   electable_count: number | null;
   verdict_reason: string | null;
@@ -338,6 +340,7 @@ export interface ScoredCandidate {
   validation_failures: ValidationFailure[];
   runtime_failures: RuntimeFailure[];
   elimination_context: Record<string, unknown>;
+  elimination_reason: string | null;
   degradation_context: unknown;
   reference_id: string | null;
   reference_accuracy: number | null;
@@ -449,7 +452,6 @@ export interface RoundResult {
   overlap: OverlapReading | null;
   overlap_results: Record<string, Record<string, unknown>[]>;
   diagnostics: unknown | null;
-  axis_memory_peaked: string[];
   health: DegradationHealth | null;
   opt_sp: OptSearchPoint | null;
   optimizer_state: OptimizerState;
@@ -551,8 +553,14 @@ export interface RunLimits {
   max_rounds: number | null;
   spend_budget_usd: number | null;
   token_budget: number | null;
-  lives_cap: number | null;
   optimizer: OptimizerLimit[];
+}
+
+/** Where an optimizer stands after a round, whichever optimizer runs: the rounds since its */
+export interface RunStanding {
+  rounds_without_advance: number;
+  stalls_left: number | null;
+  stalls_left_cap: number | null;
 }
 
 /** One race catch-up — the priors eliminator ``member`` re-measured on one sample. */
@@ -637,8 +645,7 @@ export interface LiveDashboardState {
   stop_reason: string | null;
   round: number;
   candidate: string;
-  patience: string;
-  hearts: number | null;
+  run_standing: RunStanding | null;
   rounds: RoundSummary[];
   best: number | null;
   current_acc: number | null;
@@ -984,24 +991,23 @@ export interface BenchReading {
   /** The 95% band on `composite_fitness`, drawn from the same per-row values. */
   ci_lo: number | null;
   ci_hi: number | null;
-  /** Bench rows that carry a verdict; an errored row never does. */
+  /** Bench rows carrying a verdict — a miss the prompt caused included — never
+   * fewer than the bench set less its split's `tolerance`. */
   n_scored: number;
   /** The archive run its bench rows were filed under. */
   run_id: string;
-  /** `skip` where the operator ended the pass before its last bench row, or `None`
-   * when it scored every one. */
-  stopped: string | null;
 }
 
 /** The headline: the selection and the origin, scored on a bench set no optimizer node read. */
 export interface BenchScore {
   bench_size: number;
-  /** `None` where its pass stopped short; `missing_reason` says why. */
+  /** `None` where its pass read nothing; `missing_reason` says why. */
   origin: BenchReading | null;
-  /** The headline. `None` where its pass stopped short; `missing_reason` says why. */
+  /** The headline. `None` where its pass read nothing; `missing_reason` says why. */
   selected: BenchReading | null;
-  /** Why a reading above is `None`: each pass that stopped short, with the stop and
-   * the error it stopped on. `None` when both passes read. */
+  /** Why a reading above is `None`: each pass that stopped before its last row, or
+   * ended past its split's `tolerance` of rows with no verdict. `None` when
+   * both read. */
   missing_reason: string | null;
   /** `selected` over `origin` in `composite_fitness`, paired per bench row both
    * scored; `None` below two shared rows, and 0.0 where the origin is the
@@ -1177,6 +1183,9 @@ export interface CampaignPipelineResponse {
    * reads which optimizer's graph, knobs and analytics apply by, a check-in's
    * draft included */
   optimizer: string;
+  /** That optimizer's knob values per node as the addressed course runs them — the
+   * manifest's under the campaign's and the cycle seed's overlays */
+  optimizer_knobs: Record<string, Record<string, unknown>>;
   /** Resolved config as the engine holds it — the bytes a round document carries as
    * `resolved_pipeline_params`, which makes that field this endpoint's check */
   params: Record<string, unknown>;
@@ -1423,16 +1432,22 @@ export interface MetricReading {
 }
 
 export interface DatasetSplit {
-  /** Rows held out as the bench set: no optimizer node ever reads one, and the
-   * headline is scored on them. */
+  /** Distinct samples held out as the bench set, with every row that repeats one:
+   * no optimizer node ever reads one, and the headline is scored on them. */
   bench: number;
-  /** Rows reserved as the demo pool — the rows an individual's `shot_ids` name,
-   * rendered into its prompt as query and ground truth, never scored. */
+  /** Distinct samples reserved as the demo pool — the rows an individual's
+   * `shot_ids` name, rendered into its prompt as query and ground truth,
+   * never scored. */
   demo: number;
   /** Seeds which rows fall where. Membership ranks each row by its content
    * (`Sample.key`), never its slot, so a reordered bank holds out the same
    * rows. */
   seed: number;
+  /** Bench rows a pass may end with no verdict on — a provider fault, or a cell the
+   * formula cannot grade — and still be a reading. Past it the pass reads
+   * nothing: a headline over a population other than the one sent is not the
+   * bench score. */
+  tolerance: number;
 }
 
 /** What one campaign's held-out set IS; two headlines are one quantity only if all of it agrees. */
@@ -1461,6 +1476,7 @@ export interface HeadToHeadRow {
   wall_clock_ratio: number | null;
   lift_per_incurred_usd: number | null;
   concurrent_with: string[];
+  bench_reads: number | null;
 }
 
 /** Two campaigns' selections paired on the bench rows both scored, in the headline composite. */
@@ -1626,10 +1642,10 @@ export interface LineageNode {
   theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
   /** Whether the optimizer fits theta per arm at all. Candidate: the declaration
    * its round's election carried (`RoundResult.stamps_theta`), false on a
-   * round that never elected. Course: the campaign-constant declaration of
-   * the optimizer it runs (`LiveDashboardState.stamps_theta`), so a course
-   * says whether its rounds are won on theta. False: theta is not a column
-   * here, so a surface hides it rather than drawing a cold ruler's blank. */
+   * round that never elected. Course: the declaration its own elections
+   * carried, so a course says whether its rounds are won on theta. False:
+   * theta is not a column here, so a surface hides it rather than drawing a
+   * cold ruler's blank. */
   stamps_theta: boolean;
   /** The candidate's stored evaluator namespace — the measurement a `score:` lens
    * re-scores against. */
@@ -1713,8 +1729,9 @@ export interface LineageNode {
   /** This course's round-0 score. A course that has only run its origin has this
    * and no `best_accuracy`, so reading only `best` blanks its bar. */
   origin_accuracy: number | null;
-  hearts: number | null;
-  lives_cap: number | null;
+  /** Courses only — the optimizer's standing as the course's last closed round left
+   * it, read off the course's own ledger. Null before round 0 closes. */
+  run_standing: RunStanding | null;
 }
 
 /** One event on the ray: a projection envelope plus its address. */
@@ -2148,6 +2165,14 @@ export interface KnobRow {
   options: string[] | null;
   /** Whether null is a legal value (an opt-in knob, off) */
   nullable: boolean;
+  /** The least legal value, itself legal; null when none */
+  minimum: number | null;
+  /** A bound every legal value lies strictly above; null when none */
+  exclusive_minimum: number | null;
+  /** The greatest legal value, itself legal; null when none */
+  maximum: number | null;
+  /** A bound every legal value lies strictly below; null when none */
+  exclusive_maximum: number | null;
   /** The value the manifest declares — a campaign's floor */
   value: unknown;
 }
@@ -2169,6 +2194,9 @@ export interface OptimizerEntry {
   /** The citation a paper preset reproduces; its declared knob values are that
    * paper's configuration. Null for an optimizer reproducing none */
   paper: string | null;
+  /** The installed package that registered it, as `<distribution>: <entry point>`;
+   * null for one shipped with PromptPotter */
+  origin: string | null;
 }
 
 export interface ConfigKnob {
@@ -2286,7 +2314,7 @@ export const STOP_REASON_LABELS: Record<string, string> = {
   'max_rounds': 'Max rounds',
   'target_hit': 'Target reached',
   'lives_exhausted': 'Out of lives',
-  'hard_cap_reached': 'Round cap',
+  'hard_cap_reached': 'Arm cap',
   'diag_complete': 'Diagnostic complete',
   'converged': 'Optimizer converged',
   'rebased_to_fork': 'Rebased to fork',

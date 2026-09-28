@@ -34,6 +34,7 @@ const EMPTY: ConnectorView = {
   connector: null,
   backendType: null,
   optimizer: null,
+  optimizerKnobs: null,
   view: null,
   pipelineStatus: "unbound",
   active: null,
@@ -68,6 +69,10 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
   const [connector, setConnector] = useState<string | null>(null);
   const [backendType, setBackendType] = useState<string | null>(null);
   const [optimizer, setOptimizer] = useState<string | null>(null);
+  const [optimizerKnobs, setOptimizerKnobs] = useState<Record<
+    string,
+    Record<string, unknown>
+  > | null>(null);
   const [nodeConfigSchema, setNodeConfigSchema] = useState<Record<
     string,
     NodeConfigParam[]
@@ -89,6 +94,7 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
     setConnector(null);
     setBackendType(null);
     setOptimizer(null);
+    setOptimizerKnobs(null);
     setNodeConfigSchema(null);
     setNodeOutputSchema(null);
     setModelCapabilities({});
@@ -137,6 +143,7 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
           setConnector(resp?.connector ?? null);
           setBackendType(resp?.backend_type ?? null);
           setOptimizer(resp?.optimizer ?? null);
+          setOptimizerKnobs(resp?.optimizer_knobs ?? null);
           setNodeConfigSchema(resp?.node_config_schema ?? null);
           setNodeOutputSchema(
             (resp?.node_output_schema ?? null) as Record<string, NodeOutputSchema | null> | null,
@@ -155,6 +162,7 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
           setConnector(null);
           setBackendType(null);
           setOptimizer(null);
+          setOptimizerKnobs(null);
           setNodeConfigSchema(null);
           setNodeOutputSchema(null);
           setModelCapabilities({});
@@ -219,6 +227,7 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
       connector,
       backendType,
       optimizer,
+      optimizerKnobs,
       view,
       pipelineStatus,
       active,
@@ -241,6 +250,7 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
     connector,
     backendType,
     optimizer,
+    optimizerKnobs,
     view,
     loaded,
     backends,

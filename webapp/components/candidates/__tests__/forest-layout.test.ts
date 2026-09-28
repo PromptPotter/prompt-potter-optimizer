@@ -57,8 +57,7 @@ function node(
     task: null,
     best_accuracy: null,
     origin_accuracy: null,
-    hearts: null,
-    lives_cap: null,
+    run_standing: null,
     ...over,
   };
 }

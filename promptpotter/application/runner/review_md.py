@@ -206,10 +206,9 @@ def _bench_line(name: str, reading: BenchReading | None, bench: BenchScore) -> s
         else f" (95% {reading.ci_lo:.3f} to {reading.ci_hi:.3f})"
     )
     value = "—" if reading.composite_fitness is None else f"{reading.composite_fitness:.3f}"
-    stopped = f", stopped: {reading.stopped}" if reading.stopped else ""
     return (
         f"- {name} (round {reading.round}): **{value}**{band} · accuracy "
-        f"{fmt_pct(reading.accuracy)} · {reading.n_scored}/{bench_size} rows{stopped}"
+        f"{fmt_pct(reading.accuracy)} · {reading.n_scored}/{bench_size} rows"
     )
 
 

@@ -6,7 +6,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, assert_never
 
-from promptpotter.shared.errors import is_error_result
+from promptpotter.domain.scoring import is_graded
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 shapes_optimizer_prompt(__name__)
@@ -18,11 +18,7 @@ DescriptorFeature = Literal["target_prompt_chars", "cell_objectives"]
 
 def cell_objectives(rows: Sequence[Mapping[str, Any]]) -> dict[str, float]:
     """Each graded cell's campaign objective, by sample key; errored and unscored cells are absent."""
-    return {
-        str(r["sample_key"]): float(r["objective"])
-        for r in rows
-        if not is_error_result(r) and "objective" in r
-    }
+    return {str(r["sample_key"]): float(r["objective"]) for r in rows if is_graded(r)}
 
 
 def behaviour_descriptor(

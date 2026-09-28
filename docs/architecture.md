@@ -87,8 +87,10 @@ that registry alone ([`../promptpotter/application/CLAUDE.md`](../promptpotter/a
 § Layer rule).
 
 **The bench walks the manifest's `default` pipeline, once per round.** Every other `pipelines:`
-entry is the optimizer's own, and its controller chooses between them (potter's, § Escalation —
-potter's controller); the bench never chooses.
+entry is the optimizer's own, run by its own members: an alternative its controller picks at a
+round boundary (potter's, § Escalation — potter's controller), or a phase a member opens on its
+own occasion (CAPO's `initial_population`, run once when its population is empty); the bench
+never chooses.
 
 #### A round is a neutral envelope
 
@@ -103,8 +105,9 @@ A decision a node takes lands on the ledger stamped with the node that took it.
 
 At run init the bank splits into a **search pool** and a held-out **bench set**, plus a **demo
 pool** for an optimizer whose individuals carry shots (`CampaignConfig.dataset_split` declares
-the partition). **Every optimizer node sees the search pool alone** — the demo pool only as shot
-material — and no node ever sees the bench set. The bench scores each optimizer's result on the
+the partition, over DISTINCT samples, so no copy of a held-out row stays behind). **Every
+optimizer node sees the search pool alone** — the demo pool only as shot material — and no node
+ever sees the bench set, the check-in model that authors the origin included. The bench scores each optimizer's result on the
 bench set with ONE evaluator, and that is the headline every surface serves and `export.json`
 reports. An optimizer's own selection decides what it KEEPS; it never grades what it kept. **What
 the bench grades is the pick the optimizer DECLARED** — its selector's last selection, which the
@@ -597,8 +600,8 @@ cross-campaign by design (§ Measurement archive (the actual database)).
 Optimizer LLM calls and backend matches emit structured events in **Langfuse-compatible shape**,
 wrapped via `observed_node()`. **Every** optimizer node is wrapped, including `checkin`, which
 runs *around* the loop and binds a cycle ledger so its call is billed to the campaign it seeds —
-`dispatch/schemas.py::OPTIMIZER_RESPONSE_MODELS` is the roster, and an enumeration that stops at
-the loop layers is how an unwrapped, unbilled call gets written.
+each runtime's `response_models` is the roster of its structured nodes, and an enumeration that
+stops at the loop layers is how an unwrapped, unbilled call gets written.
 
 **A nexus to the operator's existing observability stack — a core capability, not a stub.** Both
 the Langfuse and MLflow sinks are directly supported and **off by default**: a team already
@@ -947,7 +950,10 @@ the PR description.
     optimizer's own selection score as the headline, or fold the bench score into a
     selector — each lets an optimizer grade itself. Potter's θ is no exception: it is its
     election signal, never substituted into the bench score, and it surfaces only on the
-    round-level views of a round whose selector stamps it (`stamps_theta`).
+    round-level views of a round whose selector stamps it (`stamps_theta`). **A reading is over
+    the population that was sent** (`domain/scoring.py::is_graded`): a row the prompt failed is
+    its miss, and a pass cut short or past its split's `tolerance` reads nothing, never a number
+    over fewer rows.
   - **A cycle's "best" deliberately has two bases** — the optimizer's objective (its declared
     pick, `Cycle.selection`; potter's L2/L3 stall comparator alone keeps the high-water of each
     round's own `composite_fitness`) and the bench's headline on the bench set. The shared-cells

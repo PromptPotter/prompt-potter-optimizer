@@ -4,7 +4,7 @@
 
 ## Setting
 
-Each round evolves *N* individuals (default *N* = 5) via an LLM optimizer prompt. Each is measured on a shared query set **Q** of size *K* (`sp_budget_round`, default 20), producing a per-sample score in `[0, 1]` aggregated as a mean composite. The scoring budget per round is *N* × *K* backend calls, dominating wall-clock. Population is pre-enumerated — there's no parameter space to search, only a fixed set to compare.
+Each round evolves *N* individuals (default *N* = 5) via an LLM optimizer prompt. Each is measured on a shared query set **Q** of size *K* (potter's `adaptive_queue.sp_budget_round`, 20 in its manifest), producing a per-sample score in `[0, 1]` aggregated as a mean composite. The scoring budget per round is *N* × *K* backend calls, dominating wall-clock. Population is pre-enumerated — there's no parameter space to search, only a fixed set to compare.
 
 The statistical model underneath — Rasch θ/δ, the graded response, the `√φ` SE correction — is owned by [`verdict-resolution.md`](verdict-resolution.md), and so is the **round order** this page depends on one property of: it is *shared, never re-ranked per candidate*, so shared prefixes keep the paired stats comparable. A per-candidate re-rank front-loads the seed's own hit set and blinds every gate here until the tail.
 
@@ -89,7 +89,9 @@ reach the racing stream under `paired_t`.
   `max_blocks` whole blocks of the search pool in the bank's order: the same cells every round,
   never shuffled (App. C.4). `Panel.block_size` hands the boundaries to the eliminator; a pool
   short of one block refuses the round.
-- **`paired_t` (eliminator)** — `alpha`, `survivors` (μ), `length_penalty` (γ). Every live arm
+- **`paired_t` (eliminator)** — `alpha`, `length_penalty` (γ), and μ, which is the `population`
+  selector's `size`: one knob, so the race cannot keep a different count than the population
+  carries. Every live arm
   walks block k in walk order; at its close each is tested against every other live arm: a
   one-sided paired t (`shared/statistics.py::paired_reading`) on CAPO's objective (below), over the
   cells both measured — the same k blocks, since every arm walks one order. The arms that μ others
@@ -147,6 +149,11 @@ incumbent. Where the bench runs CAPO differently from the paper:
 - **The 5M-input-token budget** (§5) is the campaign's `token_budget`, which counts output tokens
   too.
 - **A reply without `<prompt>` markers** makes an invalid arm that costs no cell.
+- **The bench re-scores its incumbent** each round on the cells some arm reached, never the blocks
+  the race settled before buying: `population` reads no parent (`Selector.reads_parent`), and the
+  bench's reference rows are what every arm's lift pairs on. From round 2 the incumbent races as a
+  population member, so the re-score replays whatever of those cells it raced; round 1's is the
+  origin's, measured on them and billed in the same book — cells CAPO's budget leaves out.
 - **A repeated request samples afresh**, as the paper's T = 1.0 draw does, though the optimizer
   reuse cache keys on the request: each call carries a seed drawn by round, node and call off the
   run's seed — the determinism clamp's where one pins it, else the campaign's id — so only a resume
@@ -193,6 +200,9 @@ Where the bench runs LEVI differently from the paper:
   inspiration and the failures drawn uniformly.
 - **Alg. 1 as printed:** the calibration prompts enter the running statistics at line 13 and again
   at their insertion, line 17.
+- **A calibration that spans no descriptor volume halts the run** — one prompt placed, or every
+  one on one point: the uniform draws, and so every centroid, would land there and the archive
+  hold one cell. The paper's CVT has no answer for a zero-width bound either.
 - **The artifact** is the individual's `instruction` and `{problem_description}` CAPO's task
   description, as § CAPO's population and operators states for CAPO; the failures shown ride
   `fence_untrusted`.
@@ -250,10 +260,18 @@ Where the bench runs GEPA differently from the paper:
   same minibatch included — its call seeded as § CAPO's population and operators states for CAPO.
 - **One model for reflection and target** is the campaign's choice, as it is CAPO's: matching
   `gepa_reflect`'s model to the target's is an overlay.
+- **A pool member carries a verdict on every Pareto-set cell**, the seat and a child alike, so no
+  aggregate averages fewer cells than another. One missing any — an errored or ungraded cell — is
+  refused, a `pool_refused` decision (ARCHIVAL) naming the cells; a round seating no one leaves the
+  pool empty, and the next reflects on the incumbent again.
 - **The draw moves to the close.** Alg. 2 runs at an iteration's start; the bench draws the next
   parent when the round closes and banks it, so a resume or a fork re-seats the front and the
   draw together. A member's Pareto-set scores are banked at admission, and a scorer change
   re-grades none of them, as LEVI's elites.
+- **`max_rounds` counts rounds, and a GEPA round is one proposal**, so a campaign sizes its round
+  cap as the child count it wants — LEVI's as `interval` evaluations a round. The bench's runaway
+  guard (`runner/loop.py::HARD_CAP_ARMS`) counts arms raced, so it binds one-child GEPA no sooner
+  than a five-arm optimizer.
 - **The bench re-scores its incumbent** on the whole panel each round, minibatch included — cells
   GEPA's rollout count leaves out, billed in the same book. Under `lift_reference: parents` each
   child's lift is read against its GEPA parent on the child's cells, which the proposer already

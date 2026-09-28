@@ -15,9 +15,8 @@ from promptpotter.application.scoring.selection import (
 )
 from promptpotter.config.settings import NO_RESULT
 from promptpotter.domain.results import ArmOutcome
-from promptpotter.domain.scoring import is_answer_collapsed
+from promptpotter.domain.scoring import is_answer_collapsed, is_graded
 from promptpotter.domain.validators import StopSignal
-from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.statistics import discordant_counts
 
 if TYPE_CHECKING:
@@ -30,11 +29,11 @@ if TYPE_CHECKING:
 
 
 def _graded(rows: Iterable[QueryMeasurement]) -> dict[str, float]:
-    """Each cell's grade; an error row carries no outcome for the θ fit."""
+    """Each cell's grade; a row carrying no verdict carries no outcome for the θ fit."""
     return {
         str(sid): graded_response(r)
         for r in rows
-        if (sid := r.get("sample_id")) is not None and not is_error_result(r)
+        if (sid := r.get("sample_id")) is not None and is_graded(r)
     }
 
 
@@ -278,9 +277,9 @@ class PoBBCheck:
         if not self.priors_by_sample:
             return None
 
-        # Exclude error/deprecated samples from the θ fit — a backend hiccup is not
+        # Exclude verdict-less samples from the θ fit — a backend hiccup is not
         # evidence of inability, the same exclusion the round-winner election applies.
-        fit_results = [r for r in results if not is_error_result(r)]
+        fit_results = [r for r in results if is_graded(r)]
         if not fit_results:
             return None
         candidate_samples = [str(r.get("sample_id", "")) for r in fit_results]
@@ -396,7 +395,7 @@ class PoBBCheck:
         ``unresolved`` are candidates ahead of this one still being walked, with the rows each has
         back so far. Each may yet become a prior or never become one, so it is graded where its
         rows say and anything anywhere else, and never counted on."""
-        measured = [r for r in results if not is_error_result(r)]
+        measured = [r for r in results if is_graded(r)]
         grades = {int(r.get("sample_id", 0)): graded_response(r) for r in measured}
         cells = list(grades)
         said = {str(r.get("predicted") or "") for r in measured}
@@ -412,9 +411,9 @@ class PoBBCheck:
         }
         priors.update(pending)
         for m, (sample, row) in enumerate(upcoming, start=len(results) + 1):
-            if row is None or not is_error_result(row):
+            if row is None or is_graded(row):
                 cells.append(sample.id)
-            if row is not None and not is_error_result(row):
+            if row is not None and is_graded(row):
                 grades[sample.id] = graded_response(row)
                 said.add(str(row.get("predicted") or ""))
             if m < self.n_min:

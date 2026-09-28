@@ -160,7 +160,12 @@ async def prepare_checkin_run(
 
     dataset_root = readable_dataset_dir(stores, dataset_name)
     campaign_config = build_cycle_config(
-        session, dataset_root, pipeline_overlay=pipeline_overlay, pipeline_steps=pipeline_steps
+        session,
+        dataset_root,
+        # The optimizer the check-in chose — on a reused dataset the shared file names another.
+        optimization=draft.optimization_overrides,
+        pipeline_overlay=pipeline_overlay,
+        pipeline_steps=pipeline_steps,
     )
 
     train_data = session.samples
@@ -202,7 +207,9 @@ def _checkin_campaign_config(stores: Stores, draft: DraftCampaign) -> CampaignCo
     canonical = dataset_source_of(draft.source_file)
     if canonical is None:
         return default_campaign_config(draft)
-    return dataset_campaign_config(readable_dataset_dir(stores, canonical))
+    return dataset_campaign_config(
+        readable_dataset_dir(stores, canonical), optimization=draft.optimization_overrides
+    )
 
 
 async def start_checkin_campaign(

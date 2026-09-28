@@ -120,7 +120,7 @@ Connector-described pipeline (the shape `GET /pipeline` exposes, plus an operato
 
 Campaign knobs + scoring + optimizer LLM. Validated by `application/campaign_config.py::CampaignConfig` with `extra="forbid"` — unknown keys raise at boot. See `CampaignConfig` for the full field list.
 
-**Top-level keys.** `dataset_name`, `scoring`, `judges`, `sp_budget_round`, `exclude_nodes` (drop pipeline nodes by name), `pipeline_overlay` (per-node config overlay), `optimization`. (The optimizer is `optimization.optimizer`, a manifest under `promptpotter/assets/optimizers/`; its nodes' knobs and models ride `optimization.nodes`.)
+**Top-level keys.** `dataset_name`, `scoring`, `judges`, `sp_budget_origin`, `exclude_nodes` (drop pipeline nodes by name), `pipeline_overlay` (per-node config overlay), `optimization`. (The optimizer is `optimization.optimizer`, a manifest under `promptpotter/assets/optimizers/`; its nodes' knobs and models ride `optimization.nodes`.)
 
 `judges` maps a scoring term to a registered LLM-as-judge and the models to run it on — `{term: {name, stages: [{role, model, provider, temperature}]}}` — for datasets whose answer no matcher can grade. Each verdict is banked as a per-sample observation the `scoring` formula reads by its term KEY (never a call: a judge is a measurement, not a formula term). **Its models are inherited from nothing** — not a node's permitted set, not node config, not the optimizer's. A third party ships a judge through the `promptpotter.judges` entry-point group, validated like §1's connectors; contract: [`../../promptpotter/judges/CLAUDE.md`](../../promptpotter/judges/CLAUDE.md).
 
@@ -135,7 +135,7 @@ off the fields and the manifest, never off a doc.
 
 **Optimizer LLM:** provider, model, temperature, `reasoning_effort`, and `max_tokens` are per-node config in the selected manifest (`promptpotter/assets/optimizers/{name}/pipeline.yaml::nodes.{node}.config`), resolved inside `llm_call` like any other node tunable; a campaign moves one through `optimization.nodes.{node}.config`. The check-in node is the bench's own, in `promptpotter/assets/checkin/pipeline.yaml`.
 
-Constants moved out of `campaign.yaml` (they live next to their consumer): L1 candidate-generation temperature (the `creativity` arg in `l1/generate.py`, driven by `l1_overrides.creativity`, defaulting to the `l1_generate` node temperature), L2/L3 transition temperatures (the `l2_context`/`l3_plan` node temperatures), runaway-loop ceiling (`runner/loop.py::HARD_CAP`), stale-data recovery ladder (`scoring/sample_measurement.py`). PoBB lock-in went the other way and stayed configurable — potter's `pobb` node `lock_in` / `lock_in_n_min` / `leader_lock_in`.
+Constants moved out of `campaign.yaml` (they live next to their consumer): L1 candidate-generation temperature (the `creativity` arg in `l1/generate.py`, driven by `l1_overrides.creativity`, defaulting to the `l1_generate` node temperature), L2/L3 transition temperatures (the `l2_context`/`l3_plan` node temperatures), runaway-loop ceiling, in arms raced (`runner/loop.py::HARD_CAP_ARMS`), stale-data recovery ladder (`scoring/sample_measurement.py`). PoBB lock-in went the other way and stayed configurable — potter's `pobb` node `lock_in` / `lock_in_n_min` / `leader_lock_in`.
 
 The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no opt-in flag. Which LAYERS potter may reach is its `escalation` node's `escalation_ladder` (`full` / `l1_l2` / `l1`), the ablation switch; the individual rules are not separately toggleable.
 

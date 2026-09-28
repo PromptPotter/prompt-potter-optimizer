@@ -165,13 +165,13 @@ def _diff_paths(
 def classify_config_diff(
     config: CampaignConfig, frozen: dict[str, Any]
 ) -> tuple[DiffScope, list[str]]:
-    """Classify *config* vs the frozen snapshot. Both sides are deltas from the code DEFAULTS, so the
-    snapshot is never validated — the resume that must report drift is the one that must not die on it."""
+    """Classify *config* vs the frozen snapshot, both whole, leaf by leaf — a leaf the table does not
+    know classifies DATA_AFFECTING."""
     if not frozen:
         # A check-in skeleton (`mint_checkin_skeleton`) carries `config: {}` — the campaign has
         # no snapshot yet. That is "nothing to diff against", not "every leaf changed".
         return DiffScope.NONE, []
-    active = config.model_dump(mode="json", exclude_defaults=True)
+    active = config.model_dump(mode="json")
     table = _table(config)
     diffs = _diff_paths(table, active, frozen)
     if not diffs:

@@ -345,7 +345,10 @@ export function Forest({
               const rowLabelText = n.isLastInLane && layoutEntry ? cycName : null;
               // Inside an <svg>, so `<Hearts>` can't mount; `heartsText` is the same derivation.
               const laneHearts = layoutEntry
-                ? heartsText(layoutEntry.course.hearts, layoutEntry.course.lives_cap)
+                ? heartsText(
+                    layoutEntry.course.run_standing?.stalls_left,
+                    layoutEntry.course.run_standing?.stalls_left_cap,
+                  )
                 : "";
               const isDivergence = n.divergence !== null;
               const isDivergent = n.divergent;

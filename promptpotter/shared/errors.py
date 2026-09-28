@@ -6,7 +6,7 @@ import logging
 import re
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
@@ -450,6 +450,33 @@ def error_category(result: Mapping[str, Any]) -> ErrorCategory | None:
         return None
 
 
+# Whether an error is the configuration's own doing. A provider or machine fault says nothing about
+# the prompt, nor does a cell that ran to its end with nothing to grade; the rest are its to answer.
+ERROR_IS_CHARGED: Annotated[dict[ErrorCategory, bool], shapes_optimizer_prompt] = {
+    ErrorCategory.CLIENT: True,
+    ErrorCategory.SERVER: False,
+    ErrorCategory.CONNECTION: False,
+    ErrorCategory.PROVIDER_CREDIT: False,
+    ErrorCategory.PROVIDER_THROTTLED: False,
+    ErrorCategory.SPEND_CEILING: False,
+    ErrorCategory.TOKEN_CEILING: False,
+    ErrorCategory.PIPELINE: True,
+    ErrorCategory.HALTED: True,
+    ErrorCategory.UNSCOREABLE: False,
+    ErrorCategory.UNKNOWN: True,
+}
+assert set(ERROR_IS_CHARGED) == set(ErrorCategory), "every ErrorCategory must take a side"
+
+
+@shapes_optimizer_prompt
+def is_charged_error(result: Mapping[str, Any]) -> bool:
+    """Whether the row errored for a reason the configuration under test answers for. A category
+    this build cannot read is charged: an unexplained failure is never a reason to leave a count."""
+    if not is_error_result(result):
+        return False
+    return ERROR_IS_CHARGED[error_category(result) or ErrorCategory.UNKNOWN]
+
+
 def is_repairable_hole(result: Mapping[str, Any]) -> bool:
     """A hole a re-measure could plug. ``HALTED`` is not one: the bound that cut the cell is
     declared, so the next attempt is cut at the same place and the measurement is paid for twice."""
@@ -457,6 +484,7 @@ def is_repairable_hole(result: Mapping[str, Any]) -> bool:
 
 
 __all__ = [
+    "ERROR_IS_CHARGED",
     "BadRequestError",
     "CellHaltedError",
     "CellInfrastructureError",
@@ -484,6 +512,7 @@ __all__ = [
     "error_category",
     "graceful",
     "has_pipeline_warnings",
+    "is_charged_error",
     "is_error_result",
     "is_provider_credit_refusal",
     "is_repairable_hole",

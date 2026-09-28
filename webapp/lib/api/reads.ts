@@ -8,7 +8,6 @@ import type {
   ActivityResponse,
   BackendHealthResponse,
   BackendResponse,
-  CampaignDetailResponse,
   CampaignListResponse,
   CampaignPipelineResponse,
   CampaignStorageResponse,
@@ -326,16 +325,6 @@ export function fetchStorageByDataset(
   signal?: AbortSignal,
 ): Promise<DatasetStorageResponse> {
   return jget<DatasetStorageResponse>(`${API}/workspace/storage-by-dataset`, signal);
-}
-
-export function fetchCampaignDetail(
-  campaignId: string,
-  signal?: AbortSignal,
-): Promise<CampaignDetailResponse> {
-  return jget<CampaignDetailResponse>(
-    `${API}/campaigns/${encodeURIComponent(campaignId)}`,
-    signal,
-  );
 }
 
 export function fetchOptimizerKnobs(

@@ -11,10 +11,12 @@ from pydantic import ConfigDict, Field
 
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
+from promptpotter.domain.dashboard_rows import RunStanding
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.ruler import ThetaCaveat
 from promptpotter.domain.run_records import (
     FORK_DIRECTION,
+    ElectionRecord,
     ForkDirection,
     ForkTrigger,
     LedgerAbility,
@@ -27,9 +29,10 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_candidates,
     scan_ledger_elections,
     scan_ledger_round_closes,
+    scan_ledger_run_standing,
 )
 from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
-from promptpotter.infrastructure.store.io import read_json_optional
+from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for, sibling_kind
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store, resolve_cycle_path
 
@@ -159,10 +162,9 @@ class LineageNode(StrictModel):
         default=False,
         description="Whether the optimizer fits theta per arm at all. Candidate: the declaration "
         "its round's election carried (`RoundResult.stamps_theta`), false on a round that never "
-        "elected. Course: the campaign-constant declaration of the optimizer it runs "
-        "(`LiveDashboardState.stamps_theta`), so a course says whether its rounds are won on "
-        "theta. False: theta is not a column here, so a surface hides it rather than drawing a "
-        "cold ruler's blank.",
+        "elected. Course: the declaration its own elections carried, so a course says whether "
+        "its rounds are won on theta. False: theta is not a column here, so a surface hides it "
+        "rather than drawing a cold ruler's blank.",
     )
     evaluators: dict[str, float] = Field(
         default_factory=dict,
@@ -275,8 +277,11 @@ class LineageNode(StrictModel):
         description="This course's round-0 score. A course that has only run its origin has "
         "this and no `best_accuracy`, so reading only `best` blanks its bar.",
     )
-    hearts: int | None = None
-    lives_cap: int | None = None
+    run_standing: RunStanding | None = Field(
+        default=None,
+        description="Courses only — the optimizer's standing as the course's last closed round "
+        "left it, read off the course's own ledger. Null before round 0 closes.",
+    )
 
 
 class FamilyCourse(NamedTuple):
@@ -328,7 +333,7 @@ def _layout(stores: Stores, hop: CycleHop) -> CycleLayout:
 
 
 def _read_index(stores: Stores, hop: CycleHop) -> dict[str, object]:
-    index = read_json_optional(_layout(stores, hop).manifest)
+    index = read_json_tolerant(_layout(stores, hop).manifest)
     return index if isinstance(index, dict) else {}
 
 
@@ -399,12 +404,13 @@ class _RoundFacts(NamedTuple):
     reference_lift_ci_hi: float | None = None
 
 
-def _round_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[str, _RoundFacts]:
+def _round_facts(
+    ledger_path: Path, candidates: list[LedgerCandidate], elections: Mapping[int, ElectionRecord]
+) -> dict[str, _RoundFacts]:
     """``candidate_id -> _RoundFacts``, folded from the cycle's OWN ledger — the whole fold, so the
     tree is never a projection of another projection. **The join stays on ``label``**:
     ``candidate_id`` is a fresh uuid per construction, and a resume re-mints it. The lift rides
     ``ElectionRecord``, at the moment it is stamped."""
-    elections = scan_ledger_elections(ledger_path)
     closes = scan_ledger_round_closes(ledger_path)
     out: dict[str, _RoundFacts] = {}
     for cand in candidates:
@@ -446,8 +452,7 @@ class _CourseScalars(TypedDict):
     dataset_name: str
     best_accuracy: float | None
     origin_accuracy: float | None
-    hearts: int | None
-    lives_cap: int | None
+    run_standing: RunStanding | None
     stamps_theta: bool
 
 
@@ -456,15 +461,14 @@ def _course_scalars(
     hop: CycleHop,
     index: dict[str, object],
     reads: _Reads,
-    dash: dict[str, object],
+    elections: Mapping[int, ElectionRecord],
 ) -> _CourseScalars:
-    """The course's own facts: topology from ``index.json``, live ♥ from the dashboard."""
+    """The course's own facts: topology from ``index.json``, its standing and its declaration off
+    its own ledger — which a finished course keeps as a live one does."""
     layout = _layout(stores, hop)
 
     fork, spawned = _block(index, "fork"), _block(index, "spawned_by")
-    limits = dash.get("run_limits") if isinstance(dash.get("run_limits"), dict) else {}
-    best, hearts = index.get("best_accuracy"), dash.get("hearts")
-    cap = limits.get("lives_cap") if isinstance(limits, dict) else None
+    best = index.get("best_accuracy")
     campaign = reads.campaign(stores, hop.campaign_id)
 
     # INNER by where it LIVES, not by saying so: a rebase pair in the sandbox has no
@@ -486,9 +490,8 @@ def _course_scalars(
         "best_accuracy": float(best) if isinstance(best, int | float) else None,
         # The SAME derivation `/cycles` uses — no stored copy to drift from.
         "origin_accuracy": origin_accuracy_of(index),
-        "hearts": hearts if isinstance(hearts, int) else None,
-        "lives_cap": cap if isinstance(cap, int) else None,
-        "stamps_theta": dash.get("stamps_theta") is True,
+        "run_standing": scan_ledger_run_standing(layout.ledger),
+        "stamps_theta": any(e.stamps_theta for e in elections.values()),
     }
 
 
@@ -801,9 +804,8 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Lin
     index = _read_index(stores, leaf)
     layout = _layout(stores, leaf)
     ledger_path = layout.ledger
-    dash = read_json_optional(layout.dashboard)
-    dash = dash if isinstance(dash, dict) else {}
     candidates = scan_ledger_candidates(ledger_path)
+    elections = scan_ledger_elections(ledger_path)
     children = _child_courses(stores, path, reads)
     inner = [c for c in children if c.inner]
     # Mint order IS the campaign's timeline, so it is what positions a fork on it.
@@ -813,7 +815,7 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Lin
     buckets = _bucket_by_parent(inner, candidates)
     hops = list(path)
 
-    decided = _round_facts(ledger_path, candidates)
+    decided = _round_facts(ledger_path, candidates, elections)
 
     # Forks resolve FIRST: a replayed origin grafts its runs onto the candidate it replays.
     by_id = {c.candidate_id: c for c in candidates}
@@ -851,7 +853,7 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Lin
         )
     )
 
-    scalars = _course_scalars(stores, leaf, index, reads, dash)
+    scalars = _course_scalars(stores, leaf, index, reads, elections)
     # A course whose line MOVED does not answer for run-state; the LAST such cut speaks, and
     # each branch delegates onward, so a chain resolves to its tip. `origin_accuracy` stays
     # OURS — round 0 is the shared prefix, not the cut.
@@ -878,7 +880,7 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Lin
 
 
 def build_lineage_tree(stores: Stores, path: CyclePath) -> LineageNode:
-    """The course at *path* and its subtree, expanded to :data:`_MAX_COURSE_DEPTH`. Each level
-    costs one ledger scan plus two small JSON reads per course."""
+    """The course at *path* and its subtree, expanded to :data:`_MAX_COURSE_DEPTH`. Each course
+    costs scans of its own ledger plus one small JSON read."""
     store_at, _ = resolve_cycle_path(stores, path)
     return _build(store_at, path, depth=_MAX_COURSE_DEPTH, reads=_Reads())

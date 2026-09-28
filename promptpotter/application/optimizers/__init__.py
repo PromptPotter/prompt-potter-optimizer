@@ -24,6 +24,7 @@ __all__ = [
     "other_optimizer_packages",
     "registered",
     "runtime",
+    "runtime_origins",
     "runtimes",
 ]
 
@@ -120,6 +121,10 @@ def runtimes() -> Mapping[str, OptimizerRuntime]:
 
 def runtime(name: str) -> OptimizerRuntime:
     return lookup(RUNTIME_ENTRY_POINT_GROUP, _load_runtimes(), name)
+
+
+def runtime_origins() -> Mapping[str, str]:
+    return _load_runtimes()[1]
 
 
 def other_optimizer_packages(module: str) -> frozenset[str]:

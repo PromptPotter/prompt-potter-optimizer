@@ -13,7 +13,6 @@ import yaml
 from pydantic import ValidationError
 
 from promptpotter.application.campaign_config import load_campaign_config as _load_cfg
-from promptpotter.application.campaign_config import merge_config_layers
 from promptpotter.application.commands.checkin_dispatch import (
     dispatch_draft_patch,
     dispatch_origin_resolution,
@@ -39,8 +38,8 @@ from promptpotter.application.datasets.ingest import SlugTakenError, ingest_draf
 from promptpotter.application.datasets.origin_readiness import origin_readiness
 from promptpotter.application.jobs.launcher.admission import probe_backend
 from promptpotter.application.jobs.launcher.checkin import prepare_checkin_run
+from promptpotter.application.jobs.launcher.mint_and_start import with_optimization
 from promptpotter.application.jobs.mint import fresh_campaign_id, mint_framed_cycle
-from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.runner.entry import RunMode
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.connector import BackendUnreachableError
@@ -140,12 +139,12 @@ def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
         ) from None
 
 
-def _with_sets(file_config: dict[str, Any], sets: list[str]) -> dict[str, Any]:
-    """The name form's ``--set``: the same patch the file form sends, whose knobs merge onto the
-    dataset's config and resolve through the one optimizer resolution. A named dataset has its
+def _with_sets(config: CampaignConfig, sets: list[str]) -> CampaignConfig:
+    """The name form's ``--set``: the same patch the file form sends, whose knobs lay onto the
+    dataset's config through the one seam every door validates by. A named dataset has its
     origin on disk, so a check-in field has nothing to confirm and is refused."""
     if not sets:
-        return file_config
+        return config
     patch = _sets_to_patch(sets)
     spelled = {model: cli for cli, model in _SET_ALIAS.items()}
     fields = patch.model_fields_set - {"optimization_overrides"}
@@ -156,12 +155,10 @@ def _with_sets(file_config: dict[str, Any], sets: list[str]) -> dict[str, Any]:
         )
     knobs = patch.optimization_overrides
     assert knobs is not None  # every --set left after the refusal above is a knob
-    merged = merge_config_layers(file_config, {"optimization": knobs})
     try:
-        select_optimizer(_load_cfg(merged).optimization)
-    except ValueError as exc:
+        return with_optimization(config, knobs)
+    except PotterError as exc:
         raise SystemExit(f"ERROR: --set rejected: {exc}") from None
-    return merged
 
 
 def _reload_draft(stores: Stores, campaign_id: str) -> DraftCampaign:
@@ -331,7 +328,7 @@ async def _mint_fresh_session(
         if default_config_path.exists():
             file_config = read_campaign_config_file(default_config_path)
 
-    campaign_config = _load_cfg(_with_sets(file_config, args.sets))
+    campaign_config = _with_sets(_load_cfg(file_config), args.sets)
 
     train_data = session.samples
 

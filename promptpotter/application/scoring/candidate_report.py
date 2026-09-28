@@ -137,6 +137,7 @@ def build_score_report(
     outcome: ArmOutcome,
     resolved_pipeline_params: dict[str, Any] | None = None,
     elimination_context: dict[str, Any] | None = None,
+    elimination_reason: str | None = None,
     breakage: Breakage | None = None,
 ) -> ScoredCandidate:
     """Typed candidate score report. The CI is CARRIED from the gateway's own fold
@@ -182,6 +183,7 @@ def build_score_report(
         validation_failures=list(validation_failures),
         runtime_failures=[breakage.runtime_failure] if breakage else [],
         elimination_context=elimination_context or {},
+        elimination_reason=elimination_reason,
         degradation_context=breakage.context if breakage else {},
     )
 

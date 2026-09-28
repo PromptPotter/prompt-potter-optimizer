@@ -18,6 +18,7 @@ from promptpotter.application.initialization.loop_start import (
     diagnostic_trace,
 )
 from promptpotter.application.initialization.wiring import init_services
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.pipeline_resolve import (
     merge_pipeline_params,
@@ -237,11 +238,12 @@ async def verify_candidate(
     # measured would be a bench row the loop decided on.
     search = session.scoring.require_partition().search
     unmeasured = [s for s in search if s.id not in measured_ids]
+    round_cells = select_optimizer(campaign_config.optimization).round_cells(len(search))
     if not unmeasured:
         return VerifyOutcome(dataset_name=campaign.dataset_name, already_measured=len(measured_ids))
 
     budget = derive_verify_samples(
-        round_cell_budget=campaign_config.sp_budget_round,
+        round_cell_budget=round_cells,
         rounds_unverified=rounds_since_verified(
             stores.diagnostic_runs.list(campaign.dataset_name),
             cycle_id=hop.cycle_id,
@@ -252,7 +254,7 @@ async def verify_candidate(
     if samples is not None and samples > budget:
         raise VerifyError(
             f"--samples {samples} is above this candidate's verify budget of {budget} "
-            f"({campaign_config.sp_budget_round} cells per candidate per round, lifted by the "
+            f"({round_cells} cells per candidate per round, lifted by the "
             f"rounds run since the last verification, capped at {len(unmeasured)} unmeasured). "
             f"Pass {budget} or fewer, or verify again after more rounds."
         )

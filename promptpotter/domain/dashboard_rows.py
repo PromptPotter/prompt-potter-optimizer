@@ -16,6 +16,7 @@ from typing import Any, Literal
 
 from pydantic import ConfigDict, Field
 
+from promptpotter.domain.bench import BenchReading
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.results import (
     ArmOutcome,
@@ -36,6 +37,7 @@ __all__ = [
     "OptimizerLimit",
     "RoundSummary",
     "RoundSummaryCandidate",
+    "RunStanding",
     "SampleStatus",
     "sample_status",
 ]
@@ -277,6 +279,18 @@ class OptimizerLimit(StrictModel):
     integer: bool
 
 
+class RunStanding(StrictModel):
+    """Where an optimizer stands after a round, whichever optimizer runs: the rounds since its
+    selection last advanced, and the stalls it may still absorb out of its ceiling."""
+
+    model_config = ConfigDict(frozen=True)
+
+    rounds_without_advance: int
+    # ``None`` where the optimizer banks no stalls; the run then ends on its other limits.
+    stalls_left: int | None
+    stalls_left_cap: int | None
+
+
 class RoundSummary(StrictModel):
     """Display row for `dashboard.json::rounds[]` — webapp's completed-round source.
     Top-level `accuracy` is what the round MEASURED; `ability` is the invariant series."""
@@ -297,8 +311,15 @@ class RoundSummary(StrictModel):
     # false "great start → decay". The trend/sparkline plot THIS series, dropping any point whose
     # ruler differs; the per-round measured number stays on `candidates[]`, badged with its count.
     # Never add a `cumulative_accuracy` beside it: a mean over rows from DIFFERENT configurations
-    # fabricates a number no individual scored. Mirrors `RoundResult.ability`.
+    # fabricates a number no individual scored. Mirrors `RoundResult.ability` where the round's
+    # selector stamps θ, and is ``None`` everywhere else.
     ability: AbilityReading | None = None
+    # The highest `accuracy` any round of this cycle had measured when this one closed, a fork's
+    # seeded rounds included — the BEST line, served so no surface folds its own.
+    best_so_far: float | None = None
+    # The bench's grade of the selection this round declared — the origin at round 0, the final
+    # pick, and under `bench_each_round` every round that selected. ``None`` where none graded it.
+    bench: BenchReading | None = None
     # The round's verdict and the evidence it rests on — the two bits that decide how long the
     # cycle lives. `improved` moves the stall counter and the life bank; `electable_count`
     # decides whether the bank moves AT ALL, since a round no candidate reached measured

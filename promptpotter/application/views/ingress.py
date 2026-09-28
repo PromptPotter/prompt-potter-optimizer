@@ -10,6 +10,7 @@ from promptpotter.application.optimizers.nodes import RoundOpening
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.views.view_models import (
     AnyView,
+    BenchGradedView,
     BenchScoredView,
     CandidatesGeneratedView,
     InitEnterView,
@@ -25,6 +26,7 @@ from promptpotter.application.views.view_models import (
     WarningEntry,
 )
 from promptpotter.domain.candidate_diff import build_candidate_flat, flatten_sp_summary
+from promptpotter.domain.dashboard_rows import RunStanding
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.results import ArmOutcome, ScoredCandidate
 from promptpotter.domain.ruler import is_flat_ruler_id
@@ -46,7 +48,7 @@ def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
     opt = config.optimization
     selected = select_optimizer(opt)
     pacing = selected.pacing
-    sample = config.sp_budget_round
+    sample = selected.round_cells(len(dataset))
 
     ctx.max_rounds = opt.max_rounds or 0
     ctx.patience = pacing.patience
@@ -54,7 +56,10 @@ def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
     ctx.original_sp_flat = flatten_sp_summary(origin_pp)
     ctx.node_param_keys = {s: sorted(k) for s, k in schema.node_param_keys().items()}
     ctx.round_num = 0
-    ctx.hearts, ctx.hearts_cap = pacing.lives or (None, None)
+    opening, cap = pacing.stalls_left or (None, None)
+    ctx.run_standing = RunStanding(
+        rounds_without_advance=0, stalls_left=opening, stalls_left_cap=cap
+    )
     ctx.parent_accuracy = 0.0
 
     # Resolve the per-round composite formula at INIT.enter so the live
@@ -135,8 +140,7 @@ def _propose_enter(d: dict[str, Any], ctx: ViewContext) -> RoundStartView:
         arms=opening.arms,
         note=opening.note,
         model=d.get("model") or "(default)",
-        hearts=ctx.hearts,
-        hearts_cap=ctx.hearts_cap,
+        run_standing=ctx.run_standing,
     )
 
 
@@ -181,6 +185,13 @@ def _measure_enter(d: dict[str, Any], ctx: ViewContext) -> MeasureEnterView:
 
 def _bench_scored(d: dict[str, Any], ctx: ViewContext) -> BenchScoredView:
     return BenchScoredView(bench=d["bench"].model_dump(mode="json"))
+
+
+def _bench_graded(d: dict[str, Any], ctx: ViewContext) -> BenchGradedView:
+    reading = d["reading"]
+    return BenchGradedView(
+        reading=None if reading is None else reading.model_dump(mode="json"), missing=d["missing"]
+    )
 
 
 def _select_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
@@ -260,6 +271,7 @@ _BUILDERS: dict[str, Any] = {
     f"{CampaignPhase.MEASURE}:enter": _measure_enter,
     f"{CampaignPhase.SELECT}:exit": _select_exit,
     f"{CampaignPhase.BENCH}:scored": _bench_scored,
+    f"{CampaignPhase.BENCH}:graded": _bench_graded,
 }
 
 

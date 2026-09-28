@@ -11,7 +11,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, cast
 
 import numpy as np
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from promptpotter.application.bench.resume_and_fork.decisions import (
     GatingMode,
@@ -46,6 +46,8 @@ from promptpotter.shared.statistics import greedy_column_subset
 if TYPE_CHECKING:
     from pathlib import Path
     from types import ModuleType
+
+    from pydantic import BaseModel
 
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.bench.resume_and_fork.replayers import (
@@ -140,6 +142,11 @@ class ProxyCss:
     kind: ClassVar[NodeKind] = NodeKind.SAMPLER
     knobs: ClassVar[type[StrictModel]] = ProxyCssKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
+    # K_proxy is the paper's; the calibration round draws the whole pool.
+    size_knob: ClassVar[str | None] = None
+
+    def draws(self, selected: SelectedOptimizer, pool: int) -> int:
+        return min(cast("ProxyCssKnobs", selected.knobs(self.name)).size, pool)
 
     def draw(self, ctx: RoundContext, pool: list[Sample]) -> Panel:
         calibration = levi_state(ctx.state).calibration
@@ -213,6 +220,13 @@ class MapElitesKnobs(StrictModel):
         "(`target_prompt_chars`) and its objective on each proxy cell (`cell_objectives`).",
     )
 
+    @model_validator(mode="after")
+    def _draws_cover_centroids(self) -> MapElitesKnobs:
+        # Checked where the manifest resolves, before the calibration round is paid.
+        if self.cvt_samples < self.centroids:
+            raise ValueError("map_elites: cvt_samples must be at least centroids")
+        return self
+
 
 def _calibrate(
     ctx: RoundContext,
@@ -224,8 +238,6 @@ def _calibrate(
     cycle = ctx.cycle
     proxy_knobs = cast("ProxyCssKnobs", cycle.optimizer.knobs(ProxyCss.name))
     knobs = cast("MapElitesKnobs", cycle.optimizer.knobs(MapElites.name))
-    if knobs.cvt_samples < knobs.centroids:
-        raise ValueError("map_elites: cvt_samples must be at least centroids")
     rows_by_arm = {ind.lineage.id: rows for ind, rows in offered}
     proxy = choose_proxy(proxy_knobs, rows_by_arm, order)
     record_decision(
@@ -252,6 +264,11 @@ def _calibrate(
     for d in placed:
         stats = _welford(stats, d)
     seen = np.asarray([_normalized(stats, d) for d in placed])
+    if knobs.centroids > 1 and (seen.min(axis=0) == seen.max(axis=0)).all():
+        raise ValueError(
+            f"LEVI's calibration placed {len(placed)} prompt(s) on one descriptor point: every "
+            "centroid would land there and the archive hold one cell"
+        )
     rng = _generator(cycle, ctx.round_num, MapElites.name)
     draws = rng.uniform(seen.min(axis=0), seen.max(axis=0), size=(knobs.cvt_samples, seen.shape[1]))
     centres, _ = _lloyd(draws, knobs.centroids, rng)
@@ -268,6 +285,7 @@ class MapElites:
     knobs: ClassVar[type[StrictModel]] = MapElitesKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
     stamps_theta: ClassVar[bool] = False
+    reads_parent: ClassVar[bool] = True
 
     def select(self, ctx: RoundContext, measured: Measured, population: Population) -> Selection:
         cycle = ctx.cycle
@@ -585,6 +603,7 @@ class LeviRuntime:
     own_axes: ClassVar[dict[str, set[str]]] = {}
     priced_surface: ClassVar[Mapping[str, int]] = {}
     phases: ClassVar[tuple[nodes.OptimizerPhase, ...]] = ()
+    response_models: ClassVar[Mapping[str, type[BaseModel]]] = {}
 
     def start(
         self, session: Session, config: CampaignConfig, origin_results: list[dict[str, Any]]
@@ -644,7 +663,7 @@ class LeviRuntime:
         shift = cast("LeviParadigmShiftKnobs", selected.knobs(LeviParadigmShift.name))
         return nodes.OptimizerPacing(
             patience=None,
-            lives=None,
+            stalls_left=None,
             arms_per_round=max(shift.n_diverse_seeds, shift.interval),
             limits=(),
         )

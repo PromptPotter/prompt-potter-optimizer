@@ -1,6 +1,6 @@
-"""Regenerate every ``resolved_schemas.json`` beside a manifest under ``promptpotter/assets/`` —
-one per optimizer (``optimizers/{name}/``) and the bench's check-in (``checkin/``) — from
-``promptpotter.application.optimizers.potter.dispatch.schemas``. Idempotent.
+"""Regenerate every ``resolved_schemas.json`` beside a manifest — one per registered optimizer
+runtime, from the ``response_models`` it declares, and the bench's check-in (``checkin/``).
+Idempotent.
 
 Each file holds the schemas of the nodes its own manifest DECLARES, so a node's schema ships
 beside the manifest that runs it. It reads the manifests' node names and writes nothing else:
@@ -11,30 +11,27 @@ on every run, which CI would read as schema drift.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
 
+from promptpotter.application import optimizers
 from promptpotter.application.bench.task_context import CheckinOutput
-from promptpotter.application.optimizers.potter.dispatch.schemas import (
-    OPTIMIZER_RESPONSE_MODELS,
-)
-from promptpotter.config.paths import checkin_assets_root, optimizers_root
+from promptpotter.config.paths import checkin_assets_root
 from promptpotter.infrastructure.store.io import read_yaml
 
-RESPONSE_MODELS: dict[str, type[BaseModel]] = {
-    **OPTIMIZER_RESPONSE_MODELS,
-    "checkin": CheckinOutput,
-}
+
+def _manifests() -> dict[Path, Mapping[str, type[BaseModel]]]:
+    return {
+        checkin_assets_root(): {"checkin": CheckinOutput},
+        **{rt.manifest_dir: rt.response_models for rt in optimizers.runtimes().values()},
+    }
 
 
-def _manifest_dirs() -> list[Path]:
-    return [checkin_assets_root(), *sorted(p for p in optimizers_root().iterdir() if p.is_dir())]
-
-
-def _entry(node: str) -> dict[str, Any]:
-    schema = RESPONSE_MODELS[node].model_json_schema()
+def _entry(node: str, model: type[BaseModel]) -> dict[str, Any]:
+    schema = model.model_json_schema()
     return {
         # DECLARATION order, never sorted. `fields` IS the order declaration
         # (`NodeOutputSchema`), and field order is generation order — alphabetizing
@@ -50,12 +47,13 @@ def _entry(node: str) -> dict[str, Any]:
 
 
 def main() -> int:
-    placed: set[str] = set()
-    for directory in _manifest_dirs():
+    for directory, models in sorted(_manifests().items()):
         declared = read_yaml(directory / "pipeline.yaml").get("nodes") or {}
-        nodes = [n for n in RESPONSE_MODELS if n in declared]
-        placed.update(nodes)
-        resolved = {f"{node}/1": _entry(node) for node in nodes}
+        if orphans := sorted(set(models) - set(declared)):
+            raise SystemExit(
+                f"{directory}: response models its manifest declares no node for: {orphans}"
+            )
+        resolved = {f"{node}/1": _entry(node, model) for node, model in models.items()}
         out_path = directory / "resolved_schemas.json"
         # `ensure_ascii=False`: the schemas carry hand-written prose in their `description`
         # strings. Escaping them to \uXXXX makes the generator unable to reproduce its own
@@ -64,8 +62,6 @@ def main() -> int:
             json.dumps(resolved, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
         )
         print(f"wrote {len(resolved)} schemas to {out_path}")
-    if orphans := sorted(set(RESPONSE_MODELS) - placed):
-        raise SystemExit(f"response models no manifest declares a node for: {orphans}")
     return 0
 
 

@@ -22,7 +22,7 @@ from promptpotter.application.scoring.candidate_report import build_score_report
 from promptpotter.application.scoring.row_diagnostics import count_degraded_samples
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.opt_search_point import IndividualLineage, OptSearchPoint
 from promptpotter.domain.results import is_leader_eligible
 from promptpotter.domain.run_records import (
     CandidateMintedRecord,
@@ -197,8 +197,6 @@ def _resync_round_headline(t: RoundResult) -> bool:
 
 
 async def repair_incomplete_rounds(
-    campaign_store: CampaignStore,
-    hop: CycleHop,
     prior: list[Any],
     session: Session,
     cycle: Cycle,
@@ -210,35 +208,28 @@ async def repair_incomplete_rounds(
     by_id = {str(s.id): s for s in dataset}
     repaired: list[int] = []
     for t in prior:
-        cache = campaign_store.load_round_candidates(hop, t.round)
-        cached = cache[0] if cache else []
-        opt_sps: dict[str, OptSearchPoint] = {}
-        for entry in cached:
-            osp = OptSearchPoint.model_validate(entry["opt_sp"])
-            opt_sps[osp.lineage.id] = osp
         changed = False
         for i, cs in enumerate(t.candidate_scores):
             rows = list(t.all_candidate_results.get(cs.candidate_id) or [])
             if not is_leader_eligible(cs) or not any(map(is_repairable_hole, rows)):
                 continue
             attempted = [by_id[sid] for r in rows if (sid := str(r.get("sample_id"))) in by_id]
-            cand_osp = opt_sps.get(cs.candidate_id)
-            if cand_osp is None or not attempted:
+            if not attempted:
                 logger.warning(
-                    "Round %d candidate %s has unmeasured cells but no cached searchpoint "
-                    "to re-measure them with — leaving it holed rather than guessing.",
+                    "Round %d candidate %s has unmeasured cells but none in this dataset to "
+                    "re-measure — leaving it holed rather than guessing.",
                     t.round,
                     cs.label,
                 )
                 continue
-            # Through the OSP, never `JobSearchPoint(pipeline_params=cs.resolved_pipeline_params)`:
-            # that field has each node's rendered `prompt` stripped, so such a point reaches the
-            # backend with no prompt and banks under a run keyed on `sha256("")`.
-            sp = cand_osp.to_job_search_point(
-                base_pipeline_params=cs.resolved_pipeline_params,
-                schema=session.pipeline_schema,
-                framing=cycle.framing,
-                demo=session.scoring.require_partition().demo,
+            # The arm as its round banked it, whichever optimizer proposed it — never a proposer's
+            # own cache, which only potter writes.
+            sp = cycle.searchpoint(cs.candidate_id, rounds=prior)
+            cand_osp = OptSearchPoint.from_prompt_fields(
+                cs.prompt_fields,
+                lineage=IndividualLineage(
+                    id=cs.candidate_id, changes_description=cs.changes_description
+                ),
             )
             stamp = MeasuredCandidate(
                 idx=i,
@@ -303,6 +294,7 @@ async def repair_incomplete_rounds(
                 outcome=cs.outcome,
                 resolved_pipeline_params=cs.resolved_pipeline_params,
                 elimination_context=cs.elimination_context,
+                elimination_reason=cs.elimination_reason,
             )
             # Duplicated on purpose (see `RoundResult`); repairing one half leaves the
             # trajectory quoting the holed measurement.
@@ -382,44 +374,35 @@ async def apply_correction(
     """Cut, correct, grade — **the cut comes first**, read off the round documents and not again,
     since the repair plugs the very holes it is read from. ``None`` ⇒ nothing needed correcting."""
     cut = repair_cut(prior)
-    repair_target = hop.cycle_id
-    repair_spec: ForkSpec | None = None
-    if cut.rounds:
-        # The CANDIDATE, not the label — every course mints its own `C2.1`.
-        repair_spec = ForkSpec(
-            trigger=ForkTrigger.SCORING_DIVERGENCE,
-            reason=f"repair:round_{cut.rounds[0]}",
-            issued_by="system",
-            from_round=cut.rounds[0],
-            from_candidate_id=cut.edge,
-        )
-        repair_target = _mint_fork(
-            campaign_store,
-            hop,
-            session.session_id,
-            cut.resume_at,
-            repair_spec,
-            surviving_rounds=list(prior[: cut.resume_at]),
-        )
-        logger.warning(
-            "Round(s) %s do not re-derive from their own rows; branched → %s from %s BEFORE "
-            "correcting, so this cycle keeps them exactly as they ran. Everything after that "
-            "candidate retires with it; its earlier siblings are untouched measurements and "
-            "stay on the line. Whether the correction reaches anything is graded once it lands.",
-            ", ".join(str(r) for r in cut.rounds),
-            repair_target,
-            cut.edge or "the course root",
-        )
-
+    # The branch lifts the rounds as they RAN; the repair below corrects them in memory.
+    lifted = [t.model_copy(deep=True) for t in prior[: cut.resume_at]]
     # ONLY what the branch carries: a round above the cut was generated from the version being
     # replaced, so the branch REGENERATES it rather than paying to correct a document it will
     # discard. No cut ⇒ empty slice, the same answer the walk gives.
-    repaired = await repair_incomplete_rounds(
-        campaign_store, hop, prior[: cut.resume_at], session, cycle, dataset
-    )
+    repaired = await repair_incomplete_rounds(prior[: cut.resume_at], session, cycle, dataset)
     if not repaired:
+        # A cut nothing could re-measure mints no branch: a fork correcting nothing is an orphan.
         return None
-    assert repair_spec is not None  # `repaired` ⊆ `cut.rounds`, and that is what minted it
+    # The CANDIDATE, not the label — every course mints its own `C2.1`.
+    repair_spec = ForkSpec(
+        trigger=ForkTrigger.SCORING_DIVERGENCE,
+        reason=f"repair:round_{cut.rounds[0]}",
+        issued_by="system",
+        from_round=cut.rounds[0],
+        from_candidate_id=cut.edge,
+    )
+    repair_target = _mint_fork(
+        campaign_store, hop, session.session_id, cut.resume_at, repair_spec, surviving_rounds=lifted
+    )
+    logger.warning(
+        "Round(s) %s do not re-derive from their own rows; branched → %s from %s, and this cycle "
+        "keeps them exactly as they ran. Everything after that candidate retires with it; its "
+        "earlier siblings are untouched measurements and stay on the line. Whether the "
+        "correction reaches anything is graded once it lands.",
+        ", ".join(str(r) for r in cut.rounds),
+        repair_target,
+        cut.edge or "the course root",
+    )
     logger.warning(
         "Resume corrected round(s) %s in memory; measuring what the correction reached "
         "before deciding where it belongs.",

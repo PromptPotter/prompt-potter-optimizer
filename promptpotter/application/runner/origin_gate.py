@@ -167,7 +167,7 @@ async def _rescore_and_reemit(
     """Re-score the origin force-fresh, then re-emit round 0 through the standard ``close_round`` seam so
     every round-0 surface updates in one shape."""
 
-    scoring_set = sample_dataset(dataset, config.origin_budget())
+    scoring_set = sample_dataset(dataset, config.sp_budget_origin)
     origin = await rescore_parent(cycle, scoring_set, callbacks=cb, force_fresh=True)
     # A fresh round replaces round 0 outright, so it is re-graded as a fresh floor
     # (no prior track record) exactly as the first origin emit was.

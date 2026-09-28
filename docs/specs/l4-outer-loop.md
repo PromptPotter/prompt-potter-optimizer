@@ -96,9 +96,9 @@ exposed to.
   shared ruler above is the same θ. Manufacturing a noise term measures how noisy an LLM is on an identical
   request, which is not a quantity the loop can act on. Depth on a specific candidate is `verify`'s job — it
   re-scores on MORE samples without touching the cycle.
-- **A cell that failed is not a cell that scored zero** (`scoring/classification.py::scoreable_rows`). The election
-  grades an errored row 0.0 on purpose — the overlap guard needs that — but a published interval may not: at
-  L4 a floored cell does not read as "scored nothing", it reads as "drove the inner loop maximally down".
+- **A cell that failed is not a cell that scored zero** (`domain/scoring.py::is_graded`). An outer cell carries no
+  label, so an errored one has no verdict. The election grades it 0.0 on purpose — the overlap guard needs that —
+  but a published interval may not: at L4 a floored cell reads as "drove the inner loop maximally down".
 - **Absolute outer numbers never travel across runs.** Only a candidate's delta against its OWN run's origin
   is meaningful; within a run, comparisons are paired by seed under CRN, so draw difficulty cancels.
 

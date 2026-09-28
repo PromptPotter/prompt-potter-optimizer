@@ -43,6 +43,8 @@ if TYPE_CHECKING:
     from pathlib import Path
     from types import ModuleType
 
+    from pydantic import BaseModel
+
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.bench.resume_and_fork.replayers import (
         ReplayContext,
@@ -81,9 +83,11 @@ __all__ = [
 
 
 class GepaCheckpointKind(CheckpointKind):
-    """Decisions GEPA's members take: its eliminator's minibatch acceptance test."""
+    """Decisions GEPA's members take: its eliminator's minibatch acceptance test, and its pool
+    refusing a candidate with no verdict on some Pareto-set cell."""
 
     MINIBATCH_GATE = "minibatch_gate"
+    POOL_REFUSED = "pool_refused"
 
 
 class MinibatchKnobs(StrictModel):
@@ -109,6 +113,11 @@ class Minibatch:
     kind: ClassVar[NodeKind] = NodeKind.SAMPLER
     knobs: ClassVar[type[StrictModel]] = MinibatchKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
+    size_knob: ClassVar[str | None] = None
+
+    def draws(self, selected: SelectedOptimizer, pool: int) -> int:
+        knobs = cast("MinibatchKnobs", selected.knobs(self.name))
+        return knobs.size + round(knobs.pareto_share * pool)
 
     def draw(self, ctx: RoundContext, pool: list[Sample]) -> Panel:
         knobs = cast("MinibatchKnobs", ctx.cycle.optimizer.knobs(self.name))
@@ -329,19 +338,26 @@ class _GateRace(nodes.NoCatchUps):
         candidate_id: str,
         results: list[QueryMeasurement],
         labels: dict[str, str],
-    ) -> Mapping[str, Any] | None:
+    ) -> nodes.EliminationReading | None:
         if signal is None or signal.check_name != self.node:
             return None
         cr = signal.check_result
-        return {
-            "gate": cr["gate"],
-            "queries_scored": cr["queries_scored"],
-            "total_queries": cr["total_samples"],
-            "n_priors": 1,
-            "parent": cr["parent_id"],
-            "sigma": cr["sigma"],
-            "sigma_prime": cr["sigma_prime"],
-        }
+        mean, bar = cr["sigma_prime"], cr["sigma"]
+        reading = f"{mean:.3f} ≤ parent's {bar:.3f}" if mean is not None else "no shared cell"
+        return nodes.EliminationReading(
+            reason=(
+                f"no gain on the minibatch q{cr['queries_scored']}/{cr['total_samples']}  {reading}"
+            ),
+            context={
+                "gate": cr["gate"],
+                "queries_scored": cr["queries_scored"],
+                "total_queries": cr["total_samples"],
+                "n_priors": 1,
+                "parent": cr["parent_id"],
+                "sigma": cr["sigma"],
+                "sigma_prime": cr["sigma_prime"],
+            },
+        )
 
     def admit(self, candidate_id: str, results: list[QueryMeasurement], sp: JobSearchPoint) -> None:
         return None
@@ -422,34 +438,58 @@ class Pareto:
     knobs: ClassVar[type[StrictModel]] = ParetoKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
     stamps_theta: ClassVar[bool] = False
+    reads_parent: ClassVar[bool] = True
 
     def select(self, ctx: RoundContext, measured: Measured, population: Population) -> Selection:
         cycle = ctx.cycle
         state = gepa_state(ctx.state)
         pareto_set = population.optimizer_state.payload_as(GepaRoundState).pareto_set
         pool = [c.model_copy(deep=True) for c in state.pool]
-        if not pool:
-            # Alg. 1 lines 3-5: the incumbent, re-scored on this round's panel, is scored on the
-            # Pareto set there.
-            graded = cell_objectives(measured.parent_rows)
-            pool.append(
-                GepaCandidate(
-                    individual=measured.parent.opt_sp.model_copy(deep=True),
-                    scores={key: graded[key] for key in pareto_set if key in graded},
-                )
-            )
         cut = {cs.candidate_id for cs in measured.scores if cs.outcome is ArmOutcome.ELIMINATED}
+        offered = [
+            (ind, measured.rows[ind.lineage.id])
+            for ind in measured.electable
+            if ind.lineage.id not in cut
+        ]
+        if not pool:
+            # Alg. 1 lines 3-5: the incumbent, re-scored on this round's panel, seats the pool.
+            offered.insert(0, (measured.parent.opt_sp, measured.parent_rows))
         admitted: list[str] = []
-        for ind in measured.electable:
-            graded = cell_objectives(measured.rows[ind.lineage.id])
-            if ind.lineage.id in cut or any(k not in graded for k in pareto_set):
+        for ind, rows in offered:
+            graded = cell_objectives(rows)
+            # One rule for the seat and every child: an aggregate over fewer cells is no aggregate.
+            if ungraded := [key for key in pareto_set if key not in graded]:
+                record_decision(
+                    cycle.pending_decisions,
+                    GepaCheckpointKind.POOL_REFUSED,
+                    {"candidate_id": ind.lineage.id, "round_num": ctx.round_num},
+                    False,
+                    node=self.name,
+                    data={"ungraded": ungraded},
+                    round=ctx.round_num,
+                )
                 continue
-            admitted.append(ind.lineage.id)
+            if ind.lineage.id != measured.parent.opt_sp.lineage.id:
+                admitted.append(ind.lineage.id)
             pool.append(
                 GepaCandidate(
                     individual=ind.model_copy(deep=True),
                     scores={key: graded[key] for key in pareto_set},
                 )
+            )
+        if not pool:
+            return nodes.Selection(
+                selected_id="",
+                scores=list(measured.scores),
+                verdict_reason="no candidate carries a verdict on every Pareto-set cell; the "
+                "pool stays unseated",
+                optimizer_state=state.snapshot(
+                    population.optimizer_state.prompt_hashes,
+                    pareto_set=pareto_set,
+                    pool=[],
+                    parent_id=None,
+                    rounds_without_advance=state.rounds_without_advance + 1,
+                ),
             )
         top = max(_aggregate(c) for c in pool)
         leaders = [c.individual.lineage.id for c in pool if _aggregate(c) == top]
@@ -488,6 +528,8 @@ def _replay_minibatch_gate(
 
 GEPA_CHECKPOINT_GATING: dict[CheckpointKind, GatingMode] = {
     GepaCheckpointKind.MINIBATCH_GATE: GatingMode.REPLAYED,
+    # The pool's scores are banked at admission and never re-graded, so a refusal is too.
+    GepaCheckpointKind.POOL_REFUSED: GatingMode.ARCHIVAL,
 }
 GEPA_REPLAYERS: dict[str, Replayer] = {
     GepaCheckpointKind.MINIBATCH_GATE: _replay_minibatch_gate,
@@ -502,6 +544,7 @@ class GepaRuntime:
     own_axes: ClassVar[dict[str, set[str]]] = {}
     priced_surface: ClassVar[Mapping[str, int]] = {}
     phases: ClassVar[tuple[nodes.OptimizerPhase, ...]] = ()
+    response_models: ClassVar[Mapping[str, type[BaseModel]]] = {}
 
     def start(
         self, session: Session, config: CampaignConfig, origin_results: list[dict[str, Any]]
@@ -558,7 +601,7 @@ class GepaRuntime:
 
     def pacing(self, selected: SelectedOptimizer) -> nodes.OptimizerPacing:
         # One reflective child a round (`GepaReflect`).
-        return nodes.OptimizerPacing(patience=None, lives=None, arms_per_round=1, limits=())
+        return nodes.OptimizerPacing(patience=None, stalls_left=None, arms_per_round=1, limits=())
 
     def opening(self, ctx: RoundContext) -> nodes.RoundOpening:
         return nodes.standing_opening(ctx)

@@ -318,18 +318,11 @@ components:
       properties:
         kind:
           type: string
-          enum:
-            # potter's selector
-            - round_winner
-            # potter's eliminator (PoBB)
-            - elimination_cut
-            - leader_lock_in
-            # potter's controller
-            - l2_escalation_trigger
-            - l3_escalation_trigger
-            # the bench
-            - panel_coverage
-            - fork_cut
+          description: |
+            A `CheckpointKind` value: the bench's `BenchCheckpointKind`, or the
+            enum the deciding optimizer's own package declares. The set is those
+            registries (`decisions.py::resume_checkpoint_gating` merges them),
+            so it is open here and grows with every optimizer installed.
         node:
           type: [string, 'null']
           description: |
@@ -377,6 +370,19 @@ components:
       required: [bench]
       properties:
         bench: { type: object, additionalProperties: true }
+
+    BenchGradedPayload:
+      type: object
+      description: |
+        `PhaseRecord.payload.view` of `phase: bench`, `event: graded` — under
+        `bench_each_round`, one pass grading a round's declared selection (the
+        origin at round 0). `reading` is the `BenchReading` the OpenAPI file
+        declares, null with `missing` saying why; the dashboard serves it as
+        `rounds[].bench` on the round it names.
+      required: [reading, missing]
+      properties:
+        reading: { type: [object, 'null'], additionalProperties: true }
+        missing: { type: [string, 'null'] }
 
     RaceStandingPayload:
       type: object

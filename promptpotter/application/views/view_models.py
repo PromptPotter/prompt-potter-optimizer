@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from promptpotter.domain.dashboard_rows import RunStanding
 from promptpotter.domain.results import (
     ArmOutcome,
     HardSampleOrder,
@@ -18,6 +19,7 @@ from promptpotter.domain.spend import SpendRollup
 
 __all__ = [
     "AnyView",
+    "BenchGradedView",
     "BenchScoredView",
     "CandidatesGeneratedView",
     "DigestStatusView",
@@ -48,11 +50,9 @@ class ViewContext:
     max_rounds: int = 0
     patience: int | None = None
     round_num: int = 0
-    # Banked lives ("hearts") entering the current round; ``None`` when lives mode is off.
-    hearts: int | None = None
-    # The bank's ceiling — the denominator every ♥ readout renders against. A bare count
-    # is scaleless, and in lives mode there is no ``max_rounds`` to fall back on.
-    hearts_cap: int | None = None
+    # The optimizer's standing entering the current round; its cap is the denominator every ♥
+    # readout renders against, since a run banking stalls may have no ``max_rounds``.
+    run_standing: RunStanding | None = None
     parent_accuracy: float = 0.0
     parent_composite_fitness: float | None = None
     composite_fitness_formula: str | None = None
@@ -137,8 +137,7 @@ class RoundStartView:
     arms: int | None
     note: str
     model: str
-    hearts: int | None = None
-    hearts_cap: int | None = None
+    run_standing: RunStanding | None = None
 
 
 @dataclass(frozen=True)
@@ -174,6 +173,14 @@ class MeasureEnterView:
 class BenchScoredView:
     # `BenchScore.model_dump(mode="json")` — the dashboard folds `bench_score` from it.
     bench: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class BenchGradedView:
+    # One pass's `BenchReading.model_dump(mode="json")`, or ``None`` with `missing` saying why —
+    # the dashboard folds it onto the round it names.
+    reading: dict[str, Any] | None
+    missing: str | None
 
 
 @dataclass(frozen=True)
@@ -381,6 +388,7 @@ AnyView = (
     | CandidatesGeneratedView
     | MeasureEnterView
     | BenchScoredView
+    | BenchGradedView
     | RoundCompleteView
     | OptimizerStepEnterView
     | OptimizerStepExitView

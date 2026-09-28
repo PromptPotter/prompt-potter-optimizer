@@ -22,11 +22,18 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.run_observers import RunCallbacks
+    from promptpotter.domain.results import RoundResult
     from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.domain.spend import SpendRollup
 
-__all__ = ["BenchPass", "bench_selection", "nothing_held_out", "score_on_bench"]
+__all__ = [
+    "BenchPass",
+    "bench_selection",
+    "grade_round_selection",
+    "graded",
+    "nothing_held_out",
+    "score_on_bench",
+]
 
 
 class BenchPass(NamedTuple):
@@ -35,10 +42,6 @@ class BenchPass(NamedTuple):
     reading: BenchReading | None
     missing: str | None
     rows: list[QueryMeasurement]
-    # What the pass cost priced cold — replayed rows at what they would have cost — and the tokens
-    # it billed: the price the search sets aside for the pass that grades its selection.
-    incurred_usd: float
-    billed_tokens: int
 
 
 async def score_on_bench(
@@ -47,11 +50,10 @@ async def score_on_bench(
     *,
     round_num: int,
     cb: RunCallbacks,
-    spend: SpendRollup,
 ) -> BenchPass:
-    usd_before, tokens_before = spend.total_incurred_usd, spend.total_tokens_used
     sp_hash = search_point.sp_hash(session.pipeline_schema)
-    bench = list(session.scoring.require_partition().bench)
+    partition = session.scoring.require_partition()
+    bench = list(partition.bench)
     # Bracketed without a round: the pass scores after the loop, and a round here would move the
     # dashboard's round back to the one being graded.
     emit_phase(cb.on_phase, CampaignPhase.BENCH, "enter")
@@ -67,15 +69,23 @@ async def score_on_bench(
         )
     finally:
         emit_phase(cb.on_phase, CampaignPhase.BENCH, "exit")
-    incurred_usd = spend.total_incurred_usd - usd_before
-    billed_tokens = spend.total_tokens_used - tokens_before
-    if (signal := scored.signal) is not None and signal.check_name == SCORING_ERROR_ABORT:
-        missing = (
-            f"{scored.stopped} after {len(scored.results)} of {len(bench)} rows: "
-            f"{signal.check_result['last_error']}"
+    if scored.stopped is not None:
+        signal = scored.signal
+        cause = (
+            f": {signal.check_result['last_error']}"
+            if signal is not None and signal.check_name == SCORING_ERROR_ABORT
+            else ""
         )
-        return BenchPass(sp_hash, None, missing, [], incurred_usd, billed_tokens)
+        missing = f"{scored.stopped} after {len(scored.results)} of {len(bench)} rows{cause}"
+        return BenchPass(sp_hash, None, missing, [])
     rows = scoreable_rows(scored.results)
+    tolerance = partition.split.tolerance if partition.split is not None else 0
+    if (short := len(bench) - len(rows)) > tolerance:
+        missing = (
+            f"{short} of {len(bench)} rows carry no verdict — a provider fault, or a cell the "
+            f"formula cannot grade — past the split's tolerance of {tolerance}"
+        )
+        return BenchPass(sp_hash, None, missing, [])
     scores = scored.scores
     accuracy = scores["accuracy"]
     # The walk's served band is accuracy's; the headline is the composite, so its band is too.
@@ -92,9 +102,8 @@ async def score_on_bench(
         ci_hi=ci_hi,
         n_scored=len(rows),
         run_id=scored.run_id,
-        stopped=scored.stopped,
     )
-    return BenchPass(sp_hash, reading, None, rows, incurred_usd, billed_tokens)
+    return BenchPass(sp_hash, reading, None, rows)
 
 
 def nothing_held_out(cb: RunCallbacks) -> BenchScore:
@@ -112,8 +121,35 @@ def nothing_held_out(cb: RunCallbacks) -> BenchScore:
     return score
 
 
+def graded(cb: RunCallbacks, bench_pass: BenchPass) -> None:
+    """One pass on the ledger as the trend's per-round bench series reads it."""
+    emit_phase(
+        cb.on_phase,
+        CampaignPhase.BENCH,
+        "graded",
+        reading=bench_pass.reading,
+        missing=bench_pass.missing,
+    )
+
+
+async def grade_round_selection(
+    cycle: Cycle, session: Session, round_result: RoundResult, *, cb: RunCallbacks
+) -> None:
+    """Under ``bench_each_round``, the round's declared selection graded on the bench set. A held
+    round declares nothing new, and a campaign holding no bench row has nothing to grade on."""
+    if not (
+        cycle.config.bench_each_round
+        and round_result.selected_labels
+        and session.scoring.require_partition().bench
+    ):
+        return
+    graded(
+        cb, await score_on_bench(session, cycle.selected_sp, round_num=round_result.round, cb=cb)
+    )
+
+
 async def bench_selection(
-    cycle: Cycle, session: Session, *, origin: BenchPass, cb: RunCallbacks, spend: SpendRollup
+    cycle: Cycle, session: Session, *, origin: BenchPass, cb: RunCallbacks
 ) -> BenchScore:
     """The selection is the pick the optimizer declared (``Cycle.selection``), graded here on rows
     it never read. Scored once where it is the origin itself. Only a pause escapes the pass: any
@@ -124,14 +160,12 @@ async def bench_selection(
         selected = origin
     else:
         try:
-            selected = await score_on_bench(
-                session, selected_sp, round_num=picked.round, cb=cb, spend=spend
-            )
+            selected = await score_on_bench(session, selected_sp, round_num=picked.round, cb=cb)
         except RUN_STOPS as stop:
             reason = run_stop_reason(stop)
             if STOP_REASON_INFO[reason].outcome is StopOutcome.PAUSED:
                 raise
-            selected = BenchPass(selected_hash, None, reason.value, [], 0.0, 0)
+            selected = BenchPass(selected_hash, None, reason.value, [])
     paired = matched_parent_lift(selected.rows, origin.rows, grade="objective")
     passes = (("origin", origin), ("selected", selected))
     missing = "; ".join(f"{name}: {p.missing}" for name, p in passes if p.missing is not None)

@@ -63,6 +63,7 @@ async def run_generation_only_round(
                     l1_yield=yield_stats.l1_yield,
                     l1_parse_failure=yield_stats.l1_parse_failure,
                     prompt_hashes={},
+                    axis_memory_peaked=sorted(cycle.axes.peaked_axes()) if cycle.axes else [],
                 ),
             )
             generated.optimizer_facts = round_facts(generated)

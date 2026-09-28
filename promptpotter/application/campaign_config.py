@@ -18,7 +18,7 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.judges.protocol import JudgeSpec
 
 if TYPE_CHECKING:
-    from promptpotter.domain.run_records import CycleSeed
+    from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
 
 __all__ = [
     "CampaignConfig",
@@ -27,7 +27,8 @@ __all__ = [
     "Knob",
     "OptimizationConfig",
     "Scope",
-    "apply_inherited_overlay",
+    "apply_config_overrides",
+    "apply_cycle_seed",
     "estimand_doc",
     "freeze_campaign_config",
     "knob_label",
@@ -165,7 +166,8 @@ class OptimizationConfig(StrictModel):
         ge=0,
         description=(
             "Max rounds. 0 = measure the origin (round 0) and stop — the "
-            "origin-only run; None = unlimited, bounded only by ``HARD_CAP``."
+            "origin-only run; None = unlimited, bounded only by ``HARD_CAP_ARMS``, the arms "
+            "raced across the run."
         ),
     )
     degradation_threshold: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(...)
@@ -303,19 +305,12 @@ class OptimizationConfig(StrictModel):
 
 class CampaignConfig(StrictModel):
     dataset_name: Annotated[str, Knob(Scope.DATA, Estimand.SEARCH)] = Field("")
-    sp_budget_round: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
-        20,
-        description="Per-round eval budget — how many samples each candidate is "
-        "scored on per round. The full train split is the bank; each round the "
-        "adaptive queue mechanism (`select_round_subset`) selects this many "
-        "informative samples from it. Not the dataset/pool size.",
-    )
-    sp_budget_origin: Annotated[int | None, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
+    sp_budget_origin: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
         DEFAULT_ORIGIN_BUDGET,
         ge=1,
         description="Origin eval budget — how many bank samples the origin (C0) is "
-        "scored on at check-in. Explicit `null` ⇒ `sp_budget_round`. Defaults ABOVE "
-        "`sp_budget_round` because origin breadth is the one breadth that is nearly "
+        "scored on at check-in. The bench's, whatever the optimizer: a round's own panel is "
+        "its sampler's knob. Wide because origin breadth is the one breadth that is nearly "
         "free: θ_origin is the term EVERY delta subtracts, and its rows are "
         "content-addressed cache replayed into every candidate arm, fork and resume — "
         "paid once per config. Candidate breadth is paid per candidate, per round. "
@@ -413,12 +408,17 @@ class CampaignConfig(StrictModel):
         "reads, the held-out bench set the headline is scored on, and a demo pool. `None` "
         "holds nothing out: the whole bank is the search pool and there is no bench score.",
     )
+    bench_each_round: Annotated[bool, Knob(Scope.POLICY, Estimand.SPEND)] = Field(
+        False,
+        description="Grade each round's declared selection on the bench set too, so the trend "
+        "carries a held-out series beside the round composite. A round that selects a new "
+        "individual costs one more bench pass, `dataset_split.bench` cells, which is on the "
+        "order of the round's own panel; a held round costs nothing. Off: only the origin and "
+        "the final selection are graded, which the headline needs either way.",
+    )
 
     # No `Knob` — the walk descends into OptimizationConfig.
     optimization: OptimizationConfig
-
-    def origin_budget(self) -> int:
-        return self.sp_budget_origin or self.sp_budget_round
 
 
 def load_campaign_config(raw: dict[str, Any] | CampaignConfig) -> CampaignConfig:
@@ -466,50 +466,33 @@ def merge_node_overlays(
 
 
 def freeze_campaign_config(config: CampaignConfig) -> dict[str, Any]:
-    """Sole writer of the snapshot's shape, and it persists only the DELTA from defaults, so a knob
-    nobody set cannot make it unloadable. A set-then-renamed knob is re-stamped, never shimmed."""
-    return config.model_dump(mode="json", exclude_defaults=True)
+    """Sole writer of ``campaign.json::config``: the WHOLE config the campaign was minted to run,
+    so no later edit to its dataset's files reaches a resume, a fork or a served read of it."""
+    return config.model_dump(mode="json")
 
 
-# The snapshot fields that MERGE with the live file rather than replace it, because the file holds
-# no version of them to replace — every other frozen key is the campaign's word over the file's.
-_MERGED_INHERITED_FIELDS = frozenset({"pipeline_overlay", "optimizer_narrowing"})
+def apply_config_overrides(config: CampaignConfig, overrides: ConfigOverrides) -> CampaignConfig:
+    """ABSOLUTE values over *config*, ``nodes`` key by key; a budget arm is not applied here, since
+    a seed's budget is composed and admitted before launch (`jobs/quota.py::declare_run_ceiling`)."""
+    opt_updates: dict[str, Any] = (
+        {"max_rounds": overrides.max_rounds} if overrides.max_rounds is not None else {}
+    )
+    if overrides.nodes:
+        opt_updates["nodes"] = merge_node_overlays(config.optimization.nodes, overrides.nodes)
+    top_updates: dict[str, Any] = {"scoring": overrides.scoring} if overrides.scoring else {}
+    if not opt_updates and not top_updates:
+        return config
+    if opt_updates:
+        top_updates["optimization"] = config.optimization.model_copy(update=opt_updates)
+    return config.model_copy(update=top_updates)
 
 
-def apply_inherited_overlay(
-    config: CampaignConfig,
-    frozen_config: dict[str, Any],
-    seed: CycleSeed | None,
-) -> CampaignConfig:
-    """The campaign's own DECLARATION over the LIVE dataset file. Resume/fork rebuild from the file
-    so declaration edits stay drift-detected, then the snapshot wins wherever it SPOKE — it is the
-    delta from defaults (:func:`freeze_campaign_config`), so a knob nobody set keeps coming from
-    the file and an operator edit still reaches a resume. Read off the snapshot DICT, so one
-    renamed leaf cannot block a resume."""
-    frozen_narrowing = {
-        node: NodeSearchNarrowing.model_validate(raw)
-        for node, raw in (frozen_config.get("optimizer_narrowing") or {}).items()
-    }
-    narrowing = {**config.optimizer_narrowing, **frozen_narrowing}
-    if seed is not None:
-        narrowing.update(seed.optimizer_narrowing)
-    frozen_overlay: dict[str, Any] = frozen_config.get("pipeline_overlay") or {}
-    # The frozen snapshot wins over the live dataset file, which is a mint-time SEED — so the
-    # runner's grade-C stamp reads the SAME permitted model set the fork-cycle cap-gate reads off
-    # `campaign.config`, and the two cannot disagree. That is why `frozen_narrowing` is merged
-    # SECOND above, and the seed's own declaration last of all.
-    #
-    # Everything ELSE the campaign froze — its loop ceilings above all. Only the two fields above
-    # MERGE rather than replace, so they are the two lifted out here and the rest re-validates as
-    # one layer. Without this a `--config` (or any mint-time declaration) reached `campaign.json`
-    # and not the loop: the run enforced the dataset file's `max_rounds` and `spend_budget_usd`
-    # while every surface reading the campaign showed the operator's.
-    rest = {k: v for k, v in frozen_config.items() if k not in _MERGED_INHERITED_FIELDS}
-    if rest:
-        config = load_campaign_config(merge_config_layers(config.model_dump(mode="json"), rest))
+def apply_cycle_seed(config: CampaignConfig, seed: CycleSeed | None) -> CampaignConfig:
+    """A cycle's config: its campaign's frozen one under the seed the cycle was minted with, whose
+    narrowing replaces the campaign's node by node."""
+    if seed is None:
+        return config
+    config = apply_config_overrides(config, seed.config_overrides)
     return config.model_copy(
-        update={
-            "pipeline_overlay": {**config.pipeline_overlay, **frozen_overlay},
-            "optimizer_narrowing": narrowing,
-        }
+        update={"optimizer_narrowing": {**config.optimizer_narrowing, **seed.optimizer_narrowing}}
     )

@@ -377,93 +377,6 @@ def test_merge_known_outcomes_preserves_prior_on_untouched_samples() -> None:
 _OPT = {"degradation_threshold": 0.0}
 
 
-def test_steered_fork_seed_narrowing_overrides_campaign_locks_per_node() -> None:
-    """A steered fork edits one node's locks; its seed `optimizer_narrowing`
-    overrides the campaign-wide narrowing for THAT node, leaving others inherited."""
-    from promptpotter.application.campaign_config import (
-        apply_inherited_overlay,
-        load_campaign_config,
-    )
-
-    frozen = {
-        "optimization": _OPT,
-        "optimizer_narrowing": {
-            "llm": {"param_keys": ["temperature"], "param_allowed_values": {}},
-            "retriever": {"param_keys": ["top_k"], "param_allowed_values": {}},
-        },
-    }
-    seed = CycleSeed(
-        optimizer_narrowing={"llm": {"param_keys": [], "param_allowed_values": {}}},
-        origin_source="fork_seed",
-    )
-    merged = apply_inherited_overlay(load_campaign_config({"optimization": _OPT}), frozen, seed)
-    # Edited node: the fork's empty-keys lock (everything held) wins.
-    assert merged.optimizer_narrowing["llm"].param_keys == []
-    # Untouched node: the campaign's mint-time narrowing is inherited unchanged.
-    assert merged.optimizer_narrowing["retriever"].param_keys == ["top_k"]
-
-
-def test_frozen_campaign_config_ceilings_survive_the_live_dataset_file(tmp_path: Path) -> None:
-    """The campaign's own snapshot decides what it RUNS, not the dataset template beside it.
-
-    A mint-time `--config` must reach the loop, not only `campaign.json`, or `run_limits` arms the
-    file's ceilings while every surface reading the campaign shows the operator's. The snapshot is
-    the delta from defaults, so a knob it never named still comes off the file.
-    A snapshot selecting another optimizer runs that manifest under ITS overlay alone.
-    """
-    from types import SimpleNamespace
-
-    from promptpotter.application.campaign_config import (
-        apply_inherited_overlay,
-        load_campaign_config,
-    )
-    from promptpotter.application.datasets.authored import (
-        dataset_campaign_path,
-        load_dataset_campaign_config,
-    )
-    from promptpotter.application.optimizer_manifest import select_optimizer
-    from promptpotter.application.run_observers import build_campaign_emitter
-    from promptpotter.config.paths import benchmark_datasets_root
-
-    template = load_dataset_campaign_config(
-        dataset_campaign_path(benchmark_datasets_root() / "justlogic-d234")
-    )
-    capo_nodes = {"population": {"config": {"size": 4}}}
-    capo = apply_inherited_overlay(
-        template, {"optimization": {"optimizer": "capo", "nodes": capo_nodes}}, None
-    )
-    assert {n: o.model_dump() for n, o in capo.optimization.nodes.items()} == capo_nodes
-    assert select_optimizer(capo.optimization).node_config("population")["size"] == 4
-    session = SimpleNamespace(
-        hop=CycleHop(campaign_id="camp_capo", cycle_id="cycle_capo"),
-        tenant_root=str(tmp_path),
-        session_id="sess_capo",
-        backend_client=SimpleNamespace(max_cells_in_flight=2, measured_unit="sample"),
-    )
-    emitter = build_campaign_emitter(session, capo, origin_accuracy=None)  # type: ignore[arg-type]
-    assert emitter is not None
-    # CAPO's own pacing, the overlay's μ included: the population races beside the offspring.
-    crossovers = select_optimizer(capo.optimization).node_config("capo_crossover")["crossovers"]
-    assert emitter.state.arms_per_round == 4 + crossovers
-
-    live = load_campaign_config(
-        {
-            "optimization": {
-                **_OPT,
-                "max_rounds": 5,
-                "nodes": {"l1_generate": {"config": {"n_variants": 7}}},
-            }
-        }
-    )
-    frozen = {"optimization": {"max_rounds": 12, "spend_budget_usd": 0.3}}
-    merged = apply_inherited_overlay(live, frozen, None)
-
-    assert merged.optimization.max_rounds == 12
-    assert merged.optimization.spend_budget_usd == 0.3
-    # Named by neither: the sibling knob under the same block survives the merge.
-    assert merged.optimization.nodes["l1_generate"].config == {"n_variants": 7}
-
-
 def test_lives_resume_fold_matches_live_observe() -> None:
     """Resume-integrity: the banked-lives ("hearts") count rebuilt from the ledger's
     ``improved`` sequence (``EscalationFSM.fold``) must equal the live in-run count
@@ -1192,14 +1105,17 @@ def test_an_applied_scenario_forks_at_its_round_and_carries_the_criterion(
     change: every round it then produces is evidence for a formula that was never applied.
 
     `scoring` sits on `CampaignConfig` itself rather than under `optimization`, so it needs its own
-    bucket in `_apply_config_overrides` — folded into the nested copy beside the run limits it
+    bucket in `apply_config_overrides` — folded into the nested copy beside the run limits it
     would vanish with every gate green.
     """
     from promptpotter.application.bench.resume_and_fork.fork_siblings import (
         mint_operator_fork,
     )
-    from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
-    from promptpotter.application.runner.entry import _apply_config_overrides
+    from promptpotter.application.campaign_config import (
+        CampaignConfig,
+        OptimizationConfig,
+        apply_config_overrides,
+    )
     from promptpotter.domain.run_records import ConfigOverrides
     from promptpotter.shared.errors import PayloadInvalidError
 
@@ -1227,7 +1143,7 @@ def test_an_applied_scenario_forks_at_its_round_and_carries_the_criterion(
     seed = store.read_cycle_seed(child)
     assert seed is not None
     base = CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05))
-    applied = _apply_config_overrides(base, seed.config_overrides)
+    applied = apply_config_overrides(base, seed.config_overrides)
     assert applied.scoring == criterion
     assert base.scoring is None  # the parent's frozen config is never mutated
 

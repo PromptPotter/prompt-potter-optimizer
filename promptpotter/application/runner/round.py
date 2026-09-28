@@ -19,6 +19,7 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizers.nodes import RoundContext, RoundOpening
 from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.application.run_phase_control import declare_run_phase
+from promptpotter.application.runner.bench import grade_round_selection
 from promptpotter.application.runner.measurement import measure_population
 from promptpotter.application.runner.output import (
     write_hard_samples_artifacts,
@@ -32,6 +33,7 @@ from promptpotter.application.scoring.row_diagnostics import count_degraded_samp
 from promptpotter.application.scoring.selection import paired_fitness
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.dashboard_rows import RunStanding
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
     CampaignPhase,
@@ -457,7 +459,9 @@ async def execute_round(
         campaign_id=session.state.tracing_campaign_id,
         round_num=round_num,
     ):
-        measured = await measure_population(ctx, population, panel, plan.eliminator)
+        measured = await measure_population(
+            ctx, population, panel, plan.eliminator, reads_parent=plan.selector.reads_parent
+        )
     emit_phase(
         callbacks.on_phase,
         CampaignPhase.MEASURE,
@@ -601,9 +605,6 @@ def persist_round(
         flushed = list(cycle.pending_decisions)
         cycle.pending_decisions.clear()
 
-    if cycle.axes is not None:
-        round_result.axis_memory_peaked = sorted(cycle.axes.peaked_axes())
-
     if (ledger := session.state.ledger) is not None:
         for d in flushed:
             ledger.append(d)
@@ -664,8 +665,14 @@ async def close_round(
     round_result.optimizer_facts = cycle.optimizer.runtime.round_facts(
         cycle.optimizer, round_result
     )
-    stall, hearts = cycle.working_state.standing()
-    cb.on_round_complete(round_result, stall, hearts)
+    stall, stalls_left = cycle.working_state.standing()
+    bank = cycle.optimizer.pacing.stalls_left
+    standing = RunStanding(
+        rounds_without_advance=stall,
+        stalls_left=stalls_left,
+        stalls_left_cap=None if bank is None else bank[1],
+    )
+    cb.on_round_complete(round_result, standing)
     persist_round(cycle, round_result, session, cb)
     if cycle.axes and session.store:
         cycle.axes.refresh(
@@ -709,6 +716,7 @@ async def post_round(
         budget=budget_gate,
         log=logger.info,
     )
+    await grade_round_selection(cycle, session, round_result, cb=cb)
 
     if boundary is None:
         return

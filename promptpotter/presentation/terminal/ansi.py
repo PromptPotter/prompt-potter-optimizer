@@ -6,6 +6,7 @@ from __future__ import annotations
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.application.views.view_models import (
     AnyView,
+    BenchGradedView,
     CandidatesGeneratedView,
     InitEnterView,
     InitExitView,
@@ -68,22 +69,24 @@ def _render_init_exit(v: InitExitView) -> str:
     return "\n".join(out)
 
 
-def _heart_bar(hearts: int, cap: int | None) -> str:
-    """Banked lives filled, the rest of the ceiling hollow. The EMPTY pips are the readout: three hearts alone cannot
-    distinguish healthy-of-four from nearly-dead-of-seven, and lives mode has no ``ROUND n/max`` to carry the scale."""
-    if hearts <= 0:
+def _heart_bar(stalls_left: int, cap: int | None) -> str:
+    """Banked stalls filled, the rest of the ceiling hollow. The EMPTY pips are the readout: three
+    alone cannot distinguish healthy-of-four from nearly-dead-of-seven, and a run banking stalls
+    has no ``ROUND n/max`` to carry the scale."""
+    if stalls_left <= 0:
         return "💀"
-    if cap is None or cap < hearts:
-        return "♥" * hearts
-    return "♥" * hearts + "♡" * (cap - hearts)
+    if cap is None or cap < stalls_left:
+        return "♥" * stalls_left
+    return "♥" * stalls_left + "♡" * (cap - stalls_left)
 
 
 def _render_round_start(v: RoundStartView) -> str:
-    # Lives mode → show the ♥ bank instead of the fixed round ceiling (which is null/999
-    # when lives governs the budget); non-lives runs keep the "ROUND N/max" form.
+    # A run banking stalls shows the ♥ bank instead of the fixed round ceiling (null/999 when the
+    # bank governs the budget); any other run keeps the "ROUND N/max" form.
+    standing = v.run_standing
     round_label = (
-        f"ROUND {v.round}  {_heart_bar(v.hearts, v.hearts_cap)}"
-        if v.hearts is not None
+        f"ROUND {v.round}  {_heart_bar(standing.stalls_left, standing.stalls_left_cap)}"
+        if standing is not None and standing.stalls_left is not None
         else f"ROUND {v.round}/{v.max_rounds or 999}"
     )
     arms = "?" if v.arms is None else str(v.arms)
@@ -234,8 +237,22 @@ def to_text(view: AnyView) -> str:
             return _render_step_enter(view)
         case OptimizerStepExitView():
             return _render_step_exit(view)
+        case BenchGradedView():
+            return _render_bench_graded(view)
         case _:
             return ""
+
+
+def _render_bench_graded(v: BenchGradedView) -> str:
+    reading = v.reading
+    if reading is None:
+        return f"  {YELLOW}bench: no reading — {v.missing}{RESET}"
+    composite = reading["composite_fitness"]
+    value = "—" if composite is None else f"{composite:.3f}"
+    return (
+        f"  {DIM}bench R{reading['round']}: composite {value} on "
+        f"{reading['n_scored']} held-out rows{RESET}"
+    )
 
 
 _COLLAPSE_WORDS = {

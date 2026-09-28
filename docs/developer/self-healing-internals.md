@@ -94,9 +94,9 @@ Every `content_empty` row is gated on **the result not having answered** — the
 
 A fatal code is deterministic for the whole config — one sighting proves the candidate is broken for every remaining query, which is why a rule allowed to fire on a row that answered *correctly* eliminates a good candidate. Grow the rule table (don't expose it as a tunable) when a new pattern proves equally conclusive.
 
-Three load-boundary effects, consumed via `is_deprecated()`: `DegradationCheck` eliminates the candidate on first sighting; `open_walk` splits deprecated entries off `archive_queries.replay_feed` (`_split_off_deprecated_samples`) so fatal entries are evicted from cache and re-measured with `retry_of_deprecated_cache=True`; and `_compute_accuracy` partitions deprecated rows into their own count, out of `hits`, `total`, `errors` and the accuracy denominator.
+Two load-boundary effects, consumed via `is_deprecated()`: `DegradationCheck` eliminates the candidate on first sighting; and `open_walk` splits deprecated entries off `archive_queries.replay_feed` (`_split_off_deprecated_samples`) so fatal entries are evicted from cache and re-measured with `retry_of_deprecated_cache=True`. `_compute_accuracy` counts them apart as `deprecated`, a count WITHIN `total`: a deprecated row stays in every denominator as the miss the formula grades — which rows a reading counts is [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#which-rows-a-reading-counts)'s.
 
-This is a load-boundary filter, not a score-time fallback: trace records are still archived for forensic value, and only cache reuse and primary-stat aggregation are blocked. Sanctioned alongside the measurement's validation-failure synthetic-0 — see [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#deprecated-samples).
+This is a load-boundary filter, not a score-time fallback: trace records are still archived for forensic value, and only cache reuse is blocked. Sanctioned alongside the measurement's validation-failure synthetic-0 — see [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#deprecated-samples).
 
 ## Adding a new mechanism
 

@@ -36,14 +36,18 @@ from promptpotter.domain.pipeline_schema import (
     PipelineNode,
     PipelineSchema,
 )
+from promptpotter.domain.search_point import PARAM_SCOPE_KEYS, WHO_ANSWERS_KEYS
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import read_json, read_yaml
+from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 from promptpotter.shared.hashing import shapes_optimizer_prompt
+from promptpotter.shared.plugin_registry import BUILT_IN
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizers.nodes import (
         OptimizerPacing,
         OptimizerRuntime,
+        Sampler,
         Selector,
     )
 
@@ -144,8 +148,26 @@ class SelectedOptimizer:
         name = next(n for n in walk if self.node(n).wire_type is NodeKind.SELECTOR)
         return cast("Selector", optimizers.member(name)).stamps_theta
 
+    @property
+    def sampler(self) -> Sampler:
+        """The member ``default`` draws each round's panel with."""
+        walk = self.schema.pipelines["default"]
+        name = next(n for n in walk if self.node(n).wire_type is NodeKind.SAMPLER)
+        return cast("Sampler", optimizers.member(name))
+
+    def round_cells(self, pool: int) -> int:
+        """The cells a round draws off a search pool of ``pool`` rows (``Sampler.draws``)."""
+        return self.sampler.draws(self, pool)
+
     def node_config(self, name: str) -> dict[str, Any]:
         return dict(self.node(name).current_config)
+
+    def call_config(self, name: str) -> dict[str, Any]:
+        """*name*'s config less its member's knobs: what shapes the call itself. A knob's edit is
+        the diff classifier's to scope (``knobs.py::classify_config_diff``), never a prompt hash's."""
+        table = optimizers.registered()
+        knobs = table[name].knobs.model_fields if name in table else {}
+        return {k: v for k, v in self.node_config(name).items() if k not in knobs}
 
     def file_config(self, name: str) -> dict[str, Any]:
         self.node(name)
@@ -187,7 +209,7 @@ class SelectedOptimizer:
         return str(self.node_config(node or self.proposer)["model"])
 
     def _node_digest(self, node: str, prompt_fields: Mapping[str, Any]) -> str:
-        cfg = self.node_config(node)
+        cfg = self.call_config(node)
         body = _prompt_body(self.document, cfg)
         schema_key = _resolved_key(cfg.get("schema_family"), cfg.get("schema_version"))
         return _digest(
@@ -199,13 +221,21 @@ class SelectedOptimizer:
         )
 
     @functools.cached_property
-    def node_digests(self) -> dict[str, str]:
-        """Per llm node: the prompt it runs, its output schema and its resolved config — what
-        decides the node's output, off the manifest alone."""
-        return {node: self._node_digest(node, {}) for node in self.llm_nodes}
+    def config_digest(self) -> str:
+        """What decides this optimizer's behaviour, off the manifest alone: each llm node's prompt,
+        output schema and call config, and every member's validated knobs."""
+        return _digest(
+            [
+                self.name,
+                self.version,
+                {node: self._node_digest(node, {}) for node in self.llm_nodes},
+                {node: self.knobs(node).model_dump(mode="json") for node in self.member_nodes},
+            ]
+        )
 
     def running_digests(self) -> dict[str, str]:
-        """:attr:`node_digests` under the prompt-field edit an L4 inner cell runs its nodes with."""
+        """Per llm node: its prompt under the edit an L4 inner cell runs it with, its output schema
+        and its call config."""
         return {
             node: self._node_digest(node, resolve_node_override(node).prompt_fields)
             for node in self.llm_nodes
@@ -246,6 +276,27 @@ def running_prompt(
     return template
 
 
+# What an optimizer llm node's config may name beside its member's knobs: what `llm_call` sends or
+# routes on, and the prompt and output schema the node resolves.
+_CALL_CONFIG_KEYS: frozenset[str] = (
+    WHO_ANSWERS_KEYS
+    | PARAM_SCOPE_KEYS
+    | {"seed", "prompt_family", "prompt_version", "schema_family", "schema_version"}
+)
+
+
+def _refuse_unknown_llm_keys(selected: SelectedOptimizer) -> None:
+    table = optimizers.registered()
+    for node in selected.llm_nodes:
+        knobs = table[node].knobs.model_fields if node in table else {}
+        if unknown := sorted(set(selected.node_config(node)) - _CALL_CONFIG_KEYS - set(knobs)):
+            raise ValueError(
+                f"optimizer {selected.name!r} node {node!r} names {unknown} in its config, which "
+                f"is neither a call setting ({sorted(_CALL_CONFIG_KEYS)}) nor one of its knobs "
+                f"({sorted(knobs)})."
+            )
+
+
 def _knobs(name: str, kind: NodeKind | None, config: Mapping[str, Any]) -> StrictModel:
     model = optimizers.member(name).knobs
     if kind in MEMBER_KINDS:
@@ -283,16 +334,25 @@ def _select(
     for declared_node in selected.schema.config_nodes:
         if declared_node.wire_type in MEMBER_KINDS or declared_node.name in optimizers.registered():
             selected.knobs(declared_node.name)
+    _refuse_unknown_llm_keys(selected)
     return selected
 
 
 def resolve_optimizer(name: str, nodes: Mapping[str, ManifestNodeOverlay]) -> SelectedOptimizer:
-    """The one resolution every surface shares — a run, a draft edit, a served menu — so an
-    overlay refused in one place is refused in all."""
-    shipped = optimizers.runtime(name).manifest_dir
+    """The one resolution every surface shares — a run, a draft edit, a fork, a mint, a served menu
+    — so an overlay refused in one place is refused in all, and refused as the caller's input."""
+    try:
+        shipped = optimizers.runtime(name).manifest_dir
+    except KeyError as exc:
+        raise NotFoundError(f"No optimizer named {name!r}", code="optimizer_unknown") from exc
     path = optimizer_manifest_path(name, shipped)
     overlay = {node: dict(o.config) for node, o in sorted(nodes.items())}
-    return _select(name, shipped, path, _stamp(path), json.dumps(overlay, sort_keys=True))
+    try:
+        return _select(name, shipped, path, _stamp(path), json.dumps(overlay, sort_keys=True))
+    except ValueError as exc:
+        raise PayloadInvalidError(
+            f"optimization.nodes refused by optimizer {name!r}: {exc}", code="optimizer_overlay"
+        ) from exc
 
 
 def select_optimizer(opt: OptimizationConfig) -> SelectedOptimizer:
@@ -311,6 +371,16 @@ class KnobRow(StrictModel):
         description="The closed set a string knob takes, in declared order; null when open"
     )
     nullable: bool = Field(description="Whether null is a legal value (an opt-in knob, off)")
+    minimum: float | None = Field(description="The least legal value, itself legal; null when none")
+    exclusive_minimum: float | None = Field(
+        description="A bound every legal value lies strictly above; null when none"
+    )
+    maximum: float | None = Field(
+        description="The greatest legal value, itself legal; null when none"
+    )
+    exclusive_maximum: float | None = Field(
+        description="A bound every legal value lies strictly below; null when none"
+    )
     value: Any = Field(description="The value the manifest declares — a campaign's floor")
 
 
@@ -343,6 +413,10 @@ def _knob_row(key: str, prop: Mapping[str, Any], defs: Mapping[str, Any], value:
         type=str(kind.get("type") or ("object" if "properties" in kind else "string")),
         options=[str(v) for v in enum] if enum else None,
         nullable=nullable,
+        minimum=kind.get("minimum"),
+        exclusive_minimum=kind.get("exclusiveMinimum"),
+        maximum=kind.get("maximum"),
+        exclusive_maximum=kind.get("exclusiveMaximum"),
         value=value,
     )
 
@@ -372,6 +446,10 @@ class OptimizerEntry(StrictModel):
         description="The citation a paper preset reproduces; its declared knob values are that "
         "paper's configuration. Null for an optimizer reproducing none"
     )
+    origin: str | None = Field(
+        description="The installed package that registered it, as `<distribution>: <entry point>`; "
+        "null for one shipped with PromptPotter"
+    )
 
 
 class OptimizerRoster(StrictModel):
@@ -386,10 +464,14 @@ class OptimizerRoster(StrictModel):
 def optimizer_roster() -> OptimizerRoster:
     default = OptimizationConfig.model_fields["optimizer"].default
     names = sorted(optimizers.runtimes(), key=lambda n: (n != default, n))
+    origins = optimizers.runtime_origins()
     entries = []
     for name in names:
         selected = resolve_optimizer(name, {})
-        entries.append(OptimizerEntry(name=name, version=selected.version, paper=selected.paper))
+        origin = None if origins[name] == BUILT_IN else origins[name]
+        entries.append(
+            OptimizerEntry(name=name, version=selected.version, paper=selected.paper, origin=origin)
+        )
     return OptimizerRoster(default=default, optimizers=entries)
 
 

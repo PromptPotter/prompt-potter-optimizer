@@ -117,7 +117,7 @@ from promptpotter.domain.ruler import (
 )
 from promptpotter.domain.run_records import CandidateMintedRecord, WallClock
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import extract_item_label
+from promptpotter.domain.scoring import extract_item_label, is_graded
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.spend import SpendBucket, SpendRollup
 from promptpotter.domain.wounds import ValidationFailure
@@ -358,16 +358,20 @@ def test_a_miss_is_charged_its_cost_and_a_solved_cell_scores_its_composite(monke
     assert sum(long_perfect) > sum(short_half), "length outranked a 2x accuracy gap"
 
     # The share is half the grading function: a ruler must never pool grades across two of them.
-    before = auto_scorer_id(per_sample, per_cell)
+    before = auto_scorer_id(per_sample, per_cell, judge_instrument=None)
+    # So are the judges whose banked terms a formula reads: one text over two graders is two.
+    assert auto_scorer_id(per_sample, per_cell, judge_instrument="a judge") != before
     monkeypatch.setattr(compiler, "MISS_COST_SHARE", 0.3)
-    assert auto_scorer_id(per_sample, per_cell) != before
+    assert auto_scorer_id(per_sample, per_cell, judge_instrument=None) != before
     # A defaulted cell formula and the same text declared stamp one `scorer_cell_formula`, yet only
     # the declared one charges a miss — so the id, never the resolved text, names the grader.
     (defaulted,) = rescore_results(
         [cell(2, "b", 692)], compile_scorer(per_sample, None, verifier_graded=False)
     )
     assert defaulted["objective"] == 0.0
-    assert auto_scorer_id(per_sample, None) != auto_scorer_id(per_sample, DEFAULT_CELL_FORMULA)
+    assert auto_scorer_id(per_sample, None, judge_instrument=None) != auto_scorer_id(
+        per_sample, DEFAULT_CELL_FORMULA, judge_instrument=None
+    )
 
 
 # 2. Composite fitness — what a score is made of
@@ -442,11 +446,10 @@ def test_an_unmeasured_term_is_never_scored_as_zero() -> None:
     deprecated = _result_min("q", "a") | {"error": "SCHEMA_VALIDATION_FAILED", "fitness": 0.0}
     assert compute_accuracy(results=[deprecated]) == 0.0
 
-    # An errored row is the ABSENCE of a verdict — excluded from the mean, never a silent
-    # 0.0 dragging a real score down (an L4 inner campaign dying of a timeout must not
-    # halve its optimizer prompt's accuracy)...
+    # A provider's fault is the ABSENCE of a verdict — excluded from the mean, never a silent
+    # 0.0 dragging a real score down...
     scored = _result_min("q", "a") | {"hit": True, "fitness": 1.0}
-    errored = _result_min("ERROR", "a") | {"error": "boom", "error_category": "UNKNOWN"}
+    errored = _result_min("ERROR", "a") | {"error": "boom", "error_category": "SERVER"}
     del errored["fitness"], errored["hit"]  # real error rows carry neither
     assert compute_accuracy(results=[scored, errored]) == 1.0
     # ...while it still surfaces on the error channel, counted over ALL rows.
@@ -471,10 +474,10 @@ def test_an_unmeasured_term_is_never_scored_as_zero() -> None:
     assert empty["accuracy"] is None
     assert empty["total"] == 0
 
-    # The same split, one step in: a candidate whose every row ERRORED has no rate either. It is
-    # the arm that matters, because it is reachable — an L4 cell is a whole inner campaign, and
-    # one that times out throughout used to report itself as having driven the inner loop to 0%.
-    errored = _result_min("ERROR", "a") | {"error": "boom", "error_category": "UNKNOWN"}
+    # The same split, one step in: a candidate whose every row ERRORED with no label to miss has
+    # no rate either. It is the arm that matters, because it is reachable — an L4 cell is a whole
+    # inner campaign, and one cut throughout must not read as having driven the inner loop to 0%.
+    errored = _result_min("ERROR", "") | {"error": "boom", "error_category": "HALTED"}
     del errored["fitness"], errored["hit"]
     all_errored = compute_composite_fitness([errored], _single_node_schema())
     assert all_errored["accuracy"] is None
@@ -636,6 +639,30 @@ def test_composite_fitness_matches_default_formula():
     scored = compute_composite_fitness(results, schema)
     assert scored["composite_fitness"] == pytest.approx(scored["accuracy"], abs=1e-9)
     assert scored["composite_fitness"] == pytest.approx(0.5, abs=1e-4)
+
+
+def test_a_cell_the_prompt_failed_stays_in_the_denominator_as_a_miss() -> None:
+    """A reading's population is the one SENT. A refusal is flagged for the stop rule and a cut
+    cell errors, but both are what the prompt produced: dropping them pays a prompt accuracy for
+    refusing exactly the cells it could not answer — five hits beside five refusals read 100%.
+    Only a provider fault leaves the count. Silent: every number renders."""
+    scorer = compile_scorer("label_match(predicted, ground_truth)", verifier_graded=False)
+
+    def row(sid: int, predicted: str, **extra: Any) -> dict[str, Any]:
+        cell = {"sample_id": sid, "query": f"q{sid}", "ground_truth": "a", "predicted": predicted}
+        return {**cell, "error": None, "pipeline_data": {}, **extra}
+
+    rows = [row(i, "a") for i in range(5)]
+    rows += [row(5 + i, "I cannot help with that request.") for i in range(5)]
+    rows += [
+        row(10, "ERROR", error="ran past its envelope", error_category="HALTED"),
+        row(11, "ERROR", error="HTTP 502", error_category="SERVER"),
+    ]
+    scores = compute_composite_fitness(rescore_results(rows, scorer), _single_node_schema())
+    assert (scores["total"], scores["errors"]) == (11, 1)
+    assert scores["accuracy"] == pytest.approx(5 / 11), "the prompt's own failures left the count"
+    # With no label a cut cell has no miss to be, so it carries no verdict either.
+    assert not is_graded({**rows[10], "ground_truth": ""})
 
 
 def test_a_hallucinated_node_candidate_keeps_its_score() -> None:
@@ -1590,14 +1617,14 @@ def _peer_cycle(
     monkeypatch: Any,
     optimizer: str,
     nodes: dict,
-    solves: Callable[[str, Sample], bool],
+    solves: Callable[[str, Sample], bool | None],
     *,
     bench: int = 0,
     origin_composite: float = 0.0,
     **optimization: Any,
 ) -> Cycle:
     """A cycle of a peer ``optimizer`` over a sixteen-row bank, whose backend answers a cell right
-    where ``solves(prompt, sample)`` says."""
+    where ``solves(prompt, sample)`` says, and errors on it where that says ``None``."""
     bank = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(16)]
     schema = PipelineSchema(
         name=f"{optimizer}-e2e",
@@ -1610,7 +1637,6 @@ def _peer_cycle(
     config = load_campaign_config(
         {
             "dataset_name": f"{optimizer}-e2e",
-            "sp_budget_round": 12,
             "dataset_split": {"bench": bench, "demo": 2},
             "optimization": {
                 "optimizer": optimizer,
@@ -1659,6 +1685,8 @@ def _peer_cycle(
             "cached": False,
             "pipeline_data": {"total_time": 0.1, "target_prompt_chars": len(prompt)},
         }
+        if solved is None:
+            row["error_category"] = "SERVER"
         return rescore_results([row], session.scoring.scorer)[0]
 
     monkeypatch.setattr(query_loop, "measure_sample", _measure)
@@ -1720,7 +1748,6 @@ def test_a_capo_round_races_its_population_beside_the_offspring_and_keeps_the_be
         "blocks": {"config": {"block_size": 4, "max_blocks": 3}},
         "capo_crossover": {"config": {"crossovers": 2}},
         "few_shot": {"config": {"k_max": 1}},
-        "paired_t": {"config": {"survivors": 3}},
         "population": {"config": {"size": 3}},
     }
     # GOOD answers every cell, OK the even ones, anything else none.
@@ -1798,7 +1825,6 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
         "blocks": {"config": {"block_size": 4, "max_blocks": 2}},
         "capo_crossover": {"config": {"crossovers": 1}},
         "few_shot": {"config": {"k_max": 0}},
-        "paired_t": {"config": {"survivors": 2}},
         "population": {"config": {"size": 2}},
     }
     solves = lambda prompt, s: "GOOD" in prompt or ("OK" in prompt and s.id % 2 == 0)  # noqa: E731
@@ -1819,7 +1845,6 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
         "the target stop reads the declared pick, not the round of the composite high-water"
     )
 
-    spend = SpendRollup()
     origin = cycle.origin_round.opt_sp
     assert origin is not None
     origin_pass = asyncio.run(
@@ -1828,11 +1853,10 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
             cycle.searchpoint(origin.lineage.id),
             round_num=0,
             cb=_QUIET_CALLBACKS,  # type: ignore[arg-type]
-            spend=spend,
         )
     )
     bench = asyncio.run(
-        bench_selection(cycle, session, origin=origin_pass, cb=_QUIET_CALLBACKS, spend=spend)  # type: ignore[arg-type]
+        bench_selection(cycle, session, origin=origin_pass, cb=_QUIET_CALLBACKS)  # type: ignore[arg-type]
     )
     assert (bench.selected.round, bench.selected.sp_hash) == (1, picked.selected_scores[0].sp_hash)
     assert (bench.selected.accuracy, bench.origin.accuracy) == (1.0, 0.0), "GOOD solves them all"
@@ -1885,7 +1909,7 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
     from promptpotter.shared.errors import ErrorCategory
 
     async def _refused(sample: Sample, _session: Any, *, pipeline_params: Any) -> dict:
-        return {
+        row = {
             "sample_id": sample.id,
             "sample_key": sample.key,
             "query": sample.query,
@@ -1896,6 +1920,7 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
             "cached": False,
             "pipeline_data": {},
         }
+        return rescore_results([row], _session.scoring.require_scorer())[0]
 
     answering = query_loop.measure_sample
     monkeypatch.setattr(query_loop, "measure_sample", _refused)
@@ -1907,13 +1932,12 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
             cycle.searchpoint(unread.candidate_id),
             round_num=1,
             cb=_QUIET_CALLBACKS,  # type: ignore[arg-type]
-            spend=spend,
         )
     )
     assert refused.reading is None and refused.rows == []
     monkeypatch.setattr(query_loop, "measure_sample", answering)
     cut = asyncio.run(
-        bench_selection(cycle, session, origin=refused, cb=_QUIET_CALLBACKS, spend=spend)  # type: ignore[arg-type]
+        bench_selection(cycle, session, origin=refused, cb=_QUIET_CALLBACKS)  # type: ignore[arg-type]
     )
     assert (cut.origin, cut.lift, cut.selected) == (None, None, bench.selected)
     assert cut.missing_reason is not None and "Key limit exceeded" in cut.missing_reason
@@ -2228,6 +2252,43 @@ def test_a_gepa_run_admits_a_child_only_past_the_minibatch_and_draws_parents_off
     assert [c.individual.lineage.id for c in lone.optimizer_state.payload.pool] == [
         unread.opt_sp.lineage.id
     ]
+
+
+def test_a_gepa_pool_member_carries_a_verdict_on_every_pareto_cell(
+    built_stores, tmp_path, monkeypatch
+) -> None:
+    """GEPA ranks its pool on the mean over the Pareto set, so every member is read on the same
+    cells: the seat and a child alike are refused, on the record, for one cell with no verdict.
+    Silent if wrong: a seat averaged over fewer cells than its rival is ranked on cells it skipped."""
+    alpha = "Solve ALPHA."
+    errored: set[str] = set()
+
+    async def _llm(messages: list[dict], **_kw: Any) -> Any:
+        return types.SimpleNamespace(content=f"```\n{alpha}\n```")
+
+    def solves(prompt: str, s: Sample) -> bool | None:
+        if "ALPHA" in prompt:
+            return True
+        return None if s.key in errored else False
+
+    nodes = {"minibatch": {"config": {"size": 3, "pareto_share": 0.5}}}
+    cycle = _peer_cycle(built_stores, tmp_path, monkeypatch, "gepa", nodes, solves)
+    monkeypatch.setattr(paper_templates, "llm_call", _llm)
+    search = list(cycle.session.scoring.partition.search)
+    pareto = [s.key for s in search[:7]]
+    # The incumbent's re-score errors on one Pareto cell; the child answers every one.
+    errored.add(pareto[0])
+    origin_id = cycle.opt_sp.lineage.id
+
+    first = asyncio.run(execute_round(cycle, 1, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
+    (child,) = first.candidate_scores
+    pool = first.optimizer_state.payload.pool
+    assert [c.individual.lineage.id for c in pool] == [child.candidate_id], "the seat got in"
+    refused = [d for d in cycle.pending_decisions if d.kind == "pool_refused"]
+    assert [(d.inputs_ref["candidate_id"], d.data["ungraded"]) for d in refused] == [
+        (origin_id, [pareto[0]])
+    ]
+    assert first.selected_labels == [child.label]
 
 
 # 5. Elimination — who is cut, and when
@@ -2746,7 +2807,8 @@ def test_the_paired_t_race_cuts_live_arms_together_at_each_block_on_the_rows_the
     good_or_late = lambda prompt, s: "GOOD" in prompt or ("LATE" in prompt and s.id in first_block)  # noqa: E731
     nodes = {
         "blocks": {"config": {"block_size": 4, "max_blocks": 3}},
-        "paired_t": {"config": {"alpha": 0.2, "survivors": 2, "length_penalty": 0.05}},
+        "paired_t": {"config": {"alpha": 0.2, "length_penalty": 0.05}},
+        "population": {"config": {"size": 2}},
     }
     cycle = _peer_cycle(built_stores, tmp_path, monkeypatch, "capo", nodes, good_or_late)
     capo_state(cycle.working_state).length_norm = 100
@@ -2769,7 +2831,14 @@ def test_the_paired_t_race_cuts_live_arms_together_at_each_block_on_the_rows_the
         pipeline_params=[cycle.tracking.current_sp.pipeline_params] * len(arms),
         optimizer_state=CapoState().snapshot({}, population=[], rounds_without_advance=0),
     )
-    measured = asyncio.run(measure_population(ctx, population, panel, plan.eliminator))
+    measured = asyncio.run(
+        measure_population(
+            ctx, population, panel, plan.eliminator, reads_parent=plan.selector.reads_parent
+        )
+    )
+    # CAPO's selector reads no parent, so the parent pays only for the cells an arm reached —
+    # never block 3, which the race settled before buying.
+    assert sorted(r["sample_id"] for r in measured.parent_rows) == sorted(order[:8])
 
     # Block 1 cuts BAD, beaten by the four arms BEHIND it, and the wordy GOOD-c, which γ prices
     # below three arms solving as much; block 2 cuts LATE, beaten by exactly μ=2; the two left
@@ -2784,9 +2853,6 @@ def test_the_paired_t_race_cuts_live_arms_together_at_each_block_on_the_rows_the
     bad_ctx = measured.scores[0].elimination_context
     outscored_bad = bad_ctx["outscored_by"]
     assert sorted(outscored_bad) == ["C1.2", "C1.3", "C1.4", "C1.5"]
-    # `elimination_context` IS the shape the terminal candidate box reads
-    # (`presentation/terminal/live/candidate.py`) to print the "outscored" line — a different
-    # vocabulary from potter's `EliminationGate`, never merged into that enum.
     assert bad_ctx["gate"] == "outscored"
     assert (bad_ctx["queries_scored"], bad_ctx["block"], bad_ctx["blocks"]) == (4, 1, 3)
     assert bad_ctx["raced_against"] == ["C1.2", "C1.3", "C1.4", "C1.5"]
@@ -3515,7 +3581,10 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench(built_stores) -> 
                 measurement(s.id, level, objective=level + 0.1 * (s.id % 2), query=s.query)
                 for s in partition.bench
             ]
-            header = {"run_id": run_id, "prompt_fields_id": role, "item_count": len(rows)}
+            # The origin is ONE individual every campaign grades; each pick is its own.
+            graded = role if role == "origin" else f"{cid}:{role}"
+            header = {"run_id": run_id, "prompt_fields_id": graded, "item_count": len(rows)}
+            header |= {"name": "bench", "dataset_name": "ds"}
             record_measurement_run(
                 stores,
                 run_id,
@@ -3534,7 +3603,6 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench(built_stores) -> 
                     ci_hi=None if wide is None else composite + wide,
                     n_scored=len(rows),
                     run_id=run_id,
-                    stopped=None,
                 )
             )
         bench = BenchScore(
@@ -3557,6 +3625,8 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench(built_stores) -> 
         stores.campaigns.update(hop, {"final": final})
         spend = SpendRollup(
             loop=SpendBucket(used_usd=loop, incurred_usd=loop),
+            backend=SpendBucket(incurred_usd=incurred - loop - 0.05),
+            bench=SpendBucket(incurred_usd=0.05),
             total_used_usd=incurred if billed is None else billed,
             total_incurred_usd=incurred,
         )
@@ -3582,8 +3652,11 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench(built_stores) -> 
         pytest.approx(3.0),
         pytest.approx(0.5),
     )
-    assert row.lift_per_incurred_usd == pytest.approx(1.0)
+    # The lift is priced on the SEARCH alone: the bench's own pass is the instrument grading it.
+    assert row.lift_per_incurred_usd == pytest.approx(0.3 / 0.25)
     assert [r.concurrent_with for r in h2h.rows] == [[], []]
+    # Every individual graded on the shared rows spent them — the one origin and two picks.
+    assert [r.bench_reads for r in h2h.rows] == [3, 3]
 
     # Another seed drew other held-out rows: its headline is listed and never paired.
     gepa = campaign("gepa_c", 3, seed=1, selected=0.9)
@@ -4523,7 +4596,6 @@ def test_cached_calls_are_metered_but_not_billed(tmp_path: Path) -> None:
         state_path=CycleLayout(Path(cycle_dir)).dashboard,
         hop=CycleHop(campaign_id="c1", cycle_id="cyc1"),
         session_id="s1",
-        patience=2,
         arms_per_round=2,
         sp_budget_round=5,
         headline_metric="accuracy",

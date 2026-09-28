@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from promptpotter.application.campaign_config import merge_config_layers
 from promptpotter.application.datasets.draft_campaign import (
@@ -130,12 +130,18 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
     # Merge so one knob can change without resetting the rest, then validate the result: unknown
     # keys, an out-of-range max_rounds, and a node knob its manifest refuses all reject here.
     if patch.optimization_overrides is not None:
-        current = OptimizationOverrides.model_validate(draft.optimization_overrides)
         merged = merge_config_layers(
-            {"optimization": current.model_dump(mode="json")},
+            {"optimization": dict(draft.optimization_overrides)},
             {"optimization": patch.optimization_overrides},
         )
-        overrides = OptimizationOverrides.model_validate(merged["optimization"])
+        try:
+            overrides = OptimizationOverrides.model_validate(merged["optimization"])
+        except ValidationError as exc:
+            first = exc.errors()[0]
+            where = ".".join(str(p) for p in first["loc"])
+            raise PayloadInvalidError(
+                f"patch.optimization_overrides.{where}: {first['msg']}"
+            ) from exc
         resolve_optimizer(overrides.optimizer, overrides.nodes)
         changes["optimization_overrides"] = overrides.model_dump(mode="json")
 

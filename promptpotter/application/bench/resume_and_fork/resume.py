@@ -17,7 +17,6 @@ from promptpotter.application.bench.resume_and_fork.replayers import (
     ReplayMismatch,
     replay_decisions,
 )
-from promptpotter.application.campaign_config import freeze_campaign_config
 from promptpotter.application.knobs import DiffScope, classify_config_diff
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.domain.cycle_paths import CycleHop
@@ -178,11 +177,6 @@ async def resume_with_divergence_check(
                     "Resume: policy-only config diff (%s); continuing on cycle %s in-place",
                     ", ".join(diffed),
                     hop.cycle_id,
-                )
-                # Refresh the campaign snapshot so future resumes diff
-                # against current state.
-                campaign_store.update_campaign(
-                    hop.campaign_id, {"config": freeze_campaign_config(cycle.config)}
                 )
             return None
         if scope is DiffScope.DATA_AFFECTING and diffed:

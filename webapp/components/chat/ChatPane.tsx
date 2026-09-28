@@ -70,8 +70,8 @@ export function ChatPane({ checkinCampaignId, onOpenDashboard }: Props) {
         progress={live.progress}
         listening={live.connected && hasLiveProducer(dash?.run_phase)}
         decision={decision}
-        hearts={dash?.hearts ?? null}
-        livesCap={dash?.run_limits?.lives_cap ?? null}
+        hearts={dash?.run_standing?.stalls_left ?? null}
+        livesCap={dash?.run_standing?.stalls_left_cap ?? null}
       />
     ) : null;
 

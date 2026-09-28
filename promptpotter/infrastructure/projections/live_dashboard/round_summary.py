@@ -109,7 +109,9 @@ def _leading_arm(rr: RoundResult) -> ScoredCandidate | None:
     )
 
 
-def build_round_summary(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> RoundSummary:
+def build_round_summary(
+    rr: RoundResult, origin_rows: list[dict[str, Any]], *, best_so_far: float | None
+) -> RoundSummary:
     """One ``RoundSummary`` from a closed round — the sole writer of the persisted ``is_selected`` flag. ``health`` is
     COPIED from ``rr.health``: the projection renders the served verdict and never recomputes it."""
     # Both display models are strict name-subsets of ``ScoredCandidate`` plus the derived flags
@@ -132,7 +134,8 @@ def build_round_summary(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> R
         accuracy=rr.accuracy,
         composite_fitness=float(rr.composite_fitness),
         total=rr.total,
-        ability=rr.ability,
+        ability=rr.ability if rr.stamps_theta else None,
+        best_so_far=best_so_far,
         improved=None if rr.round == 0 else rr.improved,
         electable_count=None if rr.round == 0 else rr.electable_count,
         verdict_reason=None if rr.round == 0 else rr.verdict_reason,

@@ -1,10 +1,10 @@
 // The one derivation of the headline run KPIs, so no two surfaces show a different headline.
 
-import type { BenchScore, LiveDashboardState, RoundSummary } from "@/lib/api/types";
+import type { LiveDashboardState, RoundSummary } from "@/lib/api/types";
 import type { DashboardSnapshot } from "@/lib/poll";
 import { fmtPct0 } from "@/lib/format";
 
-// DISPLAY only: the engine always gates on θ, whatever the operator reads.
+// DISPLAY only: the selector decides on its own objective (θ where it stamps one), whatever is read.
 export type HeadlineMetric = LiveDashboardState["headline_metric"];
 
 // The one owner of a metric's name, prose and order — `candidates/series.ts` joins to it.
@@ -19,7 +19,7 @@ export const HEADLINE_METRICS: { id: HeadlineMetric; glyph: string; title: strin
     id: "ability",
     glyph: "θ",
     title:
-      "Difficulty-adjusted ability θ — the metric the winner is actually elected on. A logit (not a %): comparable within a round; cross-round comparison waits on the stable δ bank.",
+      "Difficulty-adjusted ability θ — what a θ-stamping selector (potter's) elects on. A logit (not a %): comparable within a round; cross-round comparison waits on the stable δ bank.",
   },
   {
     id: "composite",
@@ -92,58 +92,34 @@ export interface FitnessTrend {
     round: number;
     accuracy: number | null;
     composite: number | null;
-    // Only where the round's own selector elects on θ (`RoundSummary.stamps_theta`).
+    // Served only where the round's own selector elects on θ (`RoundSummary.ability`).
     theta: number | null;
-    // The bench's held-out reading of the pick this round names — the origin or the selection.
+    // The bench's held-out grade of the selection this round declared (`RoundSummary.bench`).
     bench: number | null;
     n: number;
   }[];
-  best: number[];
+  // The served BEST line (`RoundSummary.best_so_far`), `null` before any round measured.
+  best: (number | null)[];
 }
 
 // Never `cumulative_accuracy`: it pools rows measured by different configurations, so the line can
 // sit above everything the cycle measured. Takes `rounds` so callers memo on `dash?.rounds`.
-export function fitnessTrend(
-  rounds: readonly RoundSummary[] | undefined,
-  servedBest?: number | null,
-  bench?: BenchScore | null,
-): FitnessTrend {
+export function fitnessTrend(rounds: readonly RoundSummary[] | undefined): FitnessTrend {
   const sorted = [...(rounds ?? [])].sort((a, b) => a.round - b.round);
   // θ on a different δ ruler than the first stamped is a different quantity: dropped, not plotted.
   const seriesRuler = sorted.find((r) => r.ability?.ruler_id != null)?.ability?.ruler_id ?? null;
-  // The selection first: where the origin IS the selection both readings name round 0.
-  const benchOn = (round: number): number | null =>
-    bench?.selected?.round === round
-      ? bench.selected.composite_fitness
-      : bench?.origin?.round === round
-        ? bench.origin.composite_fitness
-        : null;
   const points = sorted.map((r) => ({
     round: r.round,
     accuracy: r.accuracy,
     // A round with nothing readable serves `accuracy: null`; its composite is no reading either.
     composite: r.accuracy === null ? null : r.composite_fitness,
     theta:
-      r.stamps_theta &&
-      r.ability != null &&
-      r.ability.ruler_id != null &&
-      r.ability.ruler_id === seriesRuler
+      r.ability != null && r.ability.ruler_id != null && r.ability.ruler_id === seriesRuler
         ? r.ability.theta
         : null,
-    bench: benchOn(r.round),
+    bench: r.bench?.composite_fitness ?? null,
     // The rows the plotted value is a mean over, a held round's included.
     n: r.total,
   }));
-  const best: number[] = [];
-  let runningBest = 0;
-  for (const p of points) {
-    if (p.accuracy != null) runningBest = Math.max(runningBest, p.accuracy);
-    best.push(runningBest);
-  }
-  // Anchored to the served `dash.best`: a fork's seed can carry a best its own rounds[] never reach.
-  const last = best.length - 1;
-  if (last >= 0 && servedBest != null && Number.isFinite(servedBest)) {
-    best[last] = Math.max(best[last] ?? 0, servedBest);
-  }
-  return { points, best };
+  return { points, best: sorted.map((r) => r.best_so_far) };
 }

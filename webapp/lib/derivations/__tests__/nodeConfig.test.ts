@@ -613,6 +613,10 @@ describe("parseKnob / knobValue (an optimizer knob typed in on the check-in)", (
     type: "integer",
     options: null,
     nullable: false,
+    minimum: null,
+    exclusive_minimum: null,
+    maximum: null,
+    exclusive_maximum: null,
     value: 10,
     ...over,
   });
@@ -627,6 +631,10 @@ describe("parseKnob / knobValue (an optimizer knob typed in on the check-in)", (
     expect(parseKnob(knob({ type: "number", nullable: true }), " ")).toBeNull();
     expect(parseKnob(knob({ type: "array" }), "[0.3, 1.2]")).toEqual([0.3, 1.2]);
     expect(parseKnob(knob({ type: "array" }), "[0.3,")).toBeUndefined();
+    const epsilon = knob({ type: "number", exclusive_minimum: 0, exclusive_maximum: 1 });
+    expect(parseKnob(epsilon, "0")).toBeUndefined();
+    expect(parseKnob(epsilon, "0.3")).toBe(0.3);
+    expect(parseKnob(knob({ minimum: 1 }), "1")).toBe(1);
   });
 
   it("reads the draft's value where it sets the key, the manifest's where it does not", () => {

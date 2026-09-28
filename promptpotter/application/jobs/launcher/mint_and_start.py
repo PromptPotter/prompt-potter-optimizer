@@ -8,12 +8,16 @@ import json
 import logging
 import time
 import traceback
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
+
+from pydantic import ValidationError
 
 from promptpotter.application.campaign_config import (
     CampaignConfig,
     load_campaign_config,
+    merge_config_layers,
 )
 from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
@@ -42,6 +46,7 @@ from promptpotter.application.jobs.launcher.draft_build import (
 from promptpotter.application.jobs.mint import fresh_campaign_id, mint_framed_cycle
 from promptpotter.application.jobs.quota import QuotaExceededError
 from promptpotter.application.jobs.registry import Job, JobRegistry
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import (
     configure_and_apply_pipeline,
     resolve_campaign_config,
@@ -129,16 +134,34 @@ def _assert_origin_ready(draft: DraftCampaign) -> None:
         raise OriginIncompleteError(readiness.gaps)
 
 
-def dataset_campaign_config(dataset_root: Path) -> CampaignConfig:
-    """The dataset's own campaign declaration, before any per-campaign overlay — what admission
-    reads the budget arms off, since no overlay moves one."""
-    return load_campaign_config(read_campaign_config_file(dataset_campaign_path(dataset_root)))
+def with_optimization(config: CampaignConfig, overrides: Mapping[str, Any]) -> CampaignConfig:
+    """*config* under a sparse ``optimization`` override — a mint's, a check-in's, the terminal's —
+    validated, with the manifest it then selects resolved through ``resolve_optimizer``."""
+    merged = merge_config_layers(config.model_dump(mode="json"), {"optimization": dict(overrides)})
+    try:
+        out = load_campaign_config(merged)
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        where = ".".join(str(p) for p in first["loc"])
+        raise PayloadInvalidError(f"{where}: {first['msg']}", code="optimization_invalid") from exc
+    select_optimizer(out.optimization)
+    return out
+
+
+def dataset_campaign_config(
+    dataset_root: Path, *, optimization: Mapping[str, Any]
+) -> CampaignConfig:
+    """The dataset's own campaign declaration under the ``optimization`` a launch chose — what
+    admission reads the budget arms off, since neither that nor a node overlay moves one."""
+    config = load_campaign_config(read_campaign_config_file(dataset_campaign_path(dataset_root)))
+    return with_optimization(config, optimization) if optimization else config
 
 
 def build_cycle_config(
     session: Session,
     dataset_root: Path,
     *,
+    optimization: Mapping[str, Any],
     pipeline_overlay: dict[str, Any] | None = None,
     pipeline_steps: list[str] | None = None,
 ) -> CampaignConfig:
@@ -153,7 +176,7 @@ def build_cycle_config(
     channel a campaign already has; a second `pipeline_steps` knob would be `exclude_nodes` spelled
     twice (measured: they have identical expressive power, and `filter_to_steps` preserves the
     schema's own order, so a step list cannot even reorder)."""
-    campaign_config = dataset_campaign_config(dataset_root)
+    campaign_config = dataset_campaign_config(dataset_root, optimization=optimization)
     if pipeline_overlay:
         overrides, narrowing = split_overlay(pipeline_overlay)
         campaign_config = campaign_config.model_copy(
@@ -181,6 +204,7 @@ async def mint_campaign_command(
     job_registry: JobRegistry,
     job: Job,
     limits: LaunchLimits,
+    optimization: Mapping[str, Any],
     origin_override: dict[str, Any] | None = None,
     pipeline_overlay: dict[str, Any] | None = None,
     backend_url: str = DEFAULT_BACKEND_URL,
@@ -212,7 +236,7 @@ async def mint_campaign_command(
         # The dataset's own declaration, read before the session exists: the overlay that
         # `build_cycle_config` folds on afterwards touches no budget arm. No hop — a fresh mint
         # has no seed and no standing ceiling.
-        config=lambda: dataset_campaign_config(dataset_root),
+        config=lambda: dataset_campaign_config(dataset_root, optimization=optimization),
         hop=None,
     )
 
@@ -233,7 +257,7 @@ async def mint_campaign_command(
         # Reused-dataset setup edits ride the overlay onto a per-campaign snapshot;
         # prepare_fresh_cycle freezes the result into the Campaign manifest.
         campaign_config = build_cycle_config(
-            session, dataset_root, pipeline_overlay=pipeline_overlay
+            session, dataset_root, optimization=optimization, pipeline_overlay=pipeline_overlay
         )
 
         train_data = session.samples
@@ -522,4 +546,5 @@ __all__ = [
     "mint_campaign_command",
     "persist_origin_candidate_library",
     "start_run_command",
+    "with_optimization",
 ]

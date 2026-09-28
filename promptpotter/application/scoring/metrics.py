@@ -35,14 +35,14 @@ __all__ = [
 
 
 def _compute_accuracy(results: list[QueryMeasurement]) -> dict[str, Any]:
-    """``total`` is the EVIDENCE denominator: scoreable rows only. An errored or deprecated row
-    carries no verdict, so neither belongs in the denominator a rate is read against."""
+    """``total`` is the EVIDENCE denominator: the rows carrying a verdict, a deprecated one included
+    as the miss it is. ``errors`` is every row carrying none, and ``deprecated`` a count within
+    ``total`` — the sample lifecycle's, never a subtraction from the rate."""
     deprecated = sum(1 for r in results if is_deprecated(r))
     scoreable = scoreable_rows(results)
     total = len(scoreable)
-    # Derived from the ONE filter rather than re-walked: the three counts must partition `results`,
-    # and a second `is_error_result` pass is a second place for them to stop doing so.
-    errors = len(results) - deprecated - total
+    # Derived from the ONE filter rather than re-walked, so the two counts partition `results`.
+    errors = len(results) - total
     # Same filter behind the mean — `compute_accuracy` calls `scoreable_rows` too, so `total` and
     # `accuracy` describe one population.
     accuracy = compute_accuracy(results=results)

@@ -43,8 +43,7 @@ function node(over: Partial<LineageNode> & Pick<LineageNode, "kind" | "id" | "la
     task: null,
     best_accuracy: null,
     origin_accuracy: null,
-    hearts: null,
-    lives_cap: null,
+    run_standing: null,
     ...over,
   } as LineageNode;
 }

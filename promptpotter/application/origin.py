@@ -12,7 +12,11 @@ from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     load_dataset_campaign_config,
 )
-from promptpotter.application.datasets.loaders import resolve_dataset_items, sample_dataset
+from promptpotter.application.datasets.loaders import (
+    bank_samples,
+    resolve_dataset_items,
+    sample_dataset,
+)
 from promptpotter.application.datasets.prompts import has_dataset_prompts, load_node_prompt
 from promptpotter.application.initialization.loop_start import populate_session_scoring
 from promptpotter.application.initialization.session import Session
@@ -47,6 +51,7 @@ from promptpotter.domain.run_records import CandidateMintedRecord, CycleSeed
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.judges import judge_instrument
 from promptpotter.shared.errors import (
     NotFoundError,
     PayloadInvalidError,
@@ -336,8 +341,10 @@ async def establish_campaign_origin(
         )
 
     pipeline_schema = session.pipeline_schema
-    scoring_set = sample_dataset(dataset, campaign_config.origin_budget())
-    spec = split_scoring_block(campaign_config.scoring)
+    scoring_set = sample_dataset(dataset, campaign_config.sp_budget_origin)
+    spec = split_scoring_block(
+        campaign_config.scoring, judge_instrument=judge_instrument(campaign_config.judges)
+    )
 
     if session.index_terms:
         await session.backend_client.init_session(session.index_terms)
@@ -478,7 +485,7 @@ def prospective_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) 
         items = resolve_dataset_items(stores, dataset_name)
         if not items:
             return None
-        partition = partition_bank([Sample(**it) for it in items], cfg.dataset_split)
+        partition = partition_bank(bank_samples(items), cfg.dataset_split)
         return build_origin_cycle_id(
             opt_sp,
             schema,

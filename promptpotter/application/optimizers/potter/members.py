@@ -22,7 +22,10 @@ from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYO
 from promptpotter.application.optimizers.potter.dispatch.prompts import (
     compute_optimizer_prompt_hashes,
 )
-from promptpotter.application.optimizers.potter.dispatch.schemas import L2_NODE_AXES
+from promptpotter.application.optimizers.potter.dispatch.schemas import (
+    L2_NODE_AXES,
+    OPTIMIZER_RESPONSE_MODELS,
+)
 from promptpotter.application.optimizers.potter.election import elect_on_theta
 from promptpotter.application.optimizers.potter.escalation.firing import L2, L3, escalate_l2
 from promptpotter.application.optimizers.potter.escalation.rules import DEFAULT_ESCALATION_RULES
@@ -60,18 +63,22 @@ from promptpotter.application.optimizers.potter.validators.l1_strict import (
 )
 from promptpotter.application.scoring.candidate_report import fatal_validation_failures
 from promptpotter.config.paths import optimizers_root
+from promptpotter.config.prompt_blocks import block_library
 from promptpotter.domain.dashboard_rows import OptimizerLimit
 from promptpotter.domain.phases import StopLoop
-from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM, NodeKind
+from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM, NodeKind, stable_hash
 from promptpotter.domain.results import CandidateProposal
 from promptpotter.domain.results_health import compute_node_failure_rates, evidence_starved_node
+from promptpotter.domain.scoring import is_graded
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.tracing.bridge import observed_node
-from promptpotter.shared.errors import graceful, is_error_result
+from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from pathlib import Path
     from types import ModuleType
+
+    from pydantic import BaseModel
 
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.bench.resume_and_fork.decisions import GatingMode
@@ -112,22 +119,27 @@ class AdaptiveQueue:
     kind: ClassVar[NodeKind] = NodeKind.SAMPLER
     knobs: ClassVar[type[StrictModel]] = AdaptiveQueueKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = couplings.ADAPTIVE_QUEUE
+    size_knob: ClassVar[str | None] = "sp_budget_round"
+
+    def draws(self, selected: SelectedOptimizer, pool: int) -> int:
+        # Unclamped: a budget above the pool is the finding preflight reports.
+        return potter_knobs(selected).adaptive_queue.sp_budget_round
 
     def draw(self, ctx: RoundContext, pool: list[Sample]) -> Panel:
         cycle = ctx.cycle
         config = cycle.config
-        resubset = potter_knobs(cycle.optimizer).adaptive_queue.per_round_resubset
-        if not resubset or cycle.ruler is None:
+        knobs = potter_knobs(cycle.optimizer).adaptive_queue
+        if not knobs.per_round_resubset or cycle.ruler is None:
             # The campaign-start prefix: on a COLD ruler a re-picked subset is difficulty-blind, and
             # freezing concentrates measurements so the ruler warms and locks fastest.
-            cells = select_round_subset(pool, [], config.sp_budget_round)
+            cells = select_round_subset(pool, [], knobs.sp_budget_round)
         else:
             # Archive obs are dataset-scoped + abort-residue-free → cross-cycle evidence.
             own = build_observations(cycle.rounds)
             cells = select_round_subset(
                 pool,
                 [*cycle.archive_observations, *own],
-                config.sp_budget_round,
+                knobs.sp_budget_round,
                 ruler=cycle.ruler,
                 # Enough already-anchored cells for the next extension to equate against: the
                 # acquisition prefers unmeasured cells, whose δ SE is widest.
@@ -144,7 +156,7 @@ class AdaptiveQueue:
             parent_grades = {
                 int(sid): float(r["fitness"])
                 for r in parent_results
-                if (sid := r.get("sample_id")) is not None and not is_error_result(r)
+                if (sid := r.get("sample_id")) is not None and is_graded(r)
             }
         order = build_round_order(parent_grades, cycle.ruler, [int(s.id) for s in cells])
         by_id = {int(s.id): s for s in cells}
@@ -211,6 +223,7 @@ class L1Generate:
                 # Stamped with the round rather than at save time: a re-save (a repair, a rescore)
                 # must not restamp a round with the optimizer running NOW.
                 prompt_hashes=compute_optimizer_prompt_hashes(cycle.optimizer),
+                axis_memory_peaked=sorted(cycle.axes.peaked_axes()) if cycle.axes else [],
             ),
         )
 
@@ -232,6 +245,7 @@ class ThetaElection:
     knobs: ClassVar[type[StrictModel]] = ThetaElectionKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
     stamps_theta: ClassVar[bool] = True
+    reads_parent: ClassVar[bool] = True
 
     def select(self, ctx: RoundContext, measured: Measured, population: Population) -> Selection:
         return elect_on_theta(ctx, measured, population, node=self.name)
@@ -361,6 +375,7 @@ class PotterRuntime:
     manifest_dir: ClassVar[Path] = optimizers_root() / POTTER_MANIFEST
     own_axes: ClassVar[dict[str, set[str]]] = L2_NODE_AXES
     phases: ClassVar[tuple[nodes.OptimizerPhase, ...]] = (L2.declared, L3.declared)
+    response_models: ClassVar[Mapping[str, type[BaseModel]]] = OPTIMIZER_RESPONSE_MODELS
 
     def start(
         self, session: Session, config: CampaignConfig, origin_results: list[dict[str, Any]]
@@ -381,7 +396,8 @@ class PotterRuntime:
         }
 
     def source_digest(self, *covered: ModuleType) -> str:
-        return injection_source_digest(*covered)
+        # The block library is prompt MATERIAL stored as data, which no module digest reads.
+        return stable_hash([injection_source_digest(*covered), block_library()])[:12]
 
     def override_param_types(self, node: str) -> dict[str, str]:
         spec = NODE_LAYOUTS.get(node)
@@ -476,7 +492,7 @@ class PotterRuntime:
         ]
         return nodes.OptimizerPacing(
             patience=esc.l1_patience,
-            lives=None if esc.lives is None else (esc.lives.start, esc.lives.cap),
+            stalls_left=None if esc.lives is None else (esc.lives.start, esc.lives.cap),
             arms_per_round=knobs.l1_generate.n_variants,
             limits=(
                 *(

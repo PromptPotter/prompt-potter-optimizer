@@ -46,10 +46,6 @@ def fmt_individual_header(
     return f"  {label}/{total}  {body}"
 
 
-def _labels(labels: list[str], cap: int = 3) -> str:
-    return ", ".join(labels[:cap]) + (f" (+{len(labels) - cap})" if len(labels) > cap else "")
-
-
 @dataclass(frozen=True)
 class IndividualSummary:
     tag: str
@@ -121,45 +117,12 @@ def individual_summary_from_dict(
     body_line = f"{mutations_chunk}{n_str}{vs_reference}"
 
     detail_lines: list[str] = []
-    elim = scores.get("elimination_context") or {}
     degrad = scores.get("degradation_context") or {}
 
-    # One dispatch on the gate the PRODUCER named. Never on which keys survived: only ε and
-    # lock-in computed a posterior, so quoting one under any other gate invents it.
-    gate = elim.get("gate")
-    q = f"q{int(elim.get('queries_scored', 0))}/{int(elim.get('total_queries', 0))}"
-    n_priors = int(elim.get("n_priors", 0))
-    priors = f"(of {n_priors} prior{'' if n_priors == 1 else 's'})"
-    p_best = float(elim.get("p_best", 0.0))
-    # PoBB's three gates (`pobb/checks.py::EliminationGate`), read as the strings served.
-    if gate == "lock_in":
-        detail_lines.append(f"{GREEN}✓ leader locked {q}{RESET}  p_best={p_best:.1%} {priors}")
-    elif gate == "collapsed":
-        detail_lines.append(
-            f"{YELLOW}✂ answer collapsed {q}{RESET}  "
-            f"one label for every {unit} — no measurement of ability to score"
-        )
-    elif gate == "epsilon":
-        leader = elim.get("leader_label") or (elim.get("leader_id", "?") or "?")[:8]
-        eps = float(elim["epsilon"])
-        detail_lines.append(
-            f"{YELLOW}✂ eliminated {q}{RESET}  p_best={p_best:.1%} < eps={eps:.0%}  "
-            f"vs {leader} {priors}"
-        )
-    elif gate == "outscored":
-        # CAPO's own gate (`PairedTRace.gate`) — a different vocabulary from `EliminationGate`
-        # because it is a different optimizer's cut, never merged into that enum.
-        block = f"block {int(elim['block'])}/{int(elim['blocks'])}"
-        detail_lines.append(
-            f"{YELLOW}✂ outscored at {block} ({q}){RESET}  by {_labels(elim['outscored_by'])}"
-        )
-        raced = elim["raced_against"]
-        detail_lines.append(f"  raced against {len(raced)}: {_labels(raced, cap=5)}")
-    elif gate == "not_improved":
-        # GEPA's minibatch test (`_GateRace.gate`): no gain over the parent where both were graded.
-        mean, bar = elim.get("sigma_prime"), elim.get("sigma")
-        reading = f"{mean:.3f} ≤ parent's {bar:.3f}" if mean is not None else "no shared cell"
-        detail_lines.append(f"{YELLOW}✂ no gain on the minibatch {q}{RESET}  {reading}")
+    # The eliminator words its own stops; the terminal only marks which way it decided.
+    if reason := scores.get("elimination_reason"):
+        mark = f"{GREEN}✓" if outcome == ArmOutcome.LOCKED_IN else f"{YELLOW}✂"
+        detail_lines.append(f"{mark} {reason}{RESET}")
     elif outcome == ArmOutcome.BROKEN and degrad:
         dc = int(degrad.get("degraded_count", 0))
         ts = int(degrad.get("total_scored", 0))

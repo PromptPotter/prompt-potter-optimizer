@@ -42,10 +42,11 @@ from promptpotter.domain.ruler import (
     theta_caveat,
 )
 from promptpotter.domain.run_records import RebaseRequest, ResumeCheckpointRecord
+from promptpotter.domain.scoring import is_graded
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.shared.errors import RulerUnpersistedError, is_error_result
+from promptpotter.shared.errors import RulerUnpersistedError
 from promptpotter.shared.instrument import instrument_mode
 
 if TYPE_CHECKING:
@@ -112,13 +113,15 @@ def _origin_round(
     stamps_theta: bool,
 ) -> RoundResult:
     """C0's row IS what the scoring gateway produced, plus the two facts only a round close can
-    add: its θ on the cycle's δ ruler, and a reference that is itself. Nothing re-derived."""
+    add: its θ on the cycle's δ ruler where the selector stamps one, and a reference that is
+    itself. Nothing re-derived."""
     prompt_fields = opt_sp.prompt_field_dict()
     deprecated = _compute_accuracy(cast("list[QueryMeasurement]", results))["deprecated"]
+    arm = ability if stamps_theta else None
     row = report.model_copy(
         update={
-            "theta": ability.theta if ability is not None else None,
-            "theta_se": ability.se if ability is not None else None,
+            "theta": arm.theta if arm is not None else None,
+            "theta_se": arm.se if arm is not None else None,
             "prompt_fields": prompt_fields,
             "resolved_pipeline_params": sp.config_params,
             "reference_id": opt_sp.lineage.id,
@@ -180,7 +183,7 @@ def _calibrate_delta_ruler(
     origin_obs = [
         Observation(ORIGIN_ABILITY_ID, int(sid), graded_response(r))
         for r in origin_results or []
-        if (sid := r.get("sample_id")) is not None and not is_error_result(r)
+        if (sid := r.get("sample_id")) is not None and is_graded(r)
     ]
     # ``origin_obs`` wins the cells both hold: an inner cycle that cache-replays its origin
     # banked that run INSIDE its own evidence epoch, where the archive read cannot see it.
@@ -465,9 +468,12 @@ class Cycle:
         assert picked is not None, "a closed round names the individual it ended on"
         return self.searchpoint(picked.lineage.id)
 
-    def searchpoint(self, individual_id: str) -> JobSearchPoint:
+    def searchpoint(
+        self, individual_id: str, *, rounds: Sequence[RoundResult] | None = None
+    ) -> JobSearchPoint:
         """Any individual a closed round measured, as it was measured — off what each round document
-        banks: the individual it ended on with its params, and every arm's fields and params."""
+        banks: the individual it ended on with its params, and every arm's fields and params.
+        ``rounds`` are the cycle's own unless a caller holds rounds it has not absorbed yet."""
         schema = self.session.pipeline_schema
         assert schema is not None, "a cycle is started under a pipeline_schema"
 
@@ -479,7 +485,7 @@ class Cycle:
                 demo=self.session.scoring.require_partition().demo,
             )
 
-        for rr in reversed(self.rounds):
+        for rr in reversed(self.rounds if rounds is None else rounds):
             ended_on = rr.opt_sp
             if ended_on and ended_on.lineage.id == individual_id and rr.pipeline_params is not None:
                 return built(ended_on, rr.pipeline_params)
@@ -617,8 +623,8 @@ class Cycle:
 
     def _restamp_on_warm(self, origin_theta: tuple[float, float] | None) -> None:
         """Every θ already taken on the flat ruler, re-read on the one just locked."""
-        # Round 0 carries θ twice — its own frontier and C0's row — and a warm fit must move
-        # both, or the round file reports the origin at two abilities.
+        # Round 0 carries θ twice — its own frontier and, under a θ selector, C0's row — and a
+        # warm fit must move both, or the round file reports the origin at two abilities.
         reading = _reading(
             origin_theta,
             self.ruler,
@@ -628,10 +634,11 @@ class Cycle:
         self.origin_round.ability = reading
         o_theta = reading.theta if reading is not None else None
         o_se = reading.se if reading is not None else None
-        self.origin_round.candidate_scores = [
-            c.model_copy(update={"theta": o_theta, "theta_se": o_se})
-            for c in self.origin_round.candidate_scores
-        ]
+        if self.origin_round.stamps_theta:
+            self.origin_round.candidate_scores = [
+                c.model_copy(update={"theta": o_theta, "theta_se": o_se})
+                for c in self.origin_round.candidate_scores
+            ]
         # …and every L1 round that already closed: a round that closed on a flat ruler had its θ
         # fit at δ≡0, a DIFFERENT scale, and unrestamped they sit side by side in
         # ``round_levels`` for the L4 law to average. The ROUND's frontier θ only —

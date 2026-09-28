@@ -26,7 +26,7 @@ from promptpotter.application.datasets.draft_campaign import (
     default_slug_from_filename,
     new_draft,
 )
-from promptpotter.application.datasets.loaders import resolve_dataset_items
+from promptpotter.application.datasets.loaders import bank_samples, resolve_dataset_items
 from promptpotter.application.datasets.prompts import (
     list_dataset_prompts,
     load_dataset_prompt,
@@ -36,6 +36,7 @@ from promptpotter.application.jobs.launcher.draft_build import overlay_from_camp
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.connectors.protocol import PROBE_WORKLOAD
+from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
@@ -231,6 +232,12 @@ def draft_from_dataset(
     # `dataset:{name}` source_file marks this draft as derived, and the commit
     # path mints against this canonical dataset instead of materializing a folder.
     slug = dataset_name.lower()
+    # The check-in model reads the preview with its labels, so it is drawn from the rows the
+    # dataset's own split leaves to the search: no bench row reaches the origin's author.
+    preview = [
+        {"query": s.query, "ground_truth": str(s.ground_truth)}
+        for s in partition_bank(bank_samples(items), cc.dataset_split).search
+    ]
 
     # headers ["query","ground_truth"] auto-confirm the column mapping in
     # new_draft(); the config knobs auto-confirm there too. We then state the
@@ -239,7 +246,7 @@ def draft_from_dataset(
         tenant_id=stores.identity.tenant_id,
         slug=slug,
         n_samples=len(rows),
-        sample_preview=rows[:PREVIEW_ROWS],
+        sample_preview=preview[:PREVIEW_ROWS],
         headers=["query", "ground_truth"],
         source_file=f"dataset:{dataset_name}",
         column_label_sets=_column_label_sets(["query", "ground_truth"], rows),

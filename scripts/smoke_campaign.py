@@ -57,16 +57,18 @@ def _build_config(
     return {
         "dataset_name": dataset,
         "scoring": _infer_scoring(dataset),
-        "sp_budget_round": samples,
         "exclude_nodes": [],
         "pipeline_overlay": {},
         "optimization": {
-            "l1_patience": patience,
             "max_rounds": rounds,
-            "n_variants": variants,
             "degradation_threshold": 0.4,
-            "l2_patience": 1,
-            "l3_patience": 1,
+            "nodes": {
+                "adaptive_queue": {"config": {"sp_budget_round": samples}},
+                "l1_generate": {"config": {"n_variants": variants}},
+                "escalation": {
+                    "config": {"l1_patience": patience, "l2_patience": 1, "l3_patience": 1}
+                },
+            },
         },
     }
 

@@ -19,6 +19,8 @@ if TYPE_CHECKING:
     from pathlib import Path
     from types import ModuleType
 
+    from pydantic import BaseModel
+
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.bench.resume_and_fork.decisions import GatingMode
     from promptpotter.application.bench.resume_and_fork.replayers import Replayer
@@ -58,6 +60,7 @@ __all__ = [
     "Boundary",
     "CheckResult",
     "Controller",
+    "EliminationReading",
     "Eliminator",
     "Measured",
     "MemberCoupling",
@@ -177,7 +180,7 @@ class WorkingState(Protocol):
 
     def standing(self) -> tuple[int, int | None]:
         """The two numbers the round readout carries beside the round: rounds without advance, and
-        the run's remaining allowance where the optimizer keeps one."""
+        the stalls the run may still absorb where the optimizer banks them (``RunStanding``)."""
         ...
 
 
@@ -195,11 +198,11 @@ class OptimizerPhase:
 @dataclass(frozen=True)
 class OptimizerPacing:
     """How an optimizer paces its run, for every surface showing where it stands. ``patience`` is
-    what ``WorkingState.standing``'s stall counts toward and ``lives`` the ``(opening, ceiling)`` of
-    the bank its allowance draws on; ``None`` where it keeps neither."""
+    what ``WorkingState.standing``'s stall counts toward and ``stalls_left`` the ``(opening,
+    ceiling)`` of the stalls it banks; ``None`` where it keeps neither."""
 
     patience: int | None
-    lives: tuple[int, int] | None
+    stalls_left: tuple[int, int] | None
     # The most arms one round races, which sizes a look-ahead before the round opens.
     arms_per_round: int | None
     limits: tuple[OptimizerLimit, ...]
@@ -244,6 +247,12 @@ class OptimizerRuntime(Protocol):
 
     @property
     def phases(self) -> tuple[OptimizerPhase, ...]: ...
+
+    @property
+    def response_models(self) -> Mapping[str, type[BaseModel]]:
+        """Per structured llm node, the model its reply parses as — whose schema
+        ``scripts/build_optimizer_schemas.py`` writes beside the manifest."""
+        ...
 
     def pacing(self, selected: SelectedOptimizer) -> OptimizerPacing: ...
 
@@ -395,8 +404,8 @@ class Population:
 
 @dataclass(frozen=True)
 class Measured:
-    """The measurement's output. ``parent`` is the round's best-so-far re-scored on the panel;
-    ``scores`` carry each arm's lift against its ``reference_id``, whose rows ``references``
+    """The measurement's output. ``parent`` is the round's best-so-far re-scored on the panel
+    (:attr:`Selector.reads_parent` says how much of it); ``scores`` carry each arm's lift against its ``reference_id``, whose rows ``references``
     holds; ``electable`` is the arms the round can read, coverage floor applied, in walk order —
     the only arms a selector may keep."""
 
@@ -430,6 +439,17 @@ class Boundary:
 
 
 class Sampler(NodeMember, Protocol):
+    @property
+    def size_knob(self) -> str | None:
+        """The knob setting how many cells a round draws — what a caller sizing the panel from
+        outside (an L4 panel's per-round count) writes; ``None`` where no one knob does."""
+        ...
+
+    def draws(self, selected: SelectedOptimizer, pool: int) -> int:
+        """The cells a round after the first asks for off a search pool of ``pool`` rows, read
+        before any round runs — an L4 census, a verify budget, a dashboard's look-ahead."""
+        ...
+
     def draw(self, ctx: RoundContext, pool: list[Sample]) -> Panel: ...
 
 
@@ -456,6 +476,16 @@ class RaceSnapshot:
     decision_grade: bool
 
 
+@dataclass(frozen=True)
+class EliminationReading:
+    """An eliminator's reading of an arm it stopped. ``reason`` says why in its own words, one
+    line every surface prints as served; ``context`` holds the numbers behind it, which only the
+    optimizer reads."""
+
+    reason: str
+    context: Mapping[str, Any]
+
+
 class Race(CatchUps, Protocol):
     """One round's elimination, as the measurement drives it. It stops a walk on its own rows
     through ``rule``, or every live walk together at each block's close through ``blocks``. The
@@ -479,7 +509,7 @@ class Race(CatchUps, Protocol):
         candidate_id: str,
         results: list[QueryMeasurement],
         labels: dict[str, str],
-    ) -> Mapping[str, Any] | None: ...
+    ) -> EliminationReading | None: ...
 
     def admit(
         self, candidate_id: str, results: list[QueryMeasurement], sp: JobSearchPoint
@@ -525,6 +555,12 @@ class Selector(NodeMember, Protocol):
     @property
     def stamps_theta(self) -> bool:
         """Whether ``select`` stamps each arm's θ — the column a round's scoreboard carries."""
+        ...
+
+    @property
+    def reads_parent(self) -> bool:
+        """Whether ``select`` reads ``Measured.parent``. The bench re-scores the parent on the whole
+        panel only for one that does; otherwise on the cells an arm reached, which its lifts pair on."""
         ...
 
     def select(
