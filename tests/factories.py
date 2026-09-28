@@ -9,7 +9,7 @@ and pytest all stay green while the real read path breaks. That is exactly the c
 Worse than drift, a fake can assert a shape the model cannot produce. The pair these
 replace stamped ``l1_n_no_op`` / ``l1_n_duplicate`` directly onto the round — but those
 are ``@computed_field`` properties DERIVED from ``candidate_scores`` (a collapsed variant
-rides that list with ``invalid=True`` and an ``INVARIANT_REASONS`` failure), so a stamped
+rides that list as ``ArmOutcome.INVALID`` with an ``INVARIANT_REASONS`` failure), so a stamped
 value cannot win no matter what a fake asserts — ``@computed_field`` plus ``extra="ignore"``
 already refuse it. Building the real model is what carries that refusal into every test.
 
@@ -19,8 +19,10 @@ Only what a test actually bends is a parameter; everything else is a plausible d
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
+from promptpotter.application.optimizer_manifest import resolve_optimizer
+from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
 from promptpotter.domain.escalation_signals import ValidationFailure
 from promptpotter.domain.optimizer_state import (
     POTTER_MANIFEST,
@@ -30,6 +32,7 @@ from promptpotter.domain.optimizer_state import (
 )
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import (
+    ArmOutcome,
     CycleResult,
     DegradationHealth,
     RoundResult,
@@ -93,24 +96,35 @@ def scored_candidate(
     **overrides: Any,
 ) -> ScoredCandidate:
     """One candidate row. ``invalid_reason`` collapses it the way the validator does —
-    ``invalid=True`` plus a ``ValidationFailure``, which is where ``RoundResult`` reads
+    ``ArmOutcome.INVALID`` plus a ``ValidationFailure``, which is where ``RoundResult`` reads
     its collapse counts back from."""
     failures = (
         [ValidationFailure(axis="prompt_fields", value="", allowed=[], reason=invalid_reason)]
         if invalid_reason
         else []
     )
+    outcome = ArmOutcome.INVALID if invalid_reason else ArmOutcome.MEASURED
     return ScoredCandidate(
-        run_id=None,
-        candidate_id=candidate_id,
-        label=candidate_id,
-        accuracy=accuracy,
-        composite_fitness=accuracy,
-        total=total,
-        invalid=invalid_reason is not None,
-        validation_failures=failures,
-        **overrides,
+        **(
+            {
+                "run_id": None,
+                "candidate_id": candidate_id,
+                "label": candidate_id,
+                "accuracy": accuracy,
+                "composite_fitness": accuracy,
+                "total": total,
+                "outcome": outcome,
+                "validation_failures": failures,
+            }
+            | overrides
+        )
     )
+
+
+def pobb_knobs(**bend: Any) -> PoBBKnobs:
+    """Potter's shipped ``pobb`` knobs, read off its manifest, with the ones a test bends."""
+    shipped = cast("PoBBKnobs", resolve_optimizer("potter", {}).knobs("pobb"))
+    return shipped.model_copy(update=bend)
 
 
 def degradation_health(
@@ -263,7 +277,7 @@ def lost_history(
     ``reference_accuracy`` is the bar ``acc`` is judged against.
 
     Pass ``elimination_context`` to make the loss a CUT instead: the gate inside it decides
-    whether the arm was measured at all, and an empty one is a degradation cut, which names none."""
+    whether the arm was measured at all, and an empty one is a BROKEN arm, which names none."""
     lost = RoundResult(
         optimizer_state=optimizer_state(),
         round=round_num,
@@ -281,7 +295,13 @@ def lost_history(
                 total=total,
                 reference_accuracy=0.5,
                 prompt_fields={field: value},
-                elimination_stopped=elimination_context is not None,
+                outcome=(
+                    ArmOutcome.MEASURED
+                    if elimination_context is None
+                    else ArmOutcome.ELIMINATED
+                    if elimination_context
+                    else ArmOutcome.BROKEN
+                ),
                 elimination_context=elimination_context or {},
             )
         ],

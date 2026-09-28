@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.application.views.render.prefix_reading import prefix_reading
 from promptpotter.application.views.view_models import AnyView
@@ -131,7 +132,9 @@ class LiveDisplay(Projection):
 
         return cls(
             origin_acc=origin_acc,
-            l1_patience=campaign_config.optimization.l1_patience,
+            l1_patience=select_optimizer(campaign_config.optimization).readout(
+                "escalation", "l1_patience"
+            ),
             pipeline_schema=session.pipeline_schema,
             scoring_formula=split_scoring_block(campaign_config.scoring).per_sample,
             measured_unit=session.backend_client.measured_unit,

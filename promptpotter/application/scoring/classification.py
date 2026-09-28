@@ -8,10 +8,10 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
+from promptpotter.domain.results import ArmOutcome
 from promptpotter.domain.results_health import classify_result
 from promptpotter.domain.scoring import is_unscored
-from promptpotter.domain.validators import StopRule
+from promptpotter.domain.validators import StopRule, StopSignal
 from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
@@ -94,7 +94,8 @@ def scoreable_rows(results: list[QueryMeasurement]) -> list[QueryMeasurement]:
 
 
 class DegradationCheck:
-    """Fatal-classification fast-path (one sighting ends candidate) + rate-based check."""
+    """The bench's ``BROKEN`` rule, whatever the optimizer: a fatal classification on one sighting,
+    or a deprecated share past the threshold. Any single row it lets through is simply skipped."""
 
     name = "degradation"
 
@@ -105,15 +106,15 @@ class DegradationCheck:
         self.min_samples = min_samples
         self.fatal_fastpath = fatal_fastpath
 
-    def check(self, results: list[QueryMeasurement]) -> EscalationSignal | None:
+    def check(self, results: list[QueryMeasurement]) -> StopSignal | None:
         if self.fatal_fastpath and results:
             classification = classify_result(results[-1])
             fatal = classification.dominant_fatal
             if fatal is not None:
                 n = len(results)
-                return EscalationSignal(
+                return StopSignal(
                     self.name,
-                    EscalationTarget.ELIMINATE_CANDIDATE,
+                    ArmOutcome.BROKEN,
                     {
                         "degraded_rate": 1.0,
                         "degraded_count": n,
@@ -140,9 +141,9 @@ class DegradationCheck:
         for r in results:
             wtypes.update(extract_warning_types(r))
         dominant = max(wtypes, key=wtypes.get) if wtypes else "unknown"  # type: ignore[arg-type]
-        return EscalationSignal(
+        return StopSignal(
             self.name,
-            EscalationTarget.ELIMINATE_CANDIDATE,
+            ArmOutcome.BROKEN,
             {
                 "degraded_rate": rate,
                 "degraded_count": degraded,
@@ -173,7 +174,7 @@ def build_degradation_checks(config: CampaignConfig) -> list[StopRule]:
         checks.append(
             DegradationCheck(
                 threshold=opt.degradation_threshold,
-                fatal_fastpath=opt.mechanisms.elimination.degradation_fatal_fastpath,
+                fatal_fastpath=opt.degradation_fatal_fastpath,
             )
         )
     return checks

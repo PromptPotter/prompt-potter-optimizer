@@ -21,10 +21,9 @@ export interface PipelineDependencyWire {
 // Materialized into the committed `campaign.json::optimization` block.
 export interface OptimizationOverridesWire {
   max_rounds: number;
-  prompt_block_catalogue: "guidance" | "restrict" | "off";
-  // `l1` = no escalation at all, the L1-only ablation arm.
-  escalation_ladder: "full" | "l1_l2" | "l1";
-  mechanisms: Record<string, Record<string, boolean>>;
+  // A manifest under `assets/optimizers/`; its knobs ride `nodes`.
+  optimizer: string;
+  nodes: Record<string, { config: Record<string, unknown> }>;
 }
 export interface DraftCampaignWire {
   draft_id: string;

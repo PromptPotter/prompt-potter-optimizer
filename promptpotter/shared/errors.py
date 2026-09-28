@@ -285,7 +285,7 @@ class RequestTooLargeError(RuntimeError):
             f"count (parallel calls), NOT a single-request lever — lowering it does "
             f"not shrink this request. Biggest lever first:\n"
             f"  - point the optimizer node `provider` in "
-            f"`promptpotter/assets/optimizer/pipeline.yaml` at a tier whose per-minute cap "
+            f"`promptpotter/assets/optimizers/potter/pipeline.yaml` at a tier whose per-minute cap "
             f"exceeds {requested} tokens (e.g. OpenRouter, or a paid Groq tier) — "
             f"the free Groq on_demand tier caps at {limit}\n"
             f"  - or shorten the optimizer prompt (task_description.md)."
@@ -364,6 +364,11 @@ class ResumeDivergenceError(RuntimeError):
         for k, v in self.diagnostics.items():
             lines.append(f"  {k}: {v}")
         return "\n".join(lines)
+
+
+class PromptCompositionError(Exception):
+    """An optimizer node's prompt could not be composed. The run halts with ``RENDER_ERROR`` — the
+    composition is at fault, not the search — rather than sending a degraded prompt."""
 
 
 class DatasetIdentityError(RuntimeError):
@@ -467,6 +472,7 @@ __all__ = [
     "NotFoundError",
     "PayloadInvalidError",
     "PotterError",
+    "PromptCompositionError",
     "RequestTooLargeError",
     "ResumeDivergenceError",
     "RulerCoverageError",

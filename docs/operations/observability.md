@@ -4,7 +4,7 @@ Every optimizer LLM call, backend match, and escalation check emits a structured
 
 ## What's traced, and where
 
-Phase events (`domain/phases.py`: the bench's `CampaignPhase` — `init`, `origin`, `propose`, `measure` — and potter's `PotterPhase` — `refine_strategy`, `modify_plan`) emit `enter`/`exit` pairs into the per-cycle ledger. `langfuse/events.jsonl` is a pure mirror — nothing reads it for state reconstruction.
+Phase events (`domain/phases.py`: the bench's `CampaignPhase` — `init`, `origin`, `propose`, `measure`, `select`, `adapt` — and potter's `PotterPhase` — `refine_strategy`, `modify_plan`) emit `enter`/`exit` pairs into the per-cycle ledger. `langfuse/events.jsonl` is a pure mirror — nothing reads it for state reconstruction.
 
 | Source | Event | Payload |
 |--------|-------|---------|

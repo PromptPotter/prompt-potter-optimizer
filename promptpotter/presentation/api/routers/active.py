@@ -9,12 +9,14 @@ from typing import Any
 from fastapi import APIRouter, Query
 from pydantic import Field
 
+from promptpotter.application.campaign_config import OptimizationConfig
 from promptpotter.application.jobs.capacity import resolve_run_capacity
-from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-    get_optimizer_schema,
-    optimizer_manifest,
-)
 from promptpotter.application.optimization.dispatch.schemas import L2_NODE_AXES
+from promptpotter.application.optimizer_manifest import (
+    OptimizerKnobsResponse,
+    optimizer_knobs,
+    resolve_optimizer,
+)
 from promptpotter.config.settings import settings
 from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.phases import RunPhase
@@ -37,6 +39,7 @@ from promptpotter.presentation.api.deps import (
     StoresDep,
     decode_descend,
 )
+from promptpotter.shared.errors import NotFoundError
 
 active_router = APIRouter()
 
@@ -356,17 +359,23 @@ class OptimizerPipelineResponse(StrictModel):
 @active_router.get(
     "/optimizer-pipeline", tags=["Optimizer"], response_model=OptimizerPipelineResponse
 )
-def get_optimizer_pipeline(stores: StoresDep) -> OptimizerPipelineResponse:
-    """Bundled ``promptpotter/assets/optimizer/pipeline.yaml`` + its generated
-    ``resolved_schemas.json`` sibling — the ``view`` topology plus the per-node typed config
-    surface, so the canvas node-detail renders the optimizer's own knobs (model / provider /
-    reasoning_effort / temperature / …) through the same canonical config element the steer panel
-    uses. Read-only: the install-global ``_optimizer`` pipeline is operator-owned — a hand-edit,
-    never a fork and never a write path from here (``evidence`` names a winner and writes
-    nothing); model/provider are always optimizer-locked."""
+def get_optimizer_pipeline(
+    stores: StoresDep,
+    optimizer: str = Query(
+        default=OptimizationConfig.model_fields["optimizer"].default,
+        description="The manifest under `promptpotter/assets/optimizers/` to read",
+    ),
+) -> OptimizerPipelineResponse:
+    """One optimizer manifest (``promptpotter/assets/optimizers/{optimizer}/pipeline.yaml``) +
+    its generated ``resolved_schemas.json`` sibling — the ``view`` topology plus the per-node
+    typed config surface, so the canvas node-detail renders the optimizer's own knobs through the
+    same canonical config element the steer panel uses. Read-only: the manifest is operator-owned —
+    a hand-edit, never a fork and never a write path from here; a campaign's changes ride its own
+    ``optimization.nodes``. model/provider are always optimizer-locked."""
     # The engine's own parse: a second one here had the browser and the engine disagree on menus.
-    schema = get_optimizer_schema()
-    prompts = optimizer_manifest().get("resolved_prompts") or {}
+    selected = resolve_optimizer(optimizer, {})
+    schema = selected.schema
+    prompts = selected.document.get("resolved_prompts") or {}
     # This is the OPTIMIZER's own manifest, so it is the one route that names L2's axes — and the
     # reach below must sum the SAME rows it serves, or the glyph and the padlock disagree.
     rows = schema.node_config_schema(L2_NODE_AXES)
@@ -380,6 +389,19 @@ def get_optimizer_pipeline(stores: StoresDep) -> OptimizerPipelineResponse:
         model_capabilities=resolve_schema_menu(schema, workspace=Path(stores.base_dir)),
         resolved_prompts={str(k): dict(v) for k, v in prompts.items()},
     )
+
+
+@active_router.get(
+    "/optimizers/{name}/knobs", tags=["Optimizer"], response_model=OptimizerKnobsResponse
+)
+def get_optimizer_knobs(name: str) -> OptimizerKnobsResponse:
+    """Every knob the manifest's nodes take — type, closed options, the value the manifest
+    declares — so a settings surface draws one control per knob and writes a campaign's
+    ``optimization.nodes.{node}.config.{key}``. 404 when no such manifest ships."""
+    try:
+        return optimizer_knobs(name)
+    except FileNotFoundError as exc:
+        raise NotFoundError(f"No optimizer manifest named {name!r}") from exc
 
 
 __all__ = [

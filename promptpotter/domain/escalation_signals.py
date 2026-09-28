@@ -2,18 +2,12 @@ from __future__ import annotations
 
 import enum
 import json
-from dataclasses import dataclass
 from typing import Annotated, Any
 
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt
-
-
-class EscalationTarget(enum.StrEnum):
-    ELIMINATE_CANDIDATE = "eliminate_candidate"
-    LEADER_LOCKED = "leader_locked"
 
 
 @shapes_optimizer_prompt
@@ -43,21 +37,6 @@ class NurseOwner(enum.StrEnum):
 
     L1 = "l1"
     OPERATOR = "operator"
-
-
-@dataclass
-class EscalationSignal:
-    check_name: str
-    target: EscalationTarget
-    check_result: dict[str, Any]
-
-    @property
-    def is_elimination(self) -> bool:
-        return self.target is EscalationTarget.ELIMINATE_CANDIDATE
-
-    @property
-    def is_leader_lock(self) -> bool:
-        return self.target is EscalationTarget.LEADER_LOCKED
 
 
 # The reasons that mark a candidate COLLAPSED — generated, then rejected before it could cost
@@ -206,8 +185,6 @@ def rf_dedup_key(rf_dict: dict[str, Any]) -> tuple[str, str, str]:
 
 __all__ = [
     "INVARIANT_REASONS",
-    "EscalationSignal",
-    "EscalationTarget",
     "ExplorationBudget",
     "NurseOwner",
     "RuntimeFailure",

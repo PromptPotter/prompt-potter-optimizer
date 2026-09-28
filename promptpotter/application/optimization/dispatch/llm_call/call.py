@@ -16,13 +16,13 @@ from pydantic import BaseModel
 
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     get_optimizer_config_overrides,
-    get_optimizer_schema,
     load_optimizer_prompt,
     resolve_node_override,
 )
 from promptpotter.application.optimization.dispatch.schemas import (
     OPTIMIZER_RESPONSE_MODELS,
 )
+from promptpotter.application.optimizer_manifest import llm_node_config
 from promptpotter.config.settings import OPTIMIZER_CALL_DEADLINE_S
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.run_records import (
@@ -175,10 +175,7 @@ async def llm_call(
     label = node or "llm_call"
     if config is None:
         if node:
-            schema_node = get_optimizer_schema().get_node(node)
-            if schema_node is None:
-                raise KeyError(f"Unknown optimizer node: {node}")
-            config = schema_node.current_config
+            config = llm_node_config(node)
             if response_model is None:
                 response_model = OPTIMIZER_RESPONSE_MODELS.get(node)
         else:

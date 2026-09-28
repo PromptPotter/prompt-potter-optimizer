@@ -14,7 +14,7 @@ import {
   pathOf,
 } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
-import type { LineageNode } from "@/lib/api";
+import type { ArmOutcome, LineageNode } from "@/lib/api";
 import {
   isSelectedCandidate,
   type CandidateRow,
@@ -25,7 +25,8 @@ import {
 import type { CandidateSearchPoint, CandidateVerdict } from "@/lib/derivations";
 import { MeasurementsPane } from "@/components/shell/measurements/MeasurementsPane";
 import { fmtPct0, unitCount, unitPlural } from "@/lib/format";
-import { Badge, CopyButton, SegmentedControl, type Segment } from "@/components/ui";
+import { Badge, CopyButton, SegmentedControl, Term, type Segment } from "@/components/ui";
+import { TERMS } from "@/lib/terms";
 import { NodeSurface } from "./NodeSurface";
 import { PanelCellRow } from "./PanelCellRow";
 
@@ -182,7 +183,7 @@ export function MeasurementRun({
                     <span className="tag-cached" title="Each cell is an inner campaign">
                       {unitCount(g.samples.length, unit)}
                     </span>
-                  ) : g.candidate.invalid ? (
+                  ) : g.candidate.outcome === "invalid" ? (
                     /* Never a rate: the 0.0 served beside it is `INVALID_SCORES`' synthetic score. */
                     <Badge
                       tone="danger"
@@ -195,6 +196,13 @@ export function MeasurementRun({
                       {g.candidate.n_samples ?? g.samples.length} scored
                       {g.candidate.accuracy != null && ` · ${fmtPct0(g.candidate.accuracy)}`}
                     </span>
+                  )}
+                  {g.candidate.outcome && STOPPED.has(g.candidate.outcome) && (
+                    <Badge tone={g.candidate.outcome === "broken" ? "danger" : "default"}>
+                      <Term content={TERMS[`arm_${g.candidate.outcome}`]}>
+                        {g.candidate.outcome.replace("_", " ")}
+                      </Term>
+                    </Badge>
                   )}
                   {cached > 0 && (
                     <span
@@ -257,7 +265,7 @@ export function MeasurementRun({
               )}
               {!cells ? null : g.samples.length === 0 ? (
                 <div className="rsv-empty-row">
-                  {g.candidate.invalid
+                  {g.candidate.outcome === "invalid"
                     ? `No ${unitPlural(unit)} — it was rejected before it ran.`
                     : `No matching ${unitPlural(unit)}.`}
                 </div>
@@ -299,6 +307,9 @@ export function MeasurementRun({
 
 const PANEL_RENDER_CAP = 250;
 
+// The walks that ended before their panel; a broken arm never reads as an elimination.
+const STOPPED: ReadonlySet<ArmOutcome> = new Set(["broken", "eliminated", "locked_in", "skipped"]);
+
 function Region({ children }: { children: ReactNode }) {
   return (
     <section className="opt-detail-samples" aria-label="What this step scored">
@@ -309,7 +320,7 @@ function Region({ children }: { children: ReactNode }) {
 
 // A rejected candidate reads `rejected`, never `0%`: its served accuracy is `INVALID_SCORES`' synthetic 0.0.
 function segmentFor(c: ElectedRow, verdict: CandidateVerdict | undefined): Segment<string> {
-  if (c.invalid) {
+  if (c.outcome === "invalid") {
     const reason = verdict?.failures[0]?.value;
     return {
       value: c.candidate_id,

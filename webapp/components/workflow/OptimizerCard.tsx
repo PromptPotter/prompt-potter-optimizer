@@ -14,19 +14,19 @@ import {
   ToolbarSpacer,
 } from "@/components/ui";
 import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
-import { MechanismsPanel } from "@/components/dashboard/control/MechanismsPanel";
+import { NodeKnobsPanel } from "@/components/dashboard/control/NodeKnobsPanel";
 import { RoundAxis } from "./RoundAxis";
 import type { PipelineDoc } from "./types";
 
 // The Optimizer card: the loop's frame, round axis and liveness around the shared `PipelineFlow`;
-// it draws no graph of its own. Mechanism toggles are read-only here and sit behind the header's last icon.
+// it draws no graph of its own. The optimizer's knobs are read-only here and sit behind the header's last icon.
 
 interface Props {
   pipeline: PipelineDoc | null;
 }
 
 export function OptimizerCard({ pipeline }: Props) {
-  const [mechanismsOpen, setMechanismsOpen] = useState(false);
+  const [knobsOpen, setKnobsOpen] = useState(false);
   // Liveness off the cycle stream's poll age: a frozen campaign still has a `dash`.
   const { dash, isLive } = useDashboard();
   const view = pipeline?.view ?? null;
@@ -90,10 +90,10 @@ export function OptimizerCard({ pipeline }: Props) {
           variant="ghost"
           className="workflow-mech"
           aria-haspopup="dialog"
-          aria-expanded={mechanismsOpen}
-          aria-label="Mechanisms"
-          title="Mechanisms — pluggable sorting + early-abort toggles"
-          onClick={() => setMechanismsOpen(true)}
+          aria-expanded={knobsOpen}
+          aria-label="Optimizer knobs"
+          title="Optimizer knobs — each node's configuration for this campaign"
+          onClick={() => setKnobsOpen(true)}
         >
           <IconSliders />
         </Button>
@@ -115,14 +115,12 @@ export function OptimizerCard({ pipeline }: Props) {
         />
       </div>
       <Dialog
-        open={mechanismsOpen}
-        title="Mechanisms"
-        onClose={() => setMechanismsOpen(false)}
+        open={knobsOpen}
+        title="Optimizer knobs"
+        onClose={() => setKnobsOpen(false)}
       >
-        <p className="mech-lead">
-          Pluggable sorting + early-abort toggles (campaign.json)
-        </p>
-        <MechanismsPanel />
+        <p className="mech-lead">The manifest&apos;s values, with this campaign&apos;s overlay</p>
+        <NodeKnobsPanel />
       </Dialog>
     </div>
   );

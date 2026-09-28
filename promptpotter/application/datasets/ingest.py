@@ -192,7 +192,7 @@ def draft_from_dataset(
 
     # One validated parse of the dataset's config files. The `or` ladders below fire only where
     # the authored file leaves a field empty. The optimizer LLM is install-global
-    # (`promptpotter/assets/optimizer/pipeline.yaml`), so no draft carries provider/model.
+    # (`promptpotter/assets/optimizers/potter/pipeline.yaml`), so no draft carries provider/model.
     authored = read_authored_dataset(dataset_dir)
     cc = authored.campaign_config
     task = authored.task_description
@@ -250,17 +250,16 @@ def draft_from_dataset(
             "connector": connector,
             "scoring_composite": scoring,
             # The campaign-config knobs as one object. Preserve the dataset's round
-            # ceiling + its own mechanism toggles (sorting/early-abort) so reusing an
-            # Origin carries its config instead of resetting to stock. Built off the
-            # default dump (not validated) so a dataset's higher ceiling passes
+            # ceiling, its optimizer and that optimizer's overlay, so reusing an Origin
+            # carries its config instead of resetting to stock — an ablation arm reset to the
+            # full ladder would measure a different thing under the same Origin's name. Built
+            # off the default dump (not validated) so a dataset's higher ceiling passes
             # through — the 1-100 bound gates only the operator edit path.
             "optimization_overrides": {
                 **OptimizationOverrides().model_dump(mode="json"),
                 "max_rounds": max_rounds,
-                # An ablation arm that silently reset to the full ladder on reuse would
-                # measure a different thing under the same Origin's name.
-                "escalation_ladder": cc.optimization.escalation_ladder.value,
-                "mechanisms": cc.optimization.mechanisms.model_dump(mode="json"),
+                "optimizer": cc.optimization.optimizer,
+                "nodes": {n: o.model_dump(mode="json") for n, o in cc.optimization.nodes.items()},
             },
             "pipeline_overlay": pipeline_overlay,
             "origin_prompt_fields": origin_prompt_fields,

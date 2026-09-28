@@ -39,10 +39,7 @@ export type RunLimitOverrides = Partial<
     | "max_rounds"
     | "spend_budget_usd"
     | "token_budget"
-    | "l1_patience"
-    | "l2_patience"
-    | "l3_patience"
-    | "pobb_epsilon"
+    | "nodes"
   >
 >;
 // `optimizer_narrowing` overrides the campaign's mint-time narrowing for this cycle only; absent

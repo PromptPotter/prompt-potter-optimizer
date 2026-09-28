@@ -5,21 +5,23 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from promptpotter.application.intelligence.exploration import graded_response
 from promptpotter.application.scoring.selection import (
     elimination_p_best,
     elimination_p_best_bounds,
 )
-from promptpotter.config.settings import NO_RESULT, POBB_DEFAULT_EPSILON
-from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
-from promptpotter.domain.results import EliminationGate
+from promptpotter.config.settings import NO_RESULT
+from promptpotter.domain.results import ArmOutcome
 from promptpotter.domain.scoring import is_answer_collapsed
+from promptpotter.domain.validators import StopSignal
 from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.statistics import discordant_counts
 
 if TYPE_CHECKING:
+    from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
     from promptpotter.domain.ruler import DeltaRuler
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
@@ -42,8 +44,42 @@ def _graded(rows: Iterable[QueryMeasurement]) -> dict[str, float]:
     }
 
 
-def _eliminate(name: str, check_result: dict[str, Any]) -> EscalationSignal:
-    return EscalationSignal(name, EscalationTarget.ELIMINATE_CANDIDATE, check_result)
+class EliminationGate(StrEnum):
+    """WHICH gate stopped the candidate, named here because only the producer knows: re-derived
+    downstream from whichever keys survived, a collapse cut reads as an ε cut. These are the
+    mask's abort contributors."""
+
+    EPSILON = "epsilon"  # posterior fell below ε — measurement stopped, NOT a verdict
+    LOCK_IN = "lock_in"  # the opposite verdict: far enough ahead to stop buying
+    COLLAPSED = "collapsed"  # one label for every sample — the ABSENCE of a measurement
+
+
+# The operator's word for switching one gate off, keyed by the `abort:` lens variant the API edge
+# accepts (`routers/campaigns/cycles.py::_ABORT_SUPPRESS`, derived from the same enum).
+ABORT_LENS_LABELS: dict[str, str] = {
+    f"{EliminationGate.EPSILON.value}_off": "No ε-elimination",
+    f"{EliminationGate.LOCK_IN.value}_off": "No lock-in",
+    f"{EliminationGate.COLLAPSED.value}_off": "No collapse cut",
+    "all_off": "No early abort",
+}
+
+
+class EliminationContext(TypedDict, total=False):
+    """PoBB's ``ScoredCandidate.elimination_context`` for an arm it cut or locked. ``gate`` says
+    which of the rest are MEANT: only ε and lock-in computed a posterior, and only ε a bar."""
+
+    gate: EliminationGate
+    p_best: float
+    epsilon: float
+    leader_id: str
+    queries_scored: int
+    total_queries: int
+    n_priors: int
+    leader_label: str
+
+
+def _eliminate(name: str, check_result: dict[str, Any]) -> StopSignal:
+    return StopSignal(name, ArmOutcome.ELIMINATED, check_result)
 
 
 @dataclass(frozen=True)
@@ -57,18 +93,6 @@ class PoBBSnapshot:
     paired_breakdown: dict[str, dict[str, float]]
 
 
-@dataclass(frozen=True)
-class PoBBConfig:
-    n_min: int = 6
-    epsilon: float = POBB_DEFAULT_EPSILON
-    epsilon_floor: float = POBB_DEFAULT_EPSILON
-    lock_in: float = 0.95  # threshold only; leader_lock_in owns on/off
-    lock_in_n_min: int = 8
-    # Mechanism toggles (OptimizationConfig.mechanisms.elimination.*).
-    epsilon_elimination: bool = True
-    leader_lock_in: bool = False
-
-
 class PoBBCheck:
     """Paired-sample PoBB stop rule; ``backfill_fn`` aligns the leader's history onto the candidate's
     sample set so every comparison is on identical sample IDs. ``docs/methods/candidate-elimination.md``."""
@@ -77,8 +101,9 @@ class PoBBCheck:
 
     def __init__(
         self,
-        config: PoBBConfig,
+        knobs: PoBBKnobs,
         *,
+        n_min: int,
         n_samples: int,
         ruler: DeltaRuler | None,
         backfill_fn: BackfillFn | None = None,
@@ -86,13 +111,14 @@ class PoBBCheck:
         # The cycle's FIXED δ ruler — the SAME scale the round-winner election reads, so
         # elimination θ and election θ agree (``None`` ⇒ flat, where the ruler is still cold).
         self.ruler = ruler
-        self.n_min = config.n_min
-        self.epsilon = config.epsilon
-        self.epsilon_floor = config.epsilon_floor
-        self.lock_in = config.lock_in
-        self.lock_in_n_min = config.lock_in_n_min
-        self.epsilon_elimination = config.epsilon_elimination
-        self.leader_lock_in = config.leader_lock_in
+        # The bench's `elimination_n_min`: the fewest cells an arm is judged on, at either end.
+        self.n_min = n_min
+        self.epsilon = knobs.epsilon
+        self.epsilon_floor = knobs.epsilon_floor
+        self.lock_in = knobs.lock_in
+        self.lock_in_n_min = knobs.lock_in_n_min
+        self.epsilon_elimination = knobs.epsilon_elimination
+        self.leader_lock_in = knobs.leader_lock_in
         self.n_samples = n_samples
         # Per-prior per-sample GRADED response (fitness clamped to [0,1], via
         # ``graded_response``) — the θ ε-gate fits on it directly (bit-identical to the
@@ -230,7 +256,7 @@ class PoBBCheck:
         scale = min(1.0, max(0.0, min(ramp_in, ramp_out)))
         return self.epsilon_floor + (self.epsilon - self.epsilon_floor) * scale
 
-    def check(self, results: list[QueryMeasurement]) -> EscalationSignal | None:
+    def check(self, results: list[QueryMeasurement]) -> StopSignal | None:
         n = len(results)
         if n < self.n_min:
             return None
@@ -317,9 +343,9 @@ class PoBBCheck:
 
         # Leader lock-in: stop measuring when P(cand > every prior) ≥ lock_in.
         if self.leader_lock_in and n >= self.lock_in_n_min and p_best_current >= self.lock_in:
-            return EscalationSignal(
+            return StopSignal(
                 self.name,
-                EscalationTarget.LEADER_LOCKED,
+                ArmOutcome.LOCKED_IN,
                 {
                     "gate": EliminationGate.LOCK_IN,
                     "queries_scored": n,
@@ -336,7 +362,7 @@ class PoBBCheck:
         # ε is the ONLY futility gate, and it now tests the SAME bar adoption does:
         # ``elimination_p_best`` compares strictly better-than-prior (no margin) and crowning
         # needs a strictly positive θ lift over the parent. The prior set includes the parent
-        # (``l1/score/loop.py`` registers it as ``R{n}_winner``), so ε asks exactly "can this beat
+        # (``optimizers/potter/race.py`` registers it as ``R{n}_winner``), so ε asks exactly "can this beat
         # the parent". The band of arms that survived ε yet could never be crowned closed with the
         # accuracy-recalibrated bar that opened it.
         #
@@ -432,26 +458,10 @@ class PoBBCheck:
         return None
 
 
-def build_elimination_check(
-    config: PoBBConfig,
-    *,
-    n_samples: int,
-    ruler: DeltaRuler | None,
-    backfill_fn: BackfillFn | None,
-) -> PoBBCheck:
-    """Build the round's leader-elimination check — the swap point for alternative strategies. The
-    mid-round contract is the ``StopRule`` Protocol, but the round loop also drives PoBB's lifecycle."""
-    return PoBBCheck(
-        config,
-        n_samples=n_samples,
-        ruler=ruler,
-        backfill_fn=backfill_fn,
-    )
-
-
 __all__ = [
+    "ABORT_LENS_LABELS",
+    "EliminationContext",
+    "EliminationGate",
     "PoBBCheck",
-    "PoBBConfig",
     "PoBBSnapshot",
-    "build_elimination_check",
 ]

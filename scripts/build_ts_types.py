@@ -52,6 +52,11 @@ from promptpotter.application.evidence.subjects import (
     WinnerChainPoint,
 )
 from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
+from promptpotter.application.optimizer_manifest import (
+    KnobRow,
+    NodeKnobs,
+    OptimizerKnobsResponse,
+)
 from promptpotter.application.pipeline_resolve import (
     CampaignPipelineResponse,
     CampaignRunsWith,
@@ -90,6 +95,7 @@ from promptpotter.domain.optimizer_state import (
     WoundChannels,
 )
 from promptpotter.domain.pipeline_schema import (
+    ManifestNodeOverlay,
     ModelCapability,
     NestedPipelineRef,
     NodeConfigParam,
@@ -164,9 +170,6 @@ from promptpotter.presentation.api.routers.campaigns.manifests import (
     ConfigKnob,
     ConfigMapResponse,
     ForkPreviewResponse,
-    MechanismGroup,
-    MechanismSchemaResponse,
-    MechanismToggle,
 )
 from promptpotter.presentation.api.routers.campaigns.storage import (
     CampaignStorageResponse,
@@ -332,9 +335,9 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     DatasetStorageResponse,
     # --- campaign manifest detail + the two self-describing schemas the panels render ---
     CampaignDetailResponse,
-    MechanismToggle,
-    MechanismGroup,
-    MechanismSchemaResponse,
+    OptimizerKnobsResponse,
+    NodeKnobs,
+    KnobRow,
     ConfigKnob,
     ConfigEstimandGroup,
     ConfigCoupling,
@@ -343,6 +346,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     # these in `commands.ts` is what lets a wire field go unrepresented and a closed set be
     # re-spelled by hand. ---
     ConfigOverrides,
+    ManifestNodeOverlay,  # nested in ConfigOverrides.nodes — the emitter does not recurse
     NodeSearchNarrowing,  # nested in CycleSeed.optimizer_narrowing — the emitter does not recurse
     CycleSeed,
     OriginGateDecisionPayload,
@@ -549,19 +553,19 @@ def _emit_stop_reason_tables() -> str:
 
 
 def _emit_abort_lens_labels() -> str:
-    """Emit ``ABORT_LENS_LABELS`` (domain/results.py) as the browser's abort-lens picklist.
+    """Emit ``ABORT_LENS_LABELS`` (``pobb/checks.py``) as the browser's abort-lens picklist.
 
     Hand-authored twice before — ``CandidatesCard::LENS_OPTIONS`` and ``lib/lineage::LENS_LABELS``
     — three members each against the four the API edge accepts, with two different words for the
     ε one. Emitting it in ORDER matters: this is a picklist, and the dict's order is the order the
     operator reads.
     """
-    from promptpotter.domain.results import ABORT_LENS_LABELS
+    from promptpotter.application.optimization.pobb.checks import ABORT_LENS_LABELS
 
     rows = "\n".join(f"  {variant!r}: {label!r}," for variant, label in ABORT_LENS_LABELS.items())
     return (
         "// Abort-lens variant -> operator label, in picklist order. Mirror of\n"
-        "// domain/results.py::ABORT_LENS_LABELS, whose keys are asserted against the API edge's\n"
+        "// pobb/checks.py::ABORT_LENS_LABELS, whose keys are asserted against the API edge's\n"
         "// own `_ABORT_SUPPRESS` at import. Don't hand-list these.\n"
         "export const ABORT_LENS_LABELS: Record<string, string> = {\n"
         f"{rows}\n"
@@ -721,8 +725,14 @@ _HEADER = """\
 
 def main() -> int:
     from promptpotter.domain.phases import DashboardState, PotterDashboardState, RunPhase
+    from promptpotter.domain.results import ArmOutcome
 
     blocks = [_emit_interface(model) for model in EXPORTED_MODELS]
+    blocks.append(
+        _emit_enum_union(
+            ArmOutcome, "How an arm's measurement ended (domain/results.py::ArmOutcome)."
+        )
+    )
     blocks.append(
         _emit_enum_union(RunPhase, "The coarse run-state axis (domain/phases.py::RunPhase).")
     )

@@ -205,11 +205,12 @@ promptpotter = [
     "config/prompt_variants.json",  # config/prompt_blocks.py::BUNDLED_PATH
     "connectors/resources/*.json",  # n8n workflow templates
     "connectors/resources/*.yaml",  # connectors/harbor.py::_DOCKER_OVERLAY
-    "assets/optimizer/*.yaml",      # the optimizer's own pipeline manifest
-    "assets/optimizer/*.json",      # + its generated schema registry
-    "assets/optimizer/sets/*.yaml", # specialized optimizer prompt sets (L4)
+    "assets/optimizers/*/*.yaml",   # one pipeline manifest per optimizer
+    "assets/optimizers/*/*.json",   # + each one's generated schema registry
+    "assets/checkin/*.yaml",        # the bench's check-in node
+    "assets/checkin/*.json",        # + its generated schema registry
     # The last two are BUILD ARTIFACTS — a Next.js export and a git-filtered dataset
-    # tree — so they cannot sit in the source tree the way assets/optimizer/ does.
+    # tree — so they cannot sit in the source tree the way assets/optimizers/ does.
     # `scripts/build_release.py` stages both before `uv build`; that script is what
     # makes these two globs true, and without it they match nothing silently.
     "assets/webapp/**/*",           # exported dashboard

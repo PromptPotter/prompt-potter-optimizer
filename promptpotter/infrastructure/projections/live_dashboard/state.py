@@ -145,7 +145,7 @@ class CurrentRound(StrictModel):
     # Free-form per-node LLM I/O (``build_node_block``), mirroring ``round_NNNN.json::nodes``.
     nodes: dict[str, dict[str, Any]] = Field(default_factory=dict)
     pobb: PobbBlock = Field(default_factory=PobbBlock)
-    # The parent line on its shared cells, stamped at the ELECTION and null before it. Null here
+    # The best-so-far line on its shared cells, stamped at the ELECTION and null before it; null
     # is "not measured yet", never "withheld". ONLY this one of the round's readings: the others
     # (`verdict_reason`, `electable_count`, `separable`, `ability`, `health`) reach no live
     # surface, and a served field nothing renders is a note nobody reads.

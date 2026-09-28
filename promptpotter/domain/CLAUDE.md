@@ -107,7 +107,7 @@ CORRECT depends on what the payload carries:
 
 - **Reporting** — `round_diagnostics.py`'s rows. Nothing gates, scores or escalates on them, so
   every field defaults: a lost name degrades instead of killing a paid measurement.
-- **Scoring** — `ScoredCandidate`, `EscalationSignal`, `OptSearchPoint` and its subtree. These
+- **Scoring** — `ScoredCandidate`, `StopSignal`, `OptSearchPoint` and its subtree. These
   stay required. A missing field means the record cannot be vouched for, and a tolerant read
   hands back a winner prompt with a silently defaulted field — a wrong answer beats an
   unreadable one only until someone believes it.

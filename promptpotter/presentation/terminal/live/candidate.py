@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
+from promptpotter.application.optimization.pobb.checks import EliminationGate
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
-from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 from promptpotter.domain.candidate_diff import flatten_sp_summary
 from promptpotter.domain.connector import MeasuredUnit, unit_count
-from promptpotter.domain.results import EliminationGate
+from promptpotter.domain.results import ArmOutcome
 from promptpotter.presentation.terminal.primitives import (
     CYAN,
     DIM,
@@ -49,7 +49,6 @@ def fmt_individual_header(
 
 @dataclass(frozen=True)
 class IndividualSummary:
-    status: Literal["ok", "invalid", "aborted", "eliminated"]
     tag: str
     body_line: str
     detail_lines: tuple[str, ...]
@@ -60,14 +59,15 @@ def individual_summary_from_dict(
     *,
     unit: MeasuredUnit = "sample",
 ) -> IndividualSummary:
-    """Classify a candidate score report and pre-format every display piece. Precedence: invalid > aborted > eliminated > ok.
+    """Pre-format every display piece of a candidate score report, off the outcome it names.
 
     Takes no parent: the comparison against it is SERVED (``reference_*``), never differenced
     here. See the note on ``body_line`` below for why a view may not compute one."""
     mutations = fmt_pipeline_overlay(scores.get("pipeline_overlay"))
     mutations_chunk = f"{CYAN}{mutations}{RESET}  " if mutations else ""
 
-    if scores.get("invalid"):
+    outcome = scores.get("outcome")
+    if outcome == ArmOutcome.INVALID:
         out: list[str] = []
         for vf in scores["validation_failures"]:
             allowed = vf.get("allowed") or []
@@ -80,7 +80,6 @@ def individual_summary_from_dict(
             )
             out.append("  ↳ scored 0 (no backend call); the next l1_generate reads it in l1_wounds")
         return IndividualSummary(
-            status="invalid",
             tag=f"{YELLOW}INVALID{RESET}",
             body_line="",
             detail_lines=tuple(out),
@@ -93,19 +92,10 @@ def individual_summary_from_dict(
     ci = fmt_ci(scores.get("mean_fitness_ci_lo"), scores.get("mean_fitness_ci_hi"), spec="{:.1%}")
     tag = f"{fmt_pct(acc)} {ci}"
 
-    aborted = bool(scores.get("escalation_aborted"))
-    status: Literal["ok", "aborted", "eliminated"]
-    if aborted:
-        status = "aborted"
-    elif scores.get("elimination_stopped"):
-        status = "eliminated"
-    else:
-        status = "ok"
-
-    if aborted:
+    if outcome is not None and ArmOutcome(outcome).cut_short:
         scored_q = scores.get("scored_samples", n)
         expected_q = scores.get("expected_samples", n)
-        n_str = f"{unit_count(scored_q, unit)} {YELLOW}⚠ aborted {scored_q}/{expected_q}{RESET}"
+        n_str = f"{unit_count(scored_q, unit)} {YELLOW}⚠ {outcome} {scored_q}/{expected_q}{RESET}"
     else:
         n_str = unit_count(n, unit)
     # 📖 is the per-sample tape's cache mark; this is its total for the candidate.
@@ -114,7 +104,7 @@ def individual_summary_from_dict(
         n_str += f" ({n_cached}📖)"
     # THE SERVED LIFT, never `acc - parent_acc` recomputed here: `reference_lift` is the
     # paired difference on the cells the arm and the parent BOTH measured, `None` until round
-    # close stamps it (`l1/score/winner.py`) or below two shared cells. Absent means absent —
+    # measurement stamps it (`runner/measurement.py`) or below two shared cells. Absent means absent —
     # a cut arm's rate on its own prefix outruns the parent's on a fuller panel.
     lift = scores.get("reference_lift")
     vs_parent = ""
@@ -147,12 +137,12 @@ def individual_summary_from_dict(
         )
     elif gate == EliminationGate.EPSILON:
         leader = elim.get("leader_label") or (elim.get("leader_id", "?") or "?")[:8]
-        eps = float(elim.get("epsilon", POBB_DEFAULT_EPSILON))
+        eps = float(elim["epsilon"])
         detail_lines.append(
             f"{YELLOW}✂ eliminated {q}{RESET}  p_best={p_best:.1%} < eps={eps:.0%}  "
             f"vs {leader} {priors}"
         )
-    elif scores.get("elimination_stopped") and degrad:
+    elif outcome == ArmOutcome.BROKEN and degrad:
         dc = int(degrad.get("degraded_count", 0))
         ts = int(degrad.get("total_scored", 0))
         rate = float(degrad.get("degraded_rate", 0.0))
@@ -160,7 +150,7 @@ def individual_summary_from_dict(
         reason = degrad.get("dominant_warning", "unknown")
         source = degrad.get("source", "degradation")
         tag = "fatal" if fatal else f"{rate:.0%} degraded"
-        detail_lines.append(f"{YELLOW}✂ {source} q{dc}/{ts}{RESET}  {tag}  ({reason})")
+        detail_lines.append(f"{YELLOW}✂ broken ({source}) q{dc}/{ts}{RESET}  {tag}  ({reason})")
 
     comp = scores.get("composite_fitness")
     degraded = scores.get("degraded_samples", 0)
@@ -175,7 +165,6 @@ def individual_summary_from_dict(
         detail_lines.append(f"{YELLOW}⚠ {degraded}/{n} degraded{RESET}")
 
     return IndividualSummary(
-        status=status,
         tag=tag,
         body_line=body_line,
         detail_lines=tuple(detail_lines),

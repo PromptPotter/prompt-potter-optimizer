@@ -22,6 +22,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from promptpotter.domain.phases import CampaignPhase, PotterPhase, RunPhase
+from promptpotter.domain.results import ArmOutcome
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler
 from promptpotter.domain.run_records import (
     CandidateMintedRecord,
@@ -144,7 +145,7 @@ def scan_ledger_candidates(ledger_path: Path) -> list[LedgerCandidate]:
                 fields["composite_fitness"] = None
             _merge(
                 (rnd, idx),
-                state="invalid" if scores.get("invalid") else "measured",
+                state="invalid" if scores.get("outcome") == ArmOutcome.INVALID else "measured",
                 **fields,
             )
 

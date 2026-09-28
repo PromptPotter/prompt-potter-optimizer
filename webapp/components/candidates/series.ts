@@ -113,7 +113,7 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     key: "overlap",
     legend: (c) => `overlap · ${basisN(c)}`,
     hint: (c) =>
-      `Read on the same ${unitCount(basisN(c), c.unit)} — the only bars here that can be differenced against each other, and a candidate that did not answer all of it is blank rather than short. By default the cells C0 and every winner since all answered; pin your own with the set below.`,
+      `Read on the same ${unitCount(basisN(c), c.unit)} — the only bars here that can be differenced against each other, and a candidate that did not answer all of it is blank rather than short. By default the cells C0 and each new best since all answered; pin your own with the set below.`,
     ink: () => "--color-overlap",
     kind: "bar",
     axis: "y",

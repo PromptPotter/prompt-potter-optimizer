@@ -1,6 +1,6 @@
-"""Round loop — generate → score → escalate → stop. Pause, budget and the round cap are polled
-EVERY clean round, so ``pause-cycle`` exits resumably and ``change-run-limits`` moves a ceiling
-mid-flight without a restart."""
+"""Round loop — one manifest walk per round, then the controller's boundary. Pause, budget and the
+round cap are polled EVERY clean round, so ``pause-cycle`` exits resumably and
+``change-run-limits`` moves a ceiling mid-flight without a restart."""
 
 from __future__ import annotations
 
@@ -10,21 +10,17 @@ import traceback
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimization.cycle import Cycle
-from promptpotter.application.optimization.dispatch.facade import (
-    InjectionRenderError,
-    MandatoryPanelStarvedError,
-)
-from promptpotter.application.optimization.l1.execute import execute_round
+from promptpotter.application.optimizers.nodes import RoundContext
 from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
-from promptpotter.application.runner.generation_only import run_generation_only_round
 from promptpotter.application.runner.inner.ruler import refresh_inner_rulers
 from promptpotter.application.runner.origin_gate import run_origin_gate
 from promptpotter.application.runner.round import (
     emit_origin_round,
-    escalate_or_stop,
+    execute_round,
     persist_round,
     post_round,
+    round_plan,
 )
 from promptpotter.application.runner.termination import (
     RUN_STOPS,
@@ -40,6 +36,7 @@ from promptpotter.domain.run_records import ErrorRecord, PhaseRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.llm.telemetry import emit_error_record
 from promptpotter.infrastructure.runtime_flags import read_run_limits_mirror
+from promptpotter.shared.errors import PromptCompositionError
 
 logger = logging.getLogger(__name__)
 
@@ -128,16 +125,12 @@ async def run_round_loop(
                 declare_run_phase(session, RunPhase.PAUSED)
                 return StopReason.PAUSED, None
 
-            round_checks = session.scoring.degradation_checks
-
             logger.debug(
-                "Round %d (clean=%d/%d, acc=%s, stall=%d/%d)",
+                "Round %d (clean=%d/%d, acc=%s)",
                 round_num,
                 clean_rounds,
                 max_rounds,
                 cycle.tracking.current_accuracy,
-                cycle.escalation.l1_stall_count,
-                opt.l1_patience,
             )
 
             cb.set_round(round_num)
@@ -150,9 +143,8 @@ async def run_round_loop(
             # absorbed the last round's cells.
             refresh_inner_rulers(session, config, round_num=round_num)
 
-            # The calendar cap's half of "no round will follow this one". The lives bank's
-            # half can only be known after the round is scored, so `execute_round` /
-            # `post_round` fold it in themselves via `EscalationFSM.would_exhaust_lives`.
+            # The calendar cap's half of "no round will follow this one". The controller's half
+            # can only be known after the round is scored, so `execute_round` asks it there.
             is_final_round = clean_rounds + 1 >= max_rounds
 
             # Sampled BEFORE the round is scored, because the warm now happens inside scoring
@@ -161,12 +153,7 @@ async def run_round_loop(
             # its cold θ on disk forever — the exact silence the re-persist below exists to break.
             ruler_was_cold = cycle.ruler is None
             round_result = await execute_round(
-                cycle,
-                round_num,
-                dataset,
-                cb,
-                degradation_checks=round_checks,
-                is_final_round=is_final_round,
+                cycle, round_num, dataset, cb, is_final_round=is_final_round
             )
             # A cold ruler warms during the round, and the warm fit gives round 0 the θ it could
             # not have had at its own close. Round 0's document was written back then, so without
@@ -184,7 +171,6 @@ async def run_round_loop(
                 cycle,
                 round_result,
                 round_num,
-                config,
                 session,
                 cb,
                 budget_gate,
@@ -207,9 +193,12 @@ async def run_round_loop(
                 return budget_stop, None
 
             if diag and clean_rounds >= 1:
-                # Force L2 (bypass stall counter) on R1 evidence; peek R2 with L2 overrides.
-                await escalate_or_stop(cycle, config, session, round_num - 1, cb)
-                await run_generation_only_round(cycle, session, cb, round_num)
+                # The controller acts on round 1's evidence and shows round 2's proposals.
+                controller = round_plan(cycle.optimizer).controller
+                if controller is not None:
+                    await controller.diagnose(
+                        RoundContext(cycle=cycle, round_num=round_num - 1, callbacks=cb)
+                    )
                 return StopReason.DIAG_COMPLETE, None
 
         return (StopReason.HARD_CAP if round_num >= HARD_CAP else StopReason.MAX_ROUNDS), None
@@ -224,10 +213,8 @@ async def run_round_loop(
             "Optimization paused at round %d (%s).", round_num, str(exc) or "user-initiated"
         )
         return StopReason.PAUSED, None
-    except (InjectionRenderError, MandatoryPanelStarvedError) as exc:
-        # The prompt could not be composed correctly — a renderer raised, or a panel the node
-        # cannot operate without was not placed. Distinct from CRASHED so the operator can pinpoint
-        # the composition rather than the search, and a HALT rather than a degraded prompt: a node
+    except PromptCompositionError as exc:
+        # Distinct from CRASHED — the composition is at fault, not the search — and a HALT: a node
         # handed no subject still answers, confidently, and every instrument downstream reads green.
         tb = traceback.format_exc()
         session.state.crash_traceback = tb

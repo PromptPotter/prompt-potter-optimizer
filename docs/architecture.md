@@ -75,9 +75,9 @@ declared, visible to the operator and hashed into identity; model routing is eac
 holds only what the bench owns.
 
 A manifest's nodes take the node standard's types — `llm` and `measurement`, plus `sampler`,
-`eliminator`, `selector` and `algorithm`. **Their I/O contracts and the rules a manifest must
-satisfy are owned by [`developer/node-standard.md`](developer/node-standard.md) § Node
-capabilities.** Every sampler, eliminator, selector and algorithm node is backed by an
+`eliminator`, `selector`, `algorithm` and `controller`. **Their I/O contracts and the rules a
+manifest must satisfy are owned by [`developer/node-standard.md`](developer/node-standard.md)
+§ Node capabilities.** Every node the bench walks but the measurement is backed by an
 implementation registered under its node name through the one entry-point registry connectors
 and judges use, so a third party ships an optimizer as a manifest plus its implementations, with
 no edit inside this tree.
@@ -206,13 +206,16 @@ failed measurement (validation failure on L1 output, runtime failure
 mid-eval, deprecated cache entry from a transient backend hiccup) is
 **innocent** — a technical issue, not the candidate's fault. We log
 it, ignore it, and keep accumulating evidence on the same candidate.
-A candidate is aborted only when its **`DegradationCheck`**
-(`application/scoring/classification.py::DegradationCheck`) fires — a bench check, run on
-every optimizer's arms whatever its eliminator — i.e. when its
-fraction of failed measurements crosses the per-campaign
-`degradation_threshold` (`campaign.yaml::degradation_threshold`,
-e.g. `0.4` on gsm8k) — or, by default, on a single fatal-classified
-sighting (`mechanisms.elimination.degradation_fatal_fastpath`).
+
+**Three cases, one rule.** A single error row is skipped and never scored. Errors that keep
+repeating on ONE candidate are that candidate's fault: its **`DegradationCheck`**
+(`application/scoring/classification.py::DegradationCheck`) — a bench check, run on every
+optimizer's arms whatever its eliminator — stops it as **`broken`** once its fraction of failed
+measurements crosses the per-campaign `degradation_threshold` (e.g. `0.4` on gsm8k) or, by
+default, on a single fatal-classified sighting (`optimization.degradation_fatal_fastpath`). A
+broken arm is charged to the candidate as a wound the next proposals read, and recorded apart
+from **`eliminated`**, which only the optimizer's eliminator says (`ScoredCandidate.outcome`).
+Errors on every arm are an outage and nobody's fault: the run halts (`BACKEND_UNREACHABLE`).
 
 Aggregated failures surface at round end and
 flow upward; the dispatch hub is the prompt-fill path each healing

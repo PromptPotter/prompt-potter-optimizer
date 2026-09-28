@@ -10,6 +10,7 @@ from promptpotter.application.campaign_config import freeze_campaign_config
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     combined_optimizer_prompt_hash,
 )
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import resolved_dataset_name
 from promptpotter.application.run_observers import build_campaign_emitter
 from promptpotter.application.runner.campaign_ids import mint_campaign_id, mint_checkin_cycle_id
@@ -18,7 +19,6 @@ from promptpotter.domain.bench import BankPartition
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
-from promptpotter.domain.optimizer_state import POTTER_MANIFEST
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import HeadlineMetric
 from promptpotter.domain.sample import Sample
@@ -197,6 +197,11 @@ class Session:
     spend_used: Callable[[], float] | None = None
 
 
+def _manifest_hashes(config: CampaignConfig) -> dict[str, str]:
+    selected = select_optimizer(config.optimization)
+    return {selected.name: combined_optimizer_prompt_hash(selected)}
+
+
 def new_session_state(
     *,
     init_params: dict[str, Any],
@@ -278,7 +283,7 @@ def auto_mint_session(
             created_at=now,
             root_cycle_id=root_cycle,
             root_content_hash=target_hash,
-            optimizer_manifest_hashes={POTTER_MANIFEST: combined_optimizer_prompt_hash()},
+            optimizer_manifest_hashes=_manifest_hashes(campaign_config),
             backend_id=session.backend_id,
             backend_type=backend_type_of_dataset(session.store, dataset_name),
             owner_user_id=str(session.identity.user_id),
@@ -402,7 +407,7 @@ def finalize_checkin_to_active(
         hop.campaign_id,
         {
             "root_content_hash": target_hash,
-            "optimizer_manifest_hashes": {POTTER_MANIFEST: combined_optimizer_prompt_hash()},
+            "optimizer_manifest_hashes": _manifest_hashes(campaign_config),
             "backend_id": session.backend_id,
             # Re-read rather than trusted from the skeleton: the check-in wrote the slug's
             # `pipeline.yaml` between the two, and the operator may have picked a different

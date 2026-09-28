@@ -1,5 +1,5 @@
-"""The parent line, read on the ORIGIN PANEL — see ``domain/results.py::OverlapReading`` for what
-the reading means and ``origin_panel`` for why the set is fixed at C0 rather than re-chosen."""
+"""The bench's best-so-far line, read on the ORIGIN PANEL — see ``domain/results.py::OverlapReading``
+for what the reading means and ``origin_panel`` for why the set is fixed at C0 rather than re-chosen."""
 
 from __future__ import annotations
 
@@ -9,13 +9,13 @@ from typing import TYPE_CHECKING, Any, cast
 from promptpotter.application.scoring.metrics import _compute_accuracy
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.results import (
+    LineStep,
     OverlapMember,
     OverlapReading,
-    ParentStep,
+    best_line,
     measured_cells,
     merge_known_outcomes,
     origin_panel,
-    parent_line,
 )
 from promptpotter.shared.instrument import MeasuredCandidate, MeasurementRole
 
@@ -33,22 +33,21 @@ __all__ = ["measure_overlap"]
 async def measure_overlap(
     cycle: Cycle, round_result: RoundResult, scoring_pool: list[Sample]
 ) -> None:
-    """Put the whole parent line back on the origin panel, buying only the cells each member is
-    missing, and stamp the reading onto *round_result*.
+    """Put the whole best-so-far line back on the origin panel, buying only the cells each member
+    is missing, and stamp the reading onto *round_result*.
 
     Called after the election, the ruler extension and the panel gate, so every decision this
     round makes is already made before the first of these cells is bought. That ordering IS the
     quarantine; the fields it writes are outside `results` / `all_candidate_results` so the NEXT
     round's acquisition, ruler and floor cannot see them either.
 
-    Usually one member pays — the arm this round crowned, on the panel cells it had not sat. A
-    second one pays only where it predates the panel it is now read on, and then only once.
+    Usually one member pays — the individual this round made the new best, on the panel cells it
+    had not sat. A second one pays only where it predates the panel it is now read on, and once.
     """
     if round_result.opt_sp is None:
         return
-    # The line INCLUDING this round: on a HELD round the subject is the retained parent, whose
-    # coverage this round's parent re-score just widened, and on a won round it is the new arm.
-    steps = parent_line([*cycle.rounds, round_result])
+    # The line INCLUDING this round, which may have made its own result the new best.
+    steps = best_line([*cycle.rounds, round_result])
     if len(steps) < 2:
         return  # C0 alone — there is nothing yet to read it against
     ordered = sorted(steps, key=lambda s: s.round)
@@ -90,7 +89,7 @@ async def measure_overlap(
     )
 
 
-def _member(step: ParentStep, rows: list[dict[str, Any]], keep: set[int]) -> OverlapMember:
+def _member(step: LineStep, rows: list[dict[str, Any]], keep: set[int]) -> OverlapMember:
     on_set = [r for r in rows if (sid := r.get("sample_id")) is not None and int(sid) in keep]
     stats = _compute_accuracy(cast("list[QueryMeasurement]", on_set))
     return OverlapMember(
@@ -107,16 +106,14 @@ async def _measure_gaps(
     gaps: list[int],
     scoring_pool: list[Sample],
     *,
-    step: ParentStep,
+    step: LineStep,
 ) -> list[dict[str, Any]] | None:
     """*step*'s OWN configuration on *gaps* — never the round subject's. A member measured under
     another arm's prompt is that arm's reading wearing this one's label. ``None`` when the pass
     stopped before its last gap."""
 
     schema = cycle.session.pipeline_schema
-    assert step.opt_sp is not None, (
-        "a parent line member carries the OSP its round was stamped with"
-    )
+    assert step.opt_sp is not None, "a line member carries the OSP its round was stamped with"
     assert schema is not None, "the overlap pass requires pipeline_schema"
     want = set(gaps)
     samples = [s for s in scoring_pool if s.id in want]

@@ -255,7 +255,7 @@ export function roundsOf(dash: Record<string, unknown> | null): RoundSummary[] {
 export function assertRoundMeasured(label: string, round: RoundSummary | undefined) {
   expect(round, `${label}: no round to read`).toBeDefined();
   const graded = (round?.candidates ?? []).filter(
-    (c) => typeof c.accuracy === "number" && !c.invalid,
+    (c) => typeof c.accuracy === "number" && c.outcome !== "invalid",
   );
   expect(
     graded.length,

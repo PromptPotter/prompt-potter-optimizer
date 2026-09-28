@@ -38,7 +38,6 @@ from promptpotter.application.optimization.dispatch.llm_call.call import (
 )
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     load_optimizer_prompt,
-    optimizer_model,
 )
 from promptpotter.application.optimization.dispatch.schemas import (
     L1GenerateOutput,
@@ -108,7 +107,7 @@ async def l1_generate(
     if n_variants <= 0:
         raise ValueError(f"n_variants must be >0, got {n_variants}")
 
-    model = optimizer_model("l1_generate")  # for warning/diagnostic surfaces only
+    model = cycle.optimizer.model("l1_generate")  # for warning/diagnostic surfaces only
     opt_sp = cycle.opt_sp
     pipeline_schema = cycle.session.pipeline_schema
 
@@ -131,7 +130,7 @@ async def l1_generate(
         **injection_vars,
     }
 
-    schema_field_rename = cycle.config.optimization.schema_field_rename
+    schema_field_rename = cycle.knobs.l1_generate.schema_field_rename
     output_schema = (
         build_l1_response_schema(
             pipeline_schema,

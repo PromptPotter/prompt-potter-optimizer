@@ -310,9 +310,9 @@ components:
     DecisionPayload:
       type: object
       description: |
-        ResumeCheckpointRecord — one recorded loop decision. `fork_cut` is the
-        bench's; every other kind is taken by one optimizer node, and `node`
-        names which, so a replay gates each kind on the member that owns it.
+        ResumeCheckpointRecord — one recorded loop decision. `fork_cut` and
+        `panel_coverage` are the bench's; every other kind is taken by one
+        optimizer node, and `node` names which.
       required: [kind, inputs_ref, outcome, data, timestamp]
       additionalProperties: false
       properties:
@@ -324,15 +324,14 @@ components:
             # potter's eliminator (PoBB)
             - elimination_cut
             - leader_lock_in
-            - panel_coverage
             # potter's controller
             - l2_escalation_trigger
             - l3_escalation_trigger
             # the bench
+            - panel_coverage
             - fork_cut
         node:
           type: [string, 'null']
-          x-status: declared-not-wired
           description: |
             The manifest node whose member took this decision; null for a
             bench decision.

@@ -15,9 +15,9 @@ from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.query_loop import QueryLoopState, Walk, run_walks
 from promptpotter.application.scoring.selection import mean_fitness_ci
-from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
+from promptpotter.domain.results import ArmOutcome
 from promptpotter.domain.scoring import CellScorer, QueryMeasurement
-from promptpotter.domain.validators import StopRule
+from promptpotter.domain.validators import StopRule, StopSignal
 from promptpotter.infrastructure.store import archive_queries
 from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 from promptpotter.infrastructure.tracing.events import DatasetRun
@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "SCORING_ERROR_ABORT",
     "ScoredWalk",
     "close_walk",
     "merge_with_unprocessed_priors",
@@ -53,12 +54,12 @@ __all__ = [
 @dataclass(frozen=True)
 class ScoredWalk:
     """A decided walk, recorded. ``stopped`` is why it ended before its last cell — ``"skip"``,
-    ``"escalation"`` or an abort reason — and ``None`` once it took every cell, whatever decided
+    ``"stop_rule"`` or an abort reason — and ``None`` once it took every cell, whatever decided
     it there. A partial walk means something different to each caller, so each one says what."""
 
     results: list[QueryMeasurement]
     scores: dict[str, Any]
-    signal: EscalationSignal | None
+    signal: StopSignal | None
     stopped: str | None
     # The archive run the rows were filed under — what a score report carries so each of its cells
     # is addressable as ``(run_id, sample_id)``.
@@ -97,9 +98,11 @@ def merge_with_unprocessed_priors(
     return results + [p for sid, p in prior_tail.items() if sid not in processed]
 
 
-def _build_scoring_error_signal(
-    *, results: list[QueryMeasurement], stop_reason: str
-) -> EscalationSignal:
+# The gateway's own stop: the query loop gave up on this walk. One of the bench's two BROKEN rules.
+SCORING_ERROR_ABORT = "scoring_error_abort"
+
+
+def _build_scoring_error_signal(*, results: list[QueryMeasurement], stop_reason: str) -> StopSignal:
     # Every error row here is now a cell that was actually SENT. The abort used to pad the tail
     # with synthetic markers to bring the list up to dataset length, and this had to strip them
     # back out by matching the stop reason; the padding is gone, so the filter is too.
@@ -111,9 +114,9 @@ def _build_scoring_error_signal(
     # Every ``real_error`` is an error row, so ``error`` is present + non-empty.
     last_error = str(real_errors[-1]["error"]) if real_errors else ""
     dominant = last_error or stop_reason or "scoring_error"
-    return EscalationSignal(
-        check_name="scoring_error_abort",
-        target=EscalationTarget.ELIMINATE_CANDIDATE,
+    return StopSignal(
+        check_name=SCORING_ERROR_ABORT,
+        outcome=ArmOutcome.BROKEN,
         check_result={
             "stop_reason": stop_reason,
             "dominant_warning": dominant,
@@ -218,14 +221,14 @@ def _resolve_prior_cache(
     return cached_sample_results, deprecated_samples, dataset_sample_ids
 
 
-def _resolve_partial_escalation(batch: QueryLoopResult) -> EscalationSignal | None:
+def _resolve_partial_escalation(batch: QueryLoopResult) -> StopSignal | None:
     """The escalation signal a decided walk carries. A skip is the operator's early-abort of THIS
     search point: its partial is on disk and scores like a PoBB cut, with no signal. Any other
     unsignalled stop is a scoring-error abort (consecutive 5xx, client 4xx, pipeline ERROR), made a
     candidate-scoped escalation so the caller can attach a RuntimeFailure and go on — never killing
     the round."""
-    if batch.completed or batch.escalation_signal is not None or batch.stop_reason == "skip":
-        return batch.escalation_signal
+    if batch.completed or batch.stop_signal is not None or batch.stop_reason == "skip":
+        return batch.stop_signal
     return _build_scoring_error_signal(results=batch.results, stop_reason=batch.stop_reason or "")
 
 

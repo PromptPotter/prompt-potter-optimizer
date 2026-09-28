@@ -93,12 +93,6 @@ WELL_KNOWN_PARAM_TYPES: Annotated[dict[str, str], shapes_optimizer_prompt] = {
 # that wall halts the loop with ``StopReason.OPTIMIZER_TIMEOUT`` — it is never sent again.
 OPTIMIZER_CALL_DEADLINE_S: float = 180.0
 
-# PoBB elimination — a candidate stops when its P(best) drops below ε. The runtime value is
-# ``CampaignConfig.pobb_epsilon``; this is the single default every entry point references so
-# the number cannot drift. Set at the most aggressive threshold before false-cuts of true
-# winners climb, measured on the archived round corpus.
-POBB_DEFAULT_EPSILON: Annotated[float, shapes_optimizer_prompt] = 0.15
-
 DEFAULT_ORIGIN_BUDGET: int = 40
 
 # UCB1 exploration weight for the lineage rewind pick. sqrt(2) is UCB1's regret-optimal constant
@@ -128,7 +122,7 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
 
     # Keys only. The optimizer's provider + model are per node in
-    # ``promptpotter/assets/optimizer/pipeline.yaml``; there is no env-var default for either.
+    # ``promptpotter/assets/optimizers/potter/pipeline.yaml``; there is no env-var default for either.
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
     GROQ_API_KEY: str = ""
@@ -264,7 +258,6 @@ __all__ = [
     "LOCK_TIMEOUT",
     "NO_RESULT",
     "OPTIMIZER_CALL_DEADLINE_S",
-    "POBB_DEFAULT_EPSILON",
     "PROMPT_STRING_FIELDS",
     "TERMS_VERSION",
     "WELL_KNOWN_PARAM_TYPES",

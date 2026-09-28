@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from promptpotter.domain.results import HardSampleOrder, HeadlineMetric, OverlapReading
+from promptpotter.domain.results import ArmOutcome, HardSampleOrder, HeadlineMetric, OverlapReading
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.spend import SpendRollup
 
@@ -171,11 +171,9 @@ class ScoreEntry:
     total: int
     mean_fitness_ci_lo: float | None
     mean_fitness_ci_hi: float | None
-    escalation_aborted: bool = False
-    # Why this row scored fewer cells than the panel: "" (whole panel) | "skip" (operator cut the
-    # walk short). Carried because the display RANKS on it (`domain/results.py::scoreboard_rank_key`)
-    # and a view cannot demote what it was never told.
-    partial_reason: str = ""
+    # Carried because the display RANKS on it (`domain/results.py::scoreboard_rank_key`) and a
+    # view cannot demote what it was never told.
+    outcome: ArmOutcome
     # First-validation-failure reason for synthetic-zeroed variants (e.g. ``no_op_variant``);
     # scoreboard suppresses these rows so ranking reflects mutated candidates only.
     invalid_reason: str | None = None
@@ -335,7 +333,7 @@ class RoundDigestView:
     ability: AbilityReading | None = None
     # The round's outcome in the numbers that decided it — see ``RoundResult.verdict_reason``.
     verdict_reason: str | None = None
-    # The parent line read on ONE shared set of cells — the only row in this view two rounds can
+    # The best-so-far line read on ONE shared set of cells — the only row two rounds can
     # be differenced on, since `accuracy` above is read on whatever subset the round bought.
     overlap: OverlapReading | None = None
     # Per-candidate P(best) trajectory from ``.runtime/streams/round_NNNN_p_best.jsonl``;

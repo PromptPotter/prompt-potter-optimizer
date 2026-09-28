@@ -13,7 +13,7 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 **What to try:**
 - Use your own key for that provider (OpenRouter BYOK), which gets its own rate limit, or route to another host (`route_order` in the node's config), then `python -m promptpotter resume`. No re-mint needed.
 - On a shared upstream pool, waiting is the only other cure: resume later.
-- Switch the optimizer to a smaller model in `promptpotter/assets/optimizer/pipeline.yaml` (each optimizer node's `config.model`), e.g. `"meta-llama/llama-4-scout-17b-16e-instruct"` — install-global, applies to every campaign.
+- Switch the optimizer to a smaller model in `promptpotter/assets/optimizers/potter/pipeline.yaml` (each optimizer node's `config.model`), e.g. `"meta-llama/llama-4-scout-17b-16e-instruct"` — every campaign that does not override it; one campaign's `optimization.nodes.{node}.config.model` moves only that one.
 - Upgrade to a paid tier.
 
 ---
@@ -28,7 +28,7 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 - Swap the `model` field in the relevant `datasets/<name>/pipeline.yaml` to `openai/gpt-oss-20b` and keep iterating. Flip back to `120b` for benchmarks.
 - Each dataset's `reasoning_effort` default is tuned to keep both models clear of Groq's per-model output ceiling — `bbeh` ships `reasoning_effort: low` so `20b` doesn't burn its reasoning budget.
 - Where `max_tokens` is and is not pinned by a dataset — owned by the matrix below. Raise it per-cycle via `campaign.yaml::pipeline_overlay`.
-- Target-layer model lives in `datasets/<name>/pipeline.yaml::llm_only.config` (set `provider` explicitly — e.g. `openrouter`); the optimizer-layer model is install-global in `promptpotter/assets/optimizer/pipeline.yaml` (per optimizer node). They're independent.
+- Target-layer model lives in `datasets/<name>/pipeline.yaml::llm_only.config` (set `provider` explicitly — e.g. `openrouter`); the optimizer-layer model is per optimizer node in `promptpotter/assets/optimizers/potter/pipeline.yaml`, overlaid by a campaign's `optimization.nodes`. They're independent.
 - Full per-dataset matrix: [`docs/operations/dataset-reasoning-matrix.md`](../operations/dataset-reasoning-matrix.md).
 
 ---

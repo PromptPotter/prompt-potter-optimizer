@@ -28,20 +28,19 @@ from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 __all__ = [
-    "ABORT_LENS_LABELS",
     "CEILING_FRACTION",
+    "ArmOutcome",
     "CandidateProposal",
     "CellDelta",
     "CycleResult",
     "DegradationContext",
     "DegradationHealth",
     "DiagnosticRunRecord",
-    "EliminationContext",
     "HardSampleOrder",
     "HeadlineMetric",
+    "LineStep",
     "OverlapMember",
     "OverlapReading",
-    "ParentStep",
     "ReferenceReading",
     "RoundClocks",
     "RoundResult",
@@ -49,6 +48,7 @@ __all__ = [
     "ScoreboardRow",
     "ScoredCandidate",
     "WarningDict",
+    "best_line",
     "best_round_on_shared_cells",
     "candidate_label",
     "diagnostic_held",
@@ -62,7 +62,6 @@ __all__ = [
     "overlap_row",
     "overlap_series",
     "parent_key",
-    "parent_line",
     "parse_candidate_label",
     "resolved_fitness",
     "round_clocks",
@@ -71,48 +70,27 @@ __all__ = [
 ]
 
 
-class EliminationGate(StrEnum):
-    """WHICH gate stopped the candidate, named by the PRODUCER (``pobb/checks.py``) because only it
-    knows: re-derived downstream from whichever keys survived, a collapse cut reads as an ε cut.
-    These are the mask's abort contributors."""
+class ArmOutcome(StrEnum):
+    """How an arm's measurement ended, and whose decision ended it: the bench's checks say
+    ``BROKEN``, the optimizer's eliminator ``ELIMINATED`` or ``LOCKED_IN``, the operator ``SKIPPED``."""
 
-    EPSILON = "epsilon"  # posterior fell below ε — measurement stopped, NOT a verdict
-    LOCK_IN = "lock_in"  # the opposite verdict: far enough ahead to stop buying
-    COLLAPSED = "collapsed"  # one label for every sample — the ABSENCE of a measurement
+    MEASURED = "measured"  # walked its whole panel
+    INVALID = "invalid"  # rejected before it cost a cell; the scores beside it are synthetic
+    SKIPPED = "skipped"  # the operator cut it short
+    # Errors kept repeating on THIS arm while the others measured: its fault, counted against it.
+    BROKEN = "broken"
+    ELIMINATED = "eliminated"  # the eliminator stopped buying it
+    LOCKED_IN = "locked_in"  # the eliminator stopped it far enough ahead to call
 
-
-# The operator's word for switching one gate off, keyed by the `abort:` lens variant the API edge
-# accepts (`routers/campaigns/cycles.py::_ABORT_SUPPRESS`, which derives its keys from the same
-# enum). Here rather than in the browser because the picklist was hand-authored TWICE, three
-# members against the four the edge serves — so `abort:collapsed_off` was reachable only by typing
-# a URL, and the two copies disagreed about what to call the first one.
-ABORT_LENS_LABELS: dict[str, str] = {
-    f"{EliminationGate.EPSILON.value}_off": "No ε-elimination",
-    f"{EliminationGate.LOCK_IN.value}_off": "No lock-in",
-    f"{EliminationGate.COLLAPSED.value}_off": "No collapse cut",
-    "all_off": "No early abort",
-}
-
-
-class EliminationContext(TypedDict, total=False):
-    """Written by ``decode_signal_effect`` when the elimination check fires; empty when the
-    candidate was not cut. Disjoint from :class:`DegradationContext`.
-
-    ``gate`` says which of the rest are MEANT: only ε and lock-in ever computed a posterior."""
-
-    gate: EliminationGate
-    p_best: float
-    epsilon: float
-    leader_id: str
-    queries_scored: int
-    total_queries: int
-    n_priors: int
-    leader_label: str
+    @property
+    def cut_short(self) -> bool:
+        """Stopped before its panel against the arm — by the operator, the bench or a cut."""
+        return self in (ArmOutcome.SKIPPED, ArmOutcome.BROKEN, ArmOutcome.ELIMINATED)
 
 
 class DegradationContext(TypedDict, total=False):
-    """Empty when the candidate was not degradation-cut. Disjoint from
-    :class:`EliminationContext` — the renderer branches on which of the two is non-empty."""
+    """The bench's reading of a ``BROKEN`` arm, empty on every other — beside the eliminator's own
+    ``elimination_context``, which a broken arm leaves empty."""
 
     degraded_rate: float
     degraded_count: int
@@ -243,8 +221,7 @@ class ScoredCandidate(StrictModel):
     # Paired with ``pipeline_overlay``, the full searchpoint an operator selects to seed
     # an operator-steered fork.
     prompt_fields: dict[str, Any] = Field(default_factory=dict)
-    escalation_aborted: bool = False
-    elimination_stopped: bool = False
+    outcome: ArmOutcome
     scored_samples: int = 0
     expected_samples: int = 0
     # Of ``scored_samples``, how many were replayed from the MeasurementArchive rather than
@@ -256,13 +233,11 @@ class ScoredCandidate(StrictModel):
     input_tokens: int | None = None
     output_tokens: int | None = None
     cache_read_tokens: int | None = None
-    # Why ``scored_samples < expected_samples``: "" (not partial) | "skip" (operator
-    # early-abort, which marks the cycle ``human_intervened``).
-    partial_reason: str = ""
-    invalid: bool = False
     validation_failures: list[ValidationFailure] = Field(default_factory=list)
     runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
-    elimination_context: EliminationContext = Field(default_factory=EliminationContext)
+    # The eliminator's own reading of an arm it stopped, opaque to the bench: its keys are the
+    # eliminator's (potter's are `pobb/checks.py::EliminationContext`).
+    elimination_context: dict[str, Any] = Field(default_factory=dict)
     degradation_context: DegradationContext = Field(default_factory=DegradationContext)
     # The individual this arm's lift is read against, over the cells it touched — potter's is the
     # round's parent. ``None`` where the arm was never read against one (rejected before it ran).
@@ -297,11 +272,9 @@ class ScoredCandidate(StrictModel):
 
 
 def is_leader_eligible(cs: ScoredCandidate) -> bool:
-    """A VALIDITY predicate, never a ranking one — a PoBB stop is a budget decision and
+    """A VALIDITY predicate, never a ranking one — an eliminator's stop is a budget decision and
     disqualifies nothing. Whether the round can READ the arm is :func:`is_electable`."""
-    if cs.escalation_aborted and not cs.elimination_stopped:
-        return False
-    return not cs.degradation_context
+    return cs.outcome not in (ArmOutcome.BROKEN, ArmOutcome.SKIPPED)
 
 
 def is_electable(cs: ScoredCandidate, rows: Sequence[Mapping[str, object]]) -> bool:
@@ -404,11 +377,9 @@ _SCOREBOARD_INCLUDE: set[str] = {
     "total",
     "mean_fitness_ci_lo",
     "mean_fitness_ci_hi",
-    "escalation_aborted",
-    # Without this the table cannot tell a candidate REJECTED before it cost a sample from one
-    # that got everything wrong — the two are byte-identical otherwise, and the display half was
-    # the one surface still rendering the first as a rate.
-    "invalid",
+    # Without it the table cannot tell a candidate REJECTED before it cost a sample from one that
+    # got everything wrong, nor a broken arm from one the eliminator stopped.
+    "outcome",
     "reference_accuracy",
     "reference_composite",
     # The election's own number and the margin it was decided on. Without these the table can
@@ -437,11 +408,9 @@ class ScoreboardRow(StrictModel):
     accuracy: float | None
     composite_fitness: float
     total: int
-    escalation_aborted: bool
-    # Rejected by validation before it ran, so the ``accuracy`` / ``composite_fitness`` beside it
-    # are ``INVALID_SCORES``' synthetic 0.0 — see ``DashboardCandidate.invalid`` for why that
-    # number is served at all. Nothing may render those two as a rate while this is true.
-    invalid: bool
+    # ``INVALID`` means the ``accuracy`` / ``composite_fitness`` beside it are ``INVALID_SCORES``'
+    # synthetic 0.0, which nothing may render as a rate.
+    outcome: ArmOutcome
     # ``None`` for a row that did not cover the parent's panel — see ``ScoredCandidate``: the
     # file carries the absence rather than a 0.0 that reads as a verdict the parent never gave.
     reference_accuracy: float | None
@@ -491,11 +460,11 @@ class ReferenceReading(StrictModel):
 
 
 class OverlapMember(StrictModel):
-    """One parent, read on the round's overlap set."""
+    """One member of the best-so-far line, read on the round's overlap set."""
 
     model_config = ConfigDict(frozen=True)
 
-    # The round this individual was crowned; 0 is the origin.
+    # The round this individual became the bench's best so far; 0 is the origin.
     round: int
     candidate_id: str
     label: str
@@ -518,12 +487,12 @@ class CellDelta(NamedTuple):
 
 
 class OverlapReading(StrictModel):
-    """The cells EVERY parent has answered, and each one's rate over them.
+    """The cells EVERY member of the best-so-far line has answered, and each one's rate over them.
 
     The comparison no other surface can make. Not a second fitness: a round's own accuracy is
     read on the subset that round bought, and the acquisition maximises information about one
     ability rather than spread, so consecutive rounds can share almost no cells at all. This is
-    one exam, sat by C0 and by every winner since.
+    one exam, sat by C0 and by each new best since — the bench's ranking, whatever the optimizer.
 
     REPORT-ONLY, and that is what makes measuring OUTSIDE the election unbiased. These rows reach
     no election, no parent floor, no lift, no ruler and no acquisition — fed to any of them the
@@ -537,16 +506,17 @@ class OverlapReading(StrictModel):
     # Ascending, and FIXED for the life of the cycle — :func:`origin_panel`, so every round asks
     # "is this winner better than C0?" on the same exam. Every member below has answered all of it.
     sample_ids: list[int] = Field(default_factory=list)
-    # Adoption order — C0 first.
+    # The order each became best — C0 first.
     members: list[OverlapMember] = Field(default_factory=list)
-    # What this round PAID to put the line back on the whole panel — usually the new winner alone,
-    # and more only where an earlier one predates the panel it is now read on. Zero on a held round
-    # whose parent already sat it. Sole count of those rows — nothing re-derives it from the rows.
+    # What this round PAID to put the line back on the whole panel — usually the new best alone,
+    # and more only where an earlier one predates the panel it is now read on. Zero on a round
+    # whose line already sat it. Sole count of those rows — nothing re-derives it from the rows.
     measured: int = 0
 
 
-class ParentStep(NamedTuple):
-    """One parent, every cell the cycle has measured it on, and what it takes to measure another.
+class LineStep(NamedTuple):
+    """One member of the best-so-far line, every cell the cycle has measured it on, and what it
+    takes to measure another.
 
     ``key`` is :func:`parent_key` — the identity a caller must match a round against, since
     ``candidate_id`` is the id this configuration FIRST arrived as and a later round can carry
@@ -567,7 +537,7 @@ class ParentStep(NamedTuple):
 
 
 def overlap_series(overlap: OverlapReading | None) -> str:
-    """The parent line on one line — every member's rate over the SAME cells, plus what the
+    """The best-so-far line on one line — every member's rate over the SAME cells, plus what the
     round paid to keep the set whole. Empty when there is no reading, so a caller appends
     nothing rather than printing a header over an absence."""
     if overlap is None or not overlap.members:
@@ -624,7 +594,7 @@ def parent_key(rr: RoundResult) -> str:
     **NOT ``lineage.id``.** An L2/L3 transition mints a fresh ``OptSearchPoint`` from the same six
     prompt strings — the optimizer state it moves never reaches ``render()`` — so the parent's id
     changes while the measured thing does not. Empty only on a round that never closed, which
-    ``parent_line`` has already skipped for want of an individual it ended on.
+    ``best_line`` has already skipped for want of an individual it ended on.
     """
     # The node's own `prompt` is dropped because it is that render one step stale: on a WINNING
     # round the round file records the render the round STARTED with, not the elected winner's.
@@ -634,35 +604,41 @@ def parent_key(rr: RoundResult) -> str:
     )
 
 
-def parent_line(rounds: Sequence[RoundResult]) -> list[ParentStep]:
-    """The campaign's parent line — C0, then every round that adopted a different configuration
-    — each member carrying the union of every cell the cycle measured it on, in adoption order.
+def best_line(rounds: Sequence[RoundResult]) -> list[LineStep]:
+    """The campaign's best-so-far line — C0, then each individual that became the best the bench
+    has measured, in the order it did — each member carrying the union of every cell the cycle
+    measured it on. One line per campaign, the same for every optimizer.
 
-    ONE rule covers both round shapes: ``results`` belongs to the round's parent whether the
-    round crowned an arm or retained one, so a HELD round's parent re-score WIDENS that member's
-    coverage instead of being lost. The overlap rows an earlier round paid for join it too — they
-    are that individual's own measurement, quarantined from the decisions and from nothing else.
+    "Best" is the bench's own ranking, the one ``Cycle.absorb_round`` keeps: the high-water of each
+    round's headline composite, strictly exceeded. ``results`` belongs to the individual the round
+    ended on, so a round that re-reads a member WIDENS its coverage instead of losing it. The overlap
+    rows an earlier round paid for join it too — that individual's own measurement, quarantined
+    from the decisions and from nothing else.
     """
     rows: dict[str, list[dict[str, Any]]] = {}
-    # key → the round that first adopted this configuration, and the candidate it arrived as.
-    first: dict[str, tuple[int, str]] = {}
+    # key → the candidate this configuration first arrived as.
+    first: dict[str, str] = {}
     labels: dict[str, str] = {}
     config: dict[str, tuple[OptSearchPoint | None, dict[str, Any]]] = {}
+    # key → the round it became best, in that order.
+    became: dict[str, int] = {}
+    best: float | None = None
     for rr in rounds:
         for cs in rr.candidate_scores:
             labels.setdefault(cs.candidate_id, cs.label)
-        # The individual the round ENDED on — its selection, or on a held round the parent kept.
         if rr.opt_sp is None:
             continue
-        cid = rr.opt_sp.lineage.id
         key = parent_key(rr)
-        first.setdefault(key, (rr.round, cid))
+        first.setdefault(key, rr.opt_sp.lineage.id)
         config.setdefault(key, (rr.opt_sp, dict(rr.pipeline_params or {})))
         rows[key] = merge_known_outcomes(rows.get(key, []), list(rr.results))
+        if best is None or rr.composite_fitness > best:
+            best = rr.composite_fitness
+            became.setdefault(key, rr.round)
     # Attributed to the individual they MEASURED, never to the round that bought them: one round
     # tops up several members, so folding them into the round's own key publishes one arm's cells
     # under another's label — a rate over two arms' answers.
-    by_candidate = {cid: key for key, (_rnd, cid) in first.items()}
+    by_candidate = {cid: key for key, cid in first.items()}
     for rr in rounds:
         for cid, bought in (rr.overlap_results or {}).items():
             if (owner := by_candidate.get(cid)) is not None:
@@ -671,16 +647,16 @@ def parent_line(rounds: Sequence[RoundResult]) -> list[ParentStep]:
     # is a genuine anomaly rather than the routine L2 case, and a truncated id in its place would
     # be a hash the operator cannot join to anything on screen.
     return [
-        ParentStep(
+        LineStep(
             key=key,
             round=rnd,
-            candidate_id=cid,
-            label=labels.get(cid) or f"R{rnd}",
+            candidate_id=first[key],
+            label=labels.get(first[key]) or f"R{rnd}",
             rows=rows[key],
             opt_sp=config[key][0],
             pipeline_params=config[key][1],
         )
-        for key, (rnd, cid) in first.items()
+        for key, rnd in became.items()
     ]
 
 
@@ -754,11 +730,11 @@ def round_clocks(rounds: Sequence[RoundResult], *, accuracy_ceiling: float | Non
 @shapes_optimizer_prompt
 def invariant_collapses(candidate_scores: Sequence[ScoredCandidate]) -> dict[str, int]:
     """How many proposals each ``INVARIANT_REASONS`` member collapsed — DERIVED from the arms: a
-    collapsed candidate rides them with ``invalid=True``, never dropped. One reason per candidate,
-    or the parts would sum past the population."""
+    collapsed candidate rides them as ``ArmOutcome.INVALID``, never dropped. One reason per
+    candidate, or the parts would sum past the population."""
     counts: dict[str, int] = {}
     for cand in candidate_scores:
-        if not cand.invalid:
+        if cand.outcome is not ArmOutcome.INVALID:
             continue
         reason = next(
             (vf.reason for vf in cand.validation_failures if vf.reason in INVARIANT_REASONS),
@@ -861,7 +837,7 @@ class RoundResult(StrictModel):
     # optimizer's own selector; the bench reads nothing into how.
     selected_labels: list[str]
     evaluators: dict[str, float] = Field(default_factory=dict)
-    # The 1-to-1 reading of the parent line on one shared set of cells, and the rows this round
+    # The 1-to-1 reading of the best-so-far line on one shared set of cells, and the rows this round
     # bought to keep it whole. Two fields for the same reason `accuracy` and `results` are two:
     # one is what a reader is told, the other is what it was read off. The rows are HERE and not
     # in `results` / `all_candidate_results` by design — see `OverlapReading`. `None` before
@@ -914,7 +890,7 @@ class RoundResult(StrictModel):
                 c.accuracy,
                 c.theta,
                 is_selected=c.label in selected,
-                is_partial=bool(c.partial_reason),
+                is_partial=c.outcome is ArmOutcome.SKIPPED,
             ),
             reverse=True,
         )
@@ -1145,7 +1121,7 @@ class DegradationHealth(StrictModel):
     # term the row did not carry. In ``samples`` — they were attempted — and absent from every rate
     # above, so without this field a round holding four of them reads exactly like one that graded
     # everything. Threaded from ``RoundResult`` rather than recounted here, the way
-    # ``not_attempted`` is: one owner (`l1/score/winner.py`), one number.
+    # ``not_attempted`` is: one owner (`runner/round.py`), one number.
     unscored: int = 0
     # Share of this round's predictions on its single commonest label; ``None`` where the answer
     # space makes collapse meaningless. REPORTED, never graded — hedging to one label is the

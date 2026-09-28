@@ -34,16 +34,13 @@ from promptpotter.application.mask.record import (
     MaskRound,
     SpineCycle,
 )
-from promptpotter.application.optimization.l1.population import (
-    build_score_report,
-    fatal_validation_failures,
-)
-from promptpotter.application.optimization.pobb.checks import (
-    PoBBCheck,
-    PoBBConfig,
-)
+from promptpotter.application.optimization.pobb.checks import EliminationGate, PoBBCheck
 from promptpotter.application.optimization.validators.l1_invariants import (
     detect_invariants,
+)
+from promptpotter.application.scoring.candidate_report import (
+    build_score_report,
+    fatal_validation_failures,
 )
 from promptpotter.application.scoring.classification import DegradationCheck, terminal_ranking
 from promptpotter.application.scoring.formula import (
@@ -61,10 +58,7 @@ from promptpotter.application.scoring.metrics import (
 )
 from promptpotter.application.scoring.sample_measurement import measure_sample
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.escalation_signals import (
-    EscalationTarget,
-    ValidationFailure,
-)
+from promptpotter.domain.escalation_signals import ValidationFailure
 from promptpotter.domain.opt_search_point import FewShotExample, OptSearchPoint
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import (
@@ -75,6 +69,7 @@ from promptpotter.domain.pipeline_schema import (
     PipelineSchema,
 )
 from promptpotter.domain.results import (
+    ArmOutcome,
     CandidateProposal,
     RoundResult,
     ScoredCandidate,
@@ -104,6 +99,7 @@ from tests.factories import (
     measurement,
     measurements,
     optimizer_state,
+    pobb_knobs,
     round_result,
     scored_candidate,
 )
@@ -544,7 +540,16 @@ def test_a_hallucinated_node_candidate_keeps_its_score() -> None:
     rows = [_eval_result(score=1.0)]
     scores = compute_composite_fitness(rows, _single_node_schema())
     report = build_score_report(
-        OptSearchPoint(), [wound], None, scores, rows, rows, label="C1.1", sp_hash="", run_id=None
+        OptSearchPoint(),
+        [wound],
+        None,
+        scores,
+        rows,
+        rows,
+        label="C1.1",
+        sp_hash="",
+        run_id=None,
+        outcome=ArmOutcome.MEASURED,
     )
     assert report.composite_fitness == 1.0
     assert report.validation_failures == [wound]
@@ -1129,8 +1134,7 @@ def _cs(
     *,
     candidate_id: str,
     accuracy: float,
-    escalation_aborted: bool = False,
-    elimination_stopped: bool = False,
+    outcome: ArmOutcome = ArmOutcome.MEASURED,
     degradation_context: dict | None = None,
     elimination_context: dict | None = None,
 ) -> ScoredCandidate:
@@ -1143,8 +1147,7 @@ def _cs(
         composite_fitness=accuracy,
         total=20,
         evaluators={},
-        escalation_aborted=escalation_aborted,
-        elimination_stopped=elimination_stopped,
+        outcome=outcome,
         degradation_context=degradation_context or {},
         elimination_context=elimination_context or {},
     )
@@ -1336,8 +1339,7 @@ def test_leader_eligibility_bars_invalid_measurement_not_stops():
     fatal = _cs(
         candidate_id="C1.3",
         accuracy=0.8333,
-        escalation_aborted=True,
-        elimination_stopped=True,
+        outcome=ArmOutcome.BROKEN,
         degradation_context={"fatal": True, "dominant_warning": "llm_only:empty_response"},
     )
     # A STOP IS NOT A VERDICT. A PoBB-stopped candidate stays electable: the stop said
@@ -1351,14 +1353,14 @@ def test_leader_eligibility_bars_invalid_measurement_not_stops():
     pobb_stopped = _cs(
         candidate_id="C1.2",
         accuracy=0.40,
-        elimination_stopped=True,
+        outcome=ArmOutcome.ELIMINATED,
         elimination_context={"p_best": 0.048, "epsilon": 0.05, "gate": "epsilon"},
     )
     leader_locked = _cs(
         candidate_id="C1.1",
         accuracy=0.55,
-        elimination_stopped=True,
-        elimination_context={"p_best": 0.96, "epsilon": 0.05, "gate": "lock_in"},
+        outcome=ArmOutcome.LOCKED_IN,
+        elimination_context={"p_best": 0.96, "gate": "lock_in"},
     )
     clean_loser = _cs(candidate_id="C1.4", accuracy=0.45)
 
@@ -1489,29 +1491,29 @@ def test_pobb_epsilon_is_graded_by_depth_not_scalar():
     names stopped being something the bar rides out and became something `elimination_p_best`
     refuses to claim. A one-cell verdict is now uncuttable at every depth, so the arm carrying the
     ramp has to be one the pairs can actually speak about."""
-    cfg = PoBBConfig(n_min=6, epsilon=0.30, epsilon_floor=0.15)
-    graded = PoBBCheck(cfg, n_samples=28, ruler=None)
+    cfg = pobb_knobs(epsilon=0.30, epsilon_floor=0.15)
+    graded = PoBBCheck(cfg, n_min=6, n_samples=28, ruler=None)
     assert graded.epsilon_at(6) == pytest.approx(0.15)
     assert graded.epsilon_at(9) == pytest.approx(0.225)
     assert graded.epsilon_at(12) == pytest.approx(0.30)
     # Clamped, never extrapolated: the ramp must not carry the bar ABOVE ε at any depth.
     assert graded.epsilon_at(15) == pytest.approx(0.30)
-    assert max(graded.epsilon_at(n) for n in range(cfg.n_min, 29)) == pytest.approx(0.30)
+    assert max(graded.epsilon_at(n) for n in range(graded.n_min, 29)) == pytest.approx(0.30)
     # …and back down to the floor as the remaining budget — all cutting can still save — runs out.
     assert graded.epsilon_at(20) == pytest.approx(0.20)
     # The last cuttable depth (`n_samples - n_min`) is where the guard takes over, at the floor.
     assert graded.epsilon_at(22) == pytest.approx(0.15)
 
     flat = PoBBCheck(
-        PoBBConfig(n_min=6, epsilon=0.30, epsilon_floor=0.30), n_samples=28, ruler=None
+        pobb_knobs(epsilon=0.30, epsilon_floor=0.30), n_min=6, n_samples=28, ruler=None
     )
     assert flat.epsilon_at(6) == pytest.approx(0.30)
-    # Shipped defaults sit floor and ε on the same constant, so an untouched config never grades.
-    shipped = PoBBCheck(PoBBConfig(), n_samples=28, ruler=None)
+    # The manifest sits floor and ε on the same value, so an untouched campaign never grades.
+    shipped = PoBBCheck(pobb_knobs(), n_min=6, n_samples=28, ruler=None)
     assert shipped.epsilon_at(shipped.n_min) == pytest.approx(shipped.epsilon)
 
     def arm_behind_perfect_prior(n: int, misses: int):
-        check = PoBBCheck(cfg, n_samples=28, ruler=None)
+        check = PoBBCheck(cfg, n_min=6, n_samples=28, ruler=None)
         check.register_completed(measurements([1.0] * 28), candidate_id="winner", sp=_DUMMY_SP)
         check.set_current("arm")
         return check.check(measurements([0.0] * misses + [1.0] * (n - misses)))
@@ -1533,7 +1535,8 @@ def test_pobb_epsilon_is_graded_by_depth_not_scalar():
 def test_pobb_locks_in_dominant_leader():
     """Current candidate dominating prior past lock_in_n_min fires LEADER_LOCKED."""
     check = PoBBCheck(
-        PoBBConfig(n_min=4, epsilon=0.05, lock_in=0.95, lock_in_n_min=8, leader_lock_in=True),
+        pobb_knobs(epsilon=0.05, lock_in=0.95, lock_in_n_min=8, leader_lock_in=True),
+        n_min=4,
         n_samples=20,
         ruler=None,
     )
@@ -1541,7 +1544,7 @@ def test_pobb_locks_in_dominant_leader():
     check.set_current("strong_current")
     sig = check.check(measurements([1.0] * 8))
     assert sig is not None
-    assert sig.target == EscalationTarget.LEADER_LOCKED
+    assert sig.outcome is ArmOutcome.LOCKED_IN
     cr = sig.check_result
     assert cr["leader_id"] == "weak_prior"
     assert cr["p_best"] >= 0.95
@@ -1562,7 +1565,7 @@ async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
     candidate_samples = [9, 12, 13, 14, 8]  # disjoint from leader; AIME's hard sorter order.
 
     # --- Branch (a): no backfill_fn ⇒ incomplete prior is excluded, no elimination.
-    check_no_backfill = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20, ruler=None)
+    check_no_backfill = PoBBCheck(pobb_knobs(epsilon=0.05), n_min=4, n_samples=20, ruler=None)
     check_no_backfill.register_completed(
         measurements([1.0] * 8, sample_ids=leader_samples),
         candidate_id="R1_lucky_winner",
@@ -1595,7 +1598,7 @@ async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
         return call, lambda: [{"sample_id": sample.id, "fitness": f, "objective": f}]
 
     check_paired = PoBBCheck(
-        PoBBConfig(n_min=4, epsilon=0.05), n_samples=20, ruler=None, backfill_fn=_stub_backfill
+        pobb_knobs(epsilon=0.05), n_min=4, n_samples=20, ruler=None, backfill_fn=_stub_backfill
     )
     check_paired.register_completed(
         measurements([1.0] * 8, sample_ids=leader_samples),
@@ -1629,10 +1632,10 @@ def test_an_arm_in_the_last_n_min_cells_is_finished_not_discarded() -> None:
 
     Silent harm: the arm's rows are still banked, so the round LOOKS measured — it simply has
     nothing it can rank, and says so only in the `resolved nothing` line."""
-    cfg = PoBBConfig(n_min=6, epsilon=0.30)
+    cfg = pobb_knobs(epsilon=0.30)
 
     def cut_at(n: int) -> object | None:
-        check = PoBBCheck(cfg, n_samples=28, ruler=None)
+        check = PoBBCheck(cfg, n_min=6, n_samples=28, ruler=None)
         check.register_completed(measurements([1.0] * 28), candidate_id="winner", sp=_DUMMY_SP)
         check.set_current("arm")
         return check.check(measurements([0.0] * n))
@@ -1646,7 +1649,7 @@ def test_an_arm_in_the_last_n_min_cells_is_finished_not_discarded() -> None:
 
 
 def test_a_collapse_cut_is_never_reported_as_an_epsilon_cut() -> None:
-    """`elimination_stopped` covers two gates and only one measured anything: a collapse cut
+    """An elimination covers two gates and only one measured anything: a collapse cut
     returns before the posterior, so `p_best`/`epsilon`/`n_priors`/`leader_id` are placeholders.
     Read through the ε fields it renders `0.0% < 15% vs ? (of 0 priors)` — four invented numbers —
     and tells the generator the strongest verdict the loop has was "NOT a verdict", leaving the
@@ -1655,8 +1658,6 @@ def test_a_collapse_cut_is_never_reported_as_an_epsilon_cut() -> None:
     Silent harm: nothing errors, every field renders, and the number diagnosed from was never
     measured."""
     from promptpotter.application.optimization.dispatch.injections.panels import _candidate_fate
-    from promptpotter.application.optimization.pobb.checks import PoBBCheck, PoBBConfig
-    from promptpotter.domain.results import EliminationGate
 
     rows = [
         {
@@ -1668,7 +1669,7 @@ def test_a_collapse_cut_is_never_reported_as_an_epsilon_cut() -> None:
         }
         for i in range(6)
     ]
-    signal = PoBBCheck(PoBBConfig(), n_samples=28, ruler=None).check(rows)
+    signal = PoBBCheck(pobb_knobs(), n_min=6, n_samples=28, ruler=None).check(rows)
     assert signal is not None, "a constant answerer must be cut at n_min"
     cr = signal.check_result
     assert cr["gate"] == EliminationGate.COLLAPSED
@@ -1679,7 +1680,7 @@ def test_a_collapse_cut_is_never_reported_as_an_epsilon_cut() -> None:
         return scored_candidate(
             cid,
             total=6,
-            elimination_stopped=True,
+            outcome=ArmOutcome.ELIMINATED,
             scored_samples=6,
             expected_samples=28,
             elimination_context={"queries_scored": 6, "total_queries": 28, **ctx},
@@ -1711,7 +1712,6 @@ def test_the_collapse_gate_reads_the_answer_not_the_labels() -> None:
     the arm's full budget establishing what six cells had shown, and the L1 panel that renders a
     COLLAPSED cut as a verdict on the idea (rather than as a stopped measurement) has none to
     render, so the idea comes back next round."""
-    from promptpotter.domain.results import EliminationGate
     from promptpotter.shared.errors import ErrorCategory
 
     def rows(fitness: list[float], **over: Any) -> list[Any]:
@@ -1721,7 +1721,7 @@ def test_the_collapse_gate_reads_the_answer_not_the_labels() -> None:
         ]
 
     def cut(rs: list[Any]) -> Any:
-        return PoBBCheck(PoBBConfig(), n_samples=28, ruler=None).check(rs)
+        return PoBBCheck(pobb_knobs(), n_min=6, n_samples=28, ruler=None).check(rs)
 
     signal = cut(rows([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]))
     assert signal is not None, "a constant answerer must be cut at n_min with no labels to read"
@@ -1745,7 +1745,6 @@ def test_only_an_epsilon_cut_banks_an_idea_as_measured_and_lost() -> None:
     Silent harm: banking any of the three blacklists an idea no round ever judged, and every later
     re-proposal is rejected as `repeat_variant` for the rest of the cycle with nothing raised."""
     from promptpotter.application.optimization.validators.l1_invariants import lost_ideas
-    from promptpotter.domain.results import EliminationGate
 
     def banked(ctx: dict | None) -> bool:
         history = lost_history(
@@ -1757,7 +1756,7 @@ def test_only_an_epsilon_cut_banks_an_idea_as_measured_and_lost() -> None:
     assert banked(None), "a plain accuracy loss is still a measured loss"
     assert not banked({"gate": EliminationGate.COLLAPSED})
     assert not banked({"gate": EliminationGate.LOCK_IN})
-    assert not banked({}), "a degradation cut carries no gate — the node broke, not the idea"
+    assert not banked({}), "a broken arm carries no gate — the node broke, not the idea"
 
 
 def test_elimination_p_best_discriminates_on_graded_backend() -> None:
@@ -1810,8 +1809,9 @@ def test_a_cut_needs_more_than_one_cell_that_told_the_arms_apart() -> None:
     reachable on three, or the guard has bought calibration with a gate that never fires.
     """
     from promptpotter.application.scoring.selection import elimination_p_best
-    from promptpotter.config.settings import POBB_DEFAULT_EPSILON
     from promptpotter.domain.ruler import DeltaRuler
+
+    epsilon = pobb_knobs().epsilon
 
     sids = list(range(6))
     # `sealqa-longseal-12`'s own geometry: the probe the ordering lands at slot 4 is also the
@@ -1830,12 +1830,12 @@ def test_a_cut_needs_more_than_one_cell_that_told_the_arms_apart() -> None:
     thin_prior = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0]  # that probe, and nothing else
     p_thin, _ = elimination_p_best(candidate, {"prior": thin_prior}, sids, ruler)
     assert p_thin == pytest.approx(0.25), f"one adverse cell may not reach past 0.25: {p_thin}"
-    assert p_thin > POBB_DEFAULT_EPSILON, "a one-cell verdict must not be cuttable (unbounded: .11)"
+    assert p_thin > epsilon, "a one-cell verdict must not be cuttable (unbounded: .11)"
 
     wide_prior = [1.0, 0.0, 1.0, 1.0, 0.0, 0.0]  # a prior that genuinely outscored it
     p_wide, _ = elimination_p_best(candidate, {"prior": wide_prior}, sids, ruler)
     assert p_wide == pytest.approx(0.0625), f"three adverse cells support a cut: {p_wide}"
-    assert p_wide < POBB_DEFAULT_EPSILON, "the width is there — ε decides, as it always did"
+    assert p_wide < epsilon, "the width is there — ε decides, as it always did"
 
 
 def test_a_fatal_row_ends_a_candidate_on_one_sighting_and_an_advisory_never_does() -> None:
@@ -1911,8 +1911,8 @@ def test_no_walk_is_cut_before_the_horizon_it_launched_under() -> None:
         anchor_id="horizon",
     )
     samples = [Sample(id=i, query=f"q{i}", ground_truth="AB"[i % 2]) for i in range(n)]
-    config = PoBBConfig(
-        n_min=3, epsilon=0.35, epsilon_floor=0.2, lock_in=0.7, lock_in_n_min=4, leader_lock_in=True
+    config = pobb_knobs(
+        epsilon=0.35, epsilon_floor=0.2, lock_in=0.7, lock_in_n_min=4, leader_lock_in=True
     )
     rng = random.Random(1)
     gates: set[str] = set()
@@ -1940,7 +1940,7 @@ def test_no_walk_is_cut_before_the_horizon_it_launched_under() -> None:
         for r in rows:
             if rng.random() < sick:
                 r["pipeline_data"] = {"diagnostics": {"warnings": [fatal]}}
-        check = PoBBCheck(config, n_samples=n, ruler=ruler)
+        check = PoBBCheck(config, n_min=3, n_samples=n, ruler=ruler)
         check.register_completed(
             measurements([grade(0.5) for _ in range(n)]), candidate_id="full", sp=_DUMMY_SP
         )
@@ -1965,7 +1965,7 @@ def test_no_walk_is_cut_before_the_horizon_it_launched_under() -> None:
             for i in range(n)
             for g in [grade(strength)]
         ]
-        seer = PoBBCheck(config, n_samples=n, ruler=ruler)
+        seer = PoBBCheck(config, n_min=3, n_samples=n, ruler=ruler)
         seer.priors_by_sample = dict(check.priors_by_sample)  # the partial's backfills reach both
         seer.prior_ids = list(check.prior_ids)
         if walking and rng.random() < 0.5:
@@ -2246,12 +2246,13 @@ def test_panel_precision_names_the_lever_the_panel_needs() -> None:
 
 
 def test_overlap_set_is_one_every_member_actually_answered() -> None:
-    """The 1-to-1 bars rest on one property: every member of the parent line has answered every
-    cell of the set its rate is read over. Break it and each bar still renders — over a smaller
-    denominator, at a rate nothing measured, side by side as if comparable.
+    """The 1-to-1 bars rest on one property: every member of the best-so-far line has answered
+    every cell of the set its rate is read over. Break it and each bar still renders — over a
+    smaller denominator, at a rate nothing measured, side by side as if comparable.
 
-    Also pins the three rules that keep the set affordable and honest: a HELD round's parent
-    re-score widens the parent's coverage; the panel is the ORIGIN's own cells and does not move,
+    Also pins the rules that keep the set affordable and honest: the line is the bench's own
+    best-so-far, so an optimizer's pick that never beat it is no member; a round re-reading a
+    member widens its coverage; the panel is the ORIGIN's own cells and does not move,
     so a late member is topped up onto it rather than narrowing it for everyone before it; and a
     member is a CONFIGURATION — the RENDERED target prompt, not the six fields and not a lineage
     id. An L2/L3 transition re-mints the parent's OSP from the same fields, and few-shot examples
@@ -2261,9 +2262,9 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
     from promptpotter.domain.opt_search_point import IndividualLineage, OptSearchPoint
     from promptpotter.domain.results import (
         ScoredCandidate,
+        best_line,
         measured_cells,
         origin_panel,
-        parent_line,
     )
 
     def rows(*ids: int) -> list[dict[str, object]]:
@@ -2271,11 +2272,17 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
 
     def scored(cid: str, label: str) -> ScoredCandidate:
         return ScoredCandidate(
-            run_id=None, candidate_id=cid, label=label, accuracy=0.5, composite_fitness=0.5, total=1
+            run_id=None,
+            candidate_id=cid,
+            label=label,
+            accuracy=0.5,
+            composite_fitness=0.5,
+            total=1,
+            outcome=ArmOutcome.MEASURED,
         )
 
     def rnd(
-        n: int, cid: str, label: str, instruction: str, *ids: int, shot: str = ""
+        n: int, cid: str, label: str, instruction: str, comp: float, *ids: int, shot: str = ""
     ) -> RoundResult:
         # `instruction` and `shot` BOTH make the configuration here — the second only through
         # the render, which is the whole point.
@@ -2288,6 +2295,7 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
             round=n,
             label=label,
             accuracy=0.5,
+            composite_fitness=comp,
             total=len(ids),
             improved=n > 0,
             prompt_fields=osp.prompt_field_dict(),
@@ -2299,15 +2307,15 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
             optimizer_state=optimizer_state(),
         )
 
-    # C0 on 1..6; round 1 HELD (C0 re-scored on 7,8); round 2 crowned C2.1 on 5,6,7,9; round 3
-    # HELD but an L2 transition re-minted the parent — same instruction, new id, no label.
+    # C0 on 1..6; round 1 HELD (C0 re-scored on 7,8); round 2 crowned C2.1 on 5,6,7,9, the new
+    # best; round 3 HELD but an L2 transition re-minted the parent — same instruction, new id.
     history = [
-        rnd(0, "c0", "C0", "base", 1, 2, 3, 4, 5, 6),
-        rnd(1, "c0", "C0", "base", 7, 8),
-        rnd(2, "w2", "C2.1", "edited", 5, 6, 7, 9),
-        rnd(3, "l2-remint", "C3.1", "edited", 5, 6),
+        rnd(0, "c0", "C0", "base", 0.5, 1, 2, 3, 4, 5, 6),
+        rnd(1, "c0", "C0", "base", 0.5, 7, 8),
+        rnd(2, "w2", "C2.1", "edited", 0.6, 5, 6, 7, 9),
+        rnd(3, "l2-remint", "C3.1", "edited", 0.6, 5, 6),
     ]
-    line = parent_line(history)
+    line = best_line(history)
     # TWO members, not three: the L2 re-mint is the same configuration as C2.1, so it folds in
     # and keeps C2.1's label rather than appearing beside it as an unnamed twin.
     assert [(s.candidate_id, s.label) for s in line] == [("c0", "C0"), ("w2", "C2.1")]
@@ -2315,8 +2323,11 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
     # A round-4 winner carrying C2.1's six fields verbatim and a few-shot example is a
     # DIFFERENT individual: it runs a longer prompt. Folded in, it would take C2.1's label and
     # bar, and its rows would overwrite C2.1's on every cell they share.
-    ctx = parent_line([*history, rnd(4, "w4", "C4.1", "edited", 5, 6, 7, shot="framing")])
+    ctx = best_line([*history, rnd(4, "w4", "C4.1", "edited", 0.7, 5, 6, 7, shot="framing")])
     assert [s.candidate_id for s in ctx] == ["c0", "w2", "w4"]
+    # An optimizer's pick that never beat the bench's best joins no line, whatever it elected.
+    worse = best_line([*history, rnd(4, "w4", "C4.1", "worse", 0.55, 5, 6, 7)])
+    assert [s.candidate_id for s in worse] == ["c0", "w2"]
     # The held round WIDENED the parent rather than replacing it — without that, 7 and 8 are
     # lost and cell 7 could never join the set below.
     assert measured_cells(line[0].rows) == {1, 2, 3, 4, 5, 6, 7, 8}
@@ -3269,8 +3280,8 @@ def test_a_theta_stall_verdict_must_clear_its_own_error() -> None:
 
     Silent harm: nothing distinguishes "L2 keeps firing because it is working" from "L2 keeps
     firing because noise keeps clearing its stall counter"."""
-    from promptpotter.application.campaign_config import EscalationLadder
     from promptpotter.application.optimization.escalation.state import EscalationFSM, NextAction
+    from promptpotter.application.optimizers.potter.knobs import EscalationLadder
 
     # (composite, θ, θ_se) per round, from the live run: composite frozen from round 2 on, θ
     # advancing once for real (+0.467) and then only by noise (+0.012, then flat).
@@ -3320,8 +3331,8 @@ def test_the_campaign_ends_only_where_the_objective_is_spent_and_the_round_resol
     cells at p=0.33, `separable: false`, ended at 27% of budget, `index.json` then naming round 8
     its best. Silent by construction: `perfect_score` is a SUCCESS outcome and every number
     renders."""
-    from promptpotter.application.campaign_config import EscalationLadder
     from promptpotter.application.optimization.escalation.state import EscalationFSM, NextAction
+    from promptpotter.application.optimizers.potter.knobs import EscalationLadder
 
     def outcome(objective: float, separable: bool | None) -> NextAction:
         return (
@@ -3596,12 +3607,12 @@ def test_the_l1_only_arm_can_reach_no_layer_above_it() -> None:
     nobody thought about."""
     from itertools import product
 
-    from promptpotter.application.campaign_config import EscalationLadder
     from promptpotter.application.optimization.escalation.rules import (
         EscalationInputs,
         decide_escalation,
     )
     from promptpotter.application.optimization.escalation.state import NextAction
+    from promptpotter.application.optimizers.potter.knobs import EscalationLadder
 
     grid = list(
         product(

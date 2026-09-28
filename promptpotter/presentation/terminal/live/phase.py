@@ -14,6 +14,7 @@ from promptpotter.application.scoring.row_diagnostics import find_rank
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.results import (
+    ArmOutcome,
     overlap_series,
     resolved_fitness,
     scoreboard_rank_key,
@@ -124,7 +125,7 @@ def render_round_stats(
                     s.accuracy,
                     s.theta,
                     is_selected=s.label in round_result.selected_labels,
-                    is_partial=bool(s.partial_reason),
+                    is_partial=s.outcome is ArmOutcome.SKIPPED,
                 ),
             ),
         )
@@ -160,7 +161,7 @@ def render_round_stats(
             _node_line(f"lift vs matched parent: {lift:+.3f} [{lo:+.3f}, {hi:+.3f}]  |  {verdict}")
         )
 
-    # The 1-to-1 series: the parent line read on the cells all of it has answered. It is the
+    # The 1-to-1 series: the best-so-far line read on the cells all of it has answered. It is the
     # ONLY line here two rounds can be differenced on — every other number above is read on the
     # subset this round happened to buy. Silent until the line has a second member.
     if series := overlap_series(round_result.overlap):

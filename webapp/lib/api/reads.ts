@@ -27,7 +27,7 @@ import type {
   HardSamplesScope,
   LineageNode,
   MachineStatusResponse,
-  MechanismSchemaResponse,
+  OptimizerKnobsResponse,
   MeResponse,
   Evidence,
   OriginListResponse,
@@ -327,10 +327,14 @@ export function fetchCampaignDetail(
   );
 }
 
-export function fetchMechanismsSchema(
+export function fetchOptimizerKnobs(
+  optimizer: string,
   signal?: AbortSignal,
-): Promise<MechanismSchemaResponse> {
-  return jget<MechanismSchemaResponse>(`${API}/campaigns/mechanisms-schema`, signal);
+): Promise<OptimizerKnobsResponse> {
+  return jget<OptimizerKnobsResponse>(
+    `${API}/optimizers/${encodeURIComponent(optimizer)}/knobs`,
+    signal,
+  );
 }
 
 export function fetchConfigMap(

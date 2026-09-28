@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from promptpotter.application.optimization.dispatch.llm_call.prompts import optimizer_model
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.views.render.optimizer_prompt_text import (
     format_l1_critique_for_prompt,
@@ -28,7 +28,7 @@ from promptpotter.application.views.view_models import (
 )
 from promptpotter.domain.candidate_diff import build_candidate_flat, flatten_sp_summary
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent, PotterPhase
-from promptpotter.domain.results import ScoredCandidate
+from promptpotter.domain.results import ArmOutcome, ScoredCandidate
 from promptpotter.domain.ruler import is_flat_ruler_id
 from promptpotter.shared import truncate
 
@@ -46,17 +46,19 @@ def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
     session = d["env"]
     schema = session.pipeline_schema
     opt = config.optimization
+    selected = select_optimizer(opt)
+    lives = selected.readout("escalation", "lives")
     sample = config.sp_budget_round
 
     ctx.max_rounds = opt.max_rounds or 0
-    ctx.patience = opt.l1_patience
+    ctx.patience = selected.readout("escalation", "l1_patience")
     origin_pp = session.pipeline_params or schema.to_pipeline_params()
     ctx.original_sp_flat = flatten_sp_summary(origin_pp)
     ctx.node_param_keys = {s: sorted(k) for s, k in schema.node_param_keys().items()}
     ctx.round_num = 0
     ctx.l1_stall_count = 0
-    ctx.hearts = opt.lives.start if opt.lives is not None else None
-    ctx.hearts_cap = opt.lives.cap if opt.lives is not None else None
+    ctx.hearts = lives.start if lives is not None else None
+    ctx.hearts_cap = lives.cap if lives is not None else None
     ctx.parent_accuracy = 0.0
 
     # Resolve the per-round composite formula at INIT.enter so the live
@@ -72,10 +74,10 @@ def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
         ),
         max_rounds=ctx.max_rounds,
         patience=ctx.patience,
-        n_variants=opt.n_variants,
+        n_variants=selected.readout("l1_generate", "n_variants"),
         sp_budget_round=sample,
         dataset_size=len(dataset),
-        model=optimizer_model(),
+        model=selected.model(),
         composite_fitness_formula=full,
         composite_fitness_formula_short=short,
     )
@@ -189,7 +191,7 @@ def _l1_generate_exit(d: dict[str, Any], ctx: ViewContext) -> CandidatesGenerate
     )
 
 
-def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
+def _select_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
     score_entries = [score_entry_from_dict(s) for s in d.get("candidate_scores") or []]
 
     # The promoted winner is elected by `elect_round_winner` (paired-delta LCB);
@@ -311,7 +313,7 @@ _BUILDERS: dict[str, Any] = {
     f"{CampaignPhase.INIT}:exit": _init_exit,
     f"{CampaignPhase.PROPOSE}:enter": _l1_generate_enter,
     f"{CampaignPhase.PROPOSE}:exit": _l1_generate_exit,
-    f"{CampaignPhase.MEASURE}:exit": _l1_score_exit,
+    f"{CampaignPhase.SELECT}:exit": _select_exit,
     f"{PotterPhase.REFINE_STRATEGY}:enter": _refine_enter,
     f"{PotterPhase.REFINE_STRATEGY}:exit": _refine_exit,
     f"{PotterPhase.MODIFY_PLAN}:enter": _plan_enter,
@@ -337,7 +339,7 @@ def score_entry_from_dict(s: dict[str, Any]) -> ScoreEntry:
     row reports — the old Wilson pair bracketed a binary hit rate nothing displayed."""
     sc = ScoredCandidate.model_validate(s)
     invalid_reason: str | None = None
-    if sc.invalid and sc.validation_failures:
+    if sc.outcome is ArmOutcome.INVALID and sc.validation_failures:
         first = sc.validation_failures[0]
         reason = first.get("reason") if isinstance(first, dict) else None
         invalid_reason = str(reason) if reason else None
@@ -348,8 +350,7 @@ def score_entry_from_dict(s: dict[str, Any]) -> ScoreEntry:
         total=sc.total,
         mean_fitness_ci_lo=sc.mean_fitness_ci_lo,
         mean_fitness_ci_hi=sc.mean_fitness_ci_hi,
-        escalation_aborted=sc.escalation_aborted,
-        partial_reason=sc.partial_reason,
+        outcome=sc.outcome,
         invalid_reason=invalid_reason,
         reference_accuracy=sc.reference_accuracy,
         reference_composite=sc.reference_composite,

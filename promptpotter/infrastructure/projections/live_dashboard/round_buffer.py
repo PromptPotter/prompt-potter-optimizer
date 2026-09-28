@@ -31,8 +31,8 @@ class RoundBuffer:
         self.overlap = None
 
     def stamp_overlap(self, overlap: OverlapReading | None) -> None:
-        """The parent line on its shared cells, off the ``RoundResult`` the election record carries
-        live. Measured just before that record fires (``l1/score/overlap.py``), and what answers
+        """The best-so-far line on its shared cells, off the ``RoundResult`` the election record carries
+        live. Measured just before that record fires (``runner/overlap.py``), and what answers
         "better than C0" when the δ scale underneath θ has collapsed."""
         self.overlap = overlap
 

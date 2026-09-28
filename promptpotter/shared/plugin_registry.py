@@ -7,8 +7,13 @@ from importlib.metadata import entry_points
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol
 
+from promptpotter.shared.hashing import shapes_optimizer_prompt
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
+
+# Which member answers a node name decides the text an optimizer prompt carries.
+shapes_optimizer_prompt(__name__)
 
 __all__ = ["BUILT_IN", "load_registry", "lookup"]
 

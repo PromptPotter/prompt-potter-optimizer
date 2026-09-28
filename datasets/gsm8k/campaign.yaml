@@ -5,9 +5,15 @@ campaign_config:
   exclude_nodes: []
   pipeline_overlay: {}
   optimization:
-    l1_patience: 3
     max_rounds: 15
-    n_variants: 6
     degradation_threshold: 0.4
-    l2_patience: 2
-    l3_patience: 1
+    # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
+    nodes:
+      l1_generate:
+        config:
+          n_variants: 6
+      escalation:
+        config:
+          l1_patience: 3
+          l2_patience: 2
+          l3_patience: 1

@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from itertools import pairwise
 from typing import Any
 
+from promptpotter.application.optimization.pobb.checks import EliminationGate
 from promptpotter.domain.candidate_diff import (
     IDEA_MATCH_REJECT,
     candidate_delta,
@@ -23,7 +24,7 @@ from promptpotter.domain.candidate_diff import (
 )
 from promptpotter.domain.escalation_signals import INVARIANT_REASONS, ValidationFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.results import CandidateProposal, EliminationGate, is_leader_eligible
+from promptpotter.domain.results import ArmOutcome, CandidateProposal, is_leader_eligible
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +58,8 @@ def lost_ideas(prior_rounds: Sequence[Any]) -> list[tuple[int, frozenset[str]]]:
         for cand in rr.candidate_scores:
             if not cand.total or not is_leader_eligible(cand):
                 continue
-            if cand.elimination_stopped:
-                # ε alone measured this arm against its priors; LOCK_IN is the opposite verdict,
-                # COLLAPSED is no measurement, and a degradation cut names no gate at all.
+            if cand.outcome is ArmOutcome.ELIMINATED:
+                # ε alone measured this arm against its priors; COLLAPSED is no measurement.
                 if cand.elimination_context.get("gate") != EliminationGate.EPSILON:
                     continue
             elif cand.reference_accuracy is None or (cand.accuracy > cand.reference_accuracy):

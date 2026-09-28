@@ -48,7 +48,7 @@ from promptpotter.domain.l4.proxies import (
 from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.phases import REFUSAL_STOPS, RunPhase, StopReason
 from promptpotter.domain.pipeline_schema import stable_hash
-from promptpotter.domain.results import candidate_label, invariant_collapses
+from promptpotter.domain.results import ArmOutcome, candidate_label, invariant_collapses
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
 from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND, _CYCLE_LEDGER
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
@@ -196,7 +196,7 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
         steer = prior.optimizer_state.payload.critique if prior is not None else None
         if steer and steer.get("priority_fix"):
             parts.append(f"steer: {_clip(steer['priority_fix'], 130)}")
-        scored = [c for c in rnd.candidate_scores if not c.invalid]
+        scored = [c for c in rnd.candidate_scores if c.outcome is not ArmOutcome.INVALID]
         if scored:
             # Rank by lift over the MATCHED parent, and never invent the comparison where there
             # is none: `accuracy - 0.0` hands an arm that never covered the parent's panel its

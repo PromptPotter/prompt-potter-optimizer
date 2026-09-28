@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import contextvars
-import functools
 import hashlib
 import json
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from promptpotter.application.campaign_config import DeterminismClamp
 from promptpotter.application.optimization.dispatch.injections.registry import validate_template
-from promptpotter.config.paths import optimizer_assets_root, optimizer_pipeline_path
+from promptpotter.application.optimizer_manifest import (
+    SelectedOptimizer,
+    bound_optimizer,
+    checkin_manifest,
+    llm_node_document,
+)
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.l1_layout import (
     NODE_LAYOUTS,
@@ -21,10 +25,8 @@ from promptpotter.domain.l1_layout import (
 )
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate, PromptTemplate
 from promptpotter.domain.optimizer_state import L2L3Memory
-from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.validators import ValidatorOutcome
-from promptpotter.infrastructure.store.io import read_json, read_yaml
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 shapes_optimizer_prompt(__name__)
@@ -37,12 +39,8 @@ __all__ = [
     "compute_optimizer_prompt_hashes",
     "effective_optimizer_prompts",
     "get_optimizer_config_overrides",
-    "get_optimizer_schema",
     "load_optimizer_prompt",
-    "load_optimizer_set_overrides",
     "node_layout",
-    "optimizer_manifest",
-    "optimizer_resolved_schemas",
     "resolve_layout_override",
     "resolve_node_layout",
     "resolve_node_override",
@@ -51,37 +49,10 @@ __all__ = [
     "set_optimizer_prompt_overrides",
 ]
 
-# The optimizer's own pipeline, split by authorship: the manifest is operator-authored
-# (nodes, prompts, the graph view) and the schema registry is generated from the Pydantic
-# models by ``scripts/build_optimizer_schemas.py``. One file could not be both — the
-# generator's rewrite would reformat the operator's prose on every CI run.
-#
-# INSTALL CONTENT, not a dataset. These are install-global by contract (one file
-# configures the optimizer for every campaign), so they live under the package and ship
-# in the wheel — never among the benchmark datasets, where a parent walk resolves to
-# ``site-packages/datasets/``, the HuggingFace library's directory.
-#
-# The manifest resolves through ``optimizer_pipeline_path()`` and the registry does not:
-# the operator may shadow the file they author, never the file we generate. The manifest's
-# path is resolved per read rather than bound here, because binding it at import let a
-# long-running server keep serving the model it saw at startup after the operator had
-# edited or shadowed the file — and label it "current" on the node inspector.
-OPTIMIZER_SCHEMAS_PATH = optimizer_assets_root() / "resolved_schemas.json"
-
-# Per-cycle override of the optimizer prompts, keyed by optimizer node
-# (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan`) → a partial
-# `PromptTemplate`-field dict (plus the structural `layout` / `output_schema_field_names` /
-# `model` levers), resolved by `resolve_node_override`. ONE channel, two callers — both
-# task-isolated:
-#   1. the OUTER L4 cycle binds its specialized optimizer prompt SET here
-#      (`load_optimizer_set_overrides`, from `OptimizationConfig.optimizer_set`,
-#      set at the runner seam) so it reasons about editing an inner optimizer; and
-#   2. the L4 inner-cycle runner binds the OUTER's per-node MUTATIONS here (inside
-#      the inner asyncio task) so those mutations shape the inner cycle's prompts.
-# Because each inner cycle runs in its own task, an outer binding and the
-# inner (mutation) binding never collide — the inner task overwrites its copy. A
-# ContextVar — not a global — so every level at any recursion depth carries its
-# own. Default `None` = no override (every normal, non-L4 cycle).
+# The L4 inner-cycle runner binds the OUTER's per-node MUTATIONS here (inside the inner asyncio
+# task), keyed by optimizer node → a partial `PromptTemplate`-field dict plus the structural
+# `layout` / `output_schema_field_names` / `model` levers, resolved by `resolve_node_override`.
+# A ContextVar — not a global — so every recursion level carries its own. `None` = no override.
 _OPTIMIZER_PROMPT_OVERRIDES: contextvars.ContextVar[dict[str, dict[str, Any]] | None] = (
     contextvars.ContextVar("optimizer_prompt_overrides", default=None)
 )
@@ -111,117 +82,36 @@ def get_optimizer_config_overrides() -> dict[str, Any] | None:
     return clamp.model_dump(exclude_none=True) or None
 
 
-def load_optimizer_set_overrides(opt_set: str) -> dict[str, dict[str, Any]]:
-    """A named set whose file is MISSING raises: ``optimizer_set`` is an ``Estimand.SEARCH`` axis, so
-    falling back to the default would attribute a measurement to a prompt set it never ran."""
-    if not opt_set:
-        return {}
-    path = optimizer_assets_root() / "sets" / f"{opt_set}.yaml"
-    if not path.exists():
-        raise FileNotFoundError(f"optimizer_set {opt_set!r}: no prompt set at {path}")
-    data = read_yaml(path)
-    return {k: v for k, v in data.items() if isinstance(v, dict)}
-
-
-def optimizer_manifest() -> dict[str, Any]:
-    """Public because this is what callers hash and render — the raw bytes stopped being a meaningful
-    identity once the file carried comments and block scalars. Resolved and stat-ed on every call so a
-    hand-edit and a tenant shadow both take effect without a restart: this is the ONE file an operator
-    edits to change the optimizer's model, and a process that cached it at import reported the old one
-    as live."""
-    path = optimizer_pipeline_path()
-    return _manifest_at(path, _manifest_stamp(path))
-
-
-def _manifest_stamp(path: Path) -> int:
-    """The mtime both mtime-keyed readers key on. A vanished manifest is the reader's error to
-    raise, not this line's — it falls through on a stamp no real file can hold, so no cache can
-    answer for a file that is gone."""
-    try:
-        return path.stat().st_mtime_ns
-    except OSError:
-        return -1
-
-
-@functools.lru_cache(maxsize=2)
-def _manifest_at(path: Path, _mtime_ns: int) -> dict[str, Any]:
-    """Keyed on the resolved path AND its mtime, so an edit invalidates its own entry. Two slots is
-    the whole population: the shipped manifest and one tenant shadow are all that ever alternate."""
-    if optimizer_assets_root() / "pipeline.yaml" != path:
-        logger.warning(
-            "optimizer manifest OVERRIDDEN: reading %s instead of the manifest shipped with "
-            "the package. Provider, model and temperature for every optimizer node come from "
-            "that file.",
-            path,
-        )
-    manifest: dict[str, Any] = read_yaml(path)
-    return manifest
-
-
-@functools.lru_cache(maxsize=1)
-def optimizer_resolved_schemas() -> dict[str, Any]:
-    """The generated schema registry keyed ``{family}/{version}``."""
-    schemas: dict[str, Any] = read_json(OPTIMIZER_SCHEMAS_PATH)
-    return schemas
-
-
-def _resolved_key(family: str, version: Any) -> str:
-    return f"{family}/{version}" if version is not None else family
-
-
-def get_optimizer_schema() -> PipelineSchema:
-    """The optimizer's own manifest as a schema — ONE parse, shared with ``/optimizer-pipeline``,
-    keyed on the manifest's mtime like :func:`optimizer_manifest` so a hand-edit reaches the engine
-    and not only the browser. ``nodes`` is the ``pipelines.default`` CHAIN; read ``config_nodes``
-    for what the manifest declares."""
-    path = optimizer_pipeline_path()
-    return _optimizer_schema_at(path, _manifest_stamp(path))
-
-
-@functools.lru_cache(maxsize=2)
-def _optimizer_schema_at(path: Path, mtime_ns: int) -> PipelineSchema:
-    """Two slots for the same population :func:`_manifest_at` sizes for: the shipped manifest and
-    one tenant shadow. Same key, so neither can answer for bytes the other has moved past."""
-    payload = dict(_manifest_at(path, mtime_ns))
-    payload["resolved_schemas"] = optimizer_resolved_schemas()
-    return parse_pipeline_response(payload)
-
-
-def optimizer_node_config(node: str) -> dict[str, Any]:
-    """The single read accessor for optimizer-node tunables, which live only in the optimizer
-    pipeline file — never in a per-campaign config copy."""
-    schema_node = get_optimizer_schema().get_node(node)
-    if schema_node is None:
-        raise KeyError(f"Unknown optimizer node: {node!r}")
-    return schema_node.current_config
-
-
-def optimizer_model(node: str = "l1_generate") -> str:
-    return str(optimizer_node_config(node)["model"])
-
-
-def _resolved_prompt_for_node(name: str) -> dict[str, Any] | None:
-    data = optimizer_manifest()
-    node_cfg = data.get("nodes", {}).get(name, {}).get("config", {})
-    family = node_cfg.get("prompt_family")
-    if not family:
-        return None
-    key = _resolved_key(family, node_cfg.get("prompt_version"))
-    body = data.get("resolved_prompts", {}).get(key)
-    return body if isinstance(body, dict) else None
-
-
-@functools.lru_cache(maxsize=32)
-def base_optimizer_template(name: str) -> OptimizerPromptTemplate:
-    """Override-free: the base an L4 prose mutation merges onto, and the declaration of the inline
-    ``{{tokens}}`` (``{{n_variants}}``, ``{{citable_fields}}``) that mutation must preserve."""
-    body = _resolved_prompt_for_node(name)
-    if body is None:
+def _prompt_body(
+    document: Mapping[str, Any], config: Mapping[str, Any], node: str
+) -> OptimizerPromptTemplate:
+    family, version = config.get("prompt_family"), config.get("prompt_version")
+    key = f"{family}/{version}" if version is not None else family
+    body = (document.get("resolved_prompts") or {}).get(key) if family else None
+    if not isinstance(body, dict):
         raise KeyError(
-            f"Optimizer prompt '{name}' not found in resolved_prompts registry "
-            f"(check nodes.{name}.config.prompt_family/version)."
+            f"Optimizer prompt for node {node!r} not found in resolved_prompts "
+            f"(check nodes.{node}.config.prompt_family/version)."
         )
     return OptimizerPromptTemplate(**body)
+
+
+def base_optimizer_template(name: str) -> OptimizerPromptTemplate:
+    """Override-free and off the family the MANIFEST FILE names: the base an L4 prose mutation
+    merges onto, and the declaration of the inline ``{{tokens}}`` that mutation must preserve."""
+    node, _config, document = llm_node_document(name)
+    file_config = (document["nodes"][node.name] or {}).get("config") or {}
+    return _prompt_body(document, file_config, name)
+
+
+def _running_template(
+    name: str, config: Mapping[str, Any], document: Mapping[str, Any]
+) -> OptimizerPromptTemplate:
+    template = _prompt_body(document, config, name)
+    if fields := resolve_node_override(name).prompt_fields:
+        template = template.model_copy(update=fields)
+    validate_template(name, template)
+    return template
 
 
 def effective_optimizer_prompts(
@@ -232,7 +122,7 @@ def effective_optimizer_prompts(
     base for AND advertises ``PromptTemplate`` fields, which no normal campaign's nodes do."""
     if schema is None:
         return {}
-    owned = set(list_optimizer_prompts())
+    owned = {*bound_optimizer().llm_nodes, *checkin_manifest().schema.active_steps}
     keys_by_node = schema.node_param_keys()
     params = pipeline_params or {}
     out: dict[str, dict[str, str]] = {}
@@ -254,11 +144,8 @@ def effective_optimizer_prompts(
 def load_optimizer_prompt(name: str) -> OptimizerPromptTemplate:
     """Every load runs ``validate_template``, so a template naming a slot outside ``injection_table()``
     and the per-template extras raises at load time rather than silently rendering empty."""
-    template = base_optimizer_template(name)
-    if fields := resolve_node_override(name).prompt_fields:
-        template = template.model_copy(update=fields)
-    validate_template(name, template)
-    return template
+    _node, config, document = llm_node_document(name)
+    return _running_template(name, config, document)
 
 
 @dataclass(frozen=True)
@@ -414,22 +301,14 @@ def resolved_overrides(overrides: dict[str, dict[str, Any]]) -> dict[str, Any]:
     return {"nodes": nodes, "model": model, "provider": provider}
 
 
-def list_optimizer_prompts() -> list[str]:
-    data = optimizer_manifest()
-    return sorted(
-        name
-        for name, node in data.get("nodes", {}).items()
-        if node.get("config", {}).get("prompt_family")
-    )
-
-
-def compute_optimizer_prompt_hashes() -> dict[str, str]:
-    """Three parts — the template, the resolved layout, the resolved config — because all three decide
-    what the node produces; without config, repointing a node's MODEL left this hash unmoved."""
+def compute_optimizer_prompt_hashes(selected: SelectedOptimizer) -> dict[str, str]:
+    """Per llm node of *selected*: three parts — the template, the resolved layout, the resolved
+    config — because all three decide what the node produces; without config, repointing a node's
+    MODEL left this hash unmoved."""
     out: dict[str, str] = {}
-    for name in list_optimizer_prompts():
-        tpl = load_optimizer_prompt(name)
-        blob = tpl.model_dump_json()
+    for name in selected.llm_nodes:
+        config = selected.node_config(name)
+        blob = _running_template(name, config, selected.document).model_dump_json()
         if (spec := NODE_LAYOUTS.get(name)) is not None:
             # Only an `editor == "l4"` node can have its layout moved by the override channel
             # this hash exists to notice. `l1_generate` is edited by L2, in-campaign, through
@@ -437,14 +316,14 @@ def compute_optimizer_prompt_hashes() -> dict[str, str]:
             # hash — so it contributes its floor, which is exactly what an L4 edit leaves it at.
             layout = resolve_node_layout(name) if spec.editor == "l4" else spec.floor
             blob += layout.model_dump_json()
-        blob += json.dumps(optimizer_node_config(name), sort_keys=True, default=str)
+        blob += json.dumps(config, sort_keys=True, default=str)
         out[name] = hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
     return out
 
 
-def combined_optimizer_prompt_hash() -> str:
+def combined_optimizer_prompt_hash(selected: SelectedOptimizer) -> str:
     """An audit JOIN KEY, not the drift gate: drift is asked per ROUND, where the answer can name the
     round and fork at it. Not part of ``campaign_id``, which is random per ``new``."""
-    per_prompt = compute_optimizer_prompt_hashes()
+    per_prompt = compute_optimizer_prompt_hashes(selected)
     blob = json.dumps(per_prompt, sort_keys=True)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]

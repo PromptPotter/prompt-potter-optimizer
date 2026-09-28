@@ -52,6 +52,7 @@ from promptpotter.infrastructure.llm.telemetry import (
     reset_cycle_ledger,
     set_cycle_ledger,
 )
+from promptpotter.shared.errors import PromptCompositionError
 from promptpotter.shared.hashing import module_source_digest, optimizer_prompt_shapers
 
 if TYPE_CHECKING:
@@ -124,15 +125,15 @@ class FilledPrompt(NamedTuple):
     coverage: dict[str, ComposeCoverage]
 
 
-class InjectionRenderError(Exception):
-    """Renderer raised — programmer mistake. Halts with ``RENDER_ERROR`` (distinct from CRASHED); chains the original via ``raise … from``."""
+class InjectionRenderError(PromptCompositionError):
+    """Renderer raised — programmer mistake. Chains the original via ``raise … from``."""
 
     def __init__(self, name: str, cause: BaseException) -> None:
         self.cause = cause
         super().__init__(f"injection {name!r} renderer raised {type(cause).__name__}: {cause}")
 
 
-class MandatoryPanelStarvedError(Exception):
+class MandatoryPanelStarvedError(PromptCompositionError):
     """A panel the node cannot operate without rendered evidence the composition did not place.
 
     Halts rather than shipping the prompt: a node handed no subject still answers, confidently, and
@@ -285,7 +286,7 @@ def _arm_readings(latest_round: RoundResult | None) -> tuple[ArmReading, ...]:
             mean_fitness_ci_hi=c.mean_fitness_ci_hi,
             scored_samples=c.scored_samples,
             expected_samples=c.expected_samples,
-            elimination_stopped=c.elimination_stopped,
+            outcome=c.outcome,
             gate=c.elimination_context.get("gate"),
         )
         for c in latest_round.candidate_scores
@@ -320,16 +321,16 @@ def build_bundle(
         l3_round=cycle.escalation.l3_round,
         l3_stall_count=cycle.escalation.l3_stall_count,
         exploration_budget=exploration_budget(
-            cycle.escalation.l1_stall_count, opt.l1_patience
+            cycle.escalation.l1_stall_count, cycle.knobs.escalation.l1_patience
         ).value,
         pipeline_params=dict(current_pp) if current_pp else {},
         composite_formula=formula,
         composite_formula_short=formula_short,
-        # The SAME predicate `l1/execute.py` branches on, evaluated once. A cold ruler forces the
+        # The SAME predicate the sampler branches on, evaluated once. A cold ruler forces the
         # frozen prefix however the knob is set, so the knob alone would misreport round 0.
         subset_mode=(
             "adaptive"
-            if opt.mechanisms.selection.per_round_resubset and cycle.ruler is not None
+            if cycle.knobs.adaptive_queue.per_round_resubset and cycle.ruler is not None
             else "frozen"
         ),
         elimination_n_min=opt.elimination_n_min,
@@ -395,11 +396,11 @@ def build_bundle(
         # for the life of a cycle while `detect_invariants` went on rejecting a repeat off the same
         # history: L1 punished for re-proposing an idea it was never shown had been tried.
         measured_rounds=[*prior, latest_round] if latest_round is not None else prior,
-        prompt_block_catalogue=cycle.config.optimization.prompt_block_catalogue,
+        prompt_block_catalogue=cycle.knobs.l1_generate.prompt_block_catalogue,
         earned_blocks=cycle.earned_blocks,
-        rebase_capability=cycle.config.optimization.rebase_capability,
-        terminate_capability=cycle.config.optimization.terminate_capability,
-        schema_field_rename=cycle.config.optimization.schema_field_rename,
+        rebase_capability=cycle.knobs.escalation.rebase_capability,
+        terminate_capability=cycle.knobs.escalation.terminate_capability,
+        schema_field_rename=cycle.knobs.l1_generate.schema_field_rename,
         measured_unit=cycle.session.backend_client.measured_unit,
         is_origin_round=latest_round is cycle.origin_round,
     )

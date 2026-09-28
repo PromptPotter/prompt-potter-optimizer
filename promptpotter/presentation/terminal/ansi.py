@@ -18,7 +18,7 @@ from promptpotter.application.views.view_models import (
     SpDiffView,
 )
 from promptpotter.domain.candidate_diff import group_diff_keys
-from promptpotter.domain.results import scoreboard_rank_key
+from promptpotter.domain.results import ArmOutcome, scoreboard_rank_key
 from promptpotter.presentation.terminal.primitives import (
     BOLD,
     CYAN,
@@ -138,7 +138,7 @@ def _render_round_complete(v: RoundCompleteView) -> str:
             out.append(board)
     elif v.scores:
         parts = [
-            f"{s.label}={fmt_pct(s.accuracy)}{' (aborted)' if s.escalation_aborted else ''}"
+            f"{s.label}={fmt_pct(s.accuracy)}{f' ({s.outcome})' if s.outcome.cut_short else ''}"
             for s in sorted(
                 v.scores,
                 key=lambda s: scoreboard_rank_key(
@@ -146,7 +146,7 @@ def _render_round_complete(v: RoundCompleteView) -> str:
                     s.accuracy,
                     s.theta,
                     is_selected=s.label == v.winner_label,
-                    is_partial=bool(s.partial_reason),
+                    is_partial=s.outcome is ArmOutcome.SKIPPED,
                 ),
                 reverse=True,
             )

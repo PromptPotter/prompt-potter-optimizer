@@ -12,13 +12,14 @@ from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.optimizer_state import CritiqueReadout, L2L3Memory
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.results import EliminationGate, RoundResult
+from promptpotter.domain.results import ArmOutcome, RoundResult
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler
 from promptpotter.domain.search_point import TaskDecomposition
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
+    from promptpotter.application.optimization.pobb.checks import EliminationGate
 
 
 # Every constant below decides what a prompt RECEIVES, and `injection_source_digest` hashes this
@@ -212,7 +213,7 @@ class CycleSlice:
     composite_formula_short: str | None = None
     # `frozen` (campaign-start prefix) or `adaptive` (acquisition re-picks per round). The real
     # predicate is `per_round_resubset and ruler is not None`, and a renderer deriving that for
-    # itself is how a panel and `l1/execute.py` come to disagree about what chose the rows.
+    # itself is how a panel and the sampler come to disagree about what chose the rows.
     subset_mode: str | None = None
     elimination_n_min: int | None = None
     sp_budget_round: int | None = None
@@ -240,9 +241,8 @@ class ArmReading:
     mean_fitness_ci_hi: float | None
     scored_samples: int
     expected_samples: int
-    elimination_stopped: bool
-    # WHICH gate stopped it. Beside the bool, not replacing it: a degradation cut sets
-    # `elimination_stopped` and names no gate, so `gate is not None` would drop those arms.
+    outcome: ArmOutcome
+    # WHICH of PoBB's gates stopped it, where PoBB did.
     gate: EliminationGate | None
 
 

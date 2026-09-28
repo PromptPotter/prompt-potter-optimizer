@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.optimization.dispatch.facade import build_bundle, node_packages
 from promptpotter.application.optimization.l1.critique import run_l1_critique
-from promptpotter.application.optimization.l1.population import build_score_report
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     ForkResult,
     _mint_fork,
@@ -21,6 +20,7 @@ from promptpotter.application.optimization.resume_and_fork.fork_siblings import 
 from promptpotter.application.optimization.resume_and_fork.replayers import ReplayMismatch
 from promptpotter.application.optimization.round_analysis import compute_round_diagnostics
 from promptpotter.application.run_observers import RunCallbacks
+from promptpotter.application.scoring.candidate_report import build_score_report
 from promptpotter.application.scoring.row_diagnostics import count_degraded_samples
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
@@ -303,8 +303,9 @@ async def repair_incomplete_rounds(
                 label=cs.label,
                 sp_hash=sp.sp_hash(session.pipeline_schema),
                 run_id=scored.run_id,
+                outcome=cs.outcome,
                 resolved_pipeline_params=cs.resolved_pipeline_params,
-                elimination_stopped=cs.elimination_stopped,
+                elimination_context=cs.elimination_context,
             )
             # Duplicated on purpose (see `RoundResult`); repairing one half leaves the
             # trajectory quoting the holed measurement.

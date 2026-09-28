@@ -1,0 +1,309 @@
+"""Potter's node implementations, each registered under the node name its manifest uses."""
+
+from __future__ import annotations
+
+from dataclasses import replace
+from typing import TYPE_CHECKING, ClassVar
+
+from promptpotter.application.intelligence.adaptive_queue_mechanism import build_round_order
+from promptpotter.application.intelligence.exploration import (
+    build_observations,
+    select_round_subset,
+)
+from promptpotter.application.intelligence.indexes.axis import NOISE_THRESHOLD
+from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+    compute_optimizer_prompt_hashes,
+)
+from promptpotter.application.optimization.escalation.firing import escalate_l2
+from promptpotter.application.optimization.escalation.state import NextAction
+from promptpotter.application.optimization.l1.candidate_source import generate_or_load_candidates
+from promptpotter.application.optimization.l1.critique import run_l1_critique
+from promptpotter.application.optimization.l1.population import parse_population
+from promptpotter.application.optimization.validators.l1_invariants import L1YieldStats
+from promptpotter.application.optimization.validators.l1_strict import DROPPED_MANDATORY_PLACEHOLDER
+from promptpotter.application.optimizers import nodes
+from promptpotter.application.optimizers.potter import couplings
+from promptpotter.application.optimizers.potter.election import elect_on_theta
+from promptpotter.application.optimizers.potter.generation_only import run_generation_only_round
+from promptpotter.application.optimizers.potter.knobs import (
+    AdaptiveQueueKnobs,
+    EscalationKnobs,
+    L1GenerateKnobs,
+    PoBBKnobs,
+    ThetaElectionKnobs,
+)
+from promptpotter.application.optimizers.potter.race import PoBBRace
+from promptpotter.application.scoring.candidate_report import fatal_validation_failures
+from promptpotter.domain.phases import StopLoop
+from promptpotter.domain.pipeline_schema import NodeKind
+from promptpotter.domain.results import CandidateProposal
+from promptpotter.domain.results_health import compute_node_failure_rates, evidence_starved_node
+from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.tracing.bridge import observed_node
+from promptpotter.shared.errors import graceful, is_error_result
+
+if TYPE_CHECKING:
+    from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.application.optimizers.nodes import (
+        Boundary,
+        CatchUpFn,
+        Measured,
+        Panel,
+        Population,
+        RoundContext,
+        Selection,
+    )
+    from promptpotter.domain.results import RoundResult
+    from promptpotter.domain.sample import Sample
+
+__all__ = ["MEMBERS"]
+
+
+class L1CritiqueKnobs(StrictModel):
+    """The critique's call config is all it has; it takes no knob of its own."""
+
+
+class AdaptiveQueue:
+    """The round's panel, drawn off the search pool, and ONE order every arm walks it in —
+    parent-miss samples front-loaded, a parent-hit regression probe every 4th slot, cells the
+    parent never answered ordered by discrimination — so the eliminator sees discriminating
+    evidence immediately, and shared prefixes keep paired stats comparable."""
+
+    name: ClassVar[str] = "adaptive_queue"
+    kind: ClassVar[NodeKind] = NodeKind.SAMPLER
+    knobs: ClassVar[type[StrictModel]] = AdaptiveQueueKnobs
+    couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = couplings.ADAPTIVE_QUEUE
+
+    def draw(self, ctx: RoundContext, pool: list[Sample]) -> Panel:
+        cycle = ctx.cycle
+        config = cycle.config
+        if not cycle.knobs.adaptive_queue.per_round_resubset or cycle.ruler is None:
+            # The campaign-start prefix: on a COLD ruler a re-picked subset is difficulty-blind, and
+            # freezing concentrates measurements so the ruler warms and locks fastest.
+            cells = select_round_subset(pool, [], config.sp_budget_round)
+        else:
+            # Archive obs are dataset-scoped + abort-residue-free → cross-cycle evidence.
+            own = build_observations(cycle.rounds)
+            cells = select_round_subset(
+                pool,
+                [*cycle.archive_observations, *own],
+                config.sp_budget_round,
+                ruler=cycle.ruler,
+                # Enough already-anchored cells for the next extension to equate against: the
+                # acquisition prefers unmeasured cells, whose δ SE is widest.
+                anchor_floor=config.optimization.elimination_n_min,
+                # The archive fits the θ scale; only THIS cycle's arms are in the race the panel
+                # has to separate.
+                leader_ids={o.candidate_id for o in own},
+            )
+        # CORRECTNESS, not the composite: `build_round_order` thresholds these with `is_hit`, and
+        # under a `per_cell` composite below 1.0 every cell would read as a miss.
+        parent_results = cycle.tracking.current_results
+        parent_grades: dict[int, float] = {}
+        if parent_results and cycle.tracking.current_sp is not None:
+            parent_grades = {
+                int(sid): float(r["fitness"])
+                for r in parent_results
+                if (sid := r.get("sample_id")) is not None and not is_error_result(r)
+            }
+        order = build_round_order(parent_grades, cycle.ruler, [int(s.id) for s in cells])
+        by_id = {int(s.id): s for s in cells}
+        return nodes.Panel(cells=cells, order=[by_id[sid] for sid in order])
+
+
+def _fold_strict_rejections(
+    stats: L1YieldStats, proposals: list[CandidateProposal]
+) -> L1YieldStats:
+    """Re-derive ``l1_yield`` as the share of proposals that can still MEASURE.
+
+    ``detect_invariants`` counts only the three round-local collapses, and the strict validators
+    run later, in ``parse_population``. Both land on the same wound channel, so ONE predicate spans
+    them — subtracting the collapse counters as well would charge those candidates twice. The
+    counters stay as they are; they name three specific shapes, and a strict rejection is none."""
+    if not proposals:
+        return stats
+    live = sum(1 for cp in proposals if not fatal_validation_failures(cp.validation_failures))
+    return replace(stats, l1_yield=live / len(proposals))
+
+
+class L1Generate:
+    name: ClassVar[str] = "l1_generate"
+    kind: ClassVar[NodeKind] = NodeKind.LLM
+    knobs: ClassVar[type[StrictModel]] = L1GenerateKnobs
+    couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
+
+    async def propose(
+        self, ctx: RoundContext, panel: Panel, population: Population | None
+    ) -> Population:
+        if population is not None:
+            raise ValueError(
+                "l1_generate proposes from the round's parent; a manifest walking it after "
+                "another proposer hands it a population it would discard"
+            )
+        cycle = ctx.cycle
+        schema = cycle.session.pipeline_schema
+        assert schema is not None and cycle.tracking.current_sp is not None
+        proposals, yield_stats = await generate_or_load_candidates(
+            ctx.round_num,
+            cycle,
+            ctx.callbacks.on_phase,
+            n_scoring_samples=len(panel.cells),
+            obs=cycle.session.state.obs,
+        )
+        individuals, params = parse_population(
+            proposals,
+            cycle.opt_sp,
+            cycle.tracking.current_sp.pipeline_params,
+            schema,
+            runtime_failures=cycle.memory.wounds.runtime_failures,
+            prompt_block_catalogue=cycle.knobs.l1_generate.prompt_block_catalogue,
+        )
+        yield_stats = _fold_strict_rejections(yield_stats, proposals)
+        return nodes.Population(
+            proposals=proposals,
+            individuals=individuals,
+            pipeline_params=params,
+            optimizer_state=cycle.optimizer_state(
+                l1_yield=yield_stats.l1_yield,
+                l1_parse_failure=yield_stats.l1_parse_failure,
+                # Stamped with the round rather than at save time: a re-save (a repair, a rescore)
+                # must not restamp a round with the optimizer running NOW.
+                optimizer_prompt_hashes=compute_optimizer_prompt_hashes(cycle.optimizer),
+            ),
+        )
+
+
+class PoBB:
+    name: ClassVar[str] = "pobb"
+    kind: ClassVar[NodeKind] = NodeKind.ELIMINATOR
+    knobs: ClassVar[type[StrictModel]] = PoBBKnobs
+    couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = couplings.POBB
+
+    def race(self, ctx: RoundContext, panel: Panel, catch_up: CatchUpFn) -> PoBBRace:
+        return PoBBRace(ctx, panel, catch_up, node=self.name)
+
+
+class ThetaElection:
+    name: ClassVar[str] = "theta_election"
+    kind: ClassVar[NodeKind] = NodeKind.SELECTOR
+    knobs: ClassVar[type[StrictModel]] = ThetaElectionKnobs
+    couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
+
+    def select(self, ctx: RoundContext, measured: Measured, population: Population) -> Selection:
+        return elect_on_theta(ctx, measured, population, node=self.name)
+
+
+class L1Critique:
+    """Feedback for the NEXT round's generator — nothing else reads it. A malformed response is
+    survived: the next round re-sends it before generating (`critique.py::ensure_prior_critique`)."""
+
+    name: ClassVar[str] = "l1_critique"
+    kind: ClassVar[NodeKind] = NodeKind.LLM
+    knobs: ClassVar[type[StrictModel]] = L1CritiqueKnobs
+    couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
+
+    async def adapt(self, ctx: RoundContext, round_result: RoundResult) -> None:
+        session = ctx.cycle.session
+        failed = (
+            "Origin critique failed; round 1 proceeds without seeded feedback"
+            if ctx.round_num == 0
+            else "L1 critique failed; the next round re-sends it before generating"
+        )
+        with graceful(failed):
+            async with observed_node(
+                f"l1_critique_r{ctx.round_num}",
+                "llm",
+                obs=session.state.obs,
+                campaign_id=session.state.tracing_campaign_id,
+                round_num=ctx.round_num,
+            ):
+                critique = await run_l1_critique(
+                    ctx.cycle, round_result, round_num=ctx.round_num, ledger=session.state.ledger
+                )
+            round_result.optimizer_state.payload.critique = critique
+
+
+class Escalation:
+    """The stall ladder: at each boundary it banks the round's verdict, and on a stall fires L2 —
+    which may climb to L3 — before the next round walks `default` under what they wrote."""
+
+    name: ClassVar[str] = "escalation"
+    kind: ClassVar[NodeKind] = NodeKind.CONTROLLER
+    knobs: ClassVar[type[StrictModel]] = EscalationKnobs
+    couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = couplings.ESCALATION
+
+    def stops_after(self, ctx: RoundContext, round_result: RoundResult) -> bool:
+        # Asked through the FSM so the lookahead can never disagree with the banking `observe`
+        # is about to do.
+        return ctx.cycle.escalation.would_exhaust_lives(
+            round_result.improved,
+            ctx.cycle.knobs.escalation.lives,
+            compared=round_result.electable_count > 0,
+        )
+
+    def observe(self, ctx: RoundContext, round_result: RoundResult) -> Boundary:
+        cycle = ctx.cycle
+        knobs = cycle.knobs.escalation
+        axes_with_positive_yield = (
+            None
+            if cycle.axes is None
+            else sum(1 for r in cycle.axes.axis_rankings() if r.effect_size > NOISE_THRESHOLD)
+        )
+        # A dropped mandatory backend placeholder is structural, not a stall — heal L2 now
+        # (patience 0) instead of burning l1_patience rounds while L1 re-drops it.
+        l1_mandatory_breach = any(
+            vf.reason == DROPPED_MANDATORY_PLACEHOLDER
+            for sc in round_result.candidate_scores
+            for vf in sc.validation_failures
+        )
+        # The same structural l1_generate fault, which the identical prompt reproduces; its
+        # `candidate_scores` are empty, so the round carries it on `l1_parse_failure`.
+        l1_zero_candidates = round_result.optimizer_state.payload.l1_parse_failure is not None
+        # Derived from the SAME helper the degradation grade reads, so routing and verdict can't
+        # diverge. Health is stamped only at the close, so the rates are read directly here.
+        evidence_starved = (
+            evidence_starved_node(compute_node_failure_rates(round_result.results)) is not None
+        )
+        event = cycle.escalation.observe_round(
+            improved=round_result.improved,
+            compared=round_result.electable_count > 0,
+            separable=round_result.separable,
+            # The round was elected on the composite, so the stop that ends the campaign asks it too.
+            current_objective=cycle.tracking.current_composite_fitness,
+            l1_patience=knobs.l1_patience,
+            escalation_ladder=knobs.escalation_ladder,
+            lives=knobs.lives,
+            axes_with_positive_yield=axes_with_positive_yield,
+            l1_mandatory_breach=l1_mandatory_breach,
+            l1_zero_candidates=l1_zero_candidates,
+            evidence_starved=evidence_starved,
+        )
+        return nodes.Boundary(stop=event.stop_reason, act=event.next_action == NextAction.FIRE_L2)
+
+    async def act(self, ctx: RoundContext) -> None:
+        session = ctx.cycle.session
+        stop = await escalate_l2(
+            ctx.cycle,
+            session.pipeline_schema,
+            ctx.round_num,
+            ctx.callbacks.on_phase,
+            obs=session.state.obs,
+            tracing_campaign_id=session.state.tracing_campaign_id,
+            node=self.name,
+        )
+        if stop:
+            raise StopLoop(stop)
+
+    def standing(self, cycle: Cycle) -> tuple[int, int | None]:
+        return cycle.escalation.l1_stall_count, cycle.escalation.lives
+
+    async def diagnose(self, ctx: RoundContext) -> None:
+        # Force L2 (bypass the stall counter) on this round's evidence, then peek the next
+        # round's proposals under its overrides.
+        await self.act(ctx)
+        await run_generation_only_round(
+            ctx.cycle, ctx.cycle.session, ctx.callbacks, ctx.round_num + 1
+        )
+
+
+MEMBERS = (AdaptiveQueue(), L1Generate(), PoBB(), ThetaElection(), L1Critique(), Escalation())

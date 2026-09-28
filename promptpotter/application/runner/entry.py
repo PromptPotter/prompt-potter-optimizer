@@ -11,20 +11,23 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from promptpotter.application.campaign_config import CampaignConfig
+from promptpotter.application.campaign_config import CampaignConfig, merge_node_overlays
 from promptpotter.application.initialization.loop_start import init_optimization_loop
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.exploration import parent_level_trajectory
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     compute_optimizer_prompt_hashes,
-    load_optimizer_set_overrides,
     set_determinism_clamp,
-    set_optimizer_prompt_overrides,
 )
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     _mint_fork,
     cleanup_stub_fork_if_empty,
+)
+from promptpotter.application.optimizer_manifest import (
+    bind_optimizer,
+    bound_optimizer,
+    select_optimizer,
 )
 from promptpotter.application.origin import (
     CampaignOrigin,
@@ -181,36 +184,17 @@ def _apply_config_overrides(
     # ADMITTED before launch (`jobs/quota.py::declare_run_ceiling`). Applied here too it
     # would be a second composition — and an auto-rebase's overrides would move a ceiling the
     # account never admitted.
-    opt_updates: dict[str, Any] = {
-        k: v
-        for k, v in {
-            "max_rounds": overrides.max_rounds,
-            "l1_patience": overrides.l1_patience,
-            "l2_patience": overrides.l2_patience,
-            "l3_patience": overrides.l3_patience,
-            "pobb_epsilon": overrides.pobb_epsilon,
-            "schema_field_rename": overrides.schema_field_rename,
-        }.items()
-        if v is not None
-    }
-    sel_updates = {
-        k: v
-        for k, v in {
-            "per_round_resubset": overrides.per_round_resubset,
-        }.items()
-        if v is not None
-    }
+    opt_updates: dict[str, Any] = (
+        {"max_rounds": overrides.max_rounds} if overrides.max_rounds is not None else {}
+    )
+    if overrides.nodes:
+        opt_updates["nodes"] = merge_node_overlays(config.optimization.nodes, overrides.nodes)
     # `scoring` sits on CampaignConfig itself, not under `optimization` — the one override whose
     # home is the outer model, so it rides its own bucket rather than being folded into a nested
     # copy that would silently drop it.
     top_updates: dict[str, Any] = {"scoring": overrides.scoring} if overrides.scoring else {}
-    if not opt_updates and not sel_updates and not top_updates:
+    if not opt_updates and not top_updates:
         return config
-    if sel_updates:
-        mech = config.optimization.mechanisms
-        opt_updates["mechanisms"] = mech.model_copy(
-            update={"selection": mech.selection.model_copy(update=sel_updates)}
-        )
     if opt_updates:
         top_updates["optimization"] = config.optimization.model_copy(update=opt_updates)
     return config.model_copy(update=top_updates)
@@ -839,15 +823,9 @@ async def run_optimization(
     refresh_inner_rulers(session, campaign_config, round_num=0)
     # Read here, before anything binds, so it is still a parent's and not our own.
     session.inherited_pause_check = get_abort_check()
-    # Bound through the same per-node override channel the inner runner uses — task-isolated,
-    # so an outer binding and the inner mutations of the cycles it spawns never collide. An
-    # empty set is a no-op and must NOT clear an inner runner's already-bound mutations.
-    if campaign_config.optimization.optimizer_set:
-        set_optimizer_prompt_overrides(
-            load_optimizer_set_overrides(campaign_config.optimization.optimizer_set)
-        )
-    # UNCONDITIONAL, unlike the set above: this task may be an inner cell carrying the outer
-    # campaign's pin in its context copy, and a cell measures under its own panel's clamp or none.
+    # Both per task, so an inner cell binds its own optimizer and clamp over the outer
+    # campaign's copies in its context — a cell measures under its own panel's or none.
+    bind_optimizer(select_optimizer(campaign_config.optimization))
     set_determinism_clamp(campaign_config.optimization.determinism)
     try:
         prep = await _prepare_run(
@@ -983,7 +961,7 @@ def _finalize_run(
             # is what gets quoted as the result. Seconds are the `wall_clock.round_ended_s` entry
             # under the same round number, never a second copy banked beside it.
             **round_clocks(rounds, accuracy_ceiling=accuracy_ceiling)._asdict(),
-            "prompt_hashes": compute_optimizer_prompt_hashes(),
+            "prompt_hashes": compute_optimizer_prompt_hashes(bound_optimizer()),
             # On the origin's OWN samples — never `rounds[0].reference_composite`, which
             # is round 1's winner's matched floor on a different sample basis.
             "origin_composite_fitness": cycle_result.origin_composite_fitness,

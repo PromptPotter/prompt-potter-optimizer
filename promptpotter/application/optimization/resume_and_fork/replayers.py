@@ -8,12 +8,13 @@ from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 from promptpotter.application.intelligence.exploration import graded_response
+from promptpotter.application.optimization.pobb.checks import EliminationGate
 from promptpotter.application.optimization.resume_and_fork.decisions import (
     RESUME_CHECKPOINT_GATING,
     GatingMode,
 )
 from promptpotter.application.scoring.selection import elect_round_winner, elimination_p_best
-from promptpotter.domain.results import EliminationGate, RoundResult
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import PotterCheckpointKind
 from promptpotter.domain.scoring import is_answer_collapsed
 

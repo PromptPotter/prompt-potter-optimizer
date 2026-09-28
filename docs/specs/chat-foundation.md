@@ -12,7 +12,7 @@ The first tab **is a chat**, and — deliberately — an LLM wrapper. We own tha
 
 The user ↔ assistant round-trip does not exist; chat input is disabled outside ingest.
 
-**Served by the `checkin` optimizer node** — the check-in copilot IS the conversation surface, there is no separate `chat` node, so its provider/model lives per-node in `promptpotter/assets/optimizer/pipeline.yaml` and NOT in `campaign.json`, which carries no `optimizer_llm.provider`. The assistant gets **no new tools**; it answers from context and the live stream.
+**Served by the `checkin` optimizer node** — the check-in copilot IS the conversation surface, there is no separate `chat` node, so its provider/model lives in the bench's `promptpotter/assets/checkin/pipeline.yaml` and NOT in `campaign.json`, which carries no `optimizer_llm.provider`. The assistant gets **no new tools**; it answers from context and the live stream.
 
 **A new HTTP surface, so it is declared in [`api-openapi.yaml`](api-openapi.yaml) first, in its own PR, before the handler lands** (the §0 schema-first gate). It is **not** a `/commands/{kind}` verb — it does not mutate cycle state — and its reply rides the endpoint's own response, touching no asyncapi event kind.
 

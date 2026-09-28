@@ -27,7 +27,7 @@ OPENROUTER_API_KEY=your_key_here
 
 Installed from a wheel there is no repo root, so it goes in `$PROMPTPOTTER_HOME/.env` instead. `promptpotter new` offers to write it for you on first run if no key is set.
 
-The optimizer model defaults to `deepseek/deepseek-v4-flash:nitro` on OpenRouter. It's install-global, configured once in `promptpotter/assets/optimizer/pipeline.yaml` (per optimizer node's `config.model` / `config.provider`) — the same optimizer runs every campaign. To use a different model or provider, edit that file; set the corresponding `*_API_KEY` for Groq/Anthropic/OpenAI. There is no per-campaign or env-var override.
+The optimizer model defaults to `deepseek/deepseek-v4-flash:nitro` on OpenRouter. It is declared in `promptpotter/assets/optimizers/potter/pipeline.yaml` (per optimizer node's `config.model` / `config.provider`); edit that file to change it for every campaign, or set one campaign's `optimization.nodes.{node}.config.model`. Set the corresponding `*_API_KEY` for Groq/Anthropic/OpenAI. There is no env-var override.
 
 Installed from a wheel rather than a clone, that file sits under `site-packages` and an edit there dies at the next upgrade. Put your copy at `$PROMPTPOTTER_HOME/optimizer/pipeline.yaml` instead: present, it replaces the shipped manifest whole. Full resolution rules — **owned by** [`../developer/stable-api.md § 4b`](../developer/stable-api.md).
 
@@ -53,7 +53,7 @@ Next: [Your first campaign](03-first-campaign.md).
 
 ## Environment variables
 
-The `.env` file (see `.env.example`) carries API keys. The optimizer's provider + model are install-global in `promptpotter/assets/optimizer/pipeline.yaml` (per optimizer node) — no per-campaign or env-var default. (Target/scoring model is per-dataset in the pipeline overlay.)
+The `.env` file (see `.env.example`) carries API keys. The optimizer's provider + model are declared per node in its manifest, `promptpotter/assets/optimizers/potter/pipeline.yaml`, and a campaign may move one through `optimization.nodes` — no env-var default. (Target/scoring model is per-dataset in the pipeline overlay.)
 
 | Variable | When required | Purpose |
 |----------|---------------|---------|

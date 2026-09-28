@@ -11,7 +11,7 @@ from promptpotter.domain.phases import PotterPhase, StopReason
 from promptpotter.domain.run_records import CycleRecord, PhaseRecord, view_fields
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import EscalationLadder, LivesConfig
+    from promptpotter.application.optimizers.potter.knobs import EscalationLadder, LivesConfig
     from promptpotter.infrastructure.ledger import CycleEventLog
 
 

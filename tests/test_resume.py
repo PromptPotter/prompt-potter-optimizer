@@ -268,6 +268,7 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
                     "accuracy": 0.2,
                     "composite_fitness": 0.2,
                     "total": 10,
+                    "outcome": "measured",
                 },
             ],
         ),
@@ -415,14 +416,22 @@ def test_frozen_campaign_config_ceilings_survive_the_live_dataset_file() -> None
         load_campaign_config,
     )
 
-    live = load_campaign_config({"optimization": {**_OPT, "max_rounds": 5, "n_variants": 7}})
+    live = load_campaign_config(
+        {
+            "optimization": {
+                **_OPT,
+                "max_rounds": 5,
+                "nodes": {"l1_generate": {"config": {"n_variants": 7}}},
+            }
+        }
+    )
     frozen = {"optimization": {"max_rounds": 12, "spend_budget_usd": 0.3}}
     merged = apply_inherited_overlay(live, frozen, None)
 
     assert merged.optimization.max_rounds == 12
     assert merged.optimization.spend_budget_usd == 0.3
     # Named by neither: the sibling knob under the same block survives the merge.
-    assert merged.optimization.n_variants == 7
+    assert merged.optimization.nodes["l1_generate"].config == {"n_variants": 7}
 
 
 def test_lives_resume_fold_matches_live_observe() -> None:
@@ -430,8 +439,8 @@ def test_lives_resume_fold_matches_live_observe() -> None:
     ``improved`` sequence (``EscalationFSM.fold``) must equal the live in-run count
     (``observe_round``). A mismatch is silent — a resumed run would grant a different
     round budget than the un-interrupted run, quietly changing how long it optimizes."""
-    from promptpotter.application.campaign_config import EscalationLadder, LivesConfig
     from promptpotter.application.optimization.escalation.state import EscalationFSM, NextAction
+    from promptpotter.application.optimizers.potter.knobs import EscalationLadder, LivesConfig
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.run_records import PhaseRecord
 
@@ -525,8 +534,8 @@ def test_unresolved_round_stalls_and_replays_as_one() -> None:
     whole budget re-asking a question the panel could not answer, with no error anywhere. If the
     replay disagrees with the live run, a resumed cycle escalates on a different round than the
     one it interrupted, which silently changes what the campaign measured."""
-    from promptpotter.application.campaign_config import EscalationLadder
     from promptpotter.application.optimization.escalation.state import EscalationFSM
+    from promptpotter.application.optimizers.potter.knobs import EscalationLadder
     from promptpotter.domain.run_records import PhaseRecord
 
     # (improved, separable) — a resolved win, then two wins that told no arm from the parent.
@@ -590,8 +599,8 @@ def test_l2_l3_escalation_state_survives_resume() -> None:
     the resumed run a fresh escalation budget and re-firing layers it had already spent. Silent
     in the resume sense: nothing raises, the counters just read zero.
     """
-    from promptpotter.application.campaign_config import EscalationLadder
     from promptpotter.application.optimization.escalation.state import EscalationFSM
+    from promptpotter.application.optimizers.potter.knobs import EscalationLadder
     from promptpotter.application.views.view_models import L2RefineExitView, PlanExitView
     from promptpotter.domain.phases import PotterPhase
     from promptpotter.domain.run_records import PhaseRecord
@@ -719,6 +728,7 @@ def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) ->
         PotterCheckpointKind.ELIMINATION_CUT,
         {"round_num": 1},
         True,
+        node="pobb",
         round=1,
     )
     persist_round(cycle, round_result(1), session, cb)  # type: ignore[arg-type]
@@ -728,6 +738,7 @@ def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) ->
         PotterCheckpointKind.L2_ESCALATION_TRIGGER,
         {"round_num": 1},
         True,
+        node="escalation",
         round=1,
     )
     record_decision(
@@ -735,6 +746,7 @@ def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) ->
         PotterCheckpointKind.ROUND_WINNER,
         {"round_num": 2},
         "c2",
+        node="theta_election",
         round=2,
     )
     persist_round(cycle, round_result(2), session, cb)  # type: ignore[arg-type]
@@ -745,6 +757,7 @@ def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) ->
         PotterCheckpointKind.L2_ESCALATION_TRIGGER,
         {"round_num": 2},
         True,
+        node="escalation",
         round=2,
     )
     assert flush_pending_decisions(cycle, session) == 1  # type: ignore[arg-type]
@@ -1086,7 +1099,7 @@ def test_a_fork_inherits_the_decisions_of_the_rounds_it_lifted(built_stores: Sto
         (1, PotterCheckpointKind.ELIMINATION_CUT),
         (2, PotterCheckpointKind.ROUND_WINNER),
     ):
-        record_decision(parent_ledger, kind, {"round_num": rnd}, "x", round=rnd)
+        record_decision(parent_ledger, kind, {"round_num": rnd}, "x", node=None, round=rnd)
 
     child = parent.model_copy(update={"cycle_id": "cycle_decisions_fork_a"})
     store.create(child, {})

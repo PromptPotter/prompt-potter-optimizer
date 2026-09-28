@@ -9,17 +9,17 @@ inner_benchmark: justlogic-d234
 # WHAT A CELL COSTS, off the cycle ledgers rather than off arithmetic: every 4-round cell ever
 # banked here — 8 of them, across 3 origin families — landed between $0.123 and $0.150, mean
 # $0.136, split ~60% inner worker (`llm_only`) / ~40% inner optimizer. A cell stopped early by
-# `inner_lives` costs proportionally less ($0.06-$0.07 at 2 rounds). So the panel is ~$0.82 of
+# potter's `lives` costs proportionally less ($0.06-$0.07 at 2 rounds). So the panel is ~$0.82 of
 # inner spend, and a full C0 re-measure lands near $1.0 once the outer optimizer's own calls are
 # counted. The figures this comment carried before ($0.045/cell, $0.31/panel) were 3x under and
 # never matched a run on disk; nothing here is a target, and the ledger is what to re-read when
 # the geometry above changes.
 #
 # `max_inner_rounds` IS BINDING — counted across every banked inner cell that recorded a stop, a
-# majority terminated ON the cap rather than on `inner_lives`, and most used every round. That is
+# majority terminated ON the cap rather than on potter's `lives`, and most used every round. That is
 # not a defect: the cap IS the estimand. Every arm on the panel is graded on what it delivered
 # over this one budget, and `mean_round_delta` now divides by the budget rather than by the rounds
-# a cell happened to run (`domain/l4/proxies.py::parent_level_series`) — so a cell `inner_lives` stopped
+# a cell happened to run (`domain/l4/proxies.py::parent_level_series`) — so a cell `lives` stopped
 # early is measured on the same denominator as one that ran the cap out, instead of being paid for
 # quitting. Raising it changes what the panel measures and costs proportional spend, so it is an
 # operator decision, not a tuning detail; read a delta as "lift under a 4-round budget", which is a
@@ -28,10 +28,16 @@ inner_benchmark_config:
   n_samples_per_inner_round: 28
   n_samples_origin: 40
   max_inner_rounds: 4
-  inner_n_variants: 3
-  inner_lives:
-    start: 2
-    cap: 3
+  inner_nodes:
+    l1_generate:
+      config:
+        n_variants: 3
+  inner_depth_nodes:
+    escalation:
+      config:
+        lives:
+          start: 2
+          cap: 3
   inner_optimizer_temperature: 0.0
 # A seed picks WHICH 40 rows a cell draws (`application/diagnostics/seed_screen.py::draw_bank`, the ONE
 # spelling — the runner imports it, so a screened bank and a run bank cannot diverge). These six

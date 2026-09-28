@@ -33,6 +33,8 @@ class CampaignPhase(enum.StrEnum):
     ORIGIN = "origin"
     PROPOSE = "propose"
     MEASURE = "measure"
+    SELECT = "select"
+    ADAPT = "adapt"
 
 
 class PotterPhase(enum.StrEnum):

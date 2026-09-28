@@ -26,10 +26,16 @@ campaign_config:
     # to show the Harbor path carries a real measurement end to end, not to find a better prompt.
     # Widen it after a first run has priced a cell.
     max_rounds: 2
-    n_variants: 2
-    l1_patience: 3
     degradation_threshold: 0.4
     # A RAIL, not an estimate. Nothing here predicts what an episode costs — the point of the
     # first run is to find that out — and this ceiling exists so finding out cannot cost more
     # than the operator agreed to. Raise it with `set-limits` once the ledger says what a cell is.
     spend_budget_usd: 3.00
+    # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
+    nodes:
+      l1_generate:
+        config:
+          n_variants: 2
+      escalation:
+        config:
+          l1_patience: 3

@@ -17,7 +17,7 @@ from typing import Any, Literal
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.l4.proxies import PanelPrecision
-from promptpotter.domain.results import DegradationHealth, OverlapReading
+from promptpotter.domain.results import ArmOutcome, DegradationHealth, OverlapReading
 from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
 from promptpotter.domain.scoring import is_hit, is_unscored
 from promptpotter.domain.spend import TokenAccount
@@ -159,10 +159,9 @@ class DashboardCandidate(StrictModel):
     run_id: str | None = None
     accuracy: float | None = None
     composite_fitness: float | None = None
-    # Rejected before it cost a sample (`l1/population.py::INVALID_SCORES`). Served because the
-    # scores beside it are SYNTHETIC — without it the row is byte-identical to one that got
-    # everything wrong.
-    invalid: bool = False
+    # How the arm's walk ended (`ScoredCandidate.outcome`), `None` until it is decided. Served
+    # because an `invalid` row's scores are SYNTHETIC, and a broken arm is not an eliminated one.
+    outcome: ArmOutcome | None = None
     scored_samples: int = 0
     cached_samples: int = 0
     # What measuring this searchpoint CONSUMED — the served twin of ``ScoredCandidate``'s three,
@@ -174,7 +173,6 @@ class DashboardCandidate(StrictModel):
     expected_samples: int | None = None
     evaluators: dict[str, float] = Field(default_factory=dict)
     changes_description: str = ""
-    partial_reason: str = ""  # "" | "skip" — see ScoredCandidate.partial_reason
     # Difficulty-adjusted Rasch ability + SE (`ScoredCandidate.theta`) — the metric the winner
     # was elected on, so the chart can explain a lower-accuracy winner. `None` outside the fit,
     # which is round-scoped and needs two arms: every row is null until the ELECTION stamps it,
@@ -226,6 +224,7 @@ class RoundSummaryCandidate(DashboardCandidate):
     candidate_id: str
     accuracy: float | None
     composite_fitness: float
+    outcome: ArmOutcome
     expected_samples: int
     is_selected: bool
     # The arm this round's READING is taken off, and the same one `RoundSummary.panel_precision`
@@ -269,7 +268,7 @@ class RoundSummary(StrictModel):
     # that answer's only route out of the engine. Round 0 holds no election ⇒ unset.
     verdict_reason: str | None = None
     # Did this round resolve anything — mirrors ``RoundResult.separable``, decided over the WHOLE
-    # electable field (`l1/score/winner.py::_separability`). THREE-state: ``None`` is "no arm
+    # electable field (`runner/round.py::_separability`). THREE-state: ``None`` is "no arm
     # carries a lift interval", which is not inconclusive but nothing to be conclusive about, and a
     # reader collapsing it onto ``False`` reports an unasked question as a negative answer. One
     # arm's own bracket cannot answer this, so no surface may stand in for it with the leading
@@ -282,7 +281,7 @@ class RoundSummary(StrictModel):
     # Round-close degradation verdict, origin included. ``None`` only when the round measured
     # zero samples. Webapp/CLI render it; never recompute.
     health: DegradationHealth | None = None
-    # The parent line read on ONE shared set of cells — C0 and every winner since, on the same
+    # The best-so-far line read on ONE shared set of cells — C0 and each new best since, on one
     # exam. `accuracy` above and this are not rivals: that one is the round's own subset, this one
     # is the only basis two rounds can be differenced on. `None` until the line has a second
     # member. Mirrors `RoundResult.overlap`; the rows behind it stay on the round

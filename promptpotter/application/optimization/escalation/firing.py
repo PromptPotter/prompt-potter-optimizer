@@ -56,6 +56,7 @@ from promptpotter.domain.l1_layout import (
 from promptpotter.domain.opt_search_point import OptSearchPoint, node_source
 from promptpotter.domain.optimizer_state import POTTER_MANIFEST, L2L3Memory
 from promptpotter.domain.phases import PhaseEvent, PotterPhase, StopLoop, StopReason, emit_phase
+from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.run_records import (
     ConfigOverrides,
     ForkTrigger,
@@ -69,7 +70,6 @@ from promptpotter.infrastructure.tracing.bridge import observed_node
 from promptpotter.shared import truncate
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
@@ -78,7 +78,7 @@ logger = logging.getLogger(__name__)
 
 
 # Provider/model/temperature are sourced from the layer's optimizer node config
-# (``promptpotter/assets/optimizer/pipeline.yaml``) inside ``llm_call``, never held here.
+# (``promptpotter/assets/optimizers/potter/pipeline.yaml``) inside ``llm_call``, never held here.
 
 
 @dataclass
@@ -309,7 +309,6 @@ L3 = LayerStrategy(
 async def _run_transition(
     transition: LayerStrategy,
     cycle: Cycle,
-    config: CampaignConfig,
     pipeline_schema: PipelineSchema,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
@@ -407,7 +406,7 @@ async def _run_transition(
     # (which carries the proposal to the ledger) is emitted before the raise.
     if result.terminate_proposal is not None:
         reason = result.terminate_proposal.reason.strip()
-        if not cycle.config.optimization.terminate_capability:
+        if not cycle.knobs.escalation.terminate_capability:
             # Same shape as the fork gate below: off ⇒ the prompt carried no terminate
             # guidance, and a volunteered field must not ABORT the run.
             logger.warning(
@@ -453,7 +452,7 @@ async def _run_transition(
             raise StopLoop(StopReason.OPTIMIZER_ABORT)
 
     if result.fork_proposal is not None:
-        if not cycle.config.optimization.rebase_capability:
+        if not cycle.knobs.escalation.rebase_capability:
             # A model can volunteer the field even though the prompt carried no fork guidance.
             # Without this the gate is prompt-side only, and a no-rebase ablation — whose
             # whole point is that it cannot fork — silently forks anyway.
@@ -488,14 +487,20 @@ def _stash_rebase_request(
         return False
 
     unlock = bool(proposal.unlock_schema_field_rename) and not (
-        cycle.config.optimization.schema_field_rename
+        cycle.knobs.l1_generate.schema_field_rename
     )
     cycle.rebase_request = RebaseRequest(
         fork_from_round=target_round,
         trigger=ForkTrigger.OPTIMIZER_REBASE,
         reason=str(proposal.reason or f"{layer_id} fork_proposal"),
         issued_by=f"{layer_id}/round_{round_num}",
-        config_overrides=ConfigOverrides(schema_field_rename=True) if unlock else None,
+        config_overrides=(
+            ConfigOverrides(
+                nodes={"l1_generate": ManifestNodeOverlay(config={"schema_field_rename": True})}
+            )
+            if unlock
+            else None
+        ),
     )
     logger.info(
         "%s emitted fork_proposal; UCB selected round %d of %d as the rewind target%s "
@@ -537,14 +542,15 @@ def _trigger_payload(
 
 async def escalate_l2(
     cycle: Cycle,
-    config: CampaignConfig,
     pipeline_schema: PipelineSchema,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None = None,
     obs: ObservabilityBridge | None = None,
     tracing_campaign_id: str = "",
+    *,
+    node: str,
 ) -> StopReason | None:
-    opt = config.optimization
+    opt = cycle.knobs.escalation
     esc = cycle.escalation
 
     event = esc.observe_l2_escalation(
@@ -563,6 +569,7 @@ async def escalate_l2(
         PotterCheckpointKind.L2_ESCALATION_TRIGGER,
         l2_inputs,
         event.next_action == NextAction.FIRE_L2,
+        node=node,
         data=l2_data,
         round=round_num,
     )
@@ -571,7 +578,6 @@ async def escalate_l2(
         result = await _run_transition(
             L2,
             cycle,
-            config,
             pipeline_schema,
             round_num,
             on_phase,
@@ -590,7 +596,6 @@ async def escalate_l2(
             await _run_transition(
                 L3,
                 cycle,
-                config,
                 pipeline_schema,
                 round_num,
                 on_phase,
@@ -606,6 +611,7 @@ async def escalate_l2(
         PotterCheckpointKind.L3_ESCALATION_TRIGGER,
         l3_inputs,
         event.next_action == NextAction.FIRE_L3,
+        node=node,
         data=l3_data,
         round=round_num,
     )
@@ -614,7 +620,6 @@ async def escalate_l2(
         await _run_transition(
             L3,
             cycle,
-            config,
             pipeline_schema,
             round_num,
             on_phase,

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.knobs import check_couplings
-from promptpotter.application.optimization.dispatch.llm_call.prompts import optimizer_model
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.domain.search_point import has_framing
 from promptpotter.infrastructure.llm.registry import model_profile
 
@@ -64,11 +64,12 @@ def _model_params_b(model_id: str) -> float | None:
     return float(match.group(1)) if match else None
 
 
-def _check_optimizer_below_target(target_models: tuple[str, ...]) -> PreflightWarning | None:
+def _check_optimizer_below_target(
+    opt_model: str, target_models: tuple[str, ...]
+) -> PreflightWarning | None:
     """An optimizer smaller than the target it optimizes is almost always an accidental inversion.
-    Its model is the install-global optimizer node config, never a per-campaign copy."""
+    Its model is the selected manifest's proposing node's."""
 
-    opt_model = optimizer_model()
     opt_b = _model_params_b(opt_model)
     if opt_b is None:
         return None
@@ -83,8 +84,9 @@ def _check_optimizer_below_target(target_models: tuple[str, ...]) -> PreflightWa
         detail=(
             "The optimizer is the strong model that improves the pipeline; running "
             "it on a model smaller than the target it optimizes is usually an "
-            "accidental inversion. Raise the optimizer node `model` in "
-            "`promptpotter/assets/optimizer/pipeline.yaml` to a larger tier."
+            "accidental inversion. Raise the proposing node's `model` — in the manifest under "
+            "`promptpotter/assets/optimizers/`, or this campaign's `optimization.nodes` — to a "
+            "larger tier."
         ),
     )
 
@@ -135,35 +137,13 @@ def run_preflight_checks(
     warnings: list[PreflightWarning] = []
     if (w := _check_sp_budget_vs_dataset(config, dataset)) is not None:
         warnings.append(w)
-    if (w := _check_optimizer_below_target(target_models)) is not None:
-        warnings.append(w)
-    if (w := _check_lives_have_headroom(config)) is not None:
+    opt_model = select_optimizer(config.optimization).model()
+    if (w := _check_optimizer_below_target(opt_model, target_models)) is not None:
         warnings.append(w)
     if (w := _check_task_context_present(task_context)) is not None:
         warnings.append(w)
     warnings.extend(_check_config_couplings(config))
     return warnings
-
-
-def _check_lives_have_headroom(config: CampaignConfig) -> PreflightWarning | None:
-    """``lives`` that cannot run out before ``max_rounds`` is an inert brake — and when the two
-    coincide the stop reason no longer says which fact stopped the run."""
-    lives = config.optimization.lives
-    max_rounds = config.optimization.max_rounds
-    # `max_rounds=None` is the unbounded case — there is no calendar for hearts to race.
-    if lives is None or max_rounds is None or lives.start < max_rounds:
-        return None
-    return PreflightWarning(
-        code="config.lives_no_headroom",
-        title="the stall brake cannot fire before the calendar cap",
-        detail=(
-            f"optimization.lives.start={lives.start} >= max_rounds="
-            f"{max_rounds}, so hearts can never run out first: the run "
-            "stops on the calendar and reports `lives_exhausted` for it. Lower lives.start "
-            "to brake a stalling run early, or raise max_rounds to give it room — leaving "
-            "both equal makes the stop reason unreadable."
-        ),
-    )
 
 
 def check_model_reasoning_floors(

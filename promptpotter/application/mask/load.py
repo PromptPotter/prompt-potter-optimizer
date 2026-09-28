@@ -15,6 +15,7 @@ from promptpotter.application.mask.record import (
 from promptpotter.application.scoring.evaluators import materialize_row_derivable
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import (
+    ArmOutcome,
     ScoredCandidate,
     is_electable,
     measured_cells,
@@ -90,7 +91,11 @@ def _mask_eligible(sc: ScoredCandidate, rows: list[dict[str, Any]]) -> bool:
     ``is_electable``, not ``is_leader_eligible`` — its docstring names this exact caller and
     says why: the weaker test "lets a collapsed arm top a round that refused to crown it", so a
     lens fed the realizing criterion could report a divergence the run would never have made."""
-    return is_electable(sc, rows) and not sc.invalid and not sc.validation_failures
+    return (
+        is_electable(sc, rows)
+        and sc.outcome is not ArmOutcome.INVALID
+        and not sc.validation_failures
+    )
 
 
 def _candidates(
@@ -194,10 +199,8 @@ def _mask_candidate(
 
 
 def _abort_contributor(sc: ScoredCandidate) -> str | None:
-    """Which PoBB gate stopped this candidate early; ``None`` if it ran to term. Read, not inferred
-    — guessing it from ``leader_locked`` labelled every collapse cut ``"epsilon"``. Deliberately NOT
-    gated on ``elimination_stopped``: a lock-in is a stop that leaves it False, so requiring it made
-    the ``lock_in`` contributor unreachable and its lens unable to fire."""
+    """Which PoBB gate stopped this candidate early; ``None`` if it ran to term. Read off the
+    gate PoBB named, never inferred from the outcome, which cannot tell a collapse from an ε cut."""
     return sc.elimination_context.get("gate")
 
 

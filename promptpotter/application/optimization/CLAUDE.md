@@ -25,11 +25,11 @@ Mechanism lives at its definition site — the `l1/generate.py` and `escalation/
 
 ## Cycle stop conditions
 
-Boundary stops are `max_rounds` and its opt-in measurement-driven twin `OptimizationConfig.lives` — "hearts", +1 per improving round, −1 per stall, banked, stop at 0 → `LIVES_EXHAUSTED`. It banks `improved` alone, where the stall counter also requires `RoundResult.separable`, so an inseparable winner spends patience but not a life. Two more sit in the rule set and the FSM, neither a layer's doing: `objective_exhausted` → `STOP_PERFECT`, and `l3_patience` spent → `STOP_L3_PATIENCE`. **The only stop a LAYER authors is `terminate_proposal`** (→ `StopReason.OPTIMIZER_ABORT`, § The layer-control channel) — deterministic rules route and never diagnose, so no rule is a layer's exit.
+Boundary stops are `max_rounds` and its opt-in measurement-driven twin, the `escalation` node's `lives` — "hearts", +1 per improving round, −1 per stall, banked, stop at 0 → `LIVES_EXHAUSTED`. It banks `improved` alone, where the stall counter also requires `RoundResult.separable`, so an inseparable winner spends patience but not a life. Two more sit in the rule set and the FSM, neither a layer's doing: `objective_exhausted` → `STOP_PERFECT`, and `l3_patience` spent → `STOP_L3_PATIENCE`. **The only stop a LAYER authors is `terminate_proposal`** (→ `StopReason.OPTIMIZER_ABORT`, § The layer-control channel) — deterministic rules route and never diagnose, so no rule is a layer's exit.
 
 ## The ladder's DEPTH is a knob, and it is a real suppression
 
-`OptimizationConfig.escalation_ladder` is `full` / `l1_l2` / `l1` — the ablation arms. At `l1` the `l1_only_ladder` rule preempts every `FIRE_L2` rule, so `escalate_l2` is never called and no `l2_context` / `l3_plan` prompt is ever composed; at `l1_l2` the L3 gate and the post-L2 force-trigger both stand down. **A patience never shortens the ladder** — it paces one. L1's own prompt is bit-for-bit identical across the three arms, which is what makes them comparable.
+The `escalation` node's `escalation_ladder` is `full` / `l1_l2` / `l1` — the ablation arms. At `l1` the `l1_only_ladder` rule preempts every `FIRE_L2` rule, so `escalate_l2` is never called and no `l2_context` / `l3_plan` prompt is ever composed; at `l1_l2` the L3 gate and the post-L2 force-trigger both stand down. **A patience never shortens the ladder** — it paces one. L1's own prompt is bit-for-bit identical across the three arms, which is what makes them comparable.
 
 ## L1 — what `l1_generate` may propose
 

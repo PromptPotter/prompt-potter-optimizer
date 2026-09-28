@@ -267,7 +267,7 @@ def _is_reexport_shim(init_file: Path) -> bool:
 
 
 def compute_ledger() -> dict[str, int]:
-    from promptpotter.application.knobs import KNOBS
+    from promptpotter.application.knobs import KNOBS, member_knob_count
     from promptpotter.application.optimization.dispatch.injections.registry import (
         injection_table,
     )
@@ -284,7 +284,8 @@ def compute_ledger() -> dict[str, int]:
         "modules": len(py_files),
         "init_files": len(init_files),
         "reexport_shims": sum(1 for p in init_files if _is_reexport_shim(p)),
-        "config_leaf_fields": len(KNOBS),
+        # The overlay leaf stands for the node knobs each member declares, counted instead.
+        "config_leaf_fields": len(KNOBS) - 1 + member_knob_count(),
         "settings_env": len(Settings.model_fields),
         "settings_const": sum(1 for name in settings_mod.__all__ if name.isupper()),
         "opt_search_point_fields": _count_leaves(OptSearchPoint),

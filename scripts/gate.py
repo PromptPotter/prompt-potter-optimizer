@@ -106,7 +106,7 @@ def _node(exe: str, *args: str) -> list[str]:
     return [shutil.which(exe) or exe, *args]
 
 
-def _generated(script: str, path: str) -> Callable[[Sel], Outcome]:
+def _generated(script: str, *paths: str) -> Callable[[Sel], Outcome]:
     """Regenerate a surface, then fail if the generator moved it.
 
     All three come off the Pydantic models. Ungated, a drifted model ships a stale
@@ -118,13 +118,14 @@ def _generated(script: str, path: str) -> Callable[[Sel], Outcome]:
     """
 
     def check(_sel: Sel) -> Outcome:
-        target = _REPO / path
-        before = target.read_bytes() if target.exists() else None
+        targets = [_REPO / path for path in paths]
+        before = [t.read_bytes() if t.exists() else None for t in targets]
         rc, out = _run([sys.executable, f"scripts/{script}"], _REPO)
         if rc:
             return rc, out
-        if target.read_bytes() != before:
-            return 1, f"{path} was stale — regenerated in place; re-run to confirm."
+        stale = [p for p, t, b in zip(paths, targets, before, strict=True) if t.read_bytes() != b]
+        if stale:
+            return 1, f"{', '.join(stale)} stale — regenerated in place; re-run to confirm."
         return 0, ""
 
     return check
@@ -169,13 +170,26 @@ _IMPORTS_PRESENTATION = re.compile(r"(?:from|import) promptpotter\.presentation"
 _LAYERING_ALLOW = re.compile(r"presentation\.terminal\.live\.display import LiveDisplay")
 
 
+# The round spine reaches an optimizer only through the node members its manifest names; these are
+# potter's modules, the subpackages of `optimization/` that are potter's included.
+_IMPORTS_POTTER = re.compile(
+    r"(?:from|import) promptpotter\.application\."
+    r"(?:optimizers\.potter|optimization\.(?:escalation|l1|pobb|dispatch|validators))\b"
+)
+_ROUND_SPINE = ("loop.py", "round.py", "measurement.py", "overlap.py")
+
+
 def _layering(_: Sel) -> Outcome:
     hits = _scan(
         _sources(_REPO / "promptpotter" / "application", "*.py"),
         _IMPORTS_PRESENTATION,
         allow_line=_LAYERING_ALLOW,
     )
-    return (1, "application must not import presentation:\n" + "\n".join(hits)) if hits else (0, "")
+    if hits:
+        return 1, "application must not import presentation:\n" + "\n".join(hits)
+    runner = _REPO / "promptpotter" / "application" / "runner"
+    hits = _scan([runner / name for name in _ROUND_SPINE], _IMPORTS_POTTER)
+    return (1, "the round spine must not import potter:\n" + "\n".join(hits)) if hits else (0, "")
 
 
 # A control character makes git call the whole FILE binary — the stat line reads `Bin 13089 ->
@@ -476,7 +490,9 @@ CHECKS: tuple[Check, ...] = (
         "optimizer-schemas",
         "py",
         _generated(
-            "build_optimizer_schemas.py", "promptpotter/assets/optimizer/resolved_schemas.json"
+            "build_optimizer_schemas.py",
+            "promptpotter/assets/optimizers/potter/resolved_schemas.json",
+            "promptpotter/assets/checkin/resolved_schemas.json",
         ),
         staged=True,
     ),

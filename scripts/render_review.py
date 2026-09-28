@@ -11,6 +11,7 @@ from pathlib import Path
 
 from promptpotter.application.campaign_config import load_campaign_config
 from promptpotter.application.optimization.task_context import committed_task_context
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.runner.review_md import render_review_md
 from promptpotter.domain.results import RoundResult
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
@@ -54,7 +55,7 @@ def main(argv: list[str]) -> int:
         round_audits=audits,
         context_object=context_object,
         accuracy_ceiling=config.accuracy_ceiling,
-        l1_patience=config.optimization.l1_patience,
+        l1_patience=select_optimizer(config.optimization).readout("escalation", "l1_patience"),
     )
     out_path = cycle_dir / "review.md"
     out_path.write_text(content, encoding="utf-8")

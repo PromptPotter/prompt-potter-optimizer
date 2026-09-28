@@ -7,7 +7,7 @@ from typing import Annotated, Any, Literal
 from pydantic import ConfigDict, Field, model_validator
 
 from promptpotter.domain.launch_limits import RoundsCap
-from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
+from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeSearchNarrowing
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler, ThetaCaveat
 from promptpotter.domain.spend import BudgetChange, TokenUsageKind
 from promptpotter.domain.strict_model import StrictModel
@@ -51,6 +51,7 @@ class BenchCheckpointKind(enum.StrEnum):
     """The bench's own decisions. An optimizer's ride its manifest-scoped enum."""
 
     FORK_CUT = "fork_cut"
+    PANEL_COVERAGE = "panel_coverage"
 
 
 class PotterCheckpointKind(enum.StrEnum):
@@ -59,7 +60,6 @@ class PotterCheckpointKind(enum.StrEnum):
     ROUND_WINNER = "round_winner"
     ELIMINATION_CUT = "elimination_cut"
     LEADER_LOCK_IN = "leader_lock_in"
-    PANEL_COVERAGE = "panel_coverage"
     L2_ESCALATION_TRIGGER = "l2_escalation_trigger"
     L3_ESCALATION_TRIGGER = "l3_escalation_trigger"
 
@@ -78,6 +78,8 @@ class ResumeCheckpointRecord(StrictModel):
 
     record_type: Literal["decision"] = "decision"
     kind: ResumeCheckpointKind
+    # The manifest node whose member took the decision; ``None`` for the bench's own.
+    node: str | None = None
     inputs_ref: dict[str, Any] = Field(default_factory=dict)
     outcome: Any = None
     data: dict[str, Any] = Field(default_factory=dict)
@@ -383,7 +385,7 @@ RoundWarningKind = Literal[
     "l1_critique_unavailable",
     # The odd one out, deliberately: nothing failed. The round measured cleanly and still
     # resolved nothing — no arm's blocked lift over the parent excluded 0 — which looks
-    # identical to a decisive round on every other channel. Emitted by `l1/score/winner.py`.
+    # identical to a decisive round on every other channel. Emitted by `runner/round.py`.
     "round_not_separable",
 ]
 
@@ -494,16 +496,13 @@ class ConfigOverrides(StrictModel):
     max_rounds: int | None = None
     spend_budget_usd: float | None = None
     token_budget: int | None = None
-    l1_patience: int | None = None
-    l2_patience: int | None = None
-    l3_patience: int | None = None
-    pobb_epsilon: float | None = None
-    per_round_resubset: bool | None = None
-    schema_field_rename: bool | None = None
+    # The fork's delta over the selected optimizer manifest, laid key by key onto the parent's own
+    # `optimization.nodes`. No field here switches the manifest: two optimizers are two campaigns.
+    nodes: dict[str, ManifestNodeOverlay] = Field(default_factory=dict)
     # The composite-fitness criterion (`CampaignConfig.scoring`). The one setting a mask can
     # PREVIEW against the record — a lens re-elects every round from rows already measured, so the
     # round it parts at is the round a fork carrying this is minted at. Every other field here moves
-    # a ceiling or a patience count, which no measurement can be re-read under.
+    # a ceiling or a node's knob, which no measurement can be re-read under.
     scoring: str | dict[str, str] | None = None
 
 

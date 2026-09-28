@@ -14,6 +14,7 @@ from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.authored import load_dataset_campaign_config
 from promptpotter.application.datasets.loaders import samples_from_dicts
 from promptpotter.application.embedded_run import open_session, run_campaign
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.runner.entry import RunMode
 from promptpotter.application.scoring.formula import SCORING_FUNCTIONS
@@ -48,15 +49,15 @@ def build_campaign_config(
 
     Overrides are ad-hoc notebook conveniences; the file stays the project default and the SoT
     for CLI runs. The optimizer LLM is install-global
-    (``promptpotter/assets/optimizer/pipeline.yaml``) — edit that to change the optimizer
+    (``promptpotter/assets/optimizers/potter/pipeline.yaml``) — edit that to change the optimizer
     model/provider, not the campaign config.
     """
     # Rasch-validation scaffolding: the L1-only arm, so the per-round adaptive queue accumulates
     # δ evidence with no L2/L3 fire in the window.
-    optimization: dict[str, Any] = {"max_rounds": 5, "escalation_ladder": "l1"}
-    optimization.update(
-        {k: v for k, v in {"max_rounds": max_rounds, "n_variants": n_variants}.items() if v}
-    )
+    nodes: dict[str, Any] = {"escalation": {"config": {"escalation_ladder": "l1"}}}
+    if n_variants:
+        nodes["l1_generate"] = {"config": {"n_variants": n_variants}}
+    optimization: dict[str, Any] = {"max_rounds": max_rounds or 5, "nodes": nodes}
     overrides: dict[str, Any] = {"optimization": optimization}
     if sp_budget_round is not None:
         overrides["sp_budget_round"] = sp_budget_round
@@ -170,7 +171,7 @@ async def run_bbeh_campaign(
             config={
                 "optimizer": "promptpotter",
                 "max_rounds": opt_cfg.max_rounds,
-                "n_variants": opt_cfg.n_variants,
+                "n_variants": select_optimizer(opt_cfg).readout("l1_generate", "n_variants"),
                 "sp_budget_round": campaign_config.sp_budget_round,
                 "model_id": target_model,
                 "n_train": len(train_pool),

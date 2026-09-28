@@ -320,8 +320,8 @@ export function CandidatesCard() {
   };
   const overlapNext = [
     hasOverlap
-      ? "Read C0 and every winner since on the one set of cells all of them answered. The bars beside it stay on each candidate's own cells."
-      : "Pick a set of cells and read every candidate that answered all of it on that one basis. There is no reading to show yet: the adopted line is still C0 alone, and a second member arrives with the first round that promotes a winner — a held round leaves nothing to read C0 against.",
+      ? "Read C0 and each new best since on the one set of cells all of them answered. The bars beside it stay on each candidate's own cells."
+      : "Pick a set of cells and read every candidate that answered all of it on that one basis. There is no reading to show yet: the best-so-far line is still C0 alone, and a second member arrives with the first round whose result beats it.",
     "Choose which cells the overlap bars are read on — any round's set, or your own pick.",
     "Hide the overlap bars and drop the picked set.",
   ];

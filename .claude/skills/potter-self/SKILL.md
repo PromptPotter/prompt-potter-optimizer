@@ -1,6 +1,6 @@
 ---
 name: potter-self
-description: PromptPotter L4 self-optimization — Claude + operator reading a round's artifacts, diagnosing why candidates underperformed, and deciding what evidence to buy next before spending another round. Use whenever the operator pauses at the round-1 gate, halts the loop to review, mentions L4, `promptpotter-self`, L1 stall, mode collapse, weak candidate stratification, identical / near-duplicate candidates, candidates ignoring the critique or task_context, parse failures on the l1_generate JSON, or wants to tune `l1_generate/1` in `promptpotter/assets/optimizer/pipeline.yaml`. Also use when the operator opens a `round_NNNN.json`, asks "why did L1 do that?", says "let's improve the optimizer prompt", or is weighing what experiment to run next — panel width, seed count, how many cells, whether a result is real, or why past runs never accumulated — even if "L4" is not named explicitly. Each searchpoint costs real LLM spend, so this collaborative review is the substitute for an L4 LLM-driven layer; do not skip it just because the operator did not utter the letter L4.
+description: PromptPotter L4 self-optimization — Claude + operator reading a round's artifacts, diagnosing why candidates underperformed, and deciding what evidence to buy next before spending another round. Use whenever the operator pauses at the round-1 gate, halts the loop to review, mentions L4, `promptpotter-self`, L1 stall, mode collapse, weak candidate stratification, identical / near-duplicate candidates, candidates ignoring the critique or task_context, parse failures on the l1_generate JSON, or wants to tune `l1_generate/1` in `promptpotter/assets/optimizers/potter/pipeline.yaml`. Also use when the operator opens a `round_NNNN.json`, asks "why did L1 do that?", says "let's improve the optimizer prompt", or is weighing what experiment to run next — panel width, seed count, how many cells, whether a result is real, or why past runs never accumulated — even if "L4" is not named explicitly. Each searchpoint costs real LLM spend, so this collaborative review is the substitute for an L4 LLM-driven layer; do not skip it just because the operator did not utter the letter L4.
 ---
 
 # L4: collaborative review of L1-generate
@@ -29,7 +29,7 @@ The optimizer is three nested generation loops (`promptpotter/application/optimi
 
 **Never name a panel from memory.** The citable set is *derived* — `@signal(..., citable=True)` intersected with the node's live layout by `citable_fields` (`dispatch/injections/registry.py`). A panel that does not render invites a fabricated citation, which is exactly how `sibling_yield` — a name this skill carried for weeks — went on being cited after it was deleted from the code.
 
-L4 is the human-in-the-loop review that happens **between rounds**, especially at the round-1 gate. The L1 optimizer prompt template at `promptpotter/assets/optimizer/pipeline.yaml → resolved_prompts["l1_generate/1"]` is what L4 edits — *not* L2's or L3's surfaces, *not* `pipeline_params`, *not* the `task_description.md`.
+L4 is the human-in-the-loop review that happens **between rounds**, especially at the round-1 gate. The L1 optimizer prompt template at `promptpotter/assets/optimizers/potter/pipeline.yaml → resolved_prompts["l1_generate/1"]` is what L4 edits — *not* L2's or L3's surfaces, *not* `pipeline_params`, *not* the `task_description.md`.
 
 ## Artifact map (what to read, in order)
 
@@ -37,7 +37,7 @@ Cycle root: `.promptpotter/projects/{tenant}/campaigns/{campaign_id}/cycles/{cyc
 
 | Step | File | What you extract |
 |---|---|---|
-| 1 | `promptpotter/assets/optimizer/pipeline.yaml` → `resolved_prompts["l1_generate/1"]` (outer set: `assets/optimizer/sets/self_optimizing.yaml`) | The current L1 optimizer prompt template — the thing you will edit |
+| 1 | `promptpotter/assets/optimizers/potter/pipeline.yaml` → `resolved_prompts["l1_generate/1"]` (outer: the `*_self_optimizing/1` families beside it, picked by `promptpotter-self`'s `optimization.nodes`) | The current L1 optimizer prompt template — the thing you will edit |
 | 2 | `{cycle_dir}/rounds/round_NNNN.json` | Per-round audit: parsed candidates, per-candidate scores, `overlap`, `separable`, critique text. **No rendered prompt** — see row 4 |
 | 3 | `{cycle_dir}/.runtime/streams/round_NNNN_p_best.jsonl` | PoBB elimination stream — did variants stratify or collapse? Which got eliminated first? |
 | 4 | `{cycle_dir}/.runtime/ledger.jsonl` | The cycle event log — escalation firings, decisions, spend. There is no `signals.jsonl`. **The ONLY place the rendered optimizer prompt survives**: each `payload_kind: "llm_call"` record carries `template_fields` + `variables` (render one against the other), and the `llm_call_start` beside it carries `prompt_chars`, `injection_chars`, `injection_dropped` and `injection_silent` — the panel-by-panel breakdown of what the node was actually handed. |
@@ -54,7 +54,7 @@ Reads happen by opening files; `evidence` is the one read VERB, because a compar
 
 **The cadence is SELF-FIRING, and the interval is WORK rather than a wait.** Schedule your own wake-ups the moment a run starts, and each wake IS a full pass over the reading list below. Between ticks keep investigating — fan out over the fresh dashboards and measurement files, chase the newest anomaly. An idle wait is the wasted-run failure mode this guards against: the bugs show themselves *while it runs*, and catching one early buys a kill-fix-restart before the whole spend drains. **A passive log Monitor does NOT count as supervision** — it fires only on patterns you predicted, and every real bug so far (estimator inconsistency, evidence starvation, proxy annihilation) came from reading the run's own measurement files, not from a grep hit. Role split: the operator is the developer/user; you own everything else.
 
-**Default the fix to the prompts** (`promptpotter/assets/optimizer/` — `pipeline.yaml::resolved_prompts` for the inner set, `sets/self_optimizing.yaml` for the outer one). Reach past prompts to a code fix ONLY when the data shows a structural cause — broken information flow, a missing analysis, a wiring gap. Name that cause before touching code; do not add infrastructure to paper over a prompt problem.
+**Default the fix to the prompts** (`promptpotter/assets/optimizers/potter/pipeline.yaml::resolved_prompts` — the base families for the inner loop, the `*_self_optimizing/1` families for the outer one). Reach past prompts to a code fix ONLY when the data shows a structural cause — broken information flow, a missing analysis, a wiring gap. Name that cause before touching code; do not add infrastructure to paper over a prompt problem.
 
 ### The per-checkup reading list — every tick reads ALL of these, not just the log tail
 
@@ -135,7 +135,7 @@ Whether to cut the panel from 6 seeds to 1 turns entirely on the **arm×seed int
 
 ### 1. Read the current L1 optimizer prompt
 
-Open `promptpotter/assets/optimizer/pipeline.yaml` and locate the `l1_generate/1` body under `resolved_prompts`. Note which `{{slots}}` it references. Cross-check against `application/optimization/dispatch/injections/registry.py::injection_table` so you can name what data each slot delivers. A slot the template never references is wasted load; a slot the template references but `injection_table()` does not register raises at load time (already caught by `validate_template`).
+Open `promptpotter/assets/optimizers/potter/pipeline.yaml` and locate the `l1_generate/1` body under `resolved_prompts`. Note which `{{slots}}` it references. Cross-check against `application/optimization/dispatch/injections/registry.py::injection_table` so you can name what data each slot delivers. A slot the template never references is wasted load; a slot the template references but `injection_table()` does not register raises at load time (already caught by `validate_template`).
 
 ### 2. Read the round's audit trail
 

@@ -99,12 +99,12 @@ collects everything else.
 ## Code shape
 
 - **No fallbacks in service code.** Two sanctioned exceptions:
-  `score_population()` synthetic-0 on `validation_failures`; load-boundary
+  the measurement's synthetic-0 on `validation_failures`; load-boundary
   deprecated-sample gate (uses `classify_result()` fatal codes). Any new
   fallback must be documented alongside these.
 - **Where a return-value contract must let an exception escape, use `graceful()`**
   (`shared/errors.py`). The contracts themselves — optimizer calls through
-  `llm_call()`, escalation through `QueryLoopResult.escalation_signal` — are owned
+  `llm_call()`, a stop rule's verdict through `QueryLoopResult.stop_signal` — are owned
   by [`../../promptpotter/application/CLAUDE.md`](../../promptpotter/application/CLAUDE.md)
   § Conventions.
 - **Schema field order IS generation order.** A response model's fields are

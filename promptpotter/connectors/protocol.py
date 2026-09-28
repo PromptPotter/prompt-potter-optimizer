@@ -285,7 +285,7 @@ class Connector:
     """The model catalogue the chat-first ingest writes into a fresh dataset's
     ``pipeline.yaml::available_models`` — the MENU an origin's permitted set is
     picked from. Admin-owned, the target-side twin of
-    ``assets/optimizer/pipeline.yaml::available_models``: extend it as this install
+    ``assets/optimizers/potter/pipeline.yaml::available_models``: extend it as this install
     gains access to more models. Three DISTINCT layers, and collapsing any two is
     the confusion this field exists to prevent — this is what is AVAILABLE, a node's
     ``optimizer.param_allowed_values["model"]`` is which of them that node PERMITS

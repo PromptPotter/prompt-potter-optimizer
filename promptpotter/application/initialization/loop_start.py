@@ -10,11 +10,11 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.initialization.session import Session, open_cycle_ledger
 from promptpotter.application.intelligence.indexes.axis import AxisIndex
 from promptpotter.application.optimization.cycle import Cycle
-from promptpotter.application.optimization.dispatch.llm_call.prompts import get_optimizer_schema
 from promptpotter.application.optimization.escalation.state import EscalationFSM
 from promptpotter.application.optimization.resume_and_fork.resume import (
     resume_with_divergence_check,
 )
+from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.preflight import check_model_reasoning_floors, run_preflight_checks
 from promptpotter.application.runner.campaign_ids import cycle_config_identity
@@ -272,12 +272,13 @@ async def _emit_preflight_and_init_session(
 
     # HARD block before any spend: a reasoning model pinned below its token floor (e.g. the
     # inner optimizer's l1_critique) burns its whole budget reasoning and emits zero content,
-    # stalling the loop silently. Both surfaces carry model+max_tokens: the dataset/target
-    # nodes (session.pipeline_params) and the optimizer nodes (promptpotter/assets/optimizer/pipeline.yaml).
-    # `config_nodes`, never `nodes`: l2_context, l3_plan and checkin sit off the default chain,
-    # and a floor check that walked the chain would stop covering them without an error.
+    # stalling the loop silently. Three surfaces carry model+max_tokens: the dataset/target nodes,
+    # every llm node the selected optimizer DECLARES (off its `default` chain too, or an escalation
+    # node escapes the check) and the bench's check-in node.
+    selected = select_optimizer(config.optimization)
     optimizer_node_configs = [
-        (n.name, n.current_config) for n in get_optimizer_schema().config_nodes
+        *((n, selected.node_config(n)) for n in selected.llm_nodes),
+        *((n.name, n.current_config) for n in checkin_manifest().schema.config_nodes),
     ]
     if floor_violations := check_model_reasoning_floors(
         target_node_configs + optimizer_node_configs
@@ -419,7 +420,7 @@ async def _apply_resume_fork(
         # not touch escalation. It was written at each of the four exits inside; a
         # postcondition of the call belongs at the call.
         cycle.escalation = EscalationFSM.from_ledger(
-            session.state.ledger, lives=cycle.config.optimization.lives
+            session.state.ledger, lives=cycle.knobs.escalation.lives
         )
     return resolved_cycle_id, resumed_from_round
 

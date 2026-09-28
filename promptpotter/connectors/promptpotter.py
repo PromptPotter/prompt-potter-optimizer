@@ -7,12 +7,10 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.campaign_config import OptimizationConfig
 from promptpotter.application.intelligence import exploration
 from promptpotter.application.optimization.dispatch.facade import injection_source_digest
-from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-    optimizer_manifest,
-    optimizer_resolved_schemas,
-)
+from promptpotter.application.optimizer_manifest import SelectedOptimizer, resolve_optimizer
 from promptpotter.application.runner.inner import ruler
 from promptpotter.application.runner.inner.spawn import inner_cell_envelope_s, run_inner_cycle
 from promptpotter.application.runner.inner.tasks import InnerTasks
@@ -25,7 +23,7 @@ from promptpotter.domain.l4.inner_origin import INNER_ORIGIN_KEY
 from promptpotter.domain.l4.proxies import INNER_RESULT_KEY, OUTER_PROXY_KEYS
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.pipeline_schema import stable_hash
+from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, stable_hash
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
     readable_dataset_dir,
@@ -53,47 +51,24 @@ logger = logging.getLogger(__name__)
 MAX_CELLS_IN_FLIGHT = 4
 
 
-def _revision_key(family: str | None, version: str | int | None) -> str | None:
-    """``None`` where the node names no family — a distinct input from any real key, rather than
-    a silent match against another node that also declares nothing."""
-    if not family:
-        return None
-    return f"{family}/{version}" if version is not None else family
+def _inner_optimizer_revision(dataset_dir: Path, inner: SelectedOptimizer) -> dict[str, Any]:
+    """What the inner cycle's optimizer RESOLVES TO — the baseline every arm on the panel departs
+    from: the manifest by name and version, and each node the OUTER dataset declares as its
+    mutation surface by its prompt body, output schema and resolved config.
 
-
-def _inner_optimizer_revision(dataset_dir: Path) -> dict[str, Any]:
-    """What the inner cycle's optimizer nodes RESOLVE TO — the baseline every arm on the panel
-    departs from, named by the artifacts it actually reads rather than by the file they sit in.
-
-    NARROW on purpose, and that is the whole point. Hashing the entire manifest and the entire
-    generated schema registry meant a ``checkin`` prompt edit, a node description, a widened
-    ``available_models`` or a schema regenerated for an unrelated model voided a panel that cost
-    an hour to measure — none of which changes what an inner campaign does. Read here is exactly
-    the optimizer nodes the OUTER dataset declares as its mutation surface: each one's prompt
-    body, its resolved output schema and its config. DERIVED from that declaration rather than a
-    name list, so a surface that grows a node is covered without an edit here.
-    """
-    # The PARSED manifest, never its bytes. Its siblings in this fingerprint already hash parsed
-    # values, and the file is comment-bearing YAML — byte-hashing would void every banked outer
-    # measurement the moment someone documented a node, a change with no behavioural content.
-    manifest = optimizer_manifest()
-    # The response schemas are prompt text — they ride `response_format` on every call, and
-    # their field names and `description` prose ARE the mechanism where the grammar does not
-    # bind (`docs/concepts/structured-output.md`). They sit in the generated sibling, so
-    # reading the manifest alone left them out.
-    schemas = optimizer_resolved_schemas()
+    NARROW on purpose. Hashing the whole manifest meant a node description, a widened
+    ``available_models`` or a schema regenerated for an unrelated node voided a panel that cost an
+    hour to measure. DERIVED from the outer declaration rather than a name list, so a surface that
+    grows a node is covered without an edit here. The PARSED manifest, never its bytes."""
     outer = parse_pipeline_response(read_yaml(dataset_dir / "pipeline.yaml"))
-    revision: dict[str, Any] = {}
-    for name in sorted(n.name for n in outer.config_nodes if n.tunes_llm):
-        config = ((manifest.get("nodes") or {}).get(name) or {}).get("config") or {}
-        prompt_key = _revision_key(config.get("prompt_family"), config.get("prompt_version"))
-        schema_key = _revision_key(config.get("schema_family"), config.get("schema_version"))
-        revision[name] = {
-            "config": config,
-            "prompt": (manifest.get("resolved_prompts") or {}).get(prompt_key),
-            "schema": schemas.get(schema_key) if schema_key else None,
-        }
-    return revision
+    return {
+        "manifest": inner.name,
+        "version": inner.version,
+        "nodes": {
+            name: inner.node_digests[name]
+            for name in sorted(n.name for n in outer.config_nodes if n.tunes_llm)
+        },
+    }
 
 
 def measurement_modules() -> tuple[ModuleType, ...]:
@@ -122,11 +97,12 @@ def _check_prompt_closure() -> None:
 def _identity_config(
     stores: Stores, dataset_dir: Path, inner_tasks: Mapping[str, Any] | None
 ) -> dict[str, dict[str, Any]]:
-    """The inner optimizer's effective-revision fingerprint: what the inner optimizer nodes resolve
-    to, the per-node layouts, the panel and estimator source, and the inner benchmark's own config.
-    Not the task list — each task is its own sample's ``source_pin`` (:func:`_extract_experiment`),
-    so adding one to ``inner_tasks.yaml`` voids none of the cells already banked."""
-    inner_optimizer = _inner_optimizer_revision(dataset_dir)
+    """The inner optimizer's effective-revision fingerprint: which manifest the inner campaign
+    selects and what its nodes resolve to, the per-node layouts, the panel and estimator source, and
+    the inner benchmark's own config. In the recursion the optimizer IS the instrument, so two
+    optimizers' inner cells must never pool under one key. Not the task list — each task is its own
+    sample's ``source_pin`` (:func:`_extract_experiment`), so adding one to ``inner_tasks.yaml``
+    voids none of the cells already banked."""
     layouts = {name: spec.model_dump(mode="json") for name, spec in sorted(NODE_LAYOUTS.items())}
     # `layouts` names WHICH panels fill each prompt; this is what those panels SAY. The text
     # is code, so nothing above reaches it — see `injection_source_digest`.
@@ -154,6 +130,17 @@ def _identity_config(
         ),
         "campaign": (inner_campaign or {}).get("campaign_config"),
     }
+    # The manifest the INNER campaign selects, under its own overlay. An unresolvable benchmark
+    # hashes the default manifest, which is what such an inner campaign would run.
+    inner_opt = ((inner_spec["campaign"] or {}).get("optimization")) or {}
+    inner = resolve_optimizer(
+        inner_opt.get("optimizer", OptimizationConfig.model_fields["optimizer"].default),
+        {
+            node: ManifestNodeOverlay.model_validate(raw)
+            for node, raw in (inner_opt.get("nodes") or {}).items()
+        },
+    )
+    inner_optimizer = _inner_optimizer_revision(dataset_dir, inner)
     fingerprint = stable_hash(
         [
             inner_optimizer,

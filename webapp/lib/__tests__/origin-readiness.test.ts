@@ -10,20 +10,7 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
     n_samples: 42,
     connector: "termnorm",
     scoring_composite: "label_match",
-    optimization_overrides: {
-      max_rounds: 5,
-      prompt_block_catalogue: "guidance",
-      escalation_ladder: "full",
-      mechanisms: {
-        selection: { per_round_resubset: true },
-        elimination: {
-          epsilon_elimination: true,
-          margin_elimination: true,
-          degradation_fatal_fastpath: true,
-          leader_lock_in: false,
-        },
-      },
-    },
+    optimization_overrides: { max_rounds: 5, optimizer: "potter", nodes: {} },
     raw_task_description: "",
     schema_source: "backend",
     model_capabilities: {},

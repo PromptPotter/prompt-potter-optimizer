@@ -63,7 +63,7 @@ NESTED_PARAM_TYPES: Annotated[frozenset[str], shapes_optimizer_prompt] = frozens
 )
 
 # The one nested param a campaign must UNLOCK before its L1 may emit it
-# (`OptimizationConfig.schema_field_rename`): renaming a field on the optimizer's own
+# (potter's `l1_generate` knob `schema_field_rename`): renaming a field on the optimizer's own
 # output schema is the strongest lever and the only one that can break a parser. Named
 # here, beside the other structural param constants, because two layers must agree on the
 # literal without importing each other: `build_l1_response_schema` (drops it from the emitted
@@ -212,6 +212,13 @@ class NodeKind(enum.StrEnum):
     # measurement arm already say it, and a second word for one concept is what this enum exists to
     # stop. `GATEWAY` is what the code says, because "it hands off" is the fact every reader wants.
     GATEWAY = "measurement"
+    # Optimizer members — declared only by an optimizer manifest, each backed by an implementation
+    # registered under the node's name (`docs/developer/node-standard.md` § Optimizer node types).
+    SAMPLER = "sampler"
+    ELIMINATOR = "eliminator"
+    SELECTOR = "selector"
+    ALGORITHM = "algorithm"
+    CONTROLLER = "controller"
 
 
 # A real choice WITHIN the type, so it is asserted rather than derived (`promptpotter/CLAUDE.md`
@@ -221,6 +228,17 @@ THINKING_KINDS: Annotated[frozenset[NodeKind], shapes_optimizer_prompt] = frozen
     {NodeKind.LLM, NodeKind.AGENT}
 )
 assert frozenset(NodeKind) >= THINKING_KINDS
+
+MEMBER_KINDS: Annotated[frozenset[NodeKind], shapes_optimizer_prompt] = frozenset(
+    {
+        NodeKind.SAMPLER,
+        NodeKind.ELIMINATOR,
+        NodeKind.SELECTOR,
+        NodeKind.ALGORITHM,
+        NodeKind.CONTROLLER,
+    }
+)
+assert not (MEMBER_KINDS & THINKING_KINDS) and frozenset(NodeKind) >= MEMBER_KINDS
 
 
 # The dependency kind a ``candidate_source`` node raises, and the file that
@@ -652,6 +670,15 @@ class NodeSearchNarrowing(StrictModel):
     param_allowed_values: dict[str, list[str]] = Field(default_factory=dict)
 
 
+class ManifestNodeOverlay(StrictModel):
+    """One optimizer node's delta over its manifest's ``config`` — the shape a target pipeline's
+    overlay takes. Validated against the node's own knobs when the optimizer is selected."""
+
+    model_config = ConfigDict(frozen=True)
+
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
 class PipelineSchema(StrictModel):
     """Frozen, backend-agnostic pipeline description; SoT for identity at campaign start."""
 
@@ -665,6 +692,9 @@ class PipelineSchema(StrictModel):
     # round runs. Identity stays on `nodes`: folding these into `sp_hash` re-keys every
     # banked measurement. Empty means "same as `nodes`"; read it through `config_nodes`.
     declared_nodes: list[PipelineNode] = Field(default_factory=list)
+    # Every declared sequence by name, `default` included. An optimizer's controller picks among
+    # the others; the manifest digest folds them.
+    pipelines: dict[str, list[str]] = Field(default_factory=dict)
     available_models: list[str] = Field(default_factory=list)
     view: PipelineView | None = None
     # What each selectable model answers for its own knobs (`infrastructure/llm/capabilities.py`),
@@ -1236,9 +1266,11 @@ class PipelineSchema(StrictModel):
 __all__ = [
     "CANDIDATE_LIBRARY",
     "CANDIDATE_LIBRARY_FILE",
+    "MEMBER_KINDS",
     "MOVABLE_AGENTS",
     "THINKING_KINDS",
     "LLMSpendBound",
+    "ManifestNodeOverlay",
     "NestedPipelineRef",
     "NodeConfigParam",
     "NodeKind",

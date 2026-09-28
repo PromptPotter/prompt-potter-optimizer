@@ -13,9 +13,10 @@ from promptpotter import connectors
 from promptpotter.application.campaign_config import (
     CampaignConfig,
     DeterminismClamp,
-    LivesConfig,
+    merge_node_overlays,
 )
 from promptpotter.config.settings import DEFAULT_ORIGIN_BUDGET
+from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import read_yaml_optional
 from promptpotter.shared.errors import CellUnscoreableError
@@ -46,13 +47,13 @@ class InnerBenchmarkConfig(StrictModel):
     # delta subtract, which is a precision gain, not a change of ruler.
     n_samples_origin: int | None = Field(default=DEFAULT_ORIGIN_BUDGET, ge=1)
     max_inner_rounds: int = Field(ge=1)
-    # None ⇒ keep the inner dataset's own value.
-    inner_n_variants: int | None = Field(default=None, ge=1)
-    # The improvement-banked round budget. ``max_inner_rounds`` is the CEILING a compounding inner
-    # campaign may reach; lives are what make a stalling one stop early. Owned by the outer panel
-    # for the same reason the round cap is: it is an L4 decision about how much evidence to buy,
-    # not the inner dataset's standalone default.
-    inner_lives: LivesConfig | None = None
+    # The panel's overlay on the INNER campaign's optimizer manifest, laid over the inner dataset's
+    # own — part of what a cell IS, so it enters the cell's identity.
+    inner_nodes: dict[str, ManifestNodeOverlay] = Field(default_factory=dict)
+    # The same overlay, held OUT of the identity: how much evidence a cell buys (potter's lives,
+    # which stop a stalling inner campaign before the `max_inner_rounds` ceiling), never what it
+    # is. Owned by the outer panel for the same reason the round cap is.
+    inner_depth_nodes: dict[str, ManifestNodeOverlay] = Field(default_factory=dict)
     # Determinism clamp on the inner OPTIMIZER's sampling temperature. Each inner campaign is a
     # fitness measurement of one optimizer prompt; at the file default, identical optimizer prompts generate
     # different candidates and the run-to-run swing swamps the outer proxy. None ⇒ feature off.
@@ -197,7 +198,9 @@ class InnerTasks(StrictModel):
 # Declared as the budget half and SUBTRACTED, so a field added to the spec defaults to identity.
 # That is the safe direction: a new treatment field forking a new cell wastes a run, where a new
 # budget field silently continuing a differently-configured cell corrupts the measurement.
-_DEPTH_FIELDS: frozenset[str] = frozenset({"n_rounds", "lives", "n_samples", "n_samples_origin"})
+_DEPTH_FIELDS: frozenset[str] = frozenset(
+    {"n_rounds", "depth_nodes", "n_samples", "n_samples_origin"}
+)
 
 
 class InnerTaskSpec(StrictModel):
@@ -208,8 +211,8 @@ class InnerTaskSpec(StrictModel):
     n_samples: int
     n_samples_origin: int | None = None
     n_rounds: int
-    n_variants: int | None
-    lives: LivesConfig | None = None
+    nodes: dict[str, ManifestNodeOverlay] = Field(default_factory=dict)
+    depth_nodes: dict[str, ManifestNodeOverlay] = Field(default_factory=dict)
     inner_model: str | None = None
     inner_provider: str | None = None
     inner_optimizer_temperature: float | None = None
@@ -269,8 +272,8 @@ def resolve_inner_task(ctx: InnerSpawnContext, query: str) -> InnerTaskSpec:
         n_samples=cfg.n_samples_per_inner_round,
         n_samples_origin=cfg.n_samples_origin,
         n_rounds=(cell.n_inner_rounds if cell and cell.n_inner_rounds else cfg.max_inner_rounds),
-        n_variants=cfg.inner_n_variants,
-        lives=cfg.inner_lives,
+        nodes=cfg.inner_nodes,
+        depth_nodes=cfg.inner_depth_nodes,
         inner_model=cell.inner_model if cell else None,
         inner_provider=cell.inner_provider if cell else None,
         inner_optimizer_temperature=cfg.inner_optimizer_temperature,
@@ -308,10 +311,10 @@ def inner_instrument_config(
         # only; a top-level campaign keeps the graduation, which is where it earns its keep.
         "enable_2pl_graduation": False,
     }
-    if spec.n_variants is not None:
-        opt_update["n_variants"] = spec.n_variants
-    if spec.lives is not None:
-        opt_update["lives"] = spec.lives
+    if spec.nodes or spec.depth_nodes:
+        opt_update["nodes"] = merge_node_overlays(
+            merge_node_overlays(base.optimization.nodes, spec.nodes), spec.depth_nodes
+        )
     if spec.inner_optimizer_temperature is not None:
         # The clamp's seed is the CELL's, matching the target model's, so every candidate measured
         # on a cell draws one random stream (CRN). Laid ONTO the inner dataset's own declaration.

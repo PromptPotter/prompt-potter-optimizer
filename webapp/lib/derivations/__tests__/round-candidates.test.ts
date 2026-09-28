@@ -131,7 +131,7 @@ describe("roundCandidates — a rejected candidate", () => {
         liveRow({ label: "C4.1", accuracy: 0.65, composite_fitness: 0.65, scored_samples: 20 }),
         liveRow({
           label: "C4.3",
-          invalid: true,
+          outcome: "invalid",
           // What the producer actually serves for one: the synthetic score, over no rows at all.
           accuracy: 0,
           composite_fitness: 0,
@@ -142,9 +142,9 @@ describe("roundCandidates — a rejected candidate", () => {
   });
   const rows = roundCandidates(live).filter((r) => r.source === "inflight");
 
-  it("carries the flag through, so a renderer can tell the two apart", () => {
-    expect(rows.find((r) => r.label === "C4.1")?.invalid).toBe(false);
-    expect(rows.find((r) => r.label === "C4.3")?.invalid).toBe(true);
+  it("carries the outcome through, so a renderer can tell the two apart", () => {
+    expect(rows.find((r) => r.label === "C4.1")?.outcome).toBeNull();
+    expect(rows.find((r) => r.label === "C4.3")?.outcome).toBe("invalid");
   });
 
   it("leaves the served synthetic score untouched — it feeds selection, and only the RENDER changes", () => {

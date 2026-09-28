@@ -1886,7 +1886,7 @@
             "type": "string"
           },
           "source": {
-            "description": "Where the value came from: default | campaign (operator-set) | required | constant",
+            "description": "Where the value came from: default | campaign (operator-set) | required | manifest (an optimizer node's knob, as its manifest declares it)",
             "title": "Source",
             "type": "string"
           },
@@ -3427,6 +3427,61 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "KnobRow": {
+        "additionalProperties": false,
+        "description": "One knob of one optimizer node, as a settings surface offers it.",
+        "properties": {
+          "description": {
+            "description": "What the knob does — its field description",
+            "title": "Description",
+            "type": "string"
+          },
+          "key": {
+            "description": "The knob's name under `nodes.{node}.config`",
+            "title": "Key",
+            "type": "string"
+          },
+          "nullable": {
+            "description": "Whether null is a legal value (an opt-in knob, off)",
+            "title": "Nullable",
+            "type": "boolean"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The closed set a string knob takes, in declared order; null when open",
+            "title": "Options"
+          },
+          "type": {
+            "description": "JSON Schema type the value takes: boolean | integer | number | string | object",
+            "title": "Type",
+            "type": "string"
+          },
+          "value": {
+            "description": "The value the manifest declares — a campaign's floor",
+            "title": "Value"
+          }
+        },
+        "required": [
+          "key",
+          "description",
+          "type",
+          "options",
+          "nullable",
+          "value"
+        ],
+        "title": "KnobRow",
+        "type": "object"
+      },
       "LineageDivergence": {
         "additionalProperties": false,
         "description": "Where an alternative criterion would have elected someone else. Rides the node it\ndescribes (``LineageNode.divergence``) — there is no parallel list to re-join.",
@@ -4150,94 +4205,6 @@
         "title": "MeResponse",
         "type": "object"
       },
-      "MechanismGroup": {
-        "additionalProperties": false,
-        "properties": {
-          "description": {
-            "description": "What this group of mechanisms governs",
-            "title": "Description",
-            "type": "string"
-          },
-          "key": {
-            "description": "Group key under optimization.mechanisms (e.g. 'elimination')",
-            "title": "Key",
-            "type": "string"
-          },
-          "label": {
-            "description": "Human-readable group name",
-            "title": "Label",
-            "type": "string"
-          },
-          "toggles": {
-            "description": "Toggles in this group, in declared order",
-            "items": {
-              "$ref": "#/components/schemas/MechanismToggle"
-            },
-            "title": "Toggles",
-            "type": "array"
-          }
-        },
-        "required": [
-          "key",
-          "label",
-          "description",
-          "toggles"
-        ],
-        "title": "MechanismGroup",
-        "type": "object"
-      },
-      "MechanismSchemaResponse": {
-        "additionalProperties": false,
-        "description": "Self-describing descriptor for the campaign-config mechanism toggles.\n\nDerived live from ``MechanismConfig``'s JSON schema, so a new toggle (a bool\nadded to a group model) surfaces here — and in the webapp — with no edit.\nPair the active value off the campaign's frozen ``config`` snapshot\n(``optimization.mechanisms.{group}.{key}``).",
-        "properties": {
-          "groups": {
-            "description": "Mechanism groups, in declared order",
-            "items": {
-              "$ref": "#/components/schemas/MechanismGroup"
-            },
-            "title": "Groups",
-            "type": "array"
-          }
-        },
-        "required": [
-          "groups"
-        ],
-        "title": "MechanismSchemaResponse",
-        "type": "object"
-      },
-      "MechanismToggle": {
-        "additionalProperties": false,
-        "properties": {
-          "default": {
-            "description": "Default value (preserves stock loop behavior)",
-            "title": "Default",
-            "type": "boolean"
-          },
-          "description": {
-            "description": "What the mechanism does, on vs off",
-            "title": "Description",
-            "type": "string"
-          },
-          "key": {
-            "description": "Field key under its group (e.g. 'epsilon_elimination')",
-            "title": "Key",
-            "type": "string"
-          },
-          "label": {
-            "description": "Human-readable toggle name",
-            "title": "Label",
-            "type": "string"
-          }
-        },
-        "required": [
-          "key",
-          "label",
-          "description",
-          "default"
-        ],
-        "title": "MechanismToggle",
-        "type": "object"
-      },
       "MetricReading": {
         "additionalProperties": false,
         "description": "The selection read under ONE metric, echoed back with the vocabulary it was chosen from — a\nstale render cannot then show new bars under the old metric's label.",
@@ -4607,6 +4574,36 @@
         "title": "NodeConfigParam",
         "type": "object"
       },
+      "NodeKnobs": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "description": "The node's type: sampler | eliminator | selector | …",
+            "title": "Kind",
+            "type": "string"
+          },
+          "knobs": {
+            "description": "Its knobs, in declared order",
+            "items": {
+              "$ref": "#/components/schemas/KnobRow"
+            },
+            "title": "Knobs",
+            "type": "array"
+          },
+          "node": {
+            "description": "The manifest node that owns these knobs",
+            "title": "Node",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node",
+          "kind",
+          "knobs"
+        ],
+        "title": "NodeKnobs",
+        "type": "object"
+      },
       "NodeOutputSchema": {
         "additionalProperties": false,
         "description": "Resolved output schema for a TARGET pipeline node — the structured output the\nbackend node produces, parsed from ``GET /pipeline``.\n\nThis is the ``output_schema`` the word belongs to. NOT the optimizer's own\nresponse schema (``dispatch/l1_wire_schema.py::build_l1_response_schema``), which\ndescribes what ``l1_generate`` returns. The rename lever (``SCHEMA_RENAME_PARAM``) acts on that\noptimizer side; the description keys act on this one.",
@@ -4675,6 +4672,37 @@
           "state"
         ],
         "title": "NodeReach",
+        "type": "object"
+      },
+      "OptimizerKnobsResponse": {
+        "additionalProperties": false,
+        "description": "Every knob an optimizer manifest's nodes take, served so a settings surface draws a\ncontrol per knob and writes `optimization.nodes.{node}.config.{key}`.",
+        "properties": {
+          "nodes": {
+            "description": "Every node taking a knob, in declared order",
+            "items": {
+              "$ref": "#/components/schemas/NodeKnobs"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "optimizer": {
+            "description": "The manifest name, as `optimization.optimizer` names it",
+            "title": "Optimizer",
+            "type": "string"
+          },
+          "version": {
+            "description": "The manifest's own version",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "optimizer",
+          "version",
+          "nodes"
+        ],
+        "title": "OptimizerKnobsResponse",
         "type": "object"
       },
       "OptimizerPipelineResponse": {
@@ -6576,28 +6604,6 @@
           }
         },
         "summary": "List Campaigns",
-        "tags": [
-          "Campaigns"
-        ]
-      }
-    },
-    "/api/v1/campaigns/mechanisms-schema": {
-      "get": {
-        "description": "The mechanism-toggle descriptor — groups, labels, descriptions, defaults.\n\nRead-only and campaign-independent: the webapp zips this with a campaign's\nfrozen ``config`` to render the active toggle states.",
-        "operationId": "get_mechanisms_schema_api_v1_campaigns_mechanisms_schema_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MechanismSchemaResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Get Mechanisms Schema",
         "tags": [
           "Campaigns"
         ]
@@ -8624,8 +8630,22 @@
     },
     "/api/v1/optimizer-pipeline": {
       "get": {
-        "description": "Bundled ``promptpotter/assets/optimizer/pipeline.yaml`` + its generated\n``resolved_schemas.json`` sibling — the ``view`` topology plus the per-node typed config\nsurface, so the canvas node-detail renders the optimizer's own knobs (model / provider /\nreasoning_effort / temperature / …) through the same canonical config element the steer panel\nuses. Read-only: the install-global ``_optimizer`` pipeline is operator-owned — a hand-edit,\nnever a fork and never a write path from here (``evidence`` names a winner and writes\nnothing); model/provider are always optimizer-locked.",
+        "description": "One optimizer manifest (``promptpotter/assets/optimizers/{optimizer}/pipeline.yaml``) +\nits generated ``resolved_schemas.json`` sibling — the ``view`` topology plus the per-node\ntyped config surface, so the canvas node-detail renders the optimizer's own knobs through the\nsame canonical config element the steer panel uses. Read-only: the manifest is operator-owned —\na hand-edit, never a fork and never a write path from here; a campaign's changes ride its own\n``optimization.nodes``. model/provider are always optimizer-locked.",
         "operationId": "get_optimizer_pipeline_api_v1_optimizer_pipeline_get",
+        "parameters": [
+          {
+            "description": "The manifest under `promptpotter/assets/optimizers/` to read",
+            "in": "query",
+            "name": "optimizer",
+            "required": false,
+            "schema": {
+              "default": "potter",
+              "description": "The manifest under `promptpotter/assets/optimizers/` to read",
+              "title": "Optimizer",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -8636,9 +8656,62 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Get Optimizer Pipeline",
+        "tags": [
+          "Optimizer"
+        ]
+      }
+    },
+    "/api/v1/optimizers/{name}/knobs": {
+      "get": {
+        "description": "Every knob the manifest's nodes take — type, closed options, the value the manifest\ndeclares — so a settings surface draws one control per knob and writes a campaign's\n``optimization.nodes.{node}.config.{key}``. 404 when no such manifest ships.",
+        "operationId": "get_optimizer_knobs_api_v1_optimizers__name__knobs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizerKnobsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Optimizer Knobs",
         "tags": [
           "Optimizer"
         ]

@@ -48,8 +48,8 @@ class MLflowSink:
         }
         if event.model:
             params["model"] = event.model
-        if event.n_variants:
-            params["n_variants"] = str(event.n_variants)
+        if event.n_candidates:
+            params["n_candidates"] = str(event.n_candidates)
 
         metrics = {
             "accuracy": event.accuracy,

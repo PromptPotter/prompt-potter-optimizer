@@ -20,6 +20,11 @@ interface Fields {
   eps: string;
 }
 
+function defined(values: Record<string, number | null>): Record<string, number> | null {
+  const set = Object.entries(values).filter((kv): kv is [string, number] => kv[1] != null);
+  return set.length ? Object.fromEntries(set) : null;
+}
+
 export function LimitReconcile({
   onChange,
 }: {
@@ -43,14 +48,22 @@ export function LimitReconcile({
     setF(next);
     // The floor is 0, not 1: `max_rounds: 0` means "measure the origin and stop".
     const count = { int: true } as const;
+    // Potter's knobs ride the fork's `nodes` overlay; a blank one is absent, so it inherits.
+    const escalation = defined({
+      l1_patience: parseCap(next.l1, count),
+      l2_patience: parseCap(next.l2, count),
+      l3_patience: parseCap(next.l3, count),
+    });
+    const pobb = defined({ epsilon: parseCap(next.eps, { max: 1 }) });
+    const nodes = {
+      ...(escalation ? { escalation: { config: escalation } } : {}),
+      ...(pobb ? { pobb: { config: pobb } } : {}),
+    };
     const limits: RunLimitOverrides = {
       max_rounds: parseCap(next.rounds, count) ?? undefined,
       spend_budget_usd: parseCap(next.spend) ?? undefined,
       token_budget: parseCap(next.tokens, count) ?? undefined,
-      l1_patience: parseCap(next.l1, count) ?? undefined,
-      l2_patience: parseCap(next.l2, count) ?? undefined,
-      l3_patience: parseCap(next.l3, count) ?? undefined,
-      pobb_epsilon: parseCap(next.eps, { max: 1 }) ?? undefined,
+      ...(Object.keys(nodes).length ? { nodes } : {}),
     };
     onChange(limits);
   };

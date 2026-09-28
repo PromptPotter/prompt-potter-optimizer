@@ -2286,13 +2286,22 @@ paths:
   /optimizer-pipeline:
     get:
       operationId: getOptimizerPipeline
-      summary: The optimizer's OWN manifest — install content, no campaign scope.
+      summary: One optimizer manifest as authored — install content, no campaign scope.
       description: |
-        `promptpotter/assets/optimizer/pipeline.yaml` parsed: the loop's own
-        nodes, their config schema and output contracts. One operator-owned
-        file per install, no per-campaign overlay — the one pipeline read where
-        a single answer for everyone is correct.
+        `promptpotter/assets/optimizers/{optimizer}/pipeline.yaml` parsed: that
+        optimizer's nodes, their config schema and output contracts, with no
+        campaign's overlay — a campaign's own changes ride its
+        `optimization.nodes` and are read off the campaign.
       tags: [campaigns]
+      parameters:
+        - name: optimizer
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            default: potter
+          description: The manifest to read, as `optimization.optimizer` names it.
       responses:
         '200':
           description: The optimizer manifest's view, config schema and output schemas.
@@ -2301,6 +2310,67 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+
+  /optimizers/{name}/knobs:
+    get:
+      operationId: getOptimizerKnobs
+      summary: Every knob an optimizer manifest's nodes take.
+      description: |
+        One row per knob per node — its JSON Schema type, its closed options,
+        whether null is legal, and the value the manifest declares — so a
+        settings surface draws one control per knob and writes a campaign's
+        `optimization.nodes.{node}.config.{key}`. Install content: no campaign
+        scope, no auth beyond the server's own.
+      tags: [campaigns]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        '200':
+          description: The manifest's knob menu.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [optimizer, version, nodes]
+                properties:
+                  optimizer: { type: string }
+                  version: { type: string }
+                  nodes:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [node, kind, knobs]
+                      properties:
+                        node: { type: string }
+                        kind: { type: string }
+                        knobs:
+                          type: array
+                          items:
+                            type: object
+                            additionalProperties: false
+                            required: [key, description, type, options, nullable, value]
+                            properties:
+                              key: { type: string }
+                              description: { type: string }
+                              type: { type: string }
+                              options:
+                                type: [array, 'null']
+                                items: { type: string }
+                              nullable: { type: boolean }
+                              value: {}
+        '404':
+          description: No such manifest ships with this install.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /datasets/{name}/draft:
     post:
@@ -3446,18 +3516,16 @@ components:
       description: |
         The fork's campaign-config delta. Every field optional — absent
         inherits the parent's value; applied to the fork's snapshot at init,
-        never mutates the parent's frozen config. Four kinds of knob ride here:
-        (1) run limits (`max_rounds`/`spend_budget_usd`/`token_budget`/patiences/
-        `pobb_epsilon`) — ABSOLUTE values the reconcile dialog re-sets (defaults to
-        the parent's remaining, e.g. "3 of 6 rounds left"); (2) the selection-policy
-        toggle (`per_round_resubset`) → the nested
-        `mechanisms.selection`; (3) the search-space policy toggle
-        (`schema_field_rename`); (4) the composite criterion (`scoring`), which
-        sits on `CampaignConfig` itself rather than under `optimization`. Every
-        policy knob invalidates search comparability, so a fork-at-offset-0 is how
-        you A/B one without touching the global default or the parent cycle.
-        Every knob that belongs to an optimizer rather than the bench moves into
-        `nodes`, the fork's delta over the selected manifest.
+        never mutates the parent's frozen config. Three kinds of knob ride here:
+        (1) the bench's run limits (`max_rounds`/`spend_budget_usd`/`token_budget`)
+        — ABSOLUTE values the reconcile dialog re-sets (defaults to the parent's
+        remaining, e.g. "3 of 6 rounds left"); (2) `nodes`, the fork's delta over
+        the selected optimizer manifest — every optimizer knob (potter's patiences,
+        its PoBB ε, its resubset toggle, `schema_field_rename`); (3) the composite
+        criterion (`scoring`), which sits on `CampaignConfig` itself rather than
+        under `optimization`. Every policy knob invalidates search comparability,
+        so a fork-at-offset-0 is how you A/B one without touching the manifest or
+        the parent cycle.
       properties:
         max_rounds:
           type: integer
@@ -3475,32 +3543,8 @@ components:
           minimum: 0
           nullable: true
           description: Absolute cumulative-token cap for the fork; `null` lifts the cap.
-        l1_patience:
-          type: integer
-          minimum: 1
-          x-status: wired-scheduled-for-removal
-          description: Consecutive non-improving L1 rounds before escalation. Moves under `nodes`.
-        l2_patience:
-          type: integer
-          minimum: 1
-          nullable: true
-          x-status: wired-scheduled-for-removal
-          description: L2 stall tolerance; `null` disables the L2 gate. Moves under `nodes`.
-        l3_patience:
-          type: integer
-          minimum: 1
-          nullable: true
-          x-status: wired-scheduled-for-removal
-          description: L3 stall tolerance; `null` disables the L3 gate. Moves under `nodes`.
-        pobb_epsilon:
-          type: number
-          minimum: 0
-          maximum: 1
-          x-status: wired-scheduled-for-removal
-          description: Per-candidate P(best) elimination threshold. Moves under `nodes`.
         nodes:
           type: object
-          x-status: declared-not-wired
           description: |
             The fork's delta over the selected optimizer manifest, keyed by node name —
             `{node: {config: {...}}}`, the shape a target pipeline's overlay takes.
@@ -3529,27 +3573,6 @@ components:
             `keep_rounds` fork carrying this is minted at. Every other field here
             moves a ceiling or a patience count, which no measurement can be
             re-read under, so those forks preview nothing.
-        per_round_resubset:
-          type: boolean
-          nullable: true
-          x-status: wired-scheduled-for-removal
-          description: |
-            Re-pick the most-informative scoring subset every round (adaptive
-            Rasch selection) for this fork. `null` inherits the parent. Safe to
-            A/B now that every cross-round comparator measures on one fixed θ ruler.
-            Moves under `nodes`, as potter's sampler config.
-        schema_field_rename:
-          type: boolean
-          nullable: true
-          x-status: wired-scheduled-for-removal
-          description: |
-            Let this fork's L1 rename a field on the inner `l1_generate`'s output
-            schema, not merely re-describe it. `null` inherits the parent (locked by
-            default: `build_l1_response_schema` never declares the rename param, so the
-            LLM cannot emit a key the schema omits). Only meaningful on a campaign
-            that optimizes an optimizer (`promptpotter-self`). An L2/L3
-            `fork_proposal` can request this same unlock autonomously. Moves under
-            `nodes`, as potter's config.
 
     DeleteCyclePayload:
       $ref: '#/components/schemas/CycleRef'
@@ -4225,14 +4248,12 @@ components:
           type: string
           minLength: 1
           default: potter
-          x-status: declared-not-wired
           description: |
             The optimizer manifest this campaign runs — a name under
             `assets/optimizers/`, or one a registered package ships. Every
             entry point selects it here; nothing selects it install-wide.
         nodes:
           type: object
-          x-status: declared-not-wired
           description: |
             The campaign's overlay on the selected manifest, keyed by node name —
             `{node: {config: {...}}}`, the shape a target pipeline's overlay
@@ -4245,46 +4266,6 @@ components:
               config:
                 type: object
                 additionalProperties: true
-        prompt_block_catalogue:
-          type: string
-          enum: [guidance, restrict, off]
-          default: guidance
-          x-status: wired-scheduled-for-removal
-          description: |
-            How the reusable prompt building-block library reaches the optimizer:
-            `guidance` (suggest blocks, L1 may still invent), `restrict` (library
-            values only — an off-library value fails `L1_PROMPT_BLOCKS_IN_LIBRARY`
-            and rides the existing forbidden-value wound), `off` (render empty;
-            prompt bit-for-bit identical to a no-library ablation). Moves under
-            `nodes`, as potter's config.
-        escalation_ladder:
-          type: string
-          enum: [full, l1_l2, l1]
-          default: full
-          x-status: wired-scheduled-for-removal
-          description: |
-            How far up L1 → L2 → L3 this campaign may climb. `full` is the whole
-            ladder; `l1_l2` lets L2 re-frame but never reaches L3, force-trigger
-            included; `l1` is the L1-only ablation arm, where no escalation rule
-            can return a fire and neither the `l2_context` nor the `l3_plan` prompt
-            is ever composed. L1's own prompt is identical under all three. Moves
-            under `nodes`, as potter's controller config.
-        mechanisms:
-          type: object
-          x-status: wired-scheduled-for-removal
-          additionalProperties:
-            type: object
-            additionalProperties:
-              type: boolean
-          description: |
-            Pluggable orchestration mechanism toggles
-            (`optimization.mechanisms` — sorting/selection + early-abort groups).
-            Nested `{group: {toggle: bool}}`; seeded with stock defaults,
-            operator-editable in the new-campaign form, materialized verbatim into
-            the committed `campaign.json`. Self-describing schema served by
-            `GET /campaigns/mechanisms-schema`. The toggles move to their owners:
-            `degradation_fatal_fastpath` to the bench's `DegradationCheck`, every
-            other one under `nodes` as potter's sampler or eliminator config.
 
     DraftCampaign:
       type: object
@@ -4833,11 +4814,12 @@ components:
               allOf:
                 - $ref: '#/components/schemas/OptimizationOverrides'
               description: |
-                The campaign-config knobs (`max_rounds` / `mechanisms`). The sent
-                keys are shallow-merged onto the draft's
-                current overrides — send one knob or several; a nested `mechanisms`
-                replaces wholesale. Validated against `OptimizationOverrides`
-                server-side (rejects unknown keys / out-of-range `max_rounds`).
+                The campaign-config knobs (`max_rounds` / `optimizer` / `nodes`). The
+                sent keys are merged onto the draft's current overrides — send one knob
+                or several; `nodes` merges node by node and key by key. Validated against
+                `OptimizationOverrides` and the selected manifest's node knobs
+                server-side (rejects unknown keys, an out-of-range `max_rounds`, a node
+                the manifest does not declare, a knob value its node refuses).
             raw_task_description:
               type: string
               maxLength: 16384

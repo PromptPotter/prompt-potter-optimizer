@@ -56,7 +56,7 @@ def apply_phase(core: LiveStateCore, event: PhaseEvent, view: Any = None) -> Non
         core.origin_acc = new_origin
         if new_origin > core.best_acc:
             core.best_acc = new_origin
-    elif event.phase == CampaignPhase.MEASURE and event.event == "exit" and fields.get("improved"):
+    elif event.phase == CampaignPhase.SELECT and event.event == "exit" and fields.get("improved"):
         # `improved` is a verdict on θ, not on accuracy, so it does NOT imply an accuracy was
         # recorded: the same null arrives here on exactly the runs it arrives at the origin on.
         recorded = fields.get("winner_accuracy")

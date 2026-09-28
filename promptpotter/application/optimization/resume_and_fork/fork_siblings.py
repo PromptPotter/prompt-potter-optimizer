@@ -85,6 +85,7 @@ def _fork_sibling_setup(
             BenchCheckpointKind.FORK_CUT,
             {"from_round": from_round},
             new_cycle_id,
+            node=None,
             data=record_data,
         )
 

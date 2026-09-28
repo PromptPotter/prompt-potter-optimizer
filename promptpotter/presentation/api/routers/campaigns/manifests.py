@@ -9,7 +9,6 @@ from pydantic import Field
 
 from promptpotter.application.campaign_config import (
     Estimand,
-    MechanismConfig,
     estimand_doc,
     knob_label,
 )
@@ -17,8 +16,8 @@ from promptpotter.application.datasets.draft_campaign import load_checkin_draft
 from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
 from promptpotter.application.jobs.launcher.draft_build import draft_wire
 from promptpotter.application.knobs import (
-    COUPLINGS,
     check_couplings,
+    declared_couplings,
     resolve_knob_states,
 )
 from promptpotter.application.pipeline_resolve import (
@@ -147,70 +146,6 @@ def _campaign_summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
         spend_unreported_usd=round(spent.unreported_usd, 6),
         runs_with=campaign_runs_with(stores, campaign),
     )
-
-
-class MechanismToggle(StrictModel):
-    key: str = Field(description="Field key under its group (e.g. 'epsilon_elimination')")
-    label: str = Field(description="Human-readable toggle name")
-    description: str = Field(description="What the mechanism does, on vs off")
-    default: bool = Field(description="Default value (preserves stock loop behavior)")
-
-
-class MechanismGroup(StrictModel):
-    key: str = Field(description="Group key under optimization.mechanisms (e.g. 'elimination')")
-    label: str = Field(description="Human-readable group name")
-    description: str = Field(description="What this group of mechanisms governs")
-    toggles: list[MechanismToggle] = Field(description="Toggles in this group, in declared order")
-
-
-class MechanismSchemaResponse(StrictModel):
-    """Self-describing descriptor for the campaign-config mechanism toggles.
-
-    Derived live from ``MechanismConfig``'s JSON schema, so a new toggle (a bool
-    added to a group model) surfaces here — and in the webapp — with no edit.
-    Pair the active value off the campaign's frozen ``config`` snapshot
-    (``optimization.mechanisms.{group}.{key}``).
-    """
-
-    groups: list[MechanismGroup] = Field(description="Mechanism groups, in declared order")
-
-
-def _ref_name(prop: dict[str, Any]) -> str:
-    """Resolve a property's ``$ref`` def name (Pydantic may wrap it in ``allOf``)."""
-    ref = prop.get("$ref") or prop["allOf"][0]["$ref"]
-    return str(ref).rsplit("/", 1)[-1]
-
-
-@campaigns_router.get("/campaigns/mechanisms-schema", response_model=MechanismSchemaResponse)
-async def get_mechanisms_schema() -> MechanismSchemaResponse:
-    """The mechanism-toggle descriptor — groups, labels, descriptions, defaults.
-
-    Read-only and campaign-independent: the webapp zips this with a campaign's
-    frozen ``config`` to render the active toggle states.
-    """
-    schema = MechanismConfig.model_json_schema()
-    defs = schema["$defs"]
-    groups: list[MechanismGroup] = []
-    for group_key, group_prop in schema["properties"].items():
-        gdef = defs[_ref_name(group_prop)]
-        toggles = [
-            MechanismToggle(
-                key=tk,
-                label=tprop.get("title", tk),
-                description=tprop.get("description", ""),
-                default=bool(tprop.get("default", False)),
-            )
-            for tk, tprop in gdef["properties"].items()
-        ]
-        groups.append(
-            MechanismGroup(
-                key=group_key,
-                label=group_key.replace("_", " ").title(),
-                description=gdef.get("description", ""),
-                toggles=toggles,
-            )
-        )
-    return MechanismSchemaResponse(groups=groups)
 
 
 _LIFECYCLE_FILTERS = ("active", "archived", "deleted", "checkin", "all")
@@ -400,7 +335,8 @@ class ConfigKnob(StrictModel):
     label: str = Field(description="Short display name (prefix-stripped)")
     value: Any = Field(description="Effective value in this campaign's frozen config")
     source: str = Field(
-        description="Where the value came from: default | campaign (operator-set) | required | constant"
+        description="Where the value came from: default | campaign (operator-set) | required | "
+        "manifest (an optimizer node's knob, as its manifest declares it)"
     )
 
 
@@ -485,6 +421,6 @@ def get_campaign_config_map(stores: StoresDep, campaign_id: str) -> ConfigMapRes
             severity=c.severity,
             active=c.name in active,
         )
-        for c in COUPLINGS
+        for c in declared_couplings(config)
     ]
     return ConfigMapResponse(groups=groups, couplings=couplings)

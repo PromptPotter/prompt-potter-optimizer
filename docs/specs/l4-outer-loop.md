@@ -29,7 +29,7 @@ by its wall clock against a fixed anchor; the reason is the comment beside it in
   reaching the same place in the last round.
 - **The denominator is the round BUDGET**, holding the last adopted level forward across rounds a cell
   never ran (`domain/l4/proxies.py::parent_level_series`). Dividing by the series length makes the denominator a
-  per-cell quantity, and since `inner_lives` stops a *stalling* cell, the short series is the one that
+  per-cell quantity, and since a panel's `lives` (`inner_depth_nodes`) stops a *stalling* cell, the short series is the one that
   lifted early and went quiet — it would be divided by its own brake.
 - **No difficulty denominator.** Every level is a θ on ONE δ ruler shared by every cell of the panel, so two
   levels already sit on one interval scale across seeds of different origin strength. Per-cell difficulty is
@@ -176,9 +176,10 @@ quotes no figure; re-measure before quoting a price to anyone.
    does; and [SICA](https://arxiv.org/abs/2504.15228) runs an asynchronous LLM overseer that steers or cancels
    a drifting run — a runtime monitor shaped like our heartbeat and pause contract, not a gate on a self-edit,
    so a pre-landing review gate here would be our own addition. The mode:
-   when an outer election is **decisive**, the winner's overrides become an `optimizer_set` and the outer
-   cycle forks onto it — the improved optimizer proposes the next round. `optimizer_set` already binds the
-   outer level (`runner/entry.py::run_optimization`, task-isolated from the inner binding), and inner cell
+   when an outer election is **decisive**, the winner's overrides become the outer campaign's own
+   `optimization.nodes` overlay and the outer cycle forks onto it — the improved optimizer proposes the next
+   round. The overlay already binds per task (`runner/entry.py::run_optimization`, task-isolated from the
+   inner binding), and inner cell
    identity keys on the candidate's overrides, not the outer's own set, so banked cells survive an adoption.
    What is new is the trigger and the fork. **What is never adopted is the instrument** (§ Invariants, first
    bullet; the shared ruler with it) — which is what makes a degraded optimizer visible instead of silent.

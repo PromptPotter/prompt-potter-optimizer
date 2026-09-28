@@ -77,15 +77,22 @@ class Loop:
     def _optimization(self) -> dict[str, Any]:
         return {
             "max_rounds": self.max_rounds,
-            "n_variants": self.n_variants,
-            "l1_patience": self.l1_patience,
-            "l2_patience": self.l2_patience,
-            "l3_patience": self.l3_patience,
             "degradation_threshold": self.degradation_threshold,
             "elimination_n_min": self.elimination_n_min,
-            "pobb_epsilon": self.pobb_epsilon,
             "spend_budget_usd": self.spend_budget_usd,
             "token_budget": self.token_budget,
+            # Potter's knobs, as the overlay on its manifest's nodes.
+            "nodes": {
+                "l1_generate": {"config": {"n_variants": self.n_variants}},
+                "pobb": {"config": {"epsilon": self.pobb_epsilon}},
+                "escalation": {
+                    "config": {
+                        "l1_patience": self.l1_patience,
+                        "l2_patience": self.l2_patience,
+                        "l3_patience": self.l3_patience,
+                    }
+                },
+            },
         }
 
 

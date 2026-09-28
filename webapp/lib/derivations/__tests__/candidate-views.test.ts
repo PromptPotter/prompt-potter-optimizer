@@ -50,13 +50,12 @@ function live(over: Partial<DashboardCandidate> & Pick<DashboardCandidate, "labe
     candidate_id: null,
     accuracy: null,
     composite_fitness: null,
-    invalid: false,
+    outcome: null,
     scored_samples: 0,
     cached_samples: 0,
     expected_samples: null,
     evaluators: {},
     changes_description: "",
-    partial_reason: "",
     theta: null,
     theta_se: null,
     mean_fitness_ci_lo: null,
@@ -124,7 +123,7 @@ describe("the half choice — tree unless it holds no measurement", () => {
       ...EMPTY,
       viewedNode: course([node({ kind: "candidate", id: "a", label: "C1.1", round: 1 })]),
       inflightByLabel: new Map([
-        ["C1.1", live({ label: "C1.1", accuracy: 0, invalid: true })],
+        ["C1.1", live({ label: "C1.1", accuracy: 0, outcome: "invalid" })],
       ]),
     });
     expect(views[0]?.accuracy).toBeNull();

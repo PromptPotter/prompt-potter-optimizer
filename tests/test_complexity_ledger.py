@@ -128,14 +128,29 @@ LEDGER_BASELINE = {
     # +1: `application/runner/bench.py` — the bench's pass and the headline it composes. Apart from
     # `entry.py` because the pass is a unit a later optimizer's bench reuses whole, and apart from
     # `scoring/` because it is orchestration: it picks rows, a spend bucket and when to grade.
-    "modules": 365,
+    # +6: the config split. `application/optimizer_manifest.py` — which manifest a campaign runs and
+    # its overlay, the ONE resolution a run, a draft edit and a served menu share; it folds into no
+    # neighbour because `campaign_config.py` may import nothing and `pipeline_resolve.py` resolves
+    # the TARGET pipeline. `application/optimizers/{__init__,nodes}.py` — the node-member registry
+    # (the loader's third group) and the contract it checks. `optimizers/potter/{__init__,knobs,
+    # members}.py` — potter's knob models, off `OptimizationConfig`, and the members declaring them.
+    # -1: the round walks the manifest. Gone: `l1/execute.py` and `l1/score/{__init__,loop,
+    # candidate,winner,signal_effect}.py`. New: `runner/measurement.py` (the bench's measurement
+    # node), `scoring/candidate_report.py` (the report every arm, parent and origin takes, and the
+    # bench's reading of a walk its own checks stopped), and potter's `race.py` (PoBB as the
+    # measurement drives it), `election.py` (its selector) and `couplings.py` (the hashed prose,
+    # apart so `members.py` can hold behaviour the L4 digest does not read).
+    "modules": 370,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
-    "init_files": 53,
+    # +2: `application/optimizers/__init__.py` (the member registry) and its `potter/`, empty.
+    # -1: `optimization/l1/score/`, its modules gone to the round walk.
+    "init_files": 54,
     # +1: `judges/__init__.py` — flagged for the same reason `connectors/__init__.py` is, and by
     # the same text test: a registry module has both an `__all__` and imports. Named rather than
     # emptied; the protocol types are deliberately NOT re-exported through it.
-    "reexport_shims": 6,
+    # +1: `application/optimizers/__init__.py`, the third registry module, flagged by the same text.
+    "reexport_shims": 7,
     # +1: `CampaignConfig.judges` — which LLM-as-judge grades this campaign's cells, on which
     # models, and under which TERM. One leaf though it nests twice: `Knob` marks a field as a leaf
     # whatever its shape, and how a campaign grades a cell IS one decision however many steps it
@@ -166,6 +181,9 @@ LEDGER_BASELINE = {
     # the L1 / L1+L2 / full ablation needs an arm where L2 cannot fire at all. Every earlier
     # attempt at it was a patience set high enough to outlast the round budget, which is a
     # property of the budget rather than of the arm.
+    # ±0 across the config split: potter's knobs left `OptimizationConfig` for its manifest's node
+    # members and are counted there (`knobs.py::member_knob_count`), `mechanisms.*` flattened, and
+    # `optimizer_set` became `optimizer` — a named prompt set is now a family a node's overlay picks.
     "config_leaf_fields": 44,
     # +1: `QUEUE_MAX_WAIT_S` — how long a launch may wait in line before it is withdrawn. It is a
     # setting and not a constant because it is the one queue number a HOST has to be able to
@@ -173,7 +191,8 @@ LEDGER_BASELINE = {
     "settings_env": 32,
     # -1: `TASK_CONTEXT_OVERRIDES` — the L1 context slot it keyed is gone; target text has one
     # carrier, `prompt_fields_updates`.
-    "settings_const": 13,
+    # -1: `POBB_DEFAULT_EPSILON` — a second source for the `pobb` node's ε, which its manifest owns.
+    "settings_const": 12,
     # -24: `memory` (wounds, l1_layout, l1_overrides, task_context and the wound subtree) and
     # `plan` left the individual — optimizer state rides `optimizer_state`, framing the campaign.
     "opt_search_point_fields": 15,
@@ -230,7 +249,9 @@ LEDGER_BASELINE = {
     # +22: `CycleResult.bench` — the headline, a `BenchScore` of two `BenchReading`s and the paired
     # lift. Folds into no round field: every one of those is read on the rows that chose the
     # winner, and this is the one reading taken on rows no optimizer node saw.
-    "cycle_result_fields": 248,
+    # -3: `ScoredCandidate.outcome` replaces `escalation_aborted`, `elimination_stopped`, `invalid`
+    # and `partial_reason` — one fact, how the walk ended, told four ways, none saying BROKEN.
+    "cycle_result_fields": 245,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
@@ -315,7 +336,9 @@ LEDGER_BASELINE = {
     # `if TYPE_CHECKING:` import sits in the module body and reads as top-level to an AST walk,
     # which made three "pairs" that were never runtime edges. The files whose cycle is invisible
     # until the build breaks say so at the import.
-    "deferred_imports": 10,
+    # +1: the node-member registry's walk (`application/optimizers/__init__.py`), the third of the
+    # registry walks above — each optimizer's members import when the table completes.
+    "deferred_imports": 11,
     # +1: `judges/CLAUDE.md` — the per-layer contract for a new top-level package, indexed from
     # `promptpotter/CLAUDE.md` like every other. It earns a page rather than a section in
     # `connectors/CLAUDE.md` because its load-bearing rule is the OPPOSITE concern: a connector
@@ -593,7 +616,10 @@ LEDGER_BASELINE = {
     # +16: `CycleListEntry.bench_score` with `BenchScore` and `BenchReading` — the headline on the
     # read the sidebar already makes. `best_accuracy` beside it is the optimizer's own reading on
     # the rows that chose it, so one field cannot carry both without grading a search by itself.
-    "served_fields": 660,
+    # +3: `GET /optimizers/{name}/knobs` (`OptimizerKnobsResponse`, `NodeKnobs`, `KnobRow`, 12) NET
+    # of the deleted mechanism schema (9): one menu for every optimizer's node knobs replaces a
+    # descriptor of two potter toggle groups.
+    "served_fields": 663,
 }
 
 

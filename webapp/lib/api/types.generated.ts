@@ -40,7 +40,7 @@ export interface DashboardCandidate {
   run_id: string | null;
   accuracy: number | null;
   composite_fitness: number | null;
-  invalid: boolean;
+  outcome: 'measured' | 'invalid' | 'skipped' | 'broken' | 'eliminated' | 'locked_in' | null;
   scored_samples: number;
   cached_samples: number;
   input_tokens: number | null;
@@ -49,7 +49,6 @@ export interface DashboardCandidate {
   expected_samples: number | null;
   evaluators: Record<string, number>;
   changes_description: string;
-  partial_reason: string;
   theta: number | null;
   theta_se: number | null;
   theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
@@ -117,7 +116,7 @@ export interface RoundSummaryCandidate {
   run_id: string | null;
   accuracy: number | null;
   composite_fitness: number;
-  invalid: boolean;
+  outcome: 'measured' | 'invalid' | 'skipped' | 'broken' | 'eliminated' | 'locked_in';
   scored_samples: number;
   cached_samples: number;
   input_tokens: number | null;
@@ -126,7 +125,6 @@ export interface RoundSummaryCandidate {
   expected_samples: number;
   evaluators: Record<string, number>;
   changes_description: string;
-  partial_reason: string;
   theta: number | null;
   theta_se: number | null;
   theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
@@ -170,7 +168,7 @@ export interface PanelPrecision {
   n_cells: number;
 }
 
-/** One parent, read on the round's overlap set. */
+/** One member of the best-so-far line, read on the round's overlap set. */
 export interface OverlapMember {
   round: number;
   candidate_id: string;
@@ -179,7 +177,7 @@ export interface OverlapMember {
   total: number;
 }
 
-/** The cells EVERY parent has answered, and each one's rate over them. */
+/** The cells EVERY member of the best-so-far line has answered, and each one's rate over them. */
 export interface OverlapReading {
   sample_ids: number[];
   members: OverlapMember[];
@@ -318,19 +316,16 @@ export interface ScoredCandidate {
   sp_hash: string;
   run_id: string | null;
   prompt_fields: Record<string, unknown>;
-  escalation_aborted: boolean;
-  elimination_stopped: boolean;
+  outcome: 'measured' | 'invalid' | 'skipped' | 'broken' | 'eliminated' | 'locked_in';
   scored_samples: number;
   expected_samples: number;
   cached_samples: number;
   input_tokens: number | null;
   output_tokens: number | null;
   cache_read_tokens: number | null;
-  partial_reason: string;
-  invalid: boolean;
   validation_failures: ValidationFailure[];
   runtime_failures: RuntimeFailure[];
-  elimination_context: unknown;
+  elimination_context: Record<string, unknown>;
   degradation_context: unknown;
   reference_id: string | null;
   reference_accuracy: number | null;
@@ -353,8 +348,7 @@ export interface ScoreboardRow {
   accuracy: number | null;
   composite_fitness: number;
   total: number;
-  escalation_aborted: boolean;
-  invalid: boolean;
+  outcome: 'measured' | 'invalid' | 'skipped' | 'broken' | 'eliminated' | 'locked_in';
   reference_accuracy: number | null;
   reference_composite: number | null;
   mean_fitness_ci_lo: number | null;
@@ -2023,32 +2017,39 @@ export interface CampaignDetailResponse {
   config: Record<string, unknown>;
 }
 
-export interface MechanismToggle {
-  /** Field key under its group (e.g. 'epsilon_elimination') */
-  key: string;
-  /** Human-readable toggle name */
-  label: string;
-  /** What the mechanism does, on vs off */
-  description: string;
-  /** Default value (preserves stock loop behavior) */
-  default: boolean;
+/** Every knob an optimizer manifest's nodes take, served so a settings surface draws a */
+export interface OptimizerKnobsResponse {
+  /** The manifest name, as `optimization.optimizer` names it */
+  optimizer: string;
+  /** The manifest's own version */
+  version: string;
+  /** Every node taking a knob, in declared order */
+  nodes: NodeKnobs[];
 }
 
-export interface MechanismGroup {
-  /** Group key under optimization.mechanisms (e.g. 'elimination') */
-  key: string;
-  /** Human-readable group name */
-  label: string;
-  /** What this group of mechanisms governs */
-  description: string;
-  /** Toggles in this group, in declared order */
-  toggles: MechanismToggle[];
+export interface NodeKnobs {
+  /** The manifest node that owns these knobs */
+  node: string;
+  /** The node's type: sampler | eliminator | selector | … */
+  kind: string;
+  /** Its knobs, in declared order */
+  knobs: KnobRow[];
 }
 
-/** Self-describing descriptor for the campaign-config mechanism toggles. */
-export interface MechanismSchemaResponse {
-  /** Mechanism groups, in declared order */
-  groups: MechanismGroup[];
+/** One knob of one optimizer node, as a settings surface offers it. */
+export interface KnobRow {
+  /** The knob's name under `nodes.{node}.config` */
+  key: string;
+  /** What the knob does — its field description */
+  description: string;
+  /** JSON Schema type the value takes: boolean | integer | number | string | object */
+  type: string;
+  /** The closed set a string knob takes, in declared order; null when open */
+  options: string[] | null;
+  /** Whether null is a legal value (an opt-in knob, off) */
+  nullable: boolean;
+  /** The value the manifest declares — a campaign's floor */
+  value: unknown;
 }
 
 export interface ConfigKnob {
@@ -2059,7 +2060,7 @@ export interface ConfigKnob {
   /** Effective value in this campaign's frozen config */
   value: unknown;
   /** Where the value came from: default | campaign (operator-set) | required |
-   * constant */
+   * manifest (an optimizer node's knob, as its manifest declares it) */
   source: string;
 }
 
@@ -2102,13 +2103,13 @@ export interface ConfigOverrides {
   max_rounds: number | null;
   spend_budget_usd: number | null;
   token_budget: number | null;
-  l1_patience: number | null;
-  l2_patience: number | null;
-  l3_patience: number | null;
-  pobb_epsilon: number | null;
-  per_round_resubset: boolean | null;
-  schema_field_rename: boolean | null;
+  nodes: Record<string, ManifestNodeOverlay>;
   scoring: string | Record<string, string> | null;
+}
+
+/** One optimizer node's delta over its manifest's ``config`` — the shape a target pipeline's */
+export interface ManifestNodeOverlay {
+  config: Record<string, unknown>;
 }
 
 /** A campaign's own declaration over the dataset's, and the two halves do NOT compose the same */
@@ -2139,6 +2140,9 @@ export interface OriginGateDecisionPayload {
   cycle_id: string;
   decision: 'rescore' | 'proceed' | 'abort';
 }
+
+// How an arm's measurement ended (domain/results.py::ArmOutcome).
+export type ArmOutcome = 'measured' | 'invalid' | 'skipped' | 'broken' | 'eliminated' | 'locked_in';
 
 // The coarse run-state axis (domain/phases.py::RunPhase).
 export type RunPhase = 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
@@ -2230,7 +2234,7 @@ export const STOP_REASON_OUTCOMES: Record<string, StopOutcome> = {
 };
 
 // Abort-lens variant -> operator label, in picklist order. Mirror of
-// domain/results.py::ABORT_LENS_LABELS, whose keys are asserted against the API edge's
+// pobb/checks.py::ABORT_LENS_LABELS, whose keys are asserted against the API edge's
 // own `_ABORT_SUPPRESS` at import. Don't hand-list these.
 export const ABORT_LENS_LABELS: Record<string, string> = {
   'epsilon_off': 'No ε-elimination',

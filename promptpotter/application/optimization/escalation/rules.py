@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 from promptpotter.application.optimization.escalation.state import EscalationEvent, NextAction
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import EscalationLadder
+    from promptpotter.application.optimizers.potter.knobs import EscalationLadder
 
 
 @dataclass(frozen=True)
@@ -33,7 +33,7 @@ class EscalationInputs:
     # Could this round's arms be told apart? ``None`` is "unreadable either way", which is not
     # "read and told nothing apart".
     separable: bool | None = None
-    # None until AxisIndex is initialised; runner populates from `count_positive_yield_axes(cycle)`.
+    # None until AxisIndex is initialised; the controller counts it (`Escalation.observe`).
     axes_with_positive_yield: int | None = None
     # A candidate this round dropped a mandatory backend placeholder (e.g. {{combined_text}}).
     # Structural breakage → immediate L2 re-frame, bypassing l1_patience (the "patience 0" path).

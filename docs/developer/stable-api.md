@@ -118,24 +118,24 @@ Connector-described pipeline (the shape `GET /pipeline` exposes, plus an operato
 
 Campaign knobs + scoring + optimizer LLM. Validated by `application/campaign_config.py::CampaignConfig` with `extra="forbid"` — unknown keys raise at boot. See `CampaignConfig` for the full field list.
 
-**Top-level keys.** `dataset_name`, `scoring`, `judges`, `sp_budget_round`, `exclude_nodes` (drop pipeline nodes by name), `pipeline_overlay` (per-node config overlay), `optimization`. (The optimizer LLM is install-global — `promptpotter/assets/optimizer/pipeline.yaml` — not a campaign key.)
+**Top-level keys.** `dataset_name`, `scoring`, `judges`, `sp_budget_round`, `exclude_nodes` (drop pipeline nodes by name), `pipeline_overlay` (per-node config overlay), `optimization`. (The optimizer is `optimization.optimizer`, a manifest under `promptpotter/assets/optimizers/`; its nodes' knobs and models ride `optimization.nodes`.)
 
 `judges` maps a scoring term to a registered LLM-as-judge and the models to run it on — `{term: {name, stages: [{role, model, provider, temperature}]}}` — for datasets whose answer no matcher can grade. Each verdict is banked as a per-sample observation the `scoring` formula reads by its term KEY (never a call: a judge is a measurement, not a formula term). **Its models are inherited from nothing** — not a node's permitted set, not node config, not the optimizer's. A third party ships a judge through the `promptpotter.judges` entry-point group, validated like §1's connectors; contract: [`../../promptpotter/judges/CLAUDE.md`](../../promptpotter/judges/CLAUDE.md).
 
 **`optimization` knobs:** the stable contract is the mechanism, not a
 frozen key/default table (same rule as §4). Every knob is a
-self-describing field on `OptimizationConfig` in
-`application/campaign_config.py` — `Annotated[T, Knob(scope, *estimands)]` plus a
-`Field(description=…)` — and `application/knobs.py::KNOBS` is the walked
-taxonomy. Only `degradation_threshold` is required; everything else
-defaults. Read defaults off the fields, never
-off a doc.
+self-describing field — the bench's on `OptimizationConfig` in
+`application/campaign_config.py`, an optimizer's on its node member's knob model (potter's:
+`application/optimizers/potter/knobs.py`), each `Annotated[T, Knob(scope, *estimands)]` plus a
+`Field(description=…)` — and `application/knobs.py` walks both. Only `degradation_threshold` is
+required; the bench's other knobs default in code, an optimizer's in its manifest. Read defaults
+off the fields and the manifest, never off a doc.
 
-**Optimizer LLM:** install-global, **not** in `campaign.yaml`. Provider, model, temperature, `reasoning_effort`, and `max_tokens` are per-node config in `promptpotter/assets/optimizer/pipeline.yaml` (`nodes.{l1_generate|l1_critique|l2_context|l3_plan|checkin}.config`), resolved inside `llm_call` like any other node tunable. One file configures the optimizer for every campaign.
+**Optimizer LLM:** provider, model, temperature, `reasoning_effort`, and `max_tokens` are per-node config in the selected manifest (`promptpotter/assets/optimizers/{name}/pipeline.yaml::nodes.{node}.config`), resolved inside `llm_call` like any other node tunable; a campaign moves one through `optimization.nodes.{node}.config`. The check-in node is the bench's own, in `promptpotter/assets/checkin/pipeline.yaml`.
 
-Constants moved out of `campaign.yaml` (they live next to their consumer): L1 candidate-generation temperature (the `creativity` arg in `l1/generate.py`, driven by `l1_overrides.creativity`, defaulting to the `l1_generate` node temperature), L2/L3 transition temperatures (the `l2_context`/`l3_plan` node temperatures), runaway-loop ceiling (`runner/loop.py::HARD_CAP`), stale-data recovery ladder (`scoring/sample_measurement.py`). PoBB lock-in went the other way and stayed campaign config — `pobb_lock_in` / `pobb_lock_in_n_min` / `mechanisms.elimination.leader_lock_in`.
+Constants moved out of `campaign.yaml` (they live next to their consumer): L1 candidate-generation temperature (the `creativity` arg in `l1/generate.py`, driven by `l1_overrides.creativity`, defaulting to the `l1_generate` node temperature), L2/L3 transition temperatures (the `l2_context`/`l3_plan` node temperatures), runaway-loop ceiling (`runner/loop.py::HARD_CAP`), stale-data recovery ladder (`scoring/sample_measurement.py`). PoBB lock-in went the other way and stayed configurable — potter's `pobb` node `lock_in` / `lock_in_n_min` / `leader_lock_in`.
 
-The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no opt-in flag. Which LAYERS the loop may reach is `optimization.escalation_ladder` (`full` / `l1_l2` / `l1`), the ablation switch; the individual rules are not separately toggleable.
+The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no opt-in flag. Which LAYERS potter may reach is its `escalation` node's `escalation_ladder` (`full` / `l1_l2` / `l1`), the ablation switch; the individual rules are not separately toggleable.
 
 ### Other files
 
@@ -168,12 +168,11 @@ rules; the constants themselves are internal.
 **`PROMPTPOTTER_HOME` is stable.** Set it to relocate the whole user-data tree; it is
 read once at import, so it is an environment decision, not a runtime one.
 
-**`$PROMPTPOTTER_HOME/optimizer/pipeline.yaml` is stable, and it is the one install asset
-an operator may shadow.** Present, it replaces the packaged optimizer manifest (provider /
-model / temperature per optimizer node); absent, the packaged one is read. Its two
-neighbours are deliberately not overridable — `resolved_schemas.json` is generated from the
-Pydantic models, `sets/*.yaml` is the L4 instrument — so the seam is one file, not the
-directory.
+**`$PROMPTPOTTER_HOME/optimizers/{name}/pipeline.yaml` and `$PROMPTPOTTER_HOME/checkin/pipeline.yaml`
+are stable, and they are the install assets an operator may shadow.** Present, one replaces the
+packaged manifest of that name (provider / model / temperature per node); absent, the packaged one
+is read. The generated `resolved_schemas.json` beside each is deliberately not overridable, so the
+seam is a file, never a directory.
 
 Both derived asset trees (`assets/webapp/`, `assets/benchmarks/`) are staged by
 `scripts/build_release.py`, the supported way to build a wheel — a bare `uv build` produces
@@ -309,7 +308,8 @@ Sibling cycles (forks, diag) live flat under `cycles/` alongside the root, each 
 - **`__all__`** — this document is the public surface; `__all__` is a reader's hint and nothing more. It is mechanically inert here (`implicit_reexport = true`, no `import *` anywhere), so neither runtime nor mypy consults it, and a name listed there is not thereby promised. Prune an entry nothing imports rather than reading it as a contract.
 - **Runtime dataclass shapes** not in §1–§7 (`CycleSlice`, `RoundDigest`, `InjectionBundle`, `LiveStateCore`, etc.).
 - **In-memory caches** and their invalidation strategies (optimizer LRU caches, the dispatch hub's pipeline-param-catalogue cache, etc.).
-- **Prompt templates** at `promptpotter/assets/optimizer/pipeline.yaml::resolved_prompts` — data, intentionally tunable. Forks may edit; we may also edit on any release.
+- **Prompt templates** at `promptpotter/assets/optimizers/potter/pipeline.yaml::resolved_prompts` — data, intentionally tunable. Forks may edit; we may also edit on any release.
+- **The optimizer node types** (`application/optimizers/nodes.py`, registered under `promptpotter.optimizer_nodes`). They hand a member the live `Cycle`, so a member built on them builds on internal state.
 - **Test helpers** (`tests/factories.py`, `tests/conftest.py`).
 - **The `webapp/` layout.** The webapp + control plane ship and serve users; internal component layout stays free to move.
 - **The REST API and the events stream**, specified though they are (`docs/specs/api-openapi.yaml`, `events-asyncapi.yaml`). They carry **no inbound credential**: `presentation/api/middleware/oidc.py` derives identity from a browser SESSION COOKIE and nothing else — no bearer token, no API key anywhere on the inbound path — so a third party reaches them only by running the server with `PROMPTPOTTER_AUTH=off`, i.e. with no auth at all. That makes this a same-origin browser surface plus a local no-auth mode, not an integration surface, and saying so is the honest state: per-endpoint guarantees would promise something it cannot yet keep. (The one bearer token the repo holds runs PP→TermNorm — outbound, the other direction.)

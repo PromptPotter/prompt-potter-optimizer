@@ -39,10 +39,16 @@ campaign_config:
     # for a round to win on, and finding that out AFTER paying for a round is the mistake this
     # file exists to avoid.
     max_rounds: 0
-    n_variants: 2
-    l1_patience: 3
     degradation_threshold: 0.4
     # A RAIL, not an estimate. One measured cell of this panel cost $0.0101 on a different model;
     # ten cells of a screen should land far under this, and the ceiling exists so that being
     # wrong about it costs less than the operator agreed to.
     spend_budget_usd: 2.00
+    # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
+    nodes:
+      l1_generate:
+        config:
+          n_variants: 2
+      escalation:
+        config:
+          l1_patience: 3

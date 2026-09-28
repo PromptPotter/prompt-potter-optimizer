@@ -24,8 +24,8 @@ broke", "bug-hunting", an operator already mid-investigation.
 - Read past the headline into the round's LLM I/O. A green accuracy over an empty panel is a finding.
 - Authority: halt a run, fix at its ROOT, relaunch — within the autonomy mode (root `CLAUDE.md`
   § Working principles). Name the structural cause
-  before touching code; default the fix to the `promptpotter/assets/optimizer/` optimizer prompts
-  (`pipeline.yaml::resolved_prompts` inner, `sets/*.yaml` outer) (`<root-fix>`; `<dispatch-first>` in `promptpotter/application/optimization/CLAUDE.md`).
+  before touching code; default the fix to potter's optimizer prompts
+  (`promptpotter/assets/optimizers/potter/pipeline.yaml::resolved_prompts`) (`<root-fix>`; `<dispatch-first>` in `promptpotter/application/optimization/CLAUDE.md`).
 - **Never commit.** Fixes accumulate uncommitted; name every path touched so the operator can
   `git add` by path (a second session commits to `main` concurrently).
 
@@ -189,7 +189,7 @@ So: **when a round reports `improved: false`, open
 it.** A held round whose `p_better` sits far off 0.5 is a promotion the gate refused, not a
 candidate that failed. Report it as an instrument disagreement, and name both numbers.
 
-Do **not** answer this by retuning `pobb_epsilon`, and do **not** route promotion through
+Do **not** answer this by retuning PoBB's `epsilon`, and do **not** route promotion through
 `headline_metric` — that knob is display-only on purpose, and the gate is already θ. A held round
 now means exactly one thing: no candidate's ability exceeded the parent's. If that still looks
 wrong after reading both numbers, ask what the round measured, not which estimator the gate uses.

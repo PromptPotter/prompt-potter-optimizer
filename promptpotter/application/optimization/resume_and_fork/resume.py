@@ -38,6 +38,7 @@ from promptpotter.shared.errors import ResumeDivergenceError
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.domain.results import RoundResult
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
@@ -79,11 +80,13 @@ def _stale_generation(
     )
 
 
-def _optimizer_mismatches(prior: list[RoundResult]) -> dict[int, ReplayMismatch]:
+def _optimizer_mismatches(
+    prior: list[RoundResult], selected: SelectedOptimizer
+) -> dict[int, ReplayMismatch]:
     """Rounds produced by a DIFFERENT optimizer than the one loaded now. Asked PER ROUND so an edit
     forks from where it bites; an unstamped round is REPORTED, never guessed."""
 
-    current = compute_optimizer_prompt_hashes()
+    current = compute_optimizer_prompt_hashes(selected)
     out: dict[int, ReplayMismatch] = {}
     unstamped = [t.round for t in prior if not t.optimizer_state.payload.optimizer_prompt_hashes]
     if unstamped:
@@ -164,7 +167,7 @@ async def resume_with_divergence_check(
         # Both ABOVE the config short-circuit, deliberately: optimizer prompts and layouts are
         # not KNOBS, so `DiffScope.NONE` says nothing about them; and a stale generation is the
         # one check answering for an EARLIER resume, which by now diffs clean.
-        optimizer_mismatches = _optimizer_mismatches(prior)
+        optimizer_mismatches = _optimizer_mismatches(prior, cycle.optimizer)
         stale = _stale_generation(campaign_store, hop, prior, resumed_from_round)
         campaign = campaign_store.load_campaign(hop.campaign_id)
         frozen = campaign.config if campaign is not None else {}

@@ -78,7 +78,7 @@ export function candidateViews({
     const live = isCourse ? undefined : inflightByLabel.get(n.label);
     // An INVALID candidate reports `INVALID_SCORES`' synthetic 0.0 and the tree withholds it, so
     // falling back to the live half would put the fabricated number back on the bar.
-    const useLive = live != null && !live.invalid && own == null;
+    const useLive = live != null && live.outcome !== "invalid" && own == null;
     // Every measured number reads off THIS half, so a bar and its whisker share one polling clock.
     const m = useLive ? live : n;
     const accuracy = isCourse ? (own ?? null) : (m.accuracy ?? null);

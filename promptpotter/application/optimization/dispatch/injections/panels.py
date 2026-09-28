@@ -33,6 +33,7 @@ from promptpotter.application.optimization.dispatch.bundle import (
     Item,
     signal,
 )
+from promptpotter.application.optimization.pobb.checks import EliminationGate
 from promptpotter.application.scoring.evaluators import compute_accuracy
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
@@ -48,7 +49,7 @@ from promptpotter.domain.connector import MeasuredUnit, unit_count, unit_plural
 from promptpotter.domain.escalation_signals import ExplorationBudget
 from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS, PARENT_LEVEL_SE_KEY
 from promptpotter.domain.optimizer_state import CritiqueReadout
-from promptpotter.domain.results import EliminationGate, RoundResult, ScoredCandidate
+from promptpotter.domain.results import ArmOutcome, RoundResult, ScoredCandidate
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.ruler import ThetaCaveat, theta_caveat
 from promptpotter.domain.scoring import (
@@ -900,27 +901,27 @@ def _repeatedly_lost(edits: list[_Edit]) -> list[tuple[Any, _Loss]]:
 
 
 def _candidate_fate(cand: ScoredCandidate, unit: MeasuredUnit) -> str:
-    """Not keyed on ``partial_reason``: its ``pobb`` arm is dead, so every eliminated candidate on
-    disk carries the empty string.
-
-    ``elimination_stopped`` covers gates that mean OPPOSITE things to a generator, so it asks which
+    """An elimination covers gates that mean OPPOSITE things to a generator, so it asks which
     fired. ε stops BUYING — the idea may still be good and deserves re-proposing; a collapse is a
     VERDICT, the arm having answered one label to everything. Rendered as the ε sentence, the
     strongest rejection the loop has read as "not a verdict" and the dead idea stayed live in this
-    very panel — the failure ``answer_distribution`` exists to prevent, one panel over."""
-    if cand.invalid:
+    very panel — the failure ``answer_distribution`` exists to prevent, one panel over. A BROKEN
+    arm is the candidate's own fault and is said so, apart from both."""
+    if cand.outcome is ArmOutcome.INVALID:
         return f"invalid — rejected before it cost a {unit}"
     if cand.total == 0:
         # `accuracy` defaults to 0.0, so an unmeasured candidate is byte-identical to one that
         # got everything wrong and must never be quoted as an outcome.
         return f"never measured — no {unit_plural(unit)} scored, its 0% is absence of evidence"
-    if cand.elimination_stopped:
-        cut = f"cut at {cand.scored_samples}/{cand.expected_samples} {unit_plural(unit)}"
+    cut = f"cut at {cand.scored_samples}/{cand.expected_samples} {unit_plural(unit)}"
+    if cand.outcome is ArmOutcome.BROKEN:
+        return f"{cut} — BROKEN: its measurements kept failing; charged to this candidate"
+    if cand.outcome is ArmOutcome.ELIMINATED:
         if cand.elimination_context.get("gate") == EliminationGate.COLLAPSED:
             return f"{cut} — answered ONE label to every {unit}; a VERDICT on this idea, not a stopped measurement"
         return f"{cut} — P(best) fell below ε; measurement stopped, NOT a verdict"
-    if cand.escalation_aborted:
-        return "aborted mid-run"
+    if cand.outcome is ArmOutcome.SKIPPED:
+        return "skipped mid-run by the operator"
     return "scored in full"
 
 
@@ -1153,7 +1154,8 @@ def _r_sample_provenance(b: InjectionBundle) -> list[Item]:
     # "Graded on a harder prefix" is true of an ε, lock-in or degradation cut and FALSE of a
     # collapse, which has no rate to read — and saying it invites the re-proposal `_candidate_fate`
     # refuses, from the same prompt.
-    if cut := [a for a in d.arms if a.elimination_stopped and a.gate != EliminationGate.COLLAPSED]:
+    stopped = (ArmOutcome.ELIMINATED, ArmOutcome.BROKEN)
+    if cut := [a for a in d.arms if a.outcome in stopped and a.gate != EliminationGate.COLLAPSED]:
         stops = ", ".join(f"{a.label} at {a.scored_samples}/{a.expected_samples}" for a in cut[:4])
         rows.append(
             f"stopped early: {stops} — a cut arm was graded on a harder prefix, so its rate says "

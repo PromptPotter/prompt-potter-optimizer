@@ -4,10 +4,9 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { DatasetIndexEntry, OriginEntry, StartCheckinLimits } from "@/lib/api";
 import type { IngestFlow } from "@/lib/hooks/useIngestFlow";
 import { cx } from "@/lib/cx";
-import { ChoiceField } from "@/components/forms/ChoiceField";
 import { NumberField } from "@/components/forms/NumberField";
 import { SlugField } from "@/components/forms/SlugField";
-import { MechanismsPanel } from "@/components/dashboard/control/MechanismsPanel";
+import { NodeKnobsPanel } from "@/components/dashboard/control/NodeKnobsPanel";
 import { RunSummaryItem } from "@/components/chat/RunCard";
 import { ColumnMappingPicker } from "./ColumnMappingPicker";
 import { DatasetPreview } from "./DatasetPreview";
@@ -411,37 +410,10 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
               flow.applyPatch({ optimization_overrides: { max_rounds } })
             }
           />
-          <ChoiceField
-            label="Prompt block library"
-            value={draft.optimization_overrides.prompt_block_catalogue}
-            options={[
-              { value: "guidance", label: "Suggest (reuse or invent)" },
-              { value: "restrict", label: "Library only" },
-              { value: "off", label: "Off" },
-            ]}
-            hint="Proven persona / thinking-style / answer-format blocks the optimizer can draw on."
-            onApply={(prompt_block_catalogue) =>
-              flow.applyPatch({ optimization_overrides: { prompt_block_catalogue } })
-            }
-          />
-          <ChoiceField
-            label="Escalation ladder"
-            value={draft.optimization_overrides.escalation_ladder}
-            options={[
-              { value: "full", label: "Full (L1 → L2 → L3)" },
-              { value: "l1_l2", label: "L1 + L2 (no replan)" },
-              { value: "l1", label: "L1 only" },
-            ]}
-            hint="How far the loop may escalate when L1 stalls. L1 only never composes an L2 or L3 prompt — the ablation arm."
-            onApply={(escalation_ladder) =>
-              flow.applyPatch({ optimization_overrides: { escalation_ladder } })
-            }
-          />
-          <MechanismsPanel
-            mechanisms={draft.optimization_overrides.mechanisms}
-            onChange={(mechanisms) =>
-              flow.applyPatch({ optimization_overrides: { mechanisms } })
-            }
+          <NodeKnobsPanel
+            optimizer={draft.optimization_overrides.optimizer}
+            nodes={draft.optimization_overrides.nodes}
+            onChange={(nodes) => flow.applyPatch({ optimization_overrides: { nodes } })}
           />
         </div>
       </details>

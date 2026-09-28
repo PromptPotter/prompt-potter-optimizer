@@ -61,7 +61,7 @@ RESUME_CHECKPOINT_GATING: dict[ResumeCheckpointKind, GatingMode] = {
     # recovers a holed round is ``repair_incomplete_rounds``, which re-measures the cells
     # and then forces this walk so the kinds that CAN move are re-derived against the
     # repaired rows.
-    PotterCheckpointKind.PANEL_COVERAGE: GatingMode.ARCHIVAL,
+    BenchCheckpointKind.PANEL_COVERAGE: GatingMode.ARCHIVAL,
     # Fork is observable from the parent's history (the FORK_CUT record in
     # the parent ledger names the new cycle id and the offset that the
     # fork inherits from). It's archival because the fork's identity is
@@ -91,12 +91,14 @@ def record_decision(
     inputs_ref: dict[str, Any],
     outcome: Any,
     *,
+    node: str | None,
     data: dict[str, Any] | None = None,
     round: int | None = None,
 ) -> Any:
     sink.append(
         ResumeCheckpointRecord(
             kind=kind,
+            node=node,
             inputs_ref=dict(inputs_ref),
             outcome=outcome,
             data=dict(data or {}),

@@ -1,7 +1,7 @@
 // The one per-candidate row behind every surface that lists, plots or selects candidates. Only
 // `lib/derivations/round-candidates.ts` merges origin, closed and in-flight rows into it.
 
-import type { AbilityReading } from "@/lib/api/types";
+import type { AbilityReading, ArmOutcome } from "@/lib/api/types";
 
 export type CandidateSource = "history" | "inflight";
 
@@ -51,9 +51,9 @@ export interface ElectedRow extends CandidateRow {
   // promotion gate used. `null` outside the election fit.
   referenceAccuracy: number | null;
   referenceComposite: number | null;
-  // While true, `accuracy`/`composite` are `INVALID_SCORES`' synthetic 0.0: never render either as
-  // a rate, since a rejection is not a zero score.
-  invalid: boolean;
+  // How the arm's walk ended; `null` until it is decided. While `invalid`, `accuracy`/`composite`
+  // are `INVALID_SCORES`' synthetic 0.0: never render either as a rate.
+  outcome: ArmOutcome | null;
 }
 
 // ONE array feeds both the bars and the dendrogram beneath them, so they cannot disagree.

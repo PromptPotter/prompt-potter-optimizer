@@ -15,10 +15,12 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from pydantic import Field
 
+from promptpotter.application.campaign_config import merge_node_overlays
 from promptpotter.application.datasets.draft_campaign import (
     OptimizationOverrides,
     rendered_pipeline_json,
 )
+from promptpotter.application.optimizer_manifest import resolve_optimizer
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import description_key, description_path
@@ -56,9 +58,8 @@ class EditDraftPatch(StrictModel):
     column_ground_truth: str | None = Field(default=None, max_length=256)
     # Replaces the draft's fields wholesale — the editor sends the full PromptTemplate object.
     origin_prompt_fields: dict[str, Any] | None = None
-    # Shallow-merged onto the draft's current overrides then validated against
-    # OptimizationOverrides, so the editor can send one knob or several; a nested
-    # `mechanisms` replaces wholesale.
+    # Merged onto the draft's current overrides then validated against OptimizationOverrides and
+    # the selected manifest, so the editor can send one knob or several — `nodes` key by key.
     optimization_overrides: dict[str, Any] | None = None
     # From the operator's upload or derived from one of the draft's own columns
     # (`routers/datasets/ingest.py`); both ride this patch.
@@ -126,13 +127,18 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
             patch.pipeline_overlay, before, after
         )
 
-    # Shallow-merge so one knob can change without resetting the rest, then validate the
-    # result (rejects unknown keys / out-of-range max_rounds / malformed mechanisms).
+    # Merge so one knob can change without resetting the rest, then validate the result: unknown
+    # keys, an out-of-range max_rounds, and a node knob its manifest refuses all reject here.
     if patch.optimization_overrides is not None:
-        merged = {**draft.optimization_overrides, **patch.optimization_overrides}
-        changes["optimization_overrides"] = OptimizationOverrides.model_validate(merged).model_dump(
-            mode="json"
+        current = OptimizationOverrides.model_validate(draft.optimization_overrides)
+        incoming = OptimizationOverrides.model_validate(
+            {**current.model_dump(mode="json"), **patch.optimization_overrides}
         )
+        overrides = incoming.model_copy(
+            update={"nodes": merge_node_overlays(current.nodes, incoming.nodes)}
+        )
+        resolve_optimizer(overrides.optimizer, overrides.nodes)
+        changes["optimization_overrides"] = overrides.model_dump(mode="json")
 
     # The task framing IS gated — an operator edit CONFIRMS it, which is what opens the
     # origin-readiness gate for a field left PROPOSED or UNSET.

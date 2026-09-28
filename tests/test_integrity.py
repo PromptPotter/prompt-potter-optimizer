@@ -32,7 +32,6 @@ from promptpotter.application.scoring import query_loop
 from promptpotter.application.scoring.search_point_scorer import _replayable_on
 from promptpotter.connectors import harbor
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
 from promptpotter.domain.measurement_provenance import RunSource, grade_run
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.optimizer_state import L2L3Memory
@@ -42,9 +41,11 @@ from promptpotter.domain.pipeline_schema import (
     ParamSource,
     PipelineSchema,
 )
+from promptpotter.domain.results import ArmOutcome
 from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
 from promptpotter.domain.sample import Sample, sample_key
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
+from promptpotter.domain.validators import StopSignal
 from promptpotter.infrastructure.projections.live_dashboard.projection import (
     LiveDashboardProjection,
 )
@@ -129,9 +130,7 @@ class _CutAfter:
     def check(self, results: list[Any]) -> Any:
         if len(results) < self.n:
             return None
-        return EscalationSignal(
-            self.name, EscalationTarget.ELIMINATE_CANDIDATE, {"queries_scored": len(results)}
-        )
+        return StopSignal(self.name, ArmOutcome.ELIMINATED, {"queries_scored": len(results)})
 
 
 # 1. Measurement identity — what the key distinguishes
@@ -204,17 +203,19 @@ def test_layout_only_override_moves_optimizer_prompt_hash() -> None:
         compute_optimizer_prompt_hashes,
         set_optimizer_prompt_overrides,
     )
+    from promptpotter.application.optimizer_manifest import resolve_optimizer
 
+    potter = resolve_optimizer("potter", {})
     try:
         set_optimizer_prompt_overrides(None)
-        baseline = compute_optimizer_prompt_hashes()
-        assert compute_optimizer_prompt_hashes() == baseline
+        baseline = compute_optimizer_prompt_hashes(potter)
+        assert compute_optimizer_prompt_hashes(potter) == baseline
 
         # Valid layout edit (`diagnostics` stays placed) on one node.
         set_optimizer_prompt_overrides(
             {"l1_critique": {"layout": {"axis_memory": "thinking_style"}}}
         )
-        edited = compute_optimizer_prompt_hashes()
+        edited = compute_optimizer_prompt_hashes(potter)
         assert edited["l1_critique"] != baseline["l1_critique"], (
             "layout-only override left the node hash unchanged — audits would pool "
             "layout-differing cycles"
@@ -313,9 +314,7 @@ def test_inner_campaign_id_separates_two_candidates_and_is_stable() -> None:
     from promptpotter.application.runner.inner.spawn import inner_campaign_id
     from promptpotter.application.runner.inner.tasks import InnerTaskSpec
 
-    spec = InnerTaskSpec(
-        inner_dataset="justlogic-d234", seed=3, n_samples=28, n_rounds=4, n_variants=3
-    )
+    spec = InnerTaskSpec(inner_dataset="justlogic-d234", seed=3, n_samples=28, n_rounds=4)
     c1 = {"l1_generate": {"instruction": "widen the axes"}}
     c2 = {"l1_generate": {"instruction": "narrow the axes"}}
 
@@ -342,7 +341,7 @@ def test_inner_campaign_id_separates_two_candidates_and_is_stable() -> None:
             "-c",
             "from promptpotter.application.runner.inner.spawn import inner_campaign_id;"
             "from promptpotter.application.runner.inner.tasks import InnerTaskSpec;"
-            "s=InnerTaskSpec(inner_dataset='justlogic-d234',seed=3,n_samples=28,n_rounds=4,n_variants=3);"
+            "s=InnerTaskSpec(inner_dataset='justlogic-d234',seed=3,n_samples=28,n_rounds=4);"
             "print(inner_campaign_id(s,{'l1_generate':{'instruction':'widen the axes'}}))",
         ],
         capture_output=True,
@@ -1322,6 +1321,7 @@ def test_earned_blocks_gate_on_credible_lift_and_task_fit() -> None:
             accuracy=comp,
             composite_fitness=comp,
             total=10,
+            outcome=ArmOutcome.MEASURED,
             prompt_fields={**parent, **fields},  # RESOLVED fields, parent + this candidate's change
             reference_composite=0.50,
             mean_fitness_ci_lo=ci_lo,
@@ -3115,7 +3115,9 @@ async def _walk(
 ) -> dict[str, Any]:
     """``stall`` names a sample whose call lands well after every other; ``skip_at`` is a skip on
     record from before a stop. Every cell is admitted at, and bills, $1, against ``cap_usd``."""
-    from promptpotter.application.optimization.pobb.checks import PoBBCheck, PoBBConfig
+    from factories import pobb_knobs
+
+    from promptpotter.application.optimization.pobb.checks import PoBBCheck
     from promptpotter.application.runner.termination import BudgetGate
     from promptpotter.domain.pipeline_schema import WebSpendBound
     from promptpotter.domain.spend import TokenAccount
@@ -3157,7 +3159,9 @@ async def _walk(
         return call, _commit
 
     # A parent measured on none of the round's cells, so every cell owes it one catch-up call.
-    priors = PoBBCheck(PoBBConfig(), n_samples=len(dataset), ruler=None, backfill_fn=_backfill)
+    priors = PoBBCheck(
+        pobb_knobs(), n_min=6, n_samples=len(dataset), ruler=None, backfill_fn=_backfill
+    )
     priors.register_completed([], candidate_id="parent", sp=JobSearchPoint())
     # The one seam stubbed; the window, cursors, checkpoints and discard are shipping code.
     with mock.patch.object(query_loop, "measure_sample", _measure), spending_under(book):
@@ -3222,7 +3226,7 @@ async def _round(
     slowest_last: bool = False,
     pause_after_call: int | None = None,
 ) -> dict[str, Any]:
-    """Several candidates' walks driven as one round, as `score_population` drives them. Each
+    """Several candidates' walks driven as one round, as the measurement drives them. Each
     backend call is logged under the walk whose context it ran in. ``pause_after_call`` presses
     pause as that call returns."""
     from promptpotter.shared.instrument import MeasuredCandidate, measured_candidate
@@ -3511,7 +3515,7 @@ async def test_sample_lookahead_changes_the_bill_and_never_the_record(tmp_path: 
     c1 = await _walk(dataset, armed=1, cut_at=4)
     c2 = await _walk(dataset, armed=2, cut_at=4)
     assert c2["max_depth"] == 2, "window never opened on the cut walk"
-    assert c1["stop_reason"] == c2["stop_reason"] == "escalation"
+    assert c1["stop_reason"] == c2["stop_reason"] == "stop_rule"
     assert c1["rows"] == c2["rows"]
 
     # 4. …and the only difference is on the bill: AT MOST one extra call, sometimes none (awaiting
@@ -3530,7 +3534,7 @@ async def test_sample_lookahead_changes_the_bill_and_never_the_record(tmp_path: 
     # 6. What a cut discards is bounded by the stop rule's HORIZON, not by the depth: armed far
     #    past the cut, the walk launches one cell beyond the earliest row the rule could fire at.
     deep = await _walk(dataset, armed=8, cut_at=4, max_cells=8)
-    assert deep["stop_reason"] == "escalation"
+    assert deep["stop_reason"] == "stop_rule"
     assert deep["rows"] == c1["rows"]
     assert 0 <= len(deep["calls"]) - len(c1["calls"]) <= 1
     assert len(c1["calls"]) == 4, "an unarmed walk launched before the cell ahead was decided"
@@ -3565,7 +3569,7 @@ async def test_sample_lookahead_changes_the_bill_and_never_the_record(tmp_path: 
     assert serial["peak"] == 1
     assert fanned["peak"] <= 4
     assert fanned["rows"] == serial["rows"]
-    assert fanned["stops"] == serial["stops"] == ["escalation", None, "escalation"]
+    assert fanned["stops"] == serial["stops"] == ["stop_rule", None, "stop_rule"]
     assert fanned["absorbed"] == serial["absorbed"]
     # A cell the one loop launched runs as the candidate it measures, or an L4 inner campaign is
     # filed under the candidate on turn. First cells fastest, so the second walk's calls go out
@@ -3621,12 +3625,17 @@ async def test_sample_lookahead_changes_the_bill_and_never_the_record(tmp_path: 
     assert ceiling["billed"] == 5.0
     # A skip made before a stop outlives it: the resumed round reads the last decision the ledger
     # holds for each candidate, replays it at the same row, and launches nothing the skip spared.
-    from promptpotter.application.optimization.l1.score.loop import _skips_on_record
+    from promptpotter.application.runner.measurement import _skips_on_record
     from promptpotter.infrastructure.ledger import CycleEventLog
 
     ledger = CycleEventLog(tmp_path / "ledger.jsonl")
-    for cid, n, reason in (("a", 3, "skip"), ("b", 2, "skip"), ("b", 8, ""), ("c", 4, "skip")):
-        scores = {"candidate_id": cid, "scored_samples": n, "partial_reason": reason}
+    for cid, n, reason in (
+        ("a", 3, "skipped"),
+        ("b", 2, "skipped"),
+        ("b", 8, "measured"),
+        ("c", 4, "skipped"),
+    ):
+        scores = {"candidate_id": cid, "scored_samples": n, "outcome": reason}
         ledger.append(SnapshotRecord(event="candidate_scored", round=2, payload={"scores": scores}))
     assert _skips_on_record(ledger, 2) == {"a": 3, "c": 4}
     replayed = await _walk(dataset, armed=4, max_cells=4, cut_at=None, skip_at=3)

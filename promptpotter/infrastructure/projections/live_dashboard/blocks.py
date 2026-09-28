@@ -11,7 +11,7 @@ from promptpotter.domain.dashboard_rows import (
     SampleStatus,
     sample_status,
 )
-from promptpotter.domain.results import candidate_label
+from promptpotter.domain.results import ArmOutcome, candidate_label
 from promptpotter.domain.scoring import is_verifier_graded
 from promptpotter.infrastructure.projections.live_dashboard.state import PobbBlock
 from promptpotter.shared.composite import inline_short_formula_values
@@ -117,8 +117,8 @@ def build_candidate_rows(buffer: RoundBuffer) -> list[DashboardCandidate]:
 
     ``scores`` is the ``candidate_scored`` report, folded onto by the election; before it lands, ``running`` is the
     gateway's own per-sample fold. Both carry the composite CI, so the whisker widens with the bar. The ``or`` between
-    them is a PRECEDENCE, not two spellings of one thing — only ``scores`` carries ``label``, ``candidate_id``,
-    ``invalid`` and ``partial_reason``. ``label`` is canonical — display sites read it verbatim, and no ``idx + 1``
+    them is a PRECEDENCE, not two spellings of one thing — only ``scores`` carries ``label``, ``candidate_id``
+    and ``outcome``. ``label`` is canonical — display sites read it verbatim, and no ``idx + 1``
     arithmetic exists."""
     rows: list[DashboardCandidate] = []
     for idx in sorted(buffer.candidates.keys()):
@@ -136,7 +136,7 @@ def build_candidate_rows(buffer: RoundBuffer) -> list[DashboardCandidate]:
                 or next((s["run_id"] for s in samples if s.get("run_id")), None),
                 accuracy=served.get("accuracy"),
                 composite_fitness=served.get("composite_fitness"),
-                invalid=bool(served.get("invalid", False)),
+                outcome=served.get("outcome"),
                 scored_samples=int(served.get("scored_samples") or len(samples)),
                 cached_samples=int(
                     cached if cached is not None else sum(1 for s in samples if s.get("cached"))
@@ -154,7 +154,6 @@ def build_candidate_rows(buffer: RoundBuffer) -> list[DashboardCandidate]:
                 changes_description=(
                     cand.get("changes_description") or served.get("changes_description") or ""
                 ),
-                partial_reason=served.get("partial_reason") or "",
                 mean_fitness_ci_lo=served.get("mean_fitness_ci_lo"),
                 mean_fitness_ci_hi=served.get("mean_fitness_ci_hi"),
                 # Everything below lands at `l1_score:exit`, folded in by `RoundBuffer.stamp_fit`
@@ -217,7 +216,7 @@ def build_l1_score_block(
                 "composite_fitness_formula_short": inline_short_formula_values(
                     short_formula_template, dict(served.get("evaluators") or {})
                 ),
-                "invalid": served.get("invalid", False),
+                "invalid": served.get("outcome") == ArmOutcome.INVALID,
                 "validation_failures": served.get("validation_failures") or [],
                 "samples": [row.model_dump() for row in rows],
                 # The tape BESIDE the rows, never instead of them: the browser reads `samples`,

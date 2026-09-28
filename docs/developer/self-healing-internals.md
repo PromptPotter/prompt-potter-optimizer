@@ -30,7 +30,7 @@ Storage stays four typed lists (+ `l3_note`); **rendering collapses to two owner
 | **Nurse prompt slot** | `{{l1_wounds}}` | `{{l1_wounds}}` | (whole `l3_plan` template) | `{{guard_breaches}}` |
 | **Renderer** | `_r_l1_wounds` | `_r_l1_wounds` | `_r_l1_wounds` | `_r_guard_breaches` |
 | **Nurse's writeback** | L1 re-proposes a valid override | L1 retunes the node config · or operator trims schema/model | `cycle.opt_sp.plan` | `cycle.opt_sp.plan` |
-| **Score effect** | synthetic 0 (Path 1 in `conclude_candidate`) | real score, candidate eliminated mid-eval | none | none — fires after L2 ran |
+| **Score effect** | synthetic 0 (`runner/measurement.py::_conclude_candidate`) | real score, candidate eliminated mid-eval | none | none — fires after L2 ran |
 
 ## Wound 1 — what trips the validator
 
@@ -40,12 +40,12 @@ Storage stays four typed lists (+ `l3_note`); **rendering collapses to two owner
 
 ## Wound 2 — two paths, and why ACCUMULATED is the signal
 
-`DegradationCheck` fires on either path, both producing `EscalationSignal(target=ELIMINATE_CANDIDATE)`:
+`DegradationCheck` fires on either path, both producing `StopSignal(outcome=BROKEN)`:
 
 1. **Fatal-code fast path.** `classify_result()` derives a fatal code from raw response shape. One sighting ends the candidate; bypasses `min_samples`/`threshold`.
 2. **Rate-based.** After `min_samples=3`, if `degraded_rate >= 0.4`, eliminate.
 
-`score_population` synthesises `RuntimeFailure(source, dominant_warning, warning_types, degraded_rate, …)` from the check plus the observed pipeline_params, then continues with the next candidate. End-of-round, `execute_round` mirrors new records onto the cycle's list, deduplicated by `(source, dominant_warning, observed_config)`, and never clears them — they represent discovered runtime constraints.
+The measurement (`scoring/candidate_report.py::read_breakage`) synthesises `RuntimeFailure(source, dominant_warning, warning_types, degraded_rate, …)` from the check plus the observed pipeline_params, then continues with the next candidate. End-of-round, `Cycle.absorb_round` mirrors new records onto the cycle's list, deduplicated by `(source, dominant_warning, observed_config)`, and never clears them — they represent discovered runtime constraints.
 
 `_r_l1_wounds()` partitions the runtime block into NEW (this round) vs ACCUMULATED (`first_seen_round != current_round`) and tags each entry `[owner=l1|operator]`. **ACCUMULATED is the real signal** — a surviving item means L2's prior angle didn't take. If it keeps growing, Wound 3 takes over.
 
@@ -96,14 +96,14 @@ A fatal code is deterministic for the whole config — one sighting proves the c
 
 Three load-boundary effects, consumed via `is_deprecated()`: `DegradationCheck` eliminates the candidate on first sighting; `open_walk` splits deprecated entries off `archive_queries.reusable_results` (`_split_off_deprecated_samples`) so fatal entries are evicted from cache and re-measured with `retry_of_deprecated_cache=True`; and `_compute_accuracy` partitions deprecated rows into their own count, out of `hits`, `total`, `errors` and the accuracy denominator.
 
-This is a load-boundary filter, not a score-time fallback: trace records are still archived for forensic value, and only cache reuse and primary-stat aggregation are blocked. Sanctioned alongside the `score_population()` validation-failure synthetic-0 — see [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#deprecated-samples).
+This is a load-boundary filter, not a score-time fallback: trace records are still archived for forensic value, and only cache reuse and primary-stat aggregation are blocked. Sanctioned alongside the measurement's validation-failure synthetic-0 — see [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#deprecated-samples).
 
 ## Adding a new mechanism
 
 Pick the storage stream by detector + score-effect; the owner falls out of the record type, so you never wire a nurse by hand.
 
 - New gen-time check on L1's output → **Wound 1**. Add a validator next to `L1_SCHEMA_COMPLIANCE`.
-- New runtime measurement pointing at a candidate config region → **Wound 2**. Add a check that emits `RuntimeFailure` from `l1/score/signal_effect.py`; stamp `owner=NurseOwner.L1` when L1 can retune it, `owner=NurseOwner.OPERATOR` when only the operator can.
+- New runtime measurement pointing at a candidate config region → **Wound 2**. Add a check that emits `RuntimeFailure` from `scoring/candidate_report.py::read_breakage`; stamp `owner=NurseOwner.L1` when L1 can retune it, `owner=NurseOwner.OPERATOR` when only the operator can.
 - New strategic-stall trigger → **Wound 3** isn't a registry; it's the patience timer.
 - New post-parse check on L2/L3's output → **Wound 4**. L3's side has a registry (`L3_OUTPUT_VALIDATORS`, `validators/l3_output.py`); L2's is the layout check itself (`domain/l1_layout.py::validate_l1_layout`) — there is no `L2_OUTPUT_VALIDATORS` to append to, so a new L2 check means extending that validator or standing a registry up.
 

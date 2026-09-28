@@ -154,9 +154,9 @@ responses. A sound round can carry a pinned arm, and a pinned arm can sit on a s
 
   **The question this state makes unanswerable — "is the round-N winner better than C0?" — has its
   own answer, and it is not θ.** `RoundResult.overlap` (`domain/results.py::OverlapReading`) reads
-  C0 and every winner since on the ORIGIN PANEL (`domain/results.py::origin_panel`) — cells the
-  origin answered, fixed for the life of the cycle, each winner topped up onto them at its own
-  election. Fixed because a set re-chosen from what the line happened to share CONTRACTED as the
+  C0 and each individual the bench has since ranked best (`domain/results.py::best_line`, the
+  same line for every optimizer) on the ORIGIN PANEL (`domain/results.py::origin_panel`) — cells the
+  origin answered, fixed for the life of the cycle, each new best topped up onto them once. Fixed because a set re-chosen from what the line happened to share CONTRACTED as the
   line grew, so consecutive rounds' bars answered different questions and a winner that shared
   too little simply had no bar. It is a rate, not an ability, so it needs
   no ruler and no adjustment — which is the point: it is what remains readable when the scale
@@ -391,8 +391,8 @@ campaign owns it, and `GET /datasets/{name}/cells?scope=dataset` folds it from t
 
 - Acquisition score — `intelligence/adaptive_queue_mechanism.py::pick_value` (with
   `::decision_information_gain` + `::delta_learning_gain`).
-- Round order — `::build_round_order`, called once per round at
-  `optimization/l1/score/loop.py::score_population`.
+- Round order — `::build_round_order`, called once per round by potter's sampler
+  (`optimizers/potter/members.py::AdaptiveQueue.draw`).
 - Between-round subset pick — `intelligence/exploration.py::select_round_subset`, off the LOCKED
   ruler (still **1PL**: feeding graduated discrimination `aₛ` in here is open,
   [`../specs/roadmap.md`](../specs/roadmap.md) § Fitness comparability).

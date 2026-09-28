@@ -273,9 +273,10 @@ def _wheel_problem(wheel: Path, *, expect_webapp: bool) -> tuple[str | None, int
     # A tree-level probe would pass on a glob that ships one of its three files.
     required = {
         "assets/benchmarks": "promptpotter/assets/benchmarks/",
-        "assets/optimizer/*.yaml": "promptpotter/assets/optimizer/pipeline.yaml",
-        "assets/optimizer/*.json": "promptpotter/assets/optimizer/resolved_schemas.json",
-        "assets/optimizer/sets/*.yaml": "promptpotter/assets/optimizer/sets/self_optimizing.yaml",
+        "assets/optimizers/*/*.yaml": "promptpotter/assets/optimizers/potter/pipeline.yaml",
+        "assets/optimizers/*/*.json": "promptpotter/assets/optimizers/potter/resolved_schemas.json",
+        "assets/checkin/*.yaml": "promptpotter/assets/checkin/pipeline.yaml",
+        "assets/checkin/*.json": "promptpotter/assets/checkin/resolved_schemas.json",
     }
     if expect_webapp:
         required["assets/webapp"] = "promptpotter/assets/webapp/index.html"

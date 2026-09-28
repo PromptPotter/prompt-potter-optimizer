@@ -15,14 +15,18 @@ from promptpotter.application.datasets.loaders import resolve_dataset_items, sam
 from promptpotter.application.datasets.prompts import has_dataset_prompts, load_node_prompt
 from promptpotter.application.initialization.loop_start import populate_session_scoring
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.optimization.l1.population import INVALID_SCORES, build_score_report
-from promptpotter.application.optimization.l1.score.signal_effect import is_transient_scoring_abort
 from promptpotter.application.optimization.task_context import committed_task_context
 from promptpotter.application.pipeline_resolve import (
     experiment_outside_run,
     resolve_pipeline_config_params,
 )
 from promptpotter.application.runner.campaign_ids import build_origin_cycle_id
+from promptpotter.application.scoring.candidate_report import (
+    INVALID_SCORES,
+    build_score_report,
+    is_transient_scoring_abort,
+    walk_outcome,
+)
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.bench import partition_bank
@@ -32,7 +36,12 @@ from promptpotter.domain.opt_search_point import ORIGIN_SOURCE, IndividualLineag
 from promptpotter.domain.phases import CampaignPhase, emit_phase
 from promptpotter.domain.pipeline_overlay import overlay_is_locked_axis_only
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.results import ReferenceReading, ScoredCandidate, candidate_label
+from promptpotter.domain.results import (
+    ArmOutcome,
+    ReferenceReading,
+    ScoredCandidate,
+    candidate_label,
+)
 from promptpotter.domain.run_records import CandidateMintedRecord, CycleSeed
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
@@ -123,6 +132,7 @@ async def rescore_parent(
             label=cycle.rounds[-1].label,
             sp_hash=tr.current_sp.sp_hash(session.pipeline_schema),
             run_id=scored.run_id,
+            outcome=walk_outcome(scored),
         ),
     )
 
@@ -316,6 +326,7 @@ async def establish_campaign_origin(
                 # No rows for an id to address.
                 sp_hash="",
                 run_id=None,
+                outcome=ArmOutcome.MEASURED,
             ),
             origin_results=None,
             framing=framing,
@@ -412,6 +423,7 @@ async def establish_campaign_origin(
             label=candidate_label(0, 0),
             sp_hash=sp.sp_hash(pipeline_schema),
             run_id=scored.run_id,
+            outcome=walk_outcome(scored),
             resolved_pipeline_params=sp.config_params,
         )
         listener.on_candidate_scored(0, 1, report.model_dump())

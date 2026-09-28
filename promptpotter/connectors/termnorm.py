@@ -269,14 +269,10 @@ CONNECTOR = Connector(
         "token_matching": NodeType.CANDIDATE_SOURCE,
         "fuzzy_matching": NodeType.CANDIDATE_SOURCE,
     },
-    # R4: connector-owned seed for ``campaign.json::optimization``. The required
-    # thresholds mirror ``datasets/gsm8k/campaign.json``. (``n_variants`` is the
-    # round candidate count, NOT a single-request size lever — the optimizer-LLM
-    # TPM relief comes from the OpenRouter optimizer default, not from this.)
-    default_optimization=(
-        ("n_variants", 3),
-        ("degradation_threshold", 0.4),
-    ),
+    # R4: connector-owned seed for ``campaign.json::optimization`` — the bench's required
+    # threshold, mirroring ``datasets/gsm8k/campaign.yaml``. An optimizer's knobs are its
+    # manifest's, so a connector seeds none.
+    default_optimization=(("degradation_threshold", 0.4),),
     # The MENU, which is not the same question as the origin's model below: this is what a
     # tenant may pick from, that is where they start. Without it the committed pipeline.yaml
     # carries no `available_models` and the check-in's model list has zero options — so an

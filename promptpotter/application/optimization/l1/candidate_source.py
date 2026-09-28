@@ -5,10 +5,6 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-    optimizer_model,
-    optimizer_node_config,
-)
 from promptpotter.application.optimization.l1.critique import ensure_prior_critique
 from promptpotter.application.optimization.l1.generate import (
     candidate_summaries,
@@ -45,9 +41,10 @@ async def generate_or_load_candidates(
     # Cap n_variants at 3× config so L2 can't blow up the round budget.
     opt = config.optimization
     opt_params = cycle.memory.l1_overrides
-    _n_variants = min(opt_params.get("n_variants", opt.n_variants), opt.n_variants * 3)
+    n_variants = cycle.knobs.l1_generate.n_variants
+    _n_variants = min(opt_params.get("n_variants", n_variants), n_variants * 3)
     _creativity = opt_params.get(
-        "creativity", float(optimizer_node_config("l1_generate")["temperature"])
+        "creativity", float(cycle.optimizer.node_config("l1_generate")["temperature"])
     )
     prompt_preview = cycle.opt_sp.render()[:120]
 
@@ -77,7 +74,7 @@ async def generate_or_load_candidates(
         prompt_preview=prompt_preview,
         n_variants=_n_variants,
         creativity=_creativity,
-        model=optimizer_model(),
+        model=cycle.optimizer.model(),
         has_l1_critique=(
             bool(cycle.rounds[-1].optimizer_state.payload.critique) if cycle.rounds else False
         ),

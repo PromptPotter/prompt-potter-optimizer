@@ -28,7 +28,6 @@ from promptpotter.application.scoring.sample_measurement import (
     execute_stale_data_protocol as _execute_stale_data_protocol,
 )
 from promptpotter.domain.backend import BackpressureReading
-from promptpotter.domain.escalation_signals import EscalationSignal
 from promptpotter.domain.phases import (
     REFUSAL_STOPS,
     STOP_REASON_INFO,
@@ -38,7 +37,7 @@ from promptpotter.domain.phases import (
 )
 from promptpotter.domain.scoring import CellScorer, QueryMeasurement, is_hit
 from promptpotter.domain.spend import StepTokenUsage
-from promptpotter.domain.validators import StopRule
+from promptpotter.domain.validators import StopRule, StopSignal
 from promptpotter.infrastructure.llm.spend_book import SendBound, bound_spend_book
 from promptpotter.infrastructure.runtime_flags import effective_lookahead
 from promptpotter.shared.errors import (
@@ -176,10 +175,10 @@ class FlightGauge:
 class QueryLoopResult:
     results: list[QueryMeasurement]
     completed: bool = True
-    # "skip" (operator early-abort: accept partial, cycle continues) | "escalation" | abort reason.
+    # "skip" (operator early-abort: accept partial, cycle continues) | "stop_rule" | abort reason.
     # A pause or a budget stop is raised, never returned.
     stop_reason: str | None = None
-    escalation_signal: EscalationSignal | None = None
+    stop_signal: StopSignal | None = None
 
 
 _BOLD_MARKER_RE = re.compile(r"\*\*[^*]+\*\*")
@@ -367,8 +366,8 @@ LaunchEvent = tuple[str, int, int, int, int, int | None]
 
 @dataclass
 class Walk:
-    """One search point's pass over its panel, in the order GIVEN — ``score_population`` reorders
-    the round's panel once, so walking it as-given IS the round order. Passive: :func:`run_walks`
+    """One search point's pass over its panel, in the order GIVEN — the sampler orders the
+    round's panel once, so walking it as-given IS the round order. Passive: :func:`run_walks`
     launches its cells, takes them in walk order and decides it, so every walk of a phase answers
     to one loop and no walk reads another's state across an await.
 
@@ -505,8 +504,8 @@ class Walk:
                 return QueryLoopResult(
                     self.results,
                     completed=False,
-                    stop_reason="escalation",
-                    escalation_signal=signal,
+                    stop_reason="stop_rule",
+                    stop_signal=signal,
                 )
         return QueryLoopResult(self.results) if len(self.results) == self.n else None
 
@@ -572,8 +571,8 @@ class Walk:
         self.outcome = outcome
         if self.running or self.finished:
             cause = "the phase ended" if outcome is None else (outcome.stop_reason or "complete")
-            if outcome is not None and outcome.escalation_signal is not None:
-                cause = f"{cause}: {outcome.escalation_signal.check_name}"
+            if outcome is not None and outcome.stop_signal is not None:
+                cause = f"{cause}: {outcome.stop_signal.check_name}"
             logger.info(
                 "Discarding %d look-ahead acquisition(s) after query %d/%d (%s).",
                 len(self.running) + len(self.finished),
@@ -598,15 +597,14 @@ async def run_walks(
     *,
     backfills: CatchUps | None = None,
     on_turn: Callable[[int], None] | None = None,
-    on_decided: Callable[[int], bool] | None = None,
+    on_decided: Callable[[int], None] | None = None,
 ) -> None:
     """Drive a scoring phase: every walk measures at once, and they are taken and decided one at a
     time, in order, so every row, cut, prior and event lands where a serial phase lands it.
 
     Only the walk whose TURN it is takes cells, answers a skip and is decided. ``on_turn(i)`` opens
     its turn before its held launches are released; ``on_decided(i)`` runs once it is decided, before
-    the next turn opens, and returning ``True`` ends the phase. A ``None`` walk has nothing to measure
-    and is decided on its turn.
+    the next turn opens. A ``None`` walk has nothing to measure and is decided on its turn.
 
     **The depth bounds every call the phase has out** — its cells, the PoBB catch-ups that pair
     them, and discarded calls still winding down — which a whole inner campaign per call makes a
@@ -661,13 +659,13 @@ async def run_walks(
                 if walk.dataset:
                     return True
                 walk.end(QueryLoopResult([]), cancel=cancels)
-            if on_decided is not None and on_decided(turn):
-                return False
+            if on_decided is not None:
+                on_decided(turn)
 
     def decide(walk: Walk, verdict: QueryLoopResult) -> bool:
         draining.update(walk.end(verdict, cancel=cancels))
-        if on_decided is not None and on_decided(turn):
-            return False
+        if on_decided is not None:
+            on_decided(turn)
         return advance()
 
     def fill(walk: Walk, cap: int, armed: int) -> None:
@@ -821,7 +819,7 @@ async def run_walks(
 
             # Re-read every step, so a press landing mid-walk TOPS THE WINDOW UP rather than waiting
             # for it to drain. Nothing is spent here: the round that scored under the depth spends
-            # it (`l1/score/winner.py`).
+            # it (`runner/measurement.py`).
             if not stopping:
                 if backfills is not None:
                     room = min(armed - out(), affordable())

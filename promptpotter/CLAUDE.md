@@ -39,5 +39,5 @@ Each subpackage's `CLAUDE.md` auto-loads by directory proximity and **deepest wi
 ## Owned elsewhere
 
 - **The L1 / L2 / L3 agent contracts** — owned by [`application/optimization/CLAUDE.md`](application/optimization/CLAUDE.md), beside the code they govern.
-- **Layer-import rule** — owned by [`application/CLAUDE.md`](application/CLAUDE.md) § Layer rule. `application/intelligence/` may not import `application/optimization/`.
+- **Layer-import rule** — owned by [`application/CLAUDE.md`](application/CLAUDE.md) § Layer rule. `application/intelligence/` may not import `application/optimization/`, and the round spine may not import an optimizer.
 - **Info-flow: channels, signal routing, the rendered wound signals** — owned by [`../docs/developer/dispatch-hub.md`](../docs/developer/dispatch-hub.md).

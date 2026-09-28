@@ -69,7 +69,7 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
 
 - **Optimizer model repair-rate on heavy L2/L3 structured output — unmeasured.** What is owed is the
   measurement: a live cycle reaching L3, read under the model
-  `promptpotter/assets/optimizer/pipeline.yaml` currently pins — read it off that file, never off
+  `promptpotter/assets/optimizers/potter/pipeline.yaml` currently pins — read it off that file, never off
   this entry. **Rides with:** the next supervised campaign that escalates. The run is the expensive
   part and someone is already paying for it; this is a read of what it wrote. **Re-test:** whoever
   supervises that run, asked what share of its L2/L3 optimizer calls needed a parse repair — a

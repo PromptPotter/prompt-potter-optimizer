@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
+import yaml
 from pydantic import ValidationError
 
 from promptpotter.application.campaign_config import load_campaign_config as _load_cfg
@@ -95,17 +96,18 @@ _SET_ALIAS: dict[str, str] = {
 }
 
 # The campaign-config knobs are NOT patch fields — they ride the patch's one
-# ``optimization_overrides`` dict, shallow-merged and validated by ``plan_draft_patch`` exactly as
-# the web Advanced block's are. Derived from the model, never hand-listed. ``mechanisms`` is nested
-# and has no flat string form.
-_SET_KNOBS: frozenset[str] = frozenset(OptimizationOverrides.model_fields) - {"mechanisms"}
+# ``optimization_overrides`` dict, merged and validated by ``plan_draft_patch`` exactly as the web
+# Advanced block's are. Derived from the model, never hand-listed. ``nodes`` is nested, so a node's
+# knob is spelled ``nodes.{node}.{knob}=VALUE``.
+_NODES = "nodes"
+_SET_KNOBS: frozenset[str] = frozenset(OptimizationOverrides.model_fields) - {_NODES}
 
 # What a `FIELD=VALUE` can name: every scalar the patch declares, under its CLI spelling.
 _SET_FIELDS: frozenset[str] = (SETTABLE_SCALARS - set(_SET_ALIAS.values())) | set(_SET_ALIAS)
 
 
 def _settable() -> str:
-    return ", ".join(sorted(_SET_FIELDS | _SET_KNOBS))
+    return ", ".join([*sorted(_SET_FIELDS | _SET_KNOBS), f"{_NODES}.<node>.<knob>"])
 
 
 def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
@@ -120,6 +122,11 @@ def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
         field, raw = (part.strip() for part in item.split("=", 1))
         if field in _SET_KNOBS:
             knobs[field] = raw
+        elif field.startswith(f"{_NODES}.") and field.count(".") == 2:
+            _, node, knob = field.split(".")
+            # A node's knob is typed by its member, so the value is read as YAML — `0.3`, `true`.
+            config = knobs.setdefault(_NODES, {}).setdefault(node, {"config": {}})["config"]
+            config[knob] = yaml.safe_load(raw)
         elif field in _SET_FIELDS:
             patch_raw[_SET_ALIAS.get(field, field)] = raw
         else:

@@ -78,7 +78,7 @@ STANDARD_EFFORT_LADDER: tuple[str, ...] = ("none", "default", "low", "medium", "
 set. Narrowed only by measured ``refuses_efforts``. It REPLACES whatever a node declared, because
 the node's list is a default authored before anyone knew which model would run there; a CAMPAIGN's
 narrowing intersects instead (``PipelineSchema.param_options``).
-``assets/optimizer/pipeline.yaml`` lists exactly these five; a YAML cannot import a constant, so
+``assets/optimizers/potter/pipeline.yaml`` lists exactly these five; a YAML cannot import a constant, so
 that file cites this one by name."""
 
 

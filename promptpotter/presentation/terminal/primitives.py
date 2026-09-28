@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.domain.escalation_signals import INVARIANT_REASONS
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.results import resolved_fitness, scoreboard_rank_key
+from promptpotter.domain.results import ArmOutcome, resolved_fitness, scoreboard_rank_key
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -200,7 +200,7 @@ def _scoreboard(
             s.accuracy,
             s.theta,
             is_selected=s.label == winner_label,
-            is_partial=bool(s.partial_reason),
+            is_partial=s.outcome is ArmOutcome.SKIPPED,
         ),
         reverse=True,
     )
@@ -225,9 +225,8 @@ def _scoreboard(
         row_parent = s.reference_accuracy
         delta = acc - row_parent if row_parent is not None and acc is not None else None
         delta_str = f"{delta:+.1%}" if delta is not None and abs(delta) >= 0.001 else "---"
-        aborted = s.escalation_aborted
-        if aborted:
-            winner_mark = f"  {YELLOW}(aborted){RESET}"
+        if s.outcome.cut_short:
+            winner_mark = f"  {YELLOW}({s.outcome}){RESET}"
         elif label == winner_label:
             winner_mark = f"  {GREEN}{BOLD}*{RESET}"
         else:

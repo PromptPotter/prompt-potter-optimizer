@@ -2,6 +2,7 @@
 
 export type {
   AbilityReading,
+  ArmOutcome,
   ArchiveReport,
   ActiveSessionResponse,
   CampaignListResponse,
@@ -101,9 +102,9 @@ export type {
   ForkPreviewResponse,
   MachineHolder,
   MachineStatusResponse,
-  MechanismGroup,
-  MechanismSchemaResponse,
-  MechanismToggle,
+  KnobRow,
+  NodeKnobs,
+  OptimizerKnobsResponse,
   MeResponse,
   OriginEntry,
   OriginListResponse,

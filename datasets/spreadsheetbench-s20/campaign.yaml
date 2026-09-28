@@ -14,8 +14,14 @@ campaign_config:
     per_cell: max(0.0, min(1.0, fitness * 56844.0 / (56844.0 + 0.5 * max(0.0, tokens - 56844.0))))
   optimization:
     max_rounds: 6
-    n_variants: 2
-    l1_patience: 3
     degradation_threshold: 0.4
     # The ceiling the operator set for the six-round Qwen campaign on s10.
     spend_budget_usd: 7.50
+    # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
+    nodes:
+      l1_generate:
+        config:
+          n_variants: 2
+      escalation:
+        config:
+          l1_patience: 3

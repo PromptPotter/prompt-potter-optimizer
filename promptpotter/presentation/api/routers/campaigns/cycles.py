@@ -13,10 +13,10 @@ from promptpotter.application.mask.divergence import Verdict, find_divergences
 from promptpotter.application.mask.load import load_mask_record, parse_sample_ids
 from promptpotter.application.mask.record import MaskRecord
 from promptpotter.application.mask.verdicts import make_abort_verdict, make_scoring_verdict
+from promptpotter.application.optimization.pobb.checks import ABORT_LENS_LABELS, EliminationGate
 from promptpotter.application.scoring.formula import compile_round_scorer
 from promptpotter.application.scoring.metrics import value_with_mask_applied
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop, CyclePath, WorkspaceDir
-from promptpotter.domain.results import ABORT_LENS_LABELS, EliminationGate
 from promptpotter.domain.scoring import RoundScorer
 from promptpotter.infrastructure.projections.live_dashboard.projection import fold_at
 from promptpotter.infrastructure.projections.live_dashboard.state import (

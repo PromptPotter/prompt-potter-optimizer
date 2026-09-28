@@ -18,32 +18,16 @@ from promptpotter.application.optimization.validators.l1_strict import (
     L1_SCHEMA_COMPLIANCE,
 )
 from promptpotter.application.pipeline_resolve import apply_node_overlay
-from promptpotter.application.scoring.evaluators import materialize_row_derivable
 from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.results import (
-    CandidateProposal,
-    DegradationContext,
-    EliminationContext,
-    ScoredCandidate,
-    is_floor_pinned,
-)
-from promptpotter.domain.ruler import ThetaCaveat
-from promptpotter.domain.spend import TokenAccount
+from promptpotter.domain.results import CandidateProposal
 
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "INVALID_SCORES",
-    "build_score_report",
-    "fatal_validation_failures",
-    "merge_pipeline_params",
-    "parse_population",
-    "pobb_decision_data",
-]
+__all__ = ["merge_pipeline_params", "parse_population"]
 
 
 def merge_pipeline_params(
@@ -155,113 +139,3 @@ def parse_population(
         opt_sp_list.append(opt_sp)
         merged.append(merged_pp)
     return opt_sp_list, merged
-
-
-def build_score_report(
-    opt_sp: OptSearchPoint,
-    validation_failures: Sequence[ValidationFailure],
-    pipeline_overlay: dict[str, Any] | None,
-    score_summary: dict[str, Any],
-    query_results: list[Any],
-    dataset: list[Any],
-    *,
-    label: str,
-    sp_hash: str,
-    run_id: str | None,
-    resolved_pipeline_params: dict[str, Any] | None = None,
-    aborted: bool = False,
-    elimination_stopped: bool = False,
-    elimination_context: EliminationContext | None = None,
-    degradation_context: DegradationContext | None = None,
-    invalid: bool = False,
-    new_runtime_failure: RuntimeFailure | None = None,
-) -> ScoredCandidate:
-    """Typed candidate score report. The CI is CARRIED from the gateway's own fold
-    (`search_point_scorer::_composite`), never re-derived here — one writer, one band, and the
-    same band the live row already showed. ``sp_hash`` is the scored searchpoint's own
-    ``sp_hash(session.pipeline_schema)`` — the call ``build_dataset_run_data`` makes to key the
-    rows — so the report and the archive name one identity; ``""`` where nothing was measured.
-    ``run_id`` is the walk's own (``ScoredWalk.run_id``), ``None`` where nothing was walked."""
-    evaluators = dict(score_summary.get("evaluators") or {})
-    # Refresh the row-derivable subset from the rows, as the read-side mask does (`mask/load.py`):
-    # on a RECONSTRUCT-from-disk path — resume repair, an origin replayed off its round file — the
-    # snapshot carries whatever evaluator vocabulary was current when it was written, so a formula
-    # naming a term added since halts on a name its own rows can answer. No row-derivable evaluator
-    # namespaces by node, so a bare name cannot shadow a `{node}_{name}` one. An EMPTY snapshot is
-    # an invalid / force-zeroed candidate and stays empty rather than acquiring a real accuracy.
-    if evaluators.get("accuracy") is not None and query_results:
-        evaluators.update(materialize_row_derivable(query_results))
-    return ScoredCandidate(
-        mean_fitness_ci_lo=score_summary.get("mean_fitness_ci_lo"),
-        mean_fitness_ci_hi=score_summary.get("mean_fitness_ci_hi"),
-        # Decided HERE, from the rows, rather than beside the θ it qualifies: this is the one
-        # `ScoredCandidate` construction site, so stamping it at the election would miss round 0,
-        # which holds no election fit — and an ORIGIN at 0.0 on every cell is the instance that
-        # matters most, since every later round's lift is measured against it.
-        theta_caveat=ThetaCaveat.FLOOR_PINNED if is_floor_pinned(query_results) else None,
-        candidate_id=opt_sp.lineage.id,
-        label=label,
-        changes_description=opt_sp.lineage.changes_description or "",
-        pipeline_overlay=pipeline_overlay,
-        resolved_pipeline_params=resolved_pipeline_params,
-        sp_hash=sp_hash,
-        run_id=run_id,
-        prompt_fields=opt_sp.prompt_field_dict(),
-        accuracy=score_summary["accuracy"],
-        composite_fitness=score_summary["composite_fitness"],
-        total=score_summary["total"],
-        evaluators=evaluators,
-        escalation_aborted=aborted,
-        elimination_stopped=elimination_stopped,
-        scored_samples=len(query_results),
-        expected_samples=len(dataset),
-        cached_samples=sum(1 for r in query_results if r.get("cached")),
-        # Folded HERE, beside the replay count it is the peer of, so the two readings of "what did
-        # this searchpoint cost to measure" come off one walk of one list.
-        input_tokens=measured.input
-        if (measured := TokenAccount.from_measured_rows(query_results))
-        else None,
-        output_tokens=measured.output if measured else None,
-        cache_read_tokens=measured.cache_read if measured else None,
-        partial_reason=str(score_summary.get("partial_reason", "")),
-        invalid=invalid,
-        validation_failures=list(validation_failures),
-        runtime_failures=[new_runtime_failure] if new_runtime_failure else [],
-        elimination_context=elimination_context or {},
-        degradation_context=degradation_context or {},
-    )
-
-
-def pobb_decision_data(
-    candidate_score: dict[str, Any],
-    *,
-    candidate_sample_ids: list[str] | None = None,
-    prior_histories: dict[str, dict[str, float]] | None = None,
-) -> dict[str, Any]:
-    """Archival data for PoBB decisions — the per-prior per-sample GRADED responses ARE the snapshot at decision time,
-    so replay re-fits θ from exactly these without crawling prior rounds."""
-    return {
-        "p_best": float(candidate_score.get("p_best", 0.0)),
-        "leader_id": str(candidate_score.get("leader_id", "")),
-        "paired_breakdown": dict(candidate_score.get("paired_breakdown") or {}),
-        "candidate_sample_ids": list(candidate_sample_ids or []),
-        "prior_histories": dict(prior_histories or {}),
-    }
-
-
-INVALID_SCORES: dict[str, Any] = {
-    "accuracy": 0.0,
-    "composite_fitness": 0.0,
-    "total": 0,
-    "errors": 0,
-    "invalid": True,
-}
-
-
-def fatal_validation_failures(failures: Sequence[ValidationFailure]) -> list[ValidationFailure]:
-    """The failures that cost a candidate its measurement, as opposed to riding along as signal.
-
-    ``hallucinated_node`` is the one non-fatal reason — the phantom edit is stripped and the real
-    edits still ran. One definition, because the scorer and the yield count must agree on which
-    candidates measured."""
-    return [vf for vf in failures if vf.reason != "hallucinated_node"]

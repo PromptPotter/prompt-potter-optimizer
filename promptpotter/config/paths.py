@@ -68,17 +68,30 @@ def default_jobs_dir() -> Path:
     return user_data_root() / "jobs"
 
 
-def optimizer_assets_root() -> Path:
-    """Install content: the optimizer's own pipeline + optimizer prompt sets. Install-global by
-    contract (``stable-api.md`` §3), so they ship in the wheel and are not the operator's tier."""
-    return PACKAGE_ROOT / "assets" / "optimizer"
+def optimizers_root() -> Path:
+    """Install content: one directory per optimizer manifest. Ships in the wheel and is not the
+    operator's tier (``stable-api.md`` §3)."""
+    return PACKAGE_ROOT / "assets" / "optimizers"
 
 
-def optimizer_pipeline_path() -> Path:
-    """The optimizer's node manifest, tenant-first then install — the ONE file under
-    ``assets/optimizer/`` an operator owns, so this shadows a FILE and never the directory."""
-    override = user_data_root() / "optimizer" / "pipeline.yaml"
-    return override if override.is_file() else optimizer_assets_root() / "pipeline.yaml"
+def checkin_assets_root() -> Path:
+    return PACKAGE_ROOT / "assets" / "checkin"
+
+
+def _shadowed(relative: Path, shipped: Path) -> Path:
+    # A FILE, never its directory: the generated schema registry beside the manifest is ours.
+    override = user_data_root() / relative
+    return override if override.is_file() else shipped
+
+
+def optimizer_manifest_path(name: str) -> Path:
+    return _shadowed(
+        Path("optimizers") / name / "pipeline.yaml", optimizers_root() / name / "pipeline.yaml"
+    )
+
+
+def checkin_manifest_path() -> Path:
+    return _shadowed(Path("checkin") / "pipeline.yaml", checkin_assets_root() / "pipeline.yaml")
 
 
 def env_file_path() -> Path:
@@ -113,10 +126,12 @@ __all__ = [
     "DEFAULT_PROJECTS_ROOT",
     "PACKAGE_ROOT",
     "benchmark_datasets_root",
+    "checkin_assets_root",
+    "checkin_manifest_path",
     "default_jobs_dir",
     "env_file_path",
-    "optimizer_assets_root",
-    "optimizer_pipeline_path",
+    "optimizer_manifest_path",
+    "optimizers_root",
     "source_checkout_root",
     "user_data_root",
     "webapp_static_root",

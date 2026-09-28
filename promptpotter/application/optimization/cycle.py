@@ -31,6 +31,8 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     compute_optimizer_prompt_hashes,
 )
 from promptpotter.application.optimization.escalation.state import EscalationFSM
+from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
+from promptpotter.application.optimizers.potter.knobs import PotterKnobs, potter_knobs
 from promptpotter.application.scoring.metrics import _compute_accuracy
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.cycle_paths import CycleDir
@@ -505,7 +507,9 @@ class Cycle:
                         memory,
                         l1_yield=1.0,
                         l1_parse_failure=None,
-                        optimizer_prompt_hashes=compute_optimizer_prompt_hashes(),
+                        optimizer_prompt_hashes=compute_optimizer_prompt_hashes(
+                            select_optimizer(config.optimization)
+                        ),
                     ),
                 )
             ],
@@ -530,6 +534,16 @@ class Cycle:
     @property
     def origin_round(self) -> RoundResult:
         return self.rounds[0]
+
+    @property
+    def optimizer(self) -> SelectedOptimizer:
+        return select_optimizer(self.config.optimization)
+
+    @property
+    def knobs(self) -> PotterKnobs:
+        """Potter's knobs as this campaign's overlay leaves them; re-read, since the loop moves
+        ``config`` mid-run."""
+        return potter_knobs(self.optimizer)
 
     def cumulative_ability(self, results: list[dict[str, Any]]) -> AbilityReading | None:
         """The frontier's reading on THIS cycle's ruler. Bound here so a caller reading ability

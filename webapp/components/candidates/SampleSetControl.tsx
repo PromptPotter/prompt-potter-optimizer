@@ -64,7 +64,7 @@ export function SampleSetControl({
             (everywhere
               ? " — every bar can be read on it."
               : " — a bar for a round that never bought it is blank, not zero.") +
-            (shared.has(sid) ? " On the served set: C0 and every winner since answered it." : "");
+            (shared.has(sid) ? " On the served set: C0 and each new best since answered it." : "");
           return (
             // Three facts, three channels (fill, opacity, underline) — more than a `Chip` carries.
             <button
@@ -93,7 +93,7 @@ export function SampleSetControl({
         </HoverCard>
         {overlap != null && (
           <HoverCard
-            content={`The ${unitCount(overlap.sample_ids.length, unit)} C0 and every winner since have all answered — the one basis they can be differenced on, and what the overlap bars sit on until you replace it.`}
+            content={`The ${unitCount(overlap.sample_ids.length, unit)} C0 and each new best since have all answered — the one basis they can be differenced on, and what the overlap bars sit on until you replace it.`}
           >
             <Chip
               on={sameSampleSet(sampleSet, overlap.sample_ids)}

@@ -54,18 +54,16 @@ ORIGIN_FIELD_MAX = 600
 # never read, never pruned, and rendered uncapped for the rest of the campaign.
 L1_OVERRIDE_KEYS: frozenset[str] = frozenset({"creativity", "n_variants"})
 
-# THE OPTIMIZER'S OWN SEARCH SPACE, as node axes — the half of `L1_OVERRIDE_KEYS` that lands on
-# a node the operator can see, joined to the name that node calls it. `creativity` IS
+# THE OPTIMIZER'S OWN SEARCH SPACE, as node axes — `L1_OVERRIDE_KEYS` on the node the operator
+# sees them on, joined to the name that node calls them. `creativity` IS
 # `l1_generate.temperature` (`l1/candidate_source.py` defaults it from exactly that key); the
 # synonym is a separate cleanup, and this table is where the two spellings meet so no reader has
-# to know both. `n_variants` is absent on purpose: it is round-scoped
-# (`CampaignConfig.optimization.n_variants`), not a node param, so it belongs to no node's
-# picture and inventing a home for it would be a second source for one number.
+# to know both.
 #
 # Read by `routers/active.py` to tell the optimizer picture which of its own knobs are already
 # movable — the manifest's `param_keys` are empty by design, which says "L1 does not search its
 # own config" and says NOTHING about L2, which does.
-L2_NODE_AXES: dict[str, set[str]] = {"l1_generate": {"temperature"}}
+L2_NODE_AXES: dict[str, set[str]] = {"l1_generate": {"temperature", "n_variants"}}
 
 
 def _keep_known_keys(allowed: frozenset[str]) -> Callable[[Any], Any]:

@@ -9,6 +9,7 @@ from contextvars import Token
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.views.ingress import from_phase_event
 from promptpotter.application.views.view_models import ViewContext
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
@@ -85,13 +86,13 @@ def build_campaign_emitter(
     """Live dashboard projection from session + config. ``seed_from_cycle_id`` names the parent
     cycle to seed prior trajectory from; ``None`` seeds from the cycle's own dir. ``None`` back
     when the session carries no cycle to write into, which the return type states."""
-    opt = campaign_config.optimization
+    selected = select_optimizer(campaign_config.optimization)
     return LiveDashboardProjection.for_session(
         session.hop,
         tenant_root=session.tenant_root,
         session_id=session.session_id,
-        l1_patience=opt.l1_patience,
-        n_variants=opt.n_variants,
+        l1_patience=selected.readout("escalation", "l1_patience"),
+        n_variants=selected.readout("l1_generate", "n_variants"),
         sp_budget_round=campaign_config.sp_budget_round,
         headline_metric=campaign_config.headline_metric,
         langfuse_trace_url=langfuse_trace_url,
@@ -111,15 +112,17 @@ def run_limits_from(config: CampaignConfig) -> RunLimits:
     once the held ceiling is set on it: earlier is the unadmitted config, and the ledger's own
     INIT record lands after the entire origin has scored."""
     opt = config.optimization
+    selected = select_optimizer(opt)
+    lives = selected.readout("escalation", "lives")
     return RunLimits(
         max_rounds=opt.max_rounds or None,
-        l1_patience=opt.l1_patience,
-        l2_patience=opt.l2_patience,
-        l3_patience=opt.l3_patience,
-        pobb_epsilon=opt.pobb_epsilon,
+        l1_patience=selected.readout("escalation", "l1_patience"),
+        l2_patience=selected.readout("escalation", "l2_patience"),
+        l3_patience=selected.readout("escalation", "l3_patience"),
+        pobb_epsilon=selected.readout("pobb", "epsilon"),
         spend_budget_usd=opt.spend_budget_usd,
         token_budget=opt.token_budget,
-        lives_cap=opt.lives.cap if opt.lives is not None else None,
+        lives_cap=lives.cap if lives is not None else None,
     )
 
 

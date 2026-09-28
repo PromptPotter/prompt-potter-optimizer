@@ -30,7 +30,7 @@ interface HardSamples {
   rankedByPick: HardSampleOrder | null;
   setRankedBy: (o: HardSampleOrder) => void;
   /** The optimizer's picker runs on the dataset scope regardless of this toggle
-   *  (`l1/execute.py` round-subset fit). */
+   *  (the sampler's round-subset fit). */
   scope: HardSamplesScope;
   setScope: (s: HardSamplesScope) => void;
   /** A prior (unit, scope) with a fetch in flight — dim it, never blank it. */
