@@ -8,13 +8,13 @@ from typing import TYPE_CHECKING
 from promptpotter.application.bench.resume_and_fork.decisions import record_decision
 from promptpotter.application.intelligence.exploration import PARENT_ABILITY_ID
 from promptpotter.application.optimizers.nodes import Selection
+from promptpotter.application.optimizers.potter.records import PotterCheckpointKind
 from promptpotter.application.scoring.selection import (
     elect_round_winner,
     lift_over_bar,
     parent_cells,
     parent_selection_bias,
 )
-from promptpotter.domain.run_records import PotterCheckpointKind
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence

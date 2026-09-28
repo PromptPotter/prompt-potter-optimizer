@@ -10,12 +10,12 @@ from typing import Any, cast
 from promptpotter.application.optimizer_manifest import resolve_optimizer
 from promptpotter.application.optimizers.potter.dispatch.layout import default_l1_layout
 from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
-from promptpotter.domain.optimizer_state import (
+from promptpotter.application.optimizers.potter.records import (
     POTTER_MANIFEST,
     L2L3Memory,
-    OptimizerState,
     PotterRoundState,
 )
+from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import (
     ArmOutcome,

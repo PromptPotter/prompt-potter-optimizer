@@ -65,7 +65,7 @@ A REFUSED L2 layout edit makes `escalate_l2` run `_run_transition(L3, …)` *imm
 
 ## Optimizer-memory state
 
-The fields that travel cross-round are the cycle's `domain/optimizer_state.py::L2L3Memory`, banked on every round document as its `optimizer_state` — read the roster and each field's lifecycle off the model, which cannot drift from itself.
+The fields that travel cross-round are the cycle's `optimizers/potter/records.py::L2L3Memory`, banked on every round document as its `optimizer_state` — read the roster and each field's lifecycle off the model, which cannot drift from itself.
 
 Two that the model cannot tell you. **`wounds.l3_note` is sticky free-text and not a failure record** — L3 sets it to steer L2, and it survives every parent swap (an L1 win as well as an L2/L3 transition) and is cleared only when L3 fires again, the only field there with that lifetime. And **the L1 critique is not on `L2L3Memory` at all**: it lives on `RoundResult.critique`, which the dispatch hub's `critique` injection reads through `bundle.digest.critique` (`build_bundle`, off the latest round), the same way per-round trajectory lives on `Cycle.rounds` rather than the memory.
 

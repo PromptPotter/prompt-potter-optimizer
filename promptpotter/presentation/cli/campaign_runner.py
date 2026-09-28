@@ -15,6 +15,7 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
+from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.reaper import sweep_dead_cycles
 from promptpotter.config.first_run import ensure_api_key
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
@@ -199,6 +200,10 @@ def main() -> None:
             )
             return
         args = parser.parse_args([*sys.argv[1:], "resume"])
+
+    # Every verb may read a round document, whose optimizer payload only a completed registry
+    # can type.
+    complete_registries()
 
     # Reconcile liveness before dispatch. The reaper had exactly two call sites, both bound
     # to the API server's lifespan — so on a CLI-only install nothing ever ran it, and a

@@ -342,7 +342,7 @@ def divergence_hint() -> str:
     )
     # Exhaustiveness at first build: every gated kind must surface in the operator hint.
     if not all(k.value in hint for k in gating):
-        raise RuntimeError("divergence hint must name every ResumeCheckpointKind")
+        raise RuntimeError("divergence hint must name every CheckpointKind")
     return hint
 
 

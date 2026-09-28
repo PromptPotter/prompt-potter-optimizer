@@ -8,9 +8,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.optimizers.potter.records import L2L3Memory
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.optimizer_state import CritiqueReadout, L2L3Memory
+from promptpotter.domain.optimizer_state import CritiqueReadout
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import ArmOutcome, RoundResult
 from promptpotter.domain.round_diagnostics import RoundDiagnostics

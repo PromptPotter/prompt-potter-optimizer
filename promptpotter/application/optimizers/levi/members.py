@@ -26,25 +26,25 @@ from promptpotter.application.optimizers.descriptors import (
 )
 from promptpotter.application.optimizers.levi import operators
 from promptpotter.application.optimizers.levi.state import (
-    LeviState,
-    levi_round_state,
-    levi_state,
-)
-from promptpotter.application.optimizers.paper_templates import ask, marked, unmarked, walk_rng
-from promptpotter.domain.opt_search_point import OptSearchPoint, node_source
-from promptpotter.domain.optimizer_state import (
     LEVI_MANIFEST,
     DescriptorStats,
     LeviCalibration,
     LeviElite,
+    LeviRoundState,
+    LeviState,
+    levi_state,
 )
+from promptpotter.application.optimizers.paper_templates import ask, marked, unmarked, walk_rng
+from promptpotter.config.paths import optimizers_root
+from promptpotter.domain.opt_search_point import OptSearchPoint, node_source
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import CandidateProposal, OptimizerFact, candidate_label
-from promptpotter.domain.run_records import CandidateMintedRecord, LeviCheckpointKind
+from promptpotter.domain.run_records import CandidateMintedRecord, CheckpointKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.statistics import greedy_column_subset
 
 if TYPE_CHECKING:
+    from pathlib import Path
     from types import ModuleType
 
     from promptpotter.application.bench.cycle import Cycle
@@ -65,19 +65,26 @@ if TYPE_CHECKING:
     )
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.results import RoundResult
-    from promptpotter.domain.run_records import ResumeCheckpointKind
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 __all__ = [
     "MEMBERS",
     "RUNTIME",
+    "LeviCheckpointKind",
     "LeviParadigmShiftKnobs",
     "LeviRefineKnobs",
     "MapElitesKnobs",
     "ProxyCssKnobs",
     "choose_proxy",
 ]
+
+
+class LeviCheckpointKind(CheckpointKind):
+    """Decisions LEVI's members take: the proxy benchmark its calibration round chooses."""
+
+    PROXY_SELECTED = "proxy_selected"
+
 
 # Lloyd's iterations before a k-means stops short of a fixed point.
 _LLOYD_ITERATIONS = 100
@@ -562,7 +569,7 @@ def _replay_proxy_selected(
 
 _PROPOSERS = (LeviParadigmShift.name, LeviRefine.name)
 
-LEVI_CHECKPOINT_GATING: dict[ResumeCheckpointKind, GatingMode] = {
+LEVI_CHECKPOINT_GATING: dict[CheckpointKind, GatingMode] = {
     LeviCheckpointKind.PROXY_SELECTED: GatingMode.REPLAYED,
 }
 LEVI_REPLAYERS: dict[str, Replayer] = {
@@ -574,6 +581,7 @@ class LeviRuntime:
     """LEVI beyond its nodes: its archive state, its prompt identity and its replayed proxy."""
 
     name: ClassVar[str] = LEVI_MANIFEST
+    manifest_dir: ClassVar[Path] = optimizers_root() / LEVI_MANIFEST
     own_axes: ClassVar[dict[str, set[str]]] = {}
     priced_surface: ClassVar[Mapping[str, int]] = {}
     phases: ClassVar[tuple[nodes.OptimizerPhase, ...]] = ()
@@ -599,7 +607,7 @@ class LeviRuntime:
         return {}
 
     @property
-    def checkpoint_gating(self) -> Mapping[ResumeCheckpointKind, GatingMode]:
+    def checkpoint_gating(self) -> Mapping[CheckpointKind, GatingMode]:
         return LEVI_CHECKPOINT_GATING
 
     @property
@@ -647,7 +655,7 @@ class LeviRuntime:
     def round_facts(
         self, selected: SelectedOptimizer, round_result: RoundResult
     ) -> list[OptimizerFact]:
-        state = levi_round_state(round_result)
+        state = round_result.optimizer_state.payload_as(LeviRoundState)
         if (calibration := state.calibration) is None:
             return []
         elites, k = len(state.elites), len(calibration.proxy)

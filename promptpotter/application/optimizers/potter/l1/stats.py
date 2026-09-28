@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from promptpotter.application.optimizers.nodes import CheckResult, ReviewReading
 from promptpotter.application.optimizers.potter.escalation.state import exploration_budget
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
+from promptpotter.application.optimizers.potter.records import POTTER_MANIFEST, PotterRoundState
 from promptpotter.application.optimizers.potter.validators.behavior_base import ValidatorContext
 from promptpotter.application.optimizers.potter.validators.l1_behavior import (
     CHECK_REGISTRY,
@@ -20,11 +21,7 @@ from promptpotter.application.views.render.optimizer_prompt_text import (
     format_l1_critique_for_prompt,
 )
 from promptpotter.domain.opt_search_point import node_source
-from promptpotter.domain.optimizer_state import (
-    PARSE_FAILURE_CHARGED,
-    POTTER_MANIFEST,
-    potter_round_state,
-)
+from promptpotter.domain.optimizer_state import PARSE_FAILURE_CHARGED
 from promptpotter.domain.results import OptimizerFact, RoundResult, invariant_collapses
 
 if TYPE_CHECKING:
@@ -107,7 +104,9 @@ def review_reading(
         ),
         variants=[extract_l1_variants(audit) for audit in audits],
         feedback=[
-            format_l1_critique_for_prompt(potter_round_state(r.optimizer_state).critique).strip()
+            format_l1_critique_for_prompt(
+                r.optimizer_state.payload_as(PotterRoundState).critique
+            ).strip()
             for r in rounds
         ],
     )
@@ -119,7 +118,7 @@ _COLLAPSE_WORDS = {"no_op_variant": "no-op", "duplicate_variant": "dup", "repeat
 def round_facts(round_result: RoundResult) -> list[OptimizerFact]:
     """Potter's words about a round: L1's yield where a proposal collapsed — a full yield is no
     news — and the critique the round hands its next generation."""
-    state = potter_round_state(round_result.optimizer_state)
+    state = round_result.optimizer_state.payload_as(PotterRoundState)
     facts: list[OptimizerFact] = []
     if state.l1_yield < 1.0:
         collapses = invariant_collapses(round_result.candidate_scores)
@@ -170,7 +169,7 @@ def _behavior_per_round(
         ctx = ValidatorContext(
             round_num=round_num,
             prior_rounds=list(prior_audits),
-            l1_layout=potter_round_state(round_data.optimizer_state).memory.l1_layout,
+            l1_layout=round_data.optimizer_state.payload_as(PotterRoundState).memory.l1_layout,
             context_object=context_object,
             exploration_budget=budget,
             peaked_axes=frozenset(round_data.axis_memory_peaked),
@@ -191,7 +190,7 @@ def _compute_round_1_verdict(
     if not rounds:
         return "unknown"
 
-    parse_failure = potter_round_state(rounds[0].optimizer_state).l1_parse_failure
+    parse_failure = rounds[0].optimizer_state.payload_as(PotterRoundState).l1_parse_failure
     if parse_failure in PARSE_FAILURE_CHARGED:
         return "broken"
     # The remaining reason is TOOLING — an empty or truncated provider response. This verdict is
@@ -218,7 +217,8 @@ def _mean_yield_rate(rounds: list[RoundResult]) -> float | None:
     fall short of."""
     if not rounds:
         return None
-    return sum(potter_round_state(r.optimizer_state).l1_yield for r in rounds) / len(rounds)
+    yields = [r.optimizer_state.payload_as(PotterRoundState).l1_yield for r in rounds]
+    return sum(yields) / len(yields)
 
 
 def _top_lifts(rounds: list[RoundResult], origin_composite_fitness: float | None) -> list[float]:

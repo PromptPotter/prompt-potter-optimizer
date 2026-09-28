@@ -156,11 +156,11 @@ What collapses: greedy promotion becomes the acquisition at `c = 0`, and the rew
 
 #### Surface parity — what a peer's campaign still reads wrong
 
-**Whatever optimizer a campaign runs gets the same surfaces wherever the method permits; where a feature cannot apply, the surface says so.** A surface learns which manifest a course runs from the served `optimizer` (`CampaignPipelineResponse`, `CampaignRunsWith`) and which apply from served facts (`stamps_theta`, `run_limits.optimizer`), never from a default or a name test; the check-in picks from `GET /optimizers`. What an optimizer says in its own words rides its runtime's declarations — `phases`, `opening`, `round_facts`, `pacing` (`optimizers/nodes.py`) — and every surface renders them as served. The gaps a `capo` / `levi` / `gepa` campaign still hits:
+**Whatever optimizer a campaign runs gets the same surfaces wherever the method permits; where a feature cannot apply, the surface says so.** A surface learns which manifest a course runs from the served `optimizer` (`CampaignPipelineResponse`, `CampaignRunsWith`) and which apply from served facts (`stamps_theta`, `run_limits.optimizer`), never from a default or a name test; the check-in picks from `GET /optimizers`. What an optimizer says in its own words rides its runtime's declarations — `phases`, `opening`, `round_facts`, `pacing` (`optimizers/nodes.py`) — and its manifest's node `description`s, and every surface renders them as served. The gaps a `capo` / `levi` / `gepa` campaign still hits:
 
 | Surface | Under a peer | Kind |
 |---|---|---|
-| `PipelineFlow` node tooltips (`terms.ts::TERMS.node_*`) | taught for potter's node ids alone | empty |
+| the terminal's cut line (`terminal/live/candidate.py`) | words each eliminator's `gate` by name, so a new eliminator's cut prints no reason | empty |
 
 #### Order
 

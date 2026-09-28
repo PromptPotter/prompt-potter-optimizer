@@ -20,7 +20,6 @@ import {
   layoutGrid,
   liveObserveConfig,
 } from "@/lib/derivations";
-import { TERMS } from "@/lib/terms";
 import { Icon, pressable } from "@/components/ui";
 import { cx } from "@/lib/cx";
 
@@ -335,7 +334,6 @@ function PipelineBox({
           const sub = models
             ? nodeSubLabel(n.kind, models.by[n.id] ?? null, models.loading)
             : "";
-          const tip = TERMS[`node_${n.id}`];
           const subDy = labelDy + parts.length * 11;
           const inert = scope == null && nests?.onIsolate == null;
           return (
@@ -367,7 +365,7 @@ function PipelineBox({
                     ? nests.onIsolate
                       ? "runs the pipeline below; show it alone"
                       : "runs a whole pipeline of its own"
-                    : tip,
+                    : n.description,
                   reachNote,
                 ]
                   .filter(Boolean)

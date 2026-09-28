@@ -182,8 +182,9 @@ A replayable or archival decision (a checkpoint kind + its gating mode).
 
 **Recipe:**
 
-1. Add the kind to the deciding party's enum — `BenchCheckpointKind` or the optimizer's own
-   (`PotterCheckpointKind`), both `domain/run_records.py` — **and** a gating
+1. Add the kind to the deciding party's `CheckpointKind` enum — `BenchCheckpointKind`
+   (`domain/run_records.py`) or the optimizer's own, in its package (potter's
+   `PotterCheckpointKind`, `optimizers/potter/records.py`) — **and** a gating
    entry beside the party that decides it: `BENCH_CHECKPOINT_GATING`
    (`application/bench/resume_and_fork/decisions.py`) or the optimizer runtime's
    `checkpoint_gating` (potter's is `optimizers/potter/resume.py`). `resume_checkpoint_gating`
@@ -301,6 +302,12 @@ adding a slot it needs is §2.
 `{{slot}}` the node's template references that isn't in `injection_table()`. Keep every
 optimizer LLM call on the one `bench/llm_call.py::llm_call` path — an
 unwrapped LLM call is an automatic block at review (pre-flight gate), not a test.
+
+**A whole optimizer is one package and edits nothing outside it:** `members.py` exports `MEMBERS`
+and `RUNTIME` (a plugin ships them through the two entry-point groups instead), the runtime's
+`manifest_dir` holds its `pipeline.yaml`, its payload is a `RoundPayload` registered under the
+manifest's name and its decision kinds a `CheckpointKind` its runtime gates.
+`tests/test_numerics.py` § 4 runs `tests/fixtures/optimizer_plugin/` as the proof.
 
 ---
 

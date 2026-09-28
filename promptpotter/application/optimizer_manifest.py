@@ -26,7 +26,6 @@ from promptpotter.config.paths import (
     checkin_assets_root,
     checkin_manifest_path,
     optimizer_manifest_path,
-    optimizers_root,
 )
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate, PromptTemplate
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
@@ -255,7 +254,9 @@ def _knobs(name: str, kind: NodeKind | None, config: Mapping[str, Any]) -> Stric
 
 
 @functools.lru_cache(maxsize=32)
-def _select(name: str, path: Path, stamp: int, overlay_json: str) -> SelectedOptimizer:
+def _select(
+    name: str, shipped: Path, path: Path, stamp: int, overlay_json: str
+) -> SelectedOptimizer:
     document = _read_manifest(path, stamp)
     overlay: dict[str, dict[str, Any]] = json.loads(overlay_json)
     declared = document.get("nodes") or {}
@@ -270,7 +271,7 @@ def _select(name: str, path: Path, stamp: int, overlay_json: str) -> SelectedOpt
     for node, config in overlay.items():
         block = overlaid["nodes"][node]
         block["config"] = {**(block.get("config") or {}), **config}
-    schemas = _read_schemas(optimizers_root() / name / "resolved_schemas.json")
+    schemas = _read_schemas(shipped / "resolved_schemas.json")
     selected = SelectedOptimizer(
         name=name,
         document=document,
@@ -288,9 +289,10 @@ def _select(name: str, path: Path, stamp: int, overlay_json: str) -> SelectedOpt
 def resolve_optimizer(name: str, nodes: Mapping[str, ManifestNodeOverlay]) -> SelectedOptimizer:
     """The one resolution every surface shares — a run, a draft edit, a served menu — so an
     overlay refused in one place is refused in all."""
-    path = optimizer_manifest_path(name)
+    shipped = optimizers.runtime(name).manifest_dir
+    path = optimizer_manifest_path(name, shipped)
     overlay = {node: dict(o.config) for node, o in sorted(nodes.items())}
-    return _select(name, path, _stamp(path), json.dumps(overlay, sort_keys=True))
+    return _select(name, shipped, path, _stamp(path), json.dumps(overlay, sort_keys=True))
 
 
 def select_optimizer(opt: OptimizationConfig) -> SelectedOptimizer:

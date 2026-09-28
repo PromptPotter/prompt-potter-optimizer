@@ -4,18 +4,43 @@ banked whole on every round document so a resume or a fork re-seats the front.""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
-from promptpotter.domain.optimizer_state import GEPA_MANIFEST, GepaRoundState, OptimizerState
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.optimizer_state import OptimizerState, RoundPayload
+from promptpotter.domain.strict_model import StrictModel
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import WorkingState
-    from promptpotter.domain.optimizer_state import GepaCandidate
     from promptpotter.domain.results import RoundResult
     from promptpotter.infrastructure.ledger import CycleEventLog
 
-__all__ = ["GepaState", "gepa_round_state", "gepa_state"]
+__all__ = ["GEPA_MANIFEST", "GepaCandidate", "GepaRoundState", "GepaState", "gepa_state"]
+
+GepaManifest = Literal["gepa"]
+GEPA_MANIFEST: GepaManifest = "gepa"
+
+
+class GepaCandidate(StrictModel):
+    """One member of GEPA's candidate pool and its row of the score matrix: its campaign objective
+    on each Pareto-set cell, by sample key."""
+
+    individual: OptSearchPoint
+    scores: dict[str, float]
+
+
+class GepaRoundState(RoundPayload, manifest=GEPA_MANIFEST):
+    """GEPA's payload: its candidate pool scored on the Pareto set, and the parent the next round
+    mutates."""
+
+    # Sample keys, in the order every round walks them; empty until round 1 draws the split.
+    pareto_set: list[str]
+    # Empty on the origin's document: round 1 seats the origin with its Pareto-set scores.
+    pool: list[GepaCandidate]
+    # Drawn at each round's close; ``None`` until round 1 closes, the origin being the only parent.
+    parent_id: str | None
+    rounds_without_advance: int
 
 
 @dataclass
@@ -60,13 +85,13 @@ class GepaState:
         )
 
     def replay(self, last: RoundResult) -> None:
-        self._take_up(gepa_round_state(last.optimizer_state))
+        self._take_up(last.optimizer_state.payload_as(GepaRoundState))
 
     def resume(self, ledger: CycleEventLog | None, selected: SelectedOptimizer) -> None:
         return None
 
     def absorb(self, round_result: RoundResult) -> None:
-        self._take_up(gepa_round_state(round_result.optimizer_state))
+        self._take_up(round_result.optimizer_state.payload_as(GepaRoundState))
 
     def standing(self) -> tuple[int, int | None]:
         return self.rounds_without_advance, None
@@ -83,9 +108,3 @@ def gepa_state(state: WorkingState) -> GepaState:
     if not isinstance(state, GepaState):
         raise TypeError(f"a GEPA member was handed {type(state).__name__}, not GEPA's state")
     return state
-
-
-def gepa_round_state(state: OptimizerState) -> GepaRoundState:
-    if not isinstance(state.payload, GepaRoundState):
-        raise TypeError(f"a GEPA reader was handed {state.manifest!r}'s optimizer state")
-    return state.payload

@@ -10,8 +10,8 @@ from typing import Any, Literal
 from pydantic import ConfigDict
 
 from promptpotter.application.optimizer_manifest import declared_node_override
+from promptpotter.application.optimizers.potter.records import L1Layout
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
-from promptpotter.domain.optimizer_state import L1Layout
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.shared.hashing import shapes_optimizer_prompt

@@ -172,7 +172,10 @@ LEDGER_BASELINE = {
     # +1: `optimizers/fence.py` — the untrusted-content fence potter, GEPA and LEVI wrap dataset
     # text in. It sat in potter's `bundle.py`, so two peers imported potter; `paper_templates.py`
     # is the paper presets' alone, and every optimizer's source digest must hash the fence.
-    "modules": 387,
+    # +1: `optimizers/potter/records.py` — potter's payload models and decision kinds, out of
+    # `domain/`, which enumerated every optimizer's. Apart from `state.py`, which imports the
+    # dispatch layout that imports `L1Layout`.
+    "modules": 388,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     # +2: `application/optimizers/__init__.py` (the member registry) and its `potter/`, empty.
@@ -342,7 +345,9 @@ LEDGER_BASELINE = {
     # runtime; it replaced potter's yield/critique fields on the log.md digest, which is no leaf here.
     # +1: `BenchScore.missing_reason` — why a bench reading is `None`: a pass the gateway gave up
     # on, or a stop, yields no reading, and the headline serves the stop and its error instead.
-    "cycle_result_fields": 315,
+    # -80: `optimizer_state.payload` is a `RoundPayload` each optimizer registers from its own
+    # package, so the bench's result no longer declares potter's, CAPO's, LEVI's and GEPA's.
+    "cycle_result_fields": 235,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
@@ -778,7 +783,9 @@ LEDGER_BASELINE = {
     # served once so no surface draws potter's graph, knobs or θ copy for a peer's campaign.
     # +1: `BenchScore.missing_reason` — an aborted pass served a 0.0 read off its one errored row;
     # it now yields no reading, and every surface reads the reason instead of composing one.
-    "served_fields": 730,
+    # +1: `PipelineViewNode.description` — the node's own declared explainer, served on the view so
+    # the graph's tooltip is every manifest's and no webapp table keys one by potter's node ids.
+    "served_fields": 731,
 }
 
 

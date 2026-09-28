@@ -46,22 +46,16 @@ nodes:
       k_max: 5
       prompt_block_catalogue: guidance
       schema_field_rename: false
-    description: &model_route >-
-      `openai/gpt-6-luna` on OpenRouter's plain route, the default optimizer model: it supports
-      structured outputs, and on a 3-candidate JSON task it spent ~400 reasoning and ~350 output
-      tokens. No ':nitro' — OpenRouter's fastest-provider routing may land on a host that drops
-      `response_format` rather than refusing the route. On `openai/gpt-oss-120b:nitro` that host is
-      Cerebras, which at our prompt length intermittently returns the JSON SCHEMA itself instead of
-      an instance of it (valid JSON, finish_reason=stop, no `variants`): it corrupts the search
-      silently rather than raising. Rule: never point a schema-bearing node at a new :nitro route
-      without first spending ONE call that asks for the real schema and checking the answer is an
-      instance of it — this failure mode does not error, so nothing else will tell you.
-      `deepseek/deepseek-v4-flash:nitro`, still on the menu, was probed that way and answered with
-      an instance. PRICE :nitro OFF THE WIRE, NEVER THE CATALOGUE: its 0731 snapshot's route billed
-      $0.386/Mtok over 2.05M tokens, 2.9x its own list.
+    # Every llm node runs `openai/gpt-6-luna` on OpenRouter's plain route. Never point a
+    # schema-bearing node at a new :nitro route without one call checking it answers an instance
+    # of the schema: Cerebras behind `gpt-oss-120b:nitro` silently returned the schema itself.
+    description: >-
+      L1 Generate: produces N candidate prompts from current framing + critique.
   # Runs the campaign pipeline against the panel; it makes no optimizer call, so no config.
   l1_score:
     type: measurement
+    description: >-
+      L1 Score: runs each candidate over the dataset, computes composite_fitness.
     config: {}
   # A candidate keeps measuring only while it could still beat the leader
   # (`methods/candidate-elimination.md`).
@@ -93,7 +87,8 @@ nodes:
       max_tokens: 16000
       provider: openrouter
       model: openai/gpt-6-luna
-    description: *model_route
+    description: >-
+      L1 Critique: reads round results, writes the critique L1 Generate reads next round.
   l2_context:
     type: llm
     optimizer: *node_menus
@@ -106,7 +101,9 @@ nodes:
       max_tokens: 8000
       provider: openrouter
       model: openai/gpt-6-luna
-    description: *model_route
+    description: >-
+      L2 Context: moves which panels L1 generation reads and how widely it explores. Fires on L1
+      stall.
   l3_plan:
     type: llm
     optimizer: *node_menus
@@ -119,7 +116,8 @@ nodes:
       max_tokens: 8000
       provider: openrouter
       model: openai/gpt-6-luna
-    description: *model_route
+    description: >-
+      L3 Plan: rewrites the strategy. Fires on L2 stall.
   # The stall ladder: picks each round's pipeline below, and when potter stops.
   escalation:
     type: controller

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.campaign_config import load_campaign_config
+from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.runner.review_md import render_review_md
 from promptpotter.domain.results import RoundResult
@@ -31,6 +32,7 @@ def main(argv: list[str]) -> int:
         return 2
 
     index = json.loads((cycle_dir / "index.json").read_text(encoding="utf-8"))
+    complete_registries()
     rounds = [
         RoundResult.model_validate(json.loads(f.read_text(encoding="utf-8")))
         for f in CycleLayout(cycle_dir).round_files()

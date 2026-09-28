@@ -340,6 +340,9 @@ class PipelineViewNode(StrictModel):
 
     id: str
     label: str
+    # The node's own declared `description`, which a surface shows as its explainer; `""` where
+    # the declaration gives none, and on the two `io` ends.
+    description: str = ""
     # Exactly what `pipeline_parsing.py::_derive_node_kind` can emit — a member here the
     # producer cannot produce is one the client styles and captions for nothing.
     kind: str = ""  # "io" | "llm" | "tool" | "retriever" | "cache" | "measurement"

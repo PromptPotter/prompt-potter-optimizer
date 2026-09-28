@@ -12,13 +12,6 @@ export const TERMS: Record<string, string> = {
   status_nowall:      "Dashboard has no wallclock yet — optimizer probably has not started.",
   status_stamp_mismatch: "dashboard.json keeps reporting a different (campaign, cycle) than this view expects — the optimizer may be re-instantiating, or this unit's session never wrote a dashboard.",
 
-  node_checkin:   "Check-in & origin: resolves the dataset's origin, then scores the unmodified starting prompt as the floor.",
-  node_l1_generate: "L1 Generate: produces N candidate prompts from current framing + critique.",
-  node_l1_score:    "L1 Score: runs each candidate over the dataset, computes composite_fitness.",
-  node_l1_critique: "L1 Critique: reads round results, writes the critique L1 Generate reads next round.",
-  node_l2_context:  "L2 Context: moves which panels L1 generation reads and how widely it explores. Fires on L1 stall.",
-  node_l3_plan:     "L3 Plan: rewrites the strategy. Fires on L2 stall.",
-
   composite: "composite_fitness — the per-candidate scalar the optimizer optimizes. Recipe in the formula row.",
 
   mask_up:   "Higher value is better — counted positively in the masked mean.",

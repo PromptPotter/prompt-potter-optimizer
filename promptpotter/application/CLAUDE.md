@@ -72,7 +72,7 @@ which would retry a config only the operator can fix. The one SILENT arm is `ini
   never `chat()`.
 - A stop rule's verdict flows via return value (`QueryLoopResult.stop_signal`),
   not exception.
-- An optimizer's working state is per-optimizer typed state (`domain/optimizer_state.py`) that every round document banks as `optimizer_state` and a resume or fork restores from there — never a field of the individual, never a sidecar.
+- An optimizer's working state is per-optimizer typed state (a `domain/optimizer_state.py::RoundPayload` its own package declares) that every round document banks as `optimizer_state` and a resume or fork restores from there — never a field of the individual, never a sidecar.
 - **An await that can outlast `RUN_FRESH_S` and writes nothing MUST heartbeat**
   (`infrastructure/llm/heartbeat.py`) — silence is how this package
   says "dead", so a long quiet await reads as a vanished producer and gets reaped

@@ -16,6 +16,7 @@ from promptpotter.domain.strict_model import StrictModel
 
 if TYPE_CHECKING:
     import asyncio
+    from pathlib import Path
     from types import ModuleType
 
     from promptpotter.application.bench.cycle import Cycle
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
         RoundResult,
         ScoredCandidate,
     )
-    from promptpotter.domain.run_records import ResumeCheckpointKind
+    from promptpotter.domain.run_records import CheckpointKind
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.domain.search_point import JobSearchPoint
@@ -237,6 +238,11 @@ class OptimizerRuntime(Protocol):
     def name(self) -> str: ...
 
     @property
+    def manifest_dir(self) -> Path:
+        """Where its ``pipeline.yaml`` and generated ``resolved_schemas.json`` ship."""
+        ...
+
+    @property
     def phases(self) -> tuple[OptimizerPhase, ...]: ...
 
     def pacing(self, selected: SelectedOptimizer) -> OptimizerPacing: ...
@@ -288,7 +294,7 @@ class OptimizerRuntime(Protocol):
         ...
 
     @property
-    def checkpoint_gating(self) -> Mapping[ResumeCheckpointKind, GatingMode]:
+    def checkpoint_gating(self) -> Mapping[CheckpointKind, GatingMode]:
         """Whether a resume re-derives each decision kind its members record, or only archives it."""
         ...
 

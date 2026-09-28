@@ -7,7 +7,7 @@ const node = (
   tier = 0,
   rank = 0,
   kind = "llm",
-): PipelineViewNode => ({ id, label: id, kind, tier, rank });
+): PipelineViewNode => ({ id, label: id, description: "", kind, tier, rank });
 
 const edge = (
   from: string,

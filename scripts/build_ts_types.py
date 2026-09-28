@@ -95,20 +95,7 @@ from promptpotter.domain.opt_search_point import (
     IndividualLineage,
     OptSearchPoint,
 )
-from promptpotter.domain.optimizer_state import (
-    CapoRoundState,
-    DescriptorStats,
-    GepaCandidate,
-    GepaRoundState,
-    L1Layout,
-    L2L3Memory,
-    LeviCalibration,
-    LeviElite,
-    LeviRoundState,
-    OptimizerState,
-    PotterRoundState,
-    WoundChannels,
-)
+from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.pipeline_schema import (
     ManifestNodeOverlay,
     ModelCapability,
@@ -225,17 +212,6 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     ScoreboardRow,
     EvidenceGrounding,
     IndividualLineage,
-    WoundChannels,
-    L1Layout,
-    L2L3Memory,
-    PotterRoundState,
-    CapoRoundState,
-    DescriptorStats,
-    LeviCalibration,
-    LeviElite,
-    LeviRoundState,
-    GepaCandidate,
-    GepaRoundState,
     OptimizerState,
     OptSearchPoint,
     RoundResult,
@@ -440,7 +416,8 @@ def _emit_type(annotation: typing.Any) -> str:
         return f"Record<string, {_emit_type(v_type)}>"
 
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-        return annotation.__name__
+        # A model declaring no field is a base whose registered subclass fills the wire.
+        return annotation.__name__ if annotation.model_fields else "Record<string, unknown>"
 
     return "unknown"
 

@@ -69,8 +69,8 @@ def default_jobs_dir() -> Path:
 
 
 def optimizers_root() -> Path:
-    """Install content: one directory per optimizer manifest. Ships in the wheel and is not the
-    operator's tier (``stable-api.md`` §3)."""
+    """Install content: one directory per built-in optimizer manifest. Ships in the wheel and is
+    not the operator's tier (``stable-api.md`` §3); a plugin's runtime names its own directory."""
     return PACKAGE_ROOT / "assets" / "optimizers"
 
 
@@ -84,10 +84,8 @@ def _shadowed(relative: Path, shipped: Path) -> Path:
     return override if override.is_file() else shipped
 
 
-def optimizer_manifest_path(name: str) -> Path:
-    return _shadowed(
-        Path("optimizers") / name / "pipeline.yaml", optimizers_root() / name / "pipeline.yaml"
-    )
+def optimizer_manifest_path(name: str, shipped: Path) -> Path:
+    return _shadowed(Path("optimizers") / name / "pipeline.yaml", shipped / "pipeline.yaml")
 
 
 def checkin_manifest_path() -> Path:

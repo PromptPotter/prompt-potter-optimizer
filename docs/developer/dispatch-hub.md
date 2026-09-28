@@ -248,7 +248,7 @@ L1_GENERATE's prompt is composed by walking a per-slot list of **injection names
 └────────────────────────────────────────────────────────────┘
 ```
 
-`L1Layout` (`promptpotter/domain/optimizer_state.py`) is a Pydantic model with one list per addressable slot, declared IN RENDER ORDER: `persona`, `task_intent`, `thinking_style`, `problem_description` (all L2-mutable). The last is `VOLATILE_SLOT`, the provider prefix-cache boundary — a panel placed ahead of it voids the discount on every byte behind, so an import-time assert holds every floor behind the line and `validate_l1_layout` reports an EDIT that crosses it (`l1_layout_voids_prefix`, soft: placement is a real axis and a move may be worth its discount). `PREFIX_STABLE_PANELS` is the exemption and `task_context` its one member; its docstring states the one way that panel still moves. `answer_format` is omitted on purpose — it carries L1's output JSON schema, a code contract rather than L2's call. Static text in each slot stays and the layout's renderings are appended. Renderers are layer-agnostic: the same `plan` renderer feeds L1, L2 and L3, and an injection needing to differ per layer is two injections.
+`L1Layout` (`promptpotter/application/optimizers/potter/records.py`) is a Pydantic model with one list per addressable slot, declared IN RENDER ORDER: `persona`, `task_intent`, `thinking_style`, `problem_description` (all L2-mutable). The last is `VOLATILE_SLOT`, the provider prefix-cache boundary — a panel placed ahead of it voids the discount on every byte behind, so an import-time assert holds every floor behind the line and `validate_l1_layout` reports an EDIT that crosses it (`l1_layout_voids_prefix`, soft: placement is a real axis and a move may be worth its discount). `PREFIX_STABLE_PANELS` is the exemption and `task_context` its one member; its docstring states the one way that panel still moves. `answer_format` is omitted on purpose — it carries L1's output JSON schema, a code contract rather than L2's call. Static text in each slot stays and the layout's renderings are appended. Renderers are layer-agnostic: the same `plan` renderer feeds L1, L2 and L3, and an injection needing to differ per layer is two injections.
 
 **Default floor** — `default_l1_layout` = `NODE_LAYOUTS["l1_generate"].floor`. **Read the membership there, never from a copy here.** What the layout file cannot say, being about order rather than composition: **order is priority in a second sense**, since `dispatch/compose.py` selects section by section in layout order under the discretionary allowance, so the decision frame is placed before a large panel can crowd it. And the floor is what a *first* L1 round reads rather than what most rounds read — every L2 fire in the first banked run touched the layout, and L4 optimises that authoring.
 
@@ -263,7 +263,7 @@ L2's parser (`escalation._parse_l2`) coerces `{name: slot}` onto the current lay
 
 **Adding an injection** → the golden-path recipe lives in [`adding-a-surface.md`](adding-a-surface.md).
 
-**File-line anchors** — `injection_table()`: `dispatch/injections/registry.py` · `InjectionBundle`: `dispatch/bundle.py` · `DispatchHub` + `build_bundle`: `dispatch/facade.py` · `L1_POSSIBLE`, `L1_MANDATORY`, `L1_LAYOUT_SLOTS`, `default_l1_layout`, `validate_l1_layout`: `application/optimizers/potter/dispatch/layout.py` · L1 compose path: `application/optimizers/potter/l1/generate.py::l1_generate` · the layout state: `PotterRoundState.memory.l1_layout` (`domain/optimizer_state.py`, `L2L3Memory`, `L1Layout`).
+**File-line anchors** — `injection_table()`: `dispatch/injections/registry.py` · `InjectionBundle`: `dispatch/bundle.py` · `DispatchHub` + `build_bundle`: `dispatch/facade.py` · `L1_POSSIBLE`, `L1_MANDATORY`, `L1_LAYOUT_SLOTS`, `default_l1_layout`, `validate_l1_layout`: `application/optimizers/potter/dispatch/layout.py` · L1 compose path: `application/optimizers/potter/l1/generate.py::l1_generate` · the layout state: `PotterRoundState.memory.l1_layout` (`optimizers/potter/records.py`, `L2L3Memory`, `L1Layout`).
 
 ## Trigger — when L2 fires
 
@@ -328,7 +328,7 @@ state.escalation.record_l2_fired(...)
 
 That is the whole of `_apply_l2`: it writes `PotterState.memory` in place. Every memory field is potter's working state — the `L2L3Memory` the cycle carries opaque on `Cycle.working_state`, never a field of the individual — so it carries across every adoption (an L1 win and an L2/L3 transition alike) by not moving, and every round document banks a copy as its `optimizer_state`, which is what a resume or a fork restores. The campaign's `task_context` is not memory at all: it rides `Cycle.framing`.
 
-**No decision is recorded per L2 fire.** There was one — `PROBE_ROUND_COMMITMENT`, outcome `True` if probe — and it left with the probe lever; `ResumeCheckpointKind` no longer declares it. The L2 fire itself is on the ledger as `L2_ESCALATION_TRIGGER`; layout and exploration content are not separate decisions and ride on the round file.
+**No decision is recorded per L2 fire.** There was one — `PROBE_ROUND_COMMITMENT`, outcome `True` if probe — and it left with the probe lever; no `CheckpointKind` declares it. The L2 fire itself is on the ledger as `L2_ESCALATION_TRIGGER`; layout and exploration content are not separate decisions and ride on the round file.
 
 ## Wound 4 — L2 self-healing via L3
 

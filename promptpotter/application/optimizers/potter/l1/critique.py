@@ -19,8 +19,9 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import (
     load_optimizer_prompt,
 )
 from promptpotter.application.optimizers.potter.dispatch.schemas import L1CritiqueOutput
+from promptpotter.application.optimizers.potter.records import PotterRoundState
 from promptpotter.application.run_phase_control import declare_run_phase
-from promptpotter.domain.optimizer_state import CritiqueReadout, potter_round_state
+from promptpotter.domain.optimizer_state import CritiqueReadout
 from promptpotter.domain.phases import RunPhase, StopLoop, StopReason
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 from promptpotter.shared.errors import SendRefusedError, graceful
@@ -51,7 +52,7 @@ def critique_owed(cycle: Cycle) -> bool:
     prior = cycle.rounds[-1] if cycle.rounds else None
     if prior is None or prior.round == 0 or not prior.results:
         return False
-    return not potter_round_state(prior.optimizer_state).critique
+    return not prior.optimizer_state.payload_as(PotterRoundState).critique
 
 
 async def ensure_prior_critique(cycle: Cycle, state: PotterState) -> None:
@@ -68,7 +69,7 @@ async def ensure_prior_critique(cycle: Cycle, state: PotterState) -> None:
     if not critique_owed(cycle):
         return
     prior = cycle.rounds[-1]
-    payload = potter_round_state(prior.optimizer_state)
+    payload = prior.optimizer_state.payload_as(PotterRoundState)
     session = cycle.session
     last: Exception | None = None
     for attempt in range(1, CRITIQUE_RESEND_ATTEMPTS + 1):

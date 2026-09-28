@@ -1922,18 +1922,24 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
 def test_every_installed_optimizer_closes_its_campaign_on_a_bench_headline(tmp_path) -> None:
     """Each installed optimizer, run end to end offline, grades its declared pick against the
     origin on the held-out bench — the one number a head-to-head compares. A campaign that skips
-    that pass leaves the comparison empty while every round still renders."""
+    that pass leaves the comparison empty while every round still renders. One of them is a
+    plugin installed through its entry points alone, which no file of this package names."""
     home = tmp_path / "offline"
-    script = Path(__file__).resolve().parents[1] / "scripts" / "offline_run.py"
+    root = Path(__file__).resolve().parents[1]
+    plugin = root / "tests" / "fixtures" / "optimizer_plugin"
+    # The tree under test first, so its children never import another checkout's package.
+    path = os.pathsep.join([str(root), str(plugin)])
     done = subprocess.run(
-        [sys.executable, str(script), "--rounds", "1", "--rows", "60"],
-        env={**os.environ, "PROMPTPOTTER_HOME": str(home)},
+        [sys.executable, str(root / "scripts" / "offline_run.py"), "--rounds", "1", "--rows", "60"],
+        env={**os.environ, "PROMPTPOTTER_HOME": str(home), "PYTHONPATH": path},
         capture_output=True,
         text=True,
         timeout=900,
     )
     assert done.returncode == 0, done.stdout + done.stderr
-    for name in optimizers.runtimes():
+    ran = json.loads((home / "offline-run.json").read_text(encoding="utf-8"))["workspaces"]
+    assert set(ran) == {*optimizers.runtimes(), "fixture"}
+    for name in ran:
         run = json.loads((home / name / "decisions.json").read_text(encoding="utf-8"))["run"]
         bench = run["bench"]
         assert bench["selected"]["n_scored"] == bench["origin"]["n_scored"] == bench["bench_size"]

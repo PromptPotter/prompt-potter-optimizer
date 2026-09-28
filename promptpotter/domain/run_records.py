@@ -14,10 +14,9 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
 __all__ = [
-    "RESUME_CHECKPOINT_KINDS",
     "BenchCheckpointKind",
     "CandidateMintedRecord",
-    "CapoCheckpointKind",
+    "CheckpointKind",
     "CommandAckRecord",
     "CommandRecord",
     "ConfigOverrides",
@@ -28,16 +27,12 @@ __all__ = [
     "ErrorRecord",
     "ForkSpec",
     "ForkTrigger",
-    "GepaCheckpointKind",
     "LLMCallProgressRecord",
     "LLMCallRecord",
     "LLMCallStartRecord",
     "LedgerCandidate",
     "LedgerRoundClose",
-    "LeviCheckpointKind",
     "PhaseRecord",
-    "PotterCheckpointKind",
-    "ResumeCheckpointKind",
     "ResumeCheckpointRecord",
     "RoundWarningKind",
     "RoundWarningRecord",
@@ -50,56 +45,16 @@ __all__ = [
 ]
 
 
-class BenchCheckpointKind(enum.StrEnum):
-    """The bench's own decisions. An optimizer's ride its manifest-scoped enum."""
+class CheckpointKind(enum.StrEnum):
+    """A decision kind: the bench's enum and each optimizer's, declared in its own package,
+    subclass this one. A record's ``kind`` is one of their values."""
+
+
+class BenchCheckpointKind(CheckpointKind):
+    """The bench's own decisions."""
 
     FORK_CUT = "fork_cut"
     PANEL_COVERAGE = "panel_coverage"
-
-
-class PotterCheckpointKind(enum.StrEnum):
-    """Decisions potter's members take: its selector, its eliminator (PoBB), its controller."""
-
-    ROUND_WINNER = "round_winner"
-    ELIMINATION_CUT = "elimination_cut"
-    LEADER_LOCK_IN = "leader_lock_in"
-    L2_ESCALATION_TRIGGER = "l2_escalation_trigger"
-    L3_ESCALATION_TRIGGER = "l3_escalation_trigger"
-
-
-class CapoCheckpointKind(enum.StrEnum):
-    """Decisions CAPO's members take: its eliminator's cut (paired_t), its selector's population."""
-
-    PAIRED_T_CUT = "paired_t_cut"
-    POPULATION_KEPT = "population_kept"
-
-
-class LeviCheckpointKind(enum.StrEnum):
-    """Decisions LEVI's members take: the proxy benchmark its calibration round chooses."""
-
-    PROXY_SELECTED = "proxy_selected"
-
-
-class GepaCheckpointKind(enum.StrEnum):
-    """Decisions GEPA's members take: its eliminator's minibatch acceptance test."""
-
-    MINIBATCH_GATE = "minibatch_gate"
-
-
-ResumeCheckpointKind = (
-    BenchCheckpointKind
-    | PotterCheckpointKind
-    | CapoCheckpointKind
-    | LeviCheckpointKind
-    | GepaCheckpointKind
-)
-RESUME_CHECKPOINT_KINDS: tuple[ResumeCheckpointKind, ...] = (
-    *BenchCheckpointKind,
-    *PotterCheckpointKind,
-    *CapoCheckpointKind,
-    *LeviCheckpointKind,
-    *GepaCheckpointKind,
-)
 
 
 class ResumeCheckpointRecord(StrictModel):
@@ -108,7 +63,9 @@ class ResumeCheckpointRecord(StrictModel):
     model_config = ConfigDict(frozen=True)
 
     record_type: Literal["decision"] = "decision"
-    kind: ResumeCheckpointKind
+    # A `CheckpointKind` value, read back as the string: which kinds exist is the registries' to
+    # say (`decisions.py::resume_checkpoint_gating`), and a ledger read cannot wait on them.
+    kind: str
     # The manifest node whose member took the decision; ``None`` for the bench's own.
     node: str | None = None
     inputs_ref: dict[str, Any] = Field(default_factory=dict)

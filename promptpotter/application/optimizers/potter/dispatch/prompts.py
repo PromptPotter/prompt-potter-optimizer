@@ -20,9 +20,9 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
     resolve_node_layout,
 )
+from promptpotter.application.optimizers.potter.records import L1Layout, L2L3Memory
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
-from promptpotter.domain.optimizer_state import L1Layout, L2L3Memory
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 

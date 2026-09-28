@@ -152,8 +152,10 @@ def _derive_node_kind(node: PipelineNode | None) -> str:
 def derive_pipeline_view(
     nodes: Mapping[str, PipelineNode],
     pipelines: Mapping[str, Sequence[str]],
+    descriptions: Mapping[str, str],
 ) -> PipelineView:
-    """The graph the engine actually runs, read off the two blocks that declare it.
+    """The graph the engine actually runs, read off the two blocks that declare it, each node
+    carrying the ``description`` its declaration gives.
 
     ``default`` is the chain a sample runs. A node declared but named by no pipeline runs
     once ahead of it, so it joins the chain without being a member of anything that
@@ -206,6 +208,7 @@ def derive_pipeline_view(
             PipelineViewNode(
                 id=name,
                 label=name,
+                description=descriptions[name],
                 kind=_derive_node_kind(nodes.get(name)),
                 tier=tier,
                 rank=rank,
@@ -543,6 +546,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
 
     # Always derived, never read off the manifest: a declared ``view`` is a second roster
     # beside `nodes`, with nothing able to catch the two drifting apart.
-    view = derive_pipeline_view(parsed, pipelines) if parsed else None
+    descriptions = {name: str(nodes[name].get("description") or "") for name in parsed}
+    view = derive_pipeline_view(parsed, pipelines, descriptions) if parsed else None
 
     return schema.model_copy(update={"view": view})

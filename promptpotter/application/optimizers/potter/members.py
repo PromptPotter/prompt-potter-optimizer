@@ -46,6 +46,7 @@ from promptpotter.application.optimizers.potter.l1.population import parse_popul
 from promptpotter.application.optimizers.potter.l1.stats import review_reading, round_facts
 from promptpotter.application.optimizers.potter.pobb.checks import ABORT_LENS_SUPPRESS
 from promptpotter.application.optimizers.potter.race import PoBBRace
+from promptpotter.application.optimizers.potter.records import POTTER_MANIFEST, PotterRoundState
 from promptpotter.application.optimizers.potter.resume import (
     POTTER_CHECKPOINT_GATING,
     POTTER_REPLAYERS,
@@ -58,8 +59,8 @@ from promptpotter.application.optimizers.potter.validators.l1_strict import (
     DROPPED_MANDATORY_PLACEHOLDER,
 )
 from promptpotter.application.scoring.candidate_report import fatal_validation_failures
+from promptpotter.config.paths import optimizers_root
 from promptpotter.domain.dashboard_rows import OptimizerLimit
-from promptpotter.domain.optimizer_state import POTTER_MANIFEST, potter_round_state
 from promptpotter.domain.phases import StopLoop
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM, NodeKind
 from promptpotter.domain.results import CandidateProposal
@@ -69,6 +70,7 @@ from promptpotter.infrastructure.tracing.bridge import observed_node
 from promptpotter.shared.errors import graceful, is_error_result
 
 if TYPE_CHECKING:
+    from pathlib import Path
     from types import ModuleType
 
     from promptpotter.application.bench.cycle import Cycle
@@ -89,7 +91,7 @@ if TYPE_CHECKING:
     )
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.results import OptimizerFact, RoundResult
-    from promptpotter.domain.run_records import ResumeCheckpointKind
+    from promptpotter.domain.run_records import CheckpointKind
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
@@ -266,7 +268,7 @@ class L1Critique:
                     round_num=ctx.round_num,
                     ledger=session.state.ledger,
                 )
-            potter_round_state(round_result.optimizer_state).critique = critique
+            round_result.optimizer_state.payload_as(PotterRoundState).critique = critique
 
 
 class Escalation:
@@ -305,7 +307,7 @@ class Escalation:
         # The same structural l1_generate fault, which the identical prompt reproduces; its
         # `candidate_scores` are empty, so the round carries it on `l1_parse_failure`.
         l1_zero_candidates = (
-            potter_round_state(round_result.optimizer_state).l1_parse_failure is not None
+            round_result.optimizer_state.payload_as(PotterRoundState).l1_parse_failure is not None
         )
         # Derived from the SAME helper the degradation grade reads, so routing and verdict can't
         # diverge. Health is stamped only at the close, so the rates are read directly here.
@@ -356,6 +358,7 @@ class PotterRuntime:
     """Potter beyond its nodes: its working state, prompt identity, review, and resume half."""
 
     name: ClassVar[str] = POTTER_MANIFEST
+    manifest_dir: ClassVar[Path] = optimizers_root() / POTTER_MANIFEST
     own_axes: ClassVar[dict[str, set[str]]] = L2_NODE_AXES
     phases: ClassVar[tuple[nodes.OptimizerPhase, ...]] = (L2.declared, L3.declared)
 
@@ -391,7 +394,7 @@ class PotterRuntime:
         return layout_levers(node, declared)
 
     @property
-    def checkpoint_gating(self) -> Mapping[ResumeCheckpointKind, GatingMode]:
+    def checkpoint_gating(self) -> Mapping[CheckpointKind, GatingMode]:
         return POTTER_CHECKPOINT_GATING
 
     @property
@@ -443,7 +446,9 @@ class PotterRuntime:
         stall = state.escalation.l1_stall_count
         standing = "L2 every round" if patience == 0 else f"stall {stall}/{patience} → L2"
         # A generation that calls L1 is handed the prior critique, re-sent if owed, or never runs.
-        prior = potter_round_state(cycle.rounds[-1].optimizer_state) if cycle.rounds else None
+        prior = (
+            cycle.rounds[-1].optimizer_state.payload_as(PotterRoundState) if cycle.rounds else None
+        )
         handed = (prior is not None and bool(prior.critique)) or (
             not replayed and critique_owed(cycle)
         )

@@ -41,7 +41,6 @@ from promptpotter.connectors.dspy_module import (
     DspyProgram,
 )
 from promptpotter.domain.launch_limits import LaunchLimits
-from promptpotter.domain.optimizer_state import POTTER_MANIFEST
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.infrastructure.store.dataset_access import dataset_pipeline_path
@@ -58,7 +57,9 @@ if TYPE_CHECKING:
 __all__ = ["Loop", "Node", "PromptPotterOpt"]
 
 
-# What `Loop(nodes=None)` lays on potter's manifest; every other optimizer runs its own as declared.
+_DEFAULT_OPTIMIZER: str = OptimizationConfig.model_fields["optimizer"].default
+# What `Loop(nodes=None)` lays on the default optimizer's manifest (potter's); every other
+# optimizer runs its own as declared.
 _POTTER_NODES: dict[str, dict[str, Any]] = {
     "l1_generate": {"n_variants": 6},
     "pobb": {"epsilon": 0.2},
@@ -70,7 +71,7 @@ _POTTER_NODES: dict[str, dict[str, Any]] = {
 class Loop:
     """Loop control. Every field has a default, so ``Loop()`` is a complete configuration."""
 
-    optimizer: str = OptimizationConfig.model_fields["optimizer"].default
+    optimizer: str = _DEFAULT_OPTIMIZER
     """Which optimizer proposes: any name ``optimizer_roster()`` lists."""
 
     nodes: Mapping[str, Mapping[str, Any]] | None = None
@@ -95,7 +96,7 @@ class Loop:
     def _overlay(self) -> dict[str, ManifestNodeOverlay]:
         nodes = self.nodes
         if nodes is None:
-            nodes = _POTTER_NODES if self.optimizer == POTTER_MANIFEST else {}
+            nodes = _POTTER_NODES if self.optimizer == _DEFAULT_OPTIMIZER else {}
         return {node: ManifestNodeOverlay(config=dict(knobs)) for node, knobs in nodes.items()}
 
     def _optimization(self) -> dict[str, Any]:

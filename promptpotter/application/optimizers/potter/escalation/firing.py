@@ -57,19 +57,23 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
 )
 from promptpotter.application.optimizers.potter.escalation.state import NextAction, PotterPhase
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
+from promptpotter.application.optimizers.potter.records import (
+    POTTER_MANIFEST,
+    L1Layout,
+    L2L3Memory,
+    PotterCheckpointKind,
+)
 from promptpotter.application.optimizers.potter.validators.l3_output import run_l3_output_validators
 from promptpotter.application.views.view_models import (
     OptimizerStepEnterView,
     OptimizerStepExitView,
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint, node_source
-from promptpotter.domain.optimizer_state import POTTER_MANIFEST, L1Layout, L2L3Memory
 from promptpotter.domain.phases import PhaseEvent, StopLoop, StopReason, emit_phase
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.run_records import (
     ConfigOverrides,
     ForkTrigger,
-    PotterCheckpointKind,
     RebaseRequest,
 )
 from promptpotter.domain.validators import ValidatorOutcome

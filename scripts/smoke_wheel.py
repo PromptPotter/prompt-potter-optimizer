@@ -76,7 +76,7 @@ def main() -> int:
         f"benchmarks resolved outside the installed package: {bench}"
     )
 
-    manifest_path = paths.optimizer_manifest_path("potter")
+    manifest_path = paths.optimizer_manifest_path("potter", paths.optimizers_root() / "potter")
     assert manifest_path.is_file(), f"optimizer manifest absent from the wheel: {manifest_path}"
     assert paths.checkin_manifest_path().is_file(), "check-in manifest absent from the wheel"
 

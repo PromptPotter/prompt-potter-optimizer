@@ -50,8 +50,9 @@ L2/L3 memory and plan, a population, an archive or a front ride the round as
 `optimizer_state: {manifest, prompt_hashes, payload}`, restored from the ledger on resume and fork, and read by
 no one but that optimizer.
 
-Every optimizer runs on a `promptpotter/assets/optimizers/{name}/pipeline.yaml` — same shape as
-a target backend's `pipeline.yaml` — so accumulated individuals are the dataset for
+Every optimizer runs on the `pipeline.yaml` its runtime ships — a built-in's under
+`promptpotter/assets/optimizers/{name}/` — same shape as a target backend's `pipeline.yaml`, so
+accumulated individuals are the dataset for
 **optimizing the optimizer**, and L4 tunes whichever manifest its inner campaign selects.
 
 #### The bench runs optimizers; it is not one
@@ -827,7 +828,7 @@ the PR description.
 
 - **Resume + fork-on-divergence mechanism** — load-bearing for
   `--from N` and `--fork-on-divergence`. The symbols are
-  `ResumeCheckpointRecord` / `ResumeCheckpointKind` (`domain/run_records.py`).
+  `ResumeCheckpointRecord` / `CheckpointKind` (`domain/run_records.py`).
 
 - **Campaign as a first-class entity** — § Four entities (outermost → innermost) owns the
   hierarchy and the id-minting rule. What §0.5 adds: a cleanup PR **cannot collapse Campaign back into the root

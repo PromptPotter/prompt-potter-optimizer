@@ -45,12 +45,12 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
     build_l1_response_model,
 )
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
+from promptpotter.application.optimizers.potter.records import POTTER_MANIFEST
 from promptpotter.domain.opt_search_point import EvidenceGrounding, OptSearchPoint, node_source
 from promptpotter.domain.optimizer_state import (
     PARSE_FAILURE_MALFORMED,
     PARSE_FAILURE_TOOLING,
     PARSE_FAILURE_WRONG_TYPE,
-    POTTER_MANIFEST,
 )
 from promptpotter.domain.results import CandidateProposal
 from promptpotter.domain.wounds import ValidationFailure

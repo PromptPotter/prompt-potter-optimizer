@@ -396,105 +396,11 @@ export interface IndividualLineage {
   evidence_grounding: EvidenceGrounding | null;
 }
 
-/** Four wound streams + sticky L3 note; rendered by dispatch-hub injections. */
-export interface WoundChannels {
-  l3_note: string;
-  validation_failures: ValidationFailure[];
-  runtime_failures: RuntimeFailure[];
-  l2_guard_breaches: unknown[];
-  l3_guard_breaches: unknown[];
-}
-
-/** Per-slot list of placeholder names that the dispatch hub resolves */
-export interface L1Layout {
-  persona: string[];
-  task_intent: string[];
-  thinking_style: string[];
-  problem_description: string[];
-}
-
-/** Potter's persistent frame, carried across every adoption. */
-export interface L2L3Memory {
-  /** Four wound streams (validation/runtime/l2-guard/l3-guard) + sticky L3 note.
-   * Rendered by dispatch-hub injections; absorbed by L2 next round. */
-  wounds: WoundChannels;
-  /** L2-authored ordered list of injection slots that ``DispatchHub.fill`` walks to
-   * compose the L1 optimizer prompt. L2's primary lever for changing what
-   * evidence L1 sees. */
-  l1_layout: L1Layout;
-  /** L1 optimizer prompt overrides keyed by the surface field name (``persona``,
-   * ``instruction``, …). L2 writes here to nudge L1 without rewriting the
-   * shared optimizer prompt. */
-  l1_overrides: Record<string, unknown>;
-  /** Strategic frame written by ``l3_plan`` and read by every layer next round;
-   * persistent until the next L3 fire. Empty until L3 fires for the first
-   * time. */
-  plan: string;
-}
-
-/** Potter's payload: the memory the round ended on and the readouts only potter reads. */
-export interface PotterRoundState {
-  memory: L2L3Memory;
-  critique: unknown | null;
-  l1_yield: number;
-  l1_parse_failure: string | null;
-}
-
-/** CAPO's payload: the population its selector kept. */
-export interface CapoRoundState {
-  population: OptSearchPoint[];
-  rounds_without_advance: number;
-  length_norm: number | null;
-}
-
-/** Welford's running count, mean and squared-deviation sum per descriptor dimension. */
-export interface DescriptorStats {
-  count: number;
-  mean: number[];
-  m2: number[];
-}
-
-/** What LEVI's calibration round fixes for the run: the proxy and the archive's Voronoi cells. */
-export interface LeviCalibration {
-  proxy: string[];
-  centroids: number[][];
-  stats: DescriptorStats;
-}
-
-/** One occupied cell of LEVI's archive: the best individual mapped to it. */
-export interface LeviElite {
-  cell: number;
-  score: number;
-  round: number;
-  individual: OptSearchPoint;
-}
-
-/** LEVI's payload: its CVT-MAP-Elites archive and what calibration fixed for it. */
-export interface LeviRoundState {
-  calibration: LeviCalibration | null;
-  elites: LeviElite[];
-  rounds_without_advance: number;
-}
-
-/** One member of GEPA's candidate pool and its row of the score matrix: its campaign objective */
-export interface GepaCandidate {
-  individual: OptSearchPoint;
-  scores: Record<string, number>;
-}
-
-/** GEPA's payload: its candidate pool scored on the Pareto set, and the parent the next round */
-export interface GepaRoundState {
-  pareto_set: string[];
-  pool: GepaCandidate[];
-  parent_id: string | null;
-  rounds_without_advance: number;
-}
-
 /** ``{manifest, prompt_hashes, payload}`` — the one envelope every optimizer's state rides. */
 export interface OptimizerState {
-  manifest: 'potter' | 'capo' | 'levi' | 'gepa';
+  manifest: string;
   prompt_hashes: Record<string, string>;
-  payload: PotterRoundState | CapoRoundState | LeviRoundState | GepaRoundState;
+  payload: Record<string, unknown>;
 }
 
 /** The individual: prompt structure + lineage. */
@@ -985,6 +891,7 @@ export interface NodeReach {
 export interface PipelineViewNode {
   id: string;
   label: string;
+  description: string;
   kind: string;
   tier: number;
   rank: number;

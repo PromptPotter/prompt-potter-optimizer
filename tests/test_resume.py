@@ -21,6 +21,7 @@ from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
     restore_measurement_archive,
 )
+from promptpotter.application.optimizers.potter.records import PotterCheckpointKind
 from promptpotter.application.scoring.classification import scoreable_rows
 from promptpotter.application.scoring.formula import (
     ScoringFormulaError,
@@ -33,7 +34,7 @@ from promptpotter.application.scoring.search_point_scorer import (
 )
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import RoundResult
-from promptpotter.domain.run_records import CycleSeed, PotterCheckpointKind
+from promptpotter.domain.run_records import CycleSeed
 from promptpotter.domain.scoring import is_unscored
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive, ReplayFeed
 from promptpotter.infrastructure.store.stores import Stores
@@ -790,7 +791,7 @@ def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) ->
 
     # Every decision reached the ledger exactly once, each stamped with the round that made it.
     on_disk = [
-        (r.kind.value, r.round)
+        (r.kind, r.round)
         for _offset, r in CycleEventLog(ledger.path).iter()
         if isinstance(r, ResumeCheckpointRecord)
     ]

@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from promptpotter.application.optimizers.nodes import CheckResult
-from promptpotter.domain.optimizer_state import L1Layout
+from promptpotter.application.optimizers.potter.records import L1Layout
 
 __all__ = ["CheckFn", "ValidatorContext"]
 

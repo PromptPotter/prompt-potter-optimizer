@@ -19,13 +19,12 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import (
 )
 from promptpotter.application.optimizers.potter.escalation.state import EscalationFSM
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
-from promptpotter.domain.optimizer_state import (
+from promptpotter.application.optimizers.potter.records import (
     POTTER_MANIFEST,
     L2L3Memory,
-    OptimizerState,
     PotterRoundState,
-    potter_round_state,
 )
+from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.wounds import rf_dedup_key
 from promptpotter.infrastructure.store.layout import root_cycle_id
 
@@ -99,7 +98,7 @@ class PotterState:
         )
 
     def replay(self, last: RoundResult) -> None:
-        self.memory = potter_round_state(last.optimizer_state).memory.model_copy(deep=True)
+        self.memory = last.optimizer_state.payload_as(PotterRoundState).memory.model_copy(deep=True)
 
     def resume(self, ledger: CycleEventLog | None, selected: SelectedOptimizer) -> None:
         self.escalation = EscalationFSM.from_ledger(
@@ -115,7 +114,8 @@ class PotterState:
                 if key not in seen:
                     seen.add(key)
                     failures.append(rf)
-        potter_round_state(round_result.optimizer_state).memory = self.memory.model_copy(deep=True)
+        payload = round_result.optimizer_state.payload_as(PotterRoundState)
+        payload.memory = self.memory.model_copy(deep=True)
 
     def standing(self) -> tuple[int, int | None]:
         return self.escalation.l1_stall_count, self.escalation.lives

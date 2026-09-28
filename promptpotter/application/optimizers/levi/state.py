@@ -4,18 +4,67 @@ document banks it whole, so a resume or a fork re-seats the archive off the roun
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
-from promptpotter.domain.optimizer_state import LEVI_MANIFEST, LeviRoundState, OptimizerState
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.optimizer_state import OptimizerState, RoundPayload
+from promptpotter.domain.strict_model import StrictModel
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import WorkingState
-    from promptpotter.domain.optimizer_state import LeviCalibration, LeviElite
     from promptpotter.domain.results import RoundResult
     from promptpotter.infrastructure.ledger import CycleEventLog
 
-__all__ = ["LeviState", "levi_round_state", "levi_state"]
+__all__ = [
+    "LEVI_MANIFEST",
+    "DescriptorStats",
+    "LeviCalibration",
+    "LeviElite",
+    "LeviRoundState",
+    "LeviState",
+    "levi_state",
+]
+
+LeviManifest = Literal["levi"]
+LEVI_MANIFEST: LeviManifest = "levi"
+
+
+class DescriptorStats(StrictModel):
+    """Welford's running count, mean and squared-deviation sum per descriptor dimension."""
+
+    count: int
+    mean: list[float]
+    m2: list[float]
+
+
+class LeviCalibration(StrictModel):
+    """What LEVI's calibration round fixes for the run: the proxy and the archive's Voronoi cells."""
+
+    # Sample keys, in the order every later round walks them.
+    proxy: list[str]
+    centroids: list[list[float]]
+    stats: DescriptorStats
+
+
+class LeviElite(StrictModel):
+    """One occupied cell of LEVI's archive: the best individual mapped to it."""
+
+    cell: int
+    # The mean per-cell objective over the proxy: LEVI's f, which the cell keeps the best of.
+    score: float
+    # The round whose rows measured it, which is where its feedback is read back from.
+    round: int
+    individual: OptSearchPoint
+
+
+class LeviRoundState(RoundPayload, manifest=LEVI_MANIFEST):
+    """LEVI's payload: its CVT-MAP-Elites archive and what calibration fixed for it."""
+
+    # ``None`` on the origin's document: round 1 is the calibration round that sets it.
+    calibration: LeviCalibration | None
+    elites: list[LeviElite]
+    rounds_without_advance: int
 
 
 @dataclass
@@ -53,13 +102,13 @@ class LeviState:
         )
 
     def replay(self, last: RoundResult) -> None:
-        self._take_up(levi_round_state(last))
+        self._take_up(last.optimizer_state.payload_as(LeviRoundState))
 
     def resume(self, ledger: CycleEventLog | None, selected: SelectedOptimizer) -> None:
         return None
 
     def absorb(self, round_result: RoundResult) -> None:
-        self._take_up(levi_round_state(round_result))
+        self._take_up(round_result.optimizer_state.payload_as(LeviRoundState))
 
     def standing(self) -> tuple[int, int | None]:
         return self.rounds_without_advance, None
@@ -76,12 +125,3 @@ def levi_state(state: WorkingState) -> LeviState:
     if not isinstance(state, LeviState):
         raise TypeError(f"a LEVI member was handed {type(state).__name__}, not LEVI's state")
     return state
-
-
-def levi_round_state(round_result: RoundResult) -> LeviRoundState:
-    payload = round_result.optimizer_state.payload
-    if not isinstance(payload, LeviRoundState):
-        raise TypeError(
-            f"a LEVI reader was handed {round_result.optimizer_state.manifest!r}'s optimizer state"
-        )
-    return payload

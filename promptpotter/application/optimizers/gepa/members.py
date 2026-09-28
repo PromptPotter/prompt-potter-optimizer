@@ -18,14 +18,16 @@ from promptpotter.application.optimizers import nodes, paper_templates
 from promptpotter.application.optimizers.descriptors import cell_objectives
 from promptpotter.application.optimizers.gepa import operators
 from promptpotter.application.optimizers.gepa.state import (
+    GEPA_MANIFEST,
+    GepaCandidate,
+    GepaRoundState,
     GepaState,
-    gepa_round_state,
     gepa_state,
 )
 from promptpotter.application.optimizers.paper_templates import ask, unmarked, walk_rng
 from promptpotter.application.runner.measurement import measure_as_parent
+from promptpotter.config.paths import optimizers_root
 from promptpotter.domain.opt_search_point import OptSearchPoint, node_source
-from promptpotter.domain.optimizer_state import GEPA_MANIFEST, GepaCandidate
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import (
     ArmOutcome,
@@ -33,11 +35,12 @@ from promptpotter.domain.results import (
     OptimizerFact,
     candidate_label,
 )
-from promptpotter.domain.run_records import CandidateMintedRecord, GepaCheckpointKind
+from promptpotter.domain.run_records import CandidateMintedRecord, CheckpointKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import StopSignal
 
 if TYPE_CHECKING:
+    from pathlib import Path
     from types import ModuleType
 
     from promptpotter.application.bench.cycle import Cycle
@@ -60,7 +63,7 @@ if TYPE_CHECKING:
     from promptpotter.application.scoring.query_loop import Walk
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.results import RoundResult
-    from promptpotter.domain.run_records import ResumeCheckpointKind, ResumeCheckpointRecord
+    from promptpotter.domain.run_records import ResumeCheckpointRecord
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.domain.search_point import JobSearchPoint
@@ -69,11 +72,18 @@ if TYPE_CHECKING:
 __all__ = [
     "MEMBERS",
     "RUNTIME",
+    "GepaCheckpointKind",
     "MinibatchKnobs",
     "draw_parent",
     "minibatch_improves",
     "pareto_frequencies",
 ]
+
+
+class GepaCheckpointKind(CheckpointKind):
+    """Decisions GEPA's members take: its eliminator's minibatch acceptance test."""
+
+    MINIBATCH_GATE = "minibatch_gate"
 
 
 class MinibatchKnobs(StrictModel):
@@ -416,7 +426,7 @@ class Pareto:
     def select(self, ctx: RoundContext, measured: Measured, population: Population) -> Selection:
         cycle = ctx.cycle
         state = gepa_state(ctx.state)
-        pareto_set = gepa_round_state(population.optimizer_state).pareto_set
+        pareto_set = population.optimizer_state.payload_as(GepaRoundState).pareto_set
         pool = [c.model_copy(deep=True) for c in state.pool]
         if not pool:
             # Alg. 1 lines 3-5: the incumbent, re-scored on this round's panel, is scored on the
@@ -476,7 +486,7 @@ def _replay_minibatch_gate(
     return accepted
 
 
-GEPA_CHECKPOINT_GATING: dict[ResumeCheckpointKind, GatingMode] = {
+GEPA_CHECKPOINT_GATING: dict[CheckpointKind, GatingMode] = {
     GepaCheckpointKind.MINIBATCH_GATE: GatingMode.REPLAYED,
 }
 GEPA_REPLAYERS: dict[str, Replayer] = {
@@ -488,6 +498,7 @@ class GepaRuntime:
     """GEPA beyond its nodes: its pool state, its prompt identity and its replayed gate."""
 
     name: ClassVar[str] = GEPA_MANIFEST
+    manifest_dir: ClassVar[Path] = optimizers_root() / GEPA_MANIFEST
     own_axes: ClassVar[dict[str, set[str]]] = {}
     priced_surface: ClassVar[Mapping[str, int]] = {}
     phases: ClassVar[tuple[nodes.OptimizerPhase, ...]] = ()
@@ -513,7 +524,7 @@ class GepaRuntime:
         return {}
 
     @property
-    def checkpoint_gating(self) -> Mapping[ResumeCheckpointKind, GatingMode]:
+    def checkpoint_gating(self) -> Mapping[CheckpointKind, GatingMode]:
         return GEPA_CHECKPOINT_GATING
 
     @property
@@ -555,7 +566,7 @@ class GepaRuntime:
     def round_facts(
         self, selected: SelectedOptimizer, round_result: RoundResult
     ) -> list[OptimizerFact]:
-        state = gepa_round_state(round_result.optimizer_state)
+        state = round_result.optimizer_state.payload_as(GepaRoundState)
         # The origin's document seats no pool: round 1 does.
         if not state.pool:
             return []

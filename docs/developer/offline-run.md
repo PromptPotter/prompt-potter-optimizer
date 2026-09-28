@@ -71,11 +71,12 @@ not re-key an inner cell leaves equal.
 - **The optimizer LLM** answers by node and CALL ORDINAL, never by the prompt's wording. A
   structured call names its node in its response schema and gets a minimal valid instance, shaped
   per potter node. A paper preset's text call is matched to the llm node whose manifest template
-  it opens with, and answered in the format that node parses.
-- **The knobs** are the dataset's `campaign.yaml` under the script's `BENCH` sizes; potter keeps the
-  dataset's own node overlay, and each peer's paper configuration is scaled down in `NODES`. A peer
-  also runs under a seeded determinism clamp: unseeded, its draws follow the campaign's id, which
-  every run mints anew, so two runs of one tree would differ.
+  it opens with, and answered in the form that template asks for — a `<prompt>` block, a fenced
+  block, or an array.
+- **The knobs** are the dataset's `campaign.yaml` under the script's `BENCH` sizes. The template's
+  node overlay rides only the optimizer it selects; any other runs its manifest as declared, or
+  scaled down to the bank in `SCALED`, under a seeded determinism clamp: unseeded, its draws
+  follow the campaign's id, which every run mints anew, so two runs of one tree would differ.
 
-**Adding an optimizer** makes the run fail loudly until the script knows it: a `NODES` entry for
-its scaled-down knobs, and a case in `FakeLLM._text` for each text-answering llm node.
+**Adding an optimizer** needs nothing here: it runs as its manifest declares. `tests/test_numerics.py`
+§ 4 runs one installed through its entry points alone, from `tests/fixtures/optimizer_plugin/`.

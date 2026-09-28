@@ -101,7 +101,7 @@ Move the order off the ClassVar and onto the searchpoint, as the target-prompt t
 the optimizer already has for its own prompt:
 
 ```
-domain/optimizer_state.py::L1Layout   # exists — L2-authored slot order for the OPTIMIZER prompt
+optimizers/potter/records.py::L1Layout   # exists — L2-authored slot order for the OPTIMIZER prompt
 domain/prompt_layout.py::PromptLayout  # proposed — the same idea for the TARGET prompt
 ```
 

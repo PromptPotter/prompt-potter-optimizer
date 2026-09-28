@@ -29,7 +29,11 @@ from urllib.parse import urlsplit
 import httpx
 
 from promptpotter.application import optimizers
-from promptpotter.application.campaign_config import CampaignConfig, load_campaign_config
+from promptpotter.application.campaign_config import (
+    CampaignConfig,
+    OptimizationConfig,
+    load_campaign_config,
+)
 from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     read_campaign_config_file,
@@ -59,15 +63,15 @@ PROVIDER_KEYS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY", "OPENROU
 LABEL = "OFFLINE — fake optimizer LLM and fake backend; every number is synthetic"
 LABELS = ("TRUE", "FALSE", "Uncertain")
 
-# Bench knobs every optimizer runs under; each optimizer's own knobs come from `NODES`.
+# Bench knobs every optimizer runs under; each optimizer's own knobs are its manifest's.
 BENCH: dict[str, Any] = {
     "sp_budget_round": 20,
     "sp_budget_origin": 14,
     "dataset_split": {"bench": 10, "demo": 10},
 }
-# Potter keeps the dataset's own overlay. A peer's paper configuration is scaled down to a bank
-# of a few hundred rows, so its race cuts and its archive fills within a few rounds.
-NODES: dict[str, dict[str, dict[str, Any]]] = {
+# Scale-downs of a paper configuration to a bank of a few hundred rows, so a race cuts and an
+# archive fills within a few rounds. An optimizer absent here runs as its manifest declares.
+SCALED: dict[str, dict[str, dict[str, Any]]] = {
     "capo": {
         "blocks": {"config": {"block_size": 5, "max_blocks": 4}},
         "paired_t": {"config": {"alpha": 0.2, "survivors": 2}},
@@ -80,8 +84,9 @@ NODES: dict[str, dict[str, dict[str, Any]]] = {
         "levi_paradigm_shift": {"config": {"interval": 4, "n_diverse_seeds": 2}},
         "map_elites": {"config": {"centroids": 8, "cvt_samples": 400}},
     },
-    "gepa": {},
 }
+# A listed answer carries this many prompts.
+LISTED = 15
 
 WORDS = [
     "premise", "claim", "negation", "quantifier", "conditional", "chain", "derive", "verify",
@@ -170,11 +175,13 @@ class FakeLLM:
     """An answer is a function of its node's CALL ORDINAL (and the marker a rephrase keeps), never
     of the prompt's wording, so a change to how a prompt renders moves the request capture and not
     what the run decides. A structured call names its node in its response schema; a paper
-    preset's text call is the llm node whose manifest template its prompt opens with."""
+    preset's text call is the llm node whose manifest template its prompt opens with, answered in
+    the form that template asks for."""
 
-    def __init__(self, capture: Path, prefixes: dict[str, str]) -> None:
+    def __init__(self, capture: Path, templates: dict[str, str]) -> None:
         self.capture = capture
-        self.prefixes = prefixes
+        self.templates = templates
+        self.prefixes = {node: template.split("{{")[0] for node, template in templates.items()}
         self.calls: dict[str, int] = {}
         self.n = 0
 
@@ -227,18 +234,19 @@ class FakeLLM:
     def _text(self, node: str, idx: int, prompt: str) -> str:
         rng = random.Random(f"{node}:{idx}")
         fresh = _variant(f"{node}.{idx}", rng)
-        match node:
-            case "capo_init":
-                return json.dumps([_variant(f"{node}.{idx}.{i}", rng) for i in range(15)])
-            case "capo_mutate":
-                # A rephrase keeps its parent's marker, so it keeps the parent's skill.
-                parents = _MARKER.findall(prompt)
-                return f"<prompt>{_variant(parents[-1], rng) if parents else fresh}</prompt>"
-            case "capo_crossover" | "levi_refine" | "levi_paradigm_shift":
-                return f"<prompt>{fresh}</prompt>"
-            case "gepa_reflect":
-                return f"```\n{fresh}\n```"
-        raise KeyError(f"offline run: no fake answer for llm node {node!r}")
+        template = self.templates[node]
+        if "<prompt>" in template:
+            # A template rephrasing the individual's own instruction keeps its parent's marker,
+            # so the rephrase keeps the parent's skill.
+            parents = _MARKER.findall(prompt) if "{{instruction}}" in template else []
+            return f"<prompt>{_variant(parents[-1], rng) if parents else fresh}</prompt>"
+        if "```" in template:
+            return f"```\n{fresh}\n```"
+        if "array" in template:
+            return json.dumps([_variant(f"{node}.{idx}.{i}", rng) for i in range(LISTED)])
+        raise KeyError(
+            f"offline run: llm node {node!r}'s template asks for no form the fake writes"
+        )
 
     def _shape(
         self,
@@ -518,20 +526,20 @@ def campaign_config(optimizer: str, rounds: int) -> CampaignConfig:
     )
     raw.update(BENCH)
     opt = raw["optimization"]
+    # The template's node overlay is written for the optimizer it selects, and only that one.
+    templated = opt.get("optimizer", OptimizationConfig.model_fields["optimizer"].default)
     opt.update(max_rounds=rounds, spend_budget_usd=1000.0, origin_gate="off", optimizer=optimizer)
-    if optimizer != "potter":
-        opt["nodes"] = NODES[optimizer]
-        # A peer draws off its campaign's id unless a clamp seeds it, and every run mints a new id.
+    if optimizer != templated:
+        opt["nodes"] = SCALED.get(optimizer, {})
+        # Its draws follow the campaign's id unless a clamp seeds them, and every run mints an id.
         opt["determinism"] = {"seed": 0}
     return load_campaign_config(raw)
 
 
-def text_prefixes(config: CampaignConfig) -> dict[str, str]:
+def text_templates(config: CampaignConfig) -> dict[str, str]:
     selected = select_optimizer(config.optimization)
     return {
-        node: running_prompt(node, selected.node_config(node), selected.document)
-        .render()
-        .split("{{")[0]
+        node: running_prompt(node, selected.node_config(node), selected.document).render()
         for node in selected.llm_nodes
     }
 
@@ -540,7 +548,7 @@ async def run_one(optimizer: str, workspace: Path, *, rounds: int, rows: int) ->
     (workspace / "requests").mkdir()
     config = campaign_config(optimizer, rounds)
     samples = synthetic_rows(rows)
-    llm = FakeLLM(workspace / "requests", text_prefixes(config))
+    llm = FakeLLM(workspace / "requests", text_templates(config))
     backend = FakeBackend(samples)
     router = Router(llm, backend)
     install_network(router)

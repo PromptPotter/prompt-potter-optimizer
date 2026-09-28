@@ -27,6 +27,7 @@ from promptpotter.config.settings import (
 )
 from promptpotter.connectors.protocol import InProcessWorkload
 from promptpotter.domain.backend import BackendConnection
+from promptpotter.domain.optimizer_state import round_payload_type
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.sample import Sample
@@ -332,6 +333,7 @@ def complete_registries() -> None:
     judges.registered()
     optimizers.registered()
     for runtime in optimizers.runtimes().values():
+        round_payload_type(runtime.name)
         runtime.complete()
     # Every decision kind gated once, and a replayer for exactly the REPLAYED ones.
     replayers()

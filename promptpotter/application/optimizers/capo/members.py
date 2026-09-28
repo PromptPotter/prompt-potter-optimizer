@@ -20,8 +20,9 @@ from promptpotter.application.campaign_config import Estimand, Knob, Scope
 from promptpotter.application.optimizers import nodes, paper_templates
 from promptpotter.application.optimizers.capo import operators
 from promptpotter.application.optimizers.capo.state import (
+    CAPO_MANIFEST,
+    CapoRoundState,
     CapoState,
-    capo_round_state,
     capo_state,
 )
 from promptpotter.application.optimizers.paper_templates import (
@@ -31,8 +32,8 @@ from promptpotter.application.optimizers.paper_templates import (
     walk_rng,
 )
 from promptpotter.application.scoring.candidate_report import fatal_validation_failures
+from promptpotter.config.paths import optimizers_root
 from promptpotter.domain.opt_search_point import IndividualLineage, OptSearchPoint, node_source
-from promptpotter.domain.optimizer_state import CAPO_MANIFEST
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import (
     ArmOutcome,
@@ -40,13 +41,14 @@ from promptpotter.domain.results import (
     OptimizerFact,
     candidate_label,
 )
-from promptpotter.domain.run_records import CandidateMintedRecord, CapoCheckpointKind
+from promptpotter.domain.run_records import CandidateMintedRecord, CheckpointKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import StopSignal
 from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.statistics import paired_reading
 
 if TYPE_CHECKING:
+    from pathlib import Path
     from types import ModuleType
 
     from promptpotter.application.bench.cycle import Cycle
@@ -70,7 +72,7 @@ if TYPE_CHECKING:
     from promptpotter.application.scoring.query_loop import Walk
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.results import RoundResult
-    from promptpotter.domain.run_records import ResumeCheckpointKind, ResumeCheckpointRecord
+    from promptpotter.domain.run_records import ResumeCheckpointRecord
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.domain.search_point import JobSearchPoint
@@ -80,6 +82,7 @@ __all__ = [
     "MEMBERS",
     "RUNTIME",
     "BlocksKnobs",
+    "CapoCheckpointKind",
     "CapoCrossoverKnobs",
     "FewShotKnobs",
     "PairedTKnobs",
@@ -87,6 +90,13 @@ __all__ = [
     "cross_shots",
     "mutate_shots",
 ]
+
+
+class CapoCheckpointKind(CheckpointKind):
+    """Decisions CAPO's members take: its eliminator's cut (paired_t), its selector's population."""
+
+    PAIRED_T_CUT = "paired_t_cut"
+    POPULATION_KEPT = "population_kept"
 
 
 class FewShotKnobs(StrictModel):
@@ -760,7 +770,7 @@ def _recorded_objective(inputs_ref: Mapping[str, Any]) -> _Objective:
     return _Objective(float(inputs_ref["length_penalty"]), int(inputs_ref["length_norm"]))
 
 
-CAPO_CHECKPOINT_GATING: dict[ResumeCheckpointKind, GatingMode] = {
+CAPO_CHECKPOINT_GATING: dict[CheckpointKind, GatingMode] = {
     CapoCheckpointKind.PAIRED_T_CUT: GatingMode.REPLAYED,
     CapoCheckpointKind.POPULATION_KEPT: GatingMode.REPLAYED,
 }
@@ -774,6 +784,7 @@ class CapoRuntime:
     """CAPO beyond its nodes: its population state, its prompt identity and its replayed race."""
 
     name: ClassVar[str] = CAPO_MANIFEST
+    manifest_dir: ClassVar[Path] = optimizers_root() / CAPO_MANIFEST
     own_axes: ClassVar[dict[str, set[str]]] = {}
     priced_surface: ClassVar[Mapping[str, int]] = {}
     phases: ClassVar[tuple[nodes.OptimizerPhase, ...]] = ()
@@ -799,7 +810,7 @@ class CapoRuntime:
         return {}
 
     @property
-    def checkpoint_gating(self) -> Mapping[ResumeCheckpointKind, GatingMode]:
+    def checkpoint_gating(self) -> Mapping[CheckpointKind, GatingMode]:
         return CAPO_CHECKPOINT_GATING
 
     @property
@@ -855,7 +866,7 @@ class CapoRuntime:
             (-(-len(rows) // block_size) for rows in round_result.all_candidate_results.values()),
             default=0,
         )
-        kept = len(capo_round_state(round_result).population)
+        kept = len(round_result.optimizer_state.payload_as(CapoRoundState).population)
         size = cast("PopulationKnobs", selected.knobs(PopulationSelector.name)).size
         return [
             OptimizerFact(

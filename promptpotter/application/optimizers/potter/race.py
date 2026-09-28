@@ -15,8 +15,8 @@ from promptpotter.application.optimizers.potter.pobb.checks import (
     EliminationGate,
     PoBBCheck,
 )
+from promptpotter.application.optimizers.potter.records import PotterCheckpointKind
 from promptpotter.domain.results import ArmOutcome
-from promptpotter.domain.run_records import PotterCheckpointKind
 
 if TYPE_CHECKING:
     import asyncio

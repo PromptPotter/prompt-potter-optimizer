@@ -33,13 +33,13 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
     default_l1_layout,
 )
+from promptpotter.application.optimizers.potter.records import L2L3Memory
 from promptpotter.application.scoring import query_loop
 from promptpotter.application.scoring.search_point_scorer import _replayable_on
 from promptpotter.connectors import harbor
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource, grade_run
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.optimizer_state import L2L3Memory
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     SCHEMA_TOGGLE_PARAM,
@@ -1582,7 +1582,6 @@ def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing() -> 
         _r_rendered_prompt,
         _r_task_context,
     )
-    from promptpotter.domain.optimizer_state import L2L3Memory
     from promptpotter.domain.round_diagnostics import RoundDiagnostics
 
     upstream = "Raw invoice text is provided directly as the input column."
@@ -2811,7 +2810,6 @@ def test_evidence_channel_clips_are_visible_and_tail_preserving(
         _edges_at_line,
     )
     from promptpotter.application.optimizers.potter.dispatch.schemas import L1CritiqueOutput
-    from promptpotter.domain.optimizer_state import L2L3Memory
     from promptpotter.domain.round_diagnostics import RoundDiagnostics
 
     # (1) over-cap priority_fix clips at a word boundary WITH a visible marker.

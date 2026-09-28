@@ -47,10 +47,10 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import (
 )
 from promptpotter.application.optimizers.potter.escalation.state import exploration_budget
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
+from promptpotter.application.optimizers.potter.records import PotterRoundState
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.domain import ruler
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
-from promptpotter.domain.optimizer_state import potter_round_state
 from promptpotter.domain.results import merge_known_outcomes
 from promptpotter.domain.results_health import compute_node_failure_rates
 from promptpotter.infrastructure.llm.telemetry import (
@@ -311,7 +311,9 @@ def build_bundle(
     if latest_round is None and cycle.rounds:
         latest_round = cycle.rounds[-1]
     latest_diag = latest_round.diagnostics if latest_round else None
-    latest_state = potter_round_state(latest_round.optimizer_state) if latest_round else None
+    latest_state = (
+        latest_round.optimizer_state.payload_as(PotterRoundState) if latest_round else None
+    )
     latest_crit = latest_state.critique if latest_state else None
     round_num = latest_round.round + 1 if latest_round else 1
 

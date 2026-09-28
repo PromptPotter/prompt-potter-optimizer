@@ -5463,6 +5463,11 @@
         "additionalProperties": false,
         "description": "One node's place in the flow, as a tier and a rank rather than as pixels.\n\nTier 0 is the chain a sample runs and tier n>0 is a node reached only through the n-th\nnested alternative pipeline; rank is the tier-0 position it acts on. A renderer maps them\nto rows and columns.",
         "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -9236,17 +9241,17 @@
     },
     "/api/v1/optimizer-pipeline": {
       "get": {
-        "description": "One optimizer manifest (``promptpotter/assets/optimizers/{optimizer}/pipeline.yaml``) +\nits generated ``resolved_schemas.json`` sibling — the ``view`` topology plus the per-node\ntyped config surface, so the canvas node-detail renders the optimizer's own knobs through the\nsame canonical config element the steer panel uses. Read-only: the manifest is operator-owned —\na hand-edit, never a fork and never a write path from here; a campaign's changes ride its own\n``optimization.nodes``. model/provider are always optimizer-locked.",
+        "description": "One optimizer manifest (the ``pipeline.yaml`` its runtime ships) + its generated\n``resolved_schemas.json`` sibling — the ``view`` topology plus the per-node\ntyped config surface, so the canvas node-detail renders the optimizer's own knobs through the\nsame canonical config element the steer panel uses. Read-only: the manifest is operator-owned —\na hand-edit, never a fork and never a write path from here; a campaign's changes ride its own\n``optimization.nodes``. model/provider are always optimizer-locked.",
         "operationId": "get_optimizer_pipeline_api_v1_optimizer_pipeline_get",
         "parameters": [
           {
-            "description": "The manifest under `promptpotter/assets/optimizers/` to read",
+            "description": "The registered optimizer whose manifest to read",
             "in": "query",
             "name": "optimizer",
             "required": false,
             "schema": {
               "default": "potter",
-              "description": "The manifest under `promptpotter/assets/optimizers/` to read",
+              "description": "The registered optimizer whose manifest to read",
               "title": "Optimizer",
               "type": "string"
             }
@@ -9304,7 +9309,7 @@
     },
     "/api/v1/optimizers/{name}/knobs": {
       "get": {
-        "description": "Every knob the manifest's nodes take — type, closed options, the value the manifest\ndeclares — so a settings surface draws one control per knob and writes a campaign's\n``optimization.nodes.{node}.config.{key}``. 404 when no such manifest ships.",
+        "description": "Every knob the manifest's nodes take — type, closed options, the value the manifest\ndeclares — so a settings surface draws one control per knob and writes a campaign's\n``optimization.nodes.{node}.config.{key}``. 404 when no such optimizer is registered.",
         "operationId": "get_optimizer_knobs_api_v1_optimizers__name__knobs_get",
         "parameters": [
           {

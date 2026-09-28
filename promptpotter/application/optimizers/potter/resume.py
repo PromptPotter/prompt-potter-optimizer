@@ -13,10 +13,13 @@ from promptpotter.application.intelligence.exploration import graded_response
 from promptpotter.application.optimizers.potter.dispatch.facade import build_bundle, node_packages
 from promptpotter.application.optimizers.potter.l1.critique import run_l1_critique
 from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
+from promptpotter.application.optimizers.potter.records import (
+    PotterCheckpointKind,
+    PotterRoundState,
+)
 from promptpotter.application.optimizers.potter.state import potter_state
 from promptpotter.application.scoring.selection import elect_round_winner, elimination_p_best
-from promptpotter.domain.optimizer_state import potter_round_state
-from promptpotter.domain.run_records import PotterCheckpointKind, ResumeCheckpointKind
+from promptpotter.domain.run_records import CheckpointKind
 from promptpotter.domain.scoring import is_answer_collapsed
 from promptpotter.infrastructure.llm.telemetry import reset_current_round, set_current_round
 from promptpotter.shared.errors import graceful
@@ -38,7 +41,7 @@ logger = logging.getLogger(__name__)
 __all__ = ["POTTER_CHECKPOINT_GATING", "POTTER_REPLAYERS", "rederive_critiques", "round_packages"]
 
 
-POTTER_CHECKPOINT_GATING: dict[ResumeCheckpointKind, GatingMode] = {
+POTTER_CHECKPOINT_GATING: dict[CheckpointKind, GatingMode] = {
     PotterCheckpointKind.ROUND_WINNER: GatingMode.REPLAYED,
     PotterCheckpointKind.ELIMINATION_CUT: GatingMode.REPLAYED,
     PotterCheckpointKind.LEADER_LOCK_IN: GatingMode.REPLAYED,
@@ -190,7 +193,7 @@ async def rederive_critiques(
     saved = cycle.rounds
     try:
         for rr in drifted:
-            payload = potter_round_state(rr.optimizer_state)
+            payload = rr.optimizer_state.payload_as(PotterRoundState)
             if not payload.critique or rr.round == 0:
                 continue
             cycle.rounds = [p for p in saved if p.round < rr.round]

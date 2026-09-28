@@ -14,6 +14,9 @@ available_models:
 nodes:
   checkin:
     type: llm
+    description: >-
+      Check-in & origin: resolves the dataset's origin, then scores the unmodified starting prompt
+      as the floor.
     optimizer:
       param_allowed_values:
         # `capabilities.py::STANDARD_EFFORT_LADDER`, cited because a YAML cannot import it.

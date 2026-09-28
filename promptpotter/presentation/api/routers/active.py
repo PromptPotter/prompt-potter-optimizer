@@ -364,11 +364,11 @@ def get_optimizer_pipeline(
     stores: StoresDep,
     optimizer: str = Query(
         default=OptimizationConfig.model_fields["optimizer"].default,
-        description="The manifest under `promptpotter/assets/optimizers/` to read",
+        description="The registered optimizer whose manifest to read",
     ),
 ) -> OptimizerPipelineResponse:
-    """One optimizer manifest (``promptpotter/assets/optimizers/{optimizer}/pipeline.yaml``) +
-    its generated ``resolved_schemas.json`` sibling — the ``view`` topology plus the per-node
+    """One optimizer manifest (the ``pipeline.yaml`` its runtime ships) + its generated
+    ``resolved_schemas.json`` sibling — the ``view`` topology plus the per-node
     typed config surface, so the canvas node-detail renders the optimizer's own knobs through the
     same canonical config element the steer panel uses. Read-only: the manifest is operator-owned —
     a hand-edit, never a fork and never a write path from here; a campaign's changes ride its own
@@ -406,11 +406,11 @@ def get_optimizers() -> OptimizerRoster:
 def get_optimizer_knobs(name: str) -> OptimizerKnobsResponse:
     """Every knob the manifest's nodes take — type, closed options, the value the manifest
     declares — so a settings surface draws one control per knob and writes a campaign's
-    ``optimization.nodes.{node}.config.{key}``. 404 when no such manifest ships."""
+    ``optimization.nodes.{node}.config.{key}``. 404 when no such optimizer is registered."""
     try:
         return optimizer_knobs(name)
-    except FileNotFoundError as exc:
-        raise NotFoundError(f"No optimizer manifest named {name!r}") from exc
+    except KeyError as exc:
+        raise NotFoundError(f"No optimizer named {name!r}") from exc
 
 
 __all__ = [

@@ -12,7 +12,7 @@ The silent-harm part is tested — content-hash sensitivity, by [`tests/test_int
 
 ## Pipeline declaration format
 
-Both backends and every optimizer declare pipelines as JSON. An optimizer's lives at `promptpotter/assets/optimizers/{name}/pipeline.yaml` (potter's is `optimizers/potter/`); a backend's is served by `GET /pipeline`.
+Both backends and every optimizer declare pipelines as JSON. An optimizer's lives in its runtime's `manifest_dir` (a built-in's is `promptpotter/assets/optimizers/{name}/pipeline.yaml`); a backend's is served by `GET /pipeline`.
 
 ```json
 {
@@ -59,7 +59,9 @@ types and the defaults off those models** — a table here is a second declarati
 **PromptPotter parses a SUBSET of this file, and that is by design, not rot — do not re-file the
 remainder as dead keys.** `PipelineNode` is built from `type`, `node_role`, `config` and the
 `optimizer` sub-object, nothing else; `description`, `runtime`, `short_circuit` and `input_schema`
-are the **backend's self-description**, stating its own topology for a human reader. The mirror
+are the **backend's self-description**, stating its own topology for a human reader — which is why
+`description` rides the served `view` as the node's explainer, and no surface keeps a second copy
+keyed by node id. The mirror
 rule: a key PP does not *use* gets no model field, but the key still belongs in the file — and
 "required" on a connector's side means *a connector must publish it*, not *PP reads it*.
 

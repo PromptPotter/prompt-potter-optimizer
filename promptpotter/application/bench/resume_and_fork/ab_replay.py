@@ -25,7 +25,6 @@ from promptpotter.application.mask.record import MaskRound
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.run_records import PotterCheckpointKind
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
@@ -124,14 +123,14 @@ def _make_replay_verdict(
         if not found:
             return VerdictOutcome(diverged=False)
         sink.extend(found)
-        # A flipped ROUND_WINNER names the candidate the current engine would elect, and it
-        # was measured — so unlike the abort verdict, this one CAN name the one-step
-        # alternative. Any other kind moved without naming a replacement leader.
+        # A decision re-deriving to a measured arm is a flipped election: unlike the abort verdict,
+        # it names the one-step alternative. Any other kind moved without naming a leader.
         alternative = next(
             (
-                str(m.current_outcome)
+                m.current_outcome
                 for m in found
-                if m.kind == PotterCheckpointKind.ROUND_WINNER and m.current_outcome
+                if isinstance(m.current_outcome, str)
+                and m.current_outcome in rd.all_candidate_results
             ),
             None,
         )
