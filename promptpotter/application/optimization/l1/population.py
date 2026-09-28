@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import logging
 from collections.abc import Sequence
 from typing import Any
@@ -17,38 +16,16 @@ from promptpotter.application.optimization.validators.l1_strict import (
     L1_PROMPT_PLACEHOLDERS_INTACT,
     L1_SCHEMA_COMPLIANCE,
 )
-from promptpotter.application.pipeline_resolve import apply_node_overlay
+from promptpotter.application.pipeline_resolve import merge_pipeline_params
 from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import CandidateProposal
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["merge_pipeline_params", "parse_population"]
-
-
-def merge_pipeline_params(
-    base: dict[str, Any] | None,
-    overrides: dict[str, Any] | None,
-    schema: PipelineSchema | None,
-) -> dict[str, Any] | None:
-    """The ONE candidate-override merge: overlay onto a DEEP COPY, then drop overrides for inactive nodes. Shared by the
-    live L1 path and the ``verify`` / ``ab`` replays, so a re-derived candidate hashes the config the loop did."""
-    if not overrides:
-        return base
-    merged = apply_node_overlay(copy.deepcopy(base or {}), overrides, schema)
-    if schema:
-        # DECLARED, not the running chain: this guard strips an edit to a node that does not
-        # EXIST — a hallucinated name — and a node reached only by escalating exists.
-        _declared = {n.name for n in schema.config_nodes}
-        for k, _cfg in list(node_config_items(merged)):
-            if k not in _declared:
-                logger.warning("Dropping LLM override for undeclared node %r", k)
-                del merged[k]
-    return merged
+__all__ = ["parse_population"]
 
 
 def parse_population(

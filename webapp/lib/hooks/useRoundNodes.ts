@@ -1,6 +1,6 @@
 "use client";
 // The single resolver for which round's node blocks the optimizer card shows. Plain equality
-// against `current_round.round`, never "has it closed": escalation writes land after the flush.
+// against `current_round.round`, never "has it closed": the adapters' calls land after the flush.
 
 import { useMemo } from "react";
 import { useDashboard } from "./useDashboard";

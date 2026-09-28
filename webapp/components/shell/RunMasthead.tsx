@@ -4,6 +4,7 @@ import { Badge, CopyButton, VendorLogo } from "@/components/ui";
 import { CampaignSwitcher } from "@/components/shell/CampaignSwitcher";
 import { ViewTabs } from "@/components/shell/ViewTabs";
 import {
+  benchStat,
   buildForest,
   campaignLineParts,
   campaignModels,
@@ -16,6 +17,7 @@ import {
 import { fmtPct0, fmtUsdCents, shortModel } from "@/lib/format";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { pathLeaf } from "@/lib/ids";
+import { isMeasuring } from "@/lib/poll";
 import { cx } from "@/lib/cx";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { useWorkspace } from "@/lib/workspace";
@@ -73,11 +75,9 @@ export function RunMasthead({
   );
 
   const { best } = headlineStats(dash);
-  // `dash.candidate` goes stale between rounds, so it stands in only while the scorer is active.
-  const scoringCand =
-    dash?.current_round.active_node === "l1_score"
-      ? String(dash.candidate || "").split("/")[0]
-      : "";
+  const bench = dash?.bench_score ? benchStat(dash.bench_score) : null;
+  // `dash.candidate` goes stale between rounds, so it stands in only while the measurement works.
+  const scoringCand = dash && isMeasuring(dash) ? String(dash.candidate || "").split("/")[0] : "";
   const roundsCap = dash?.run_limits?.max_rounds ?? null;
   const position = scoringCand || (dashRound != null ? `R${dashRound}` : "—");
 
@@ -154,6 +154,12 @@ export function RunMasthead({
                 <path className="line" d={spark.path} />
               </svg>
             )}
+          </span>
+          {/* The headline: the selection graded on held-out rows; BEST beside it is the optimizer's own. */}
+          <span className="chip">
+            <span className="chip-lbl">Bench</span>
+            {bench ? bench.value : "—"}
+            {bench && <span className="chip-of"> {bench.sub}</span>}
           </span>
           <span className="chip">
             <span className="chip-lbl">Rounds</span>

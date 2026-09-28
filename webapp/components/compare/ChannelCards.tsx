@@ -375,7 +375,7 @@ function ChannelCard({
               <dd>{reading.cycle_rounds_scored}</dd>
             </div>
             {/* Served `authorship`: the arm groups by optimizer CONFIG, which forks share, so this is
-                the only row separating a human's prompt from L1's. */}
+                the only row separating a human's prompt from the optimizer's. */}
             <div>
               <dt>authored by</dt>
               <dd title={reading.authorship}>{reading.authorship || "—"}</dd>

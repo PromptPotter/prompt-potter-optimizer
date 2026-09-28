@@ -137,7 +137,7 @@ class LineageNode(StrictModel):
     is_selected: bool = Field(
         default=False,
         description="Elected this round. Stamped at the ELECTION, which is the last thing "
-        "scoring does — so it lands a whole `l1_critique` call before the round closes, and a "
+        "scoring does — so it lands before the round's adapters run and the round closes, and a "
         "round still running its optimizer calls already reports its winner. False where no "
         "election has been held (still scoring, or halted on a holed panel) and on a round that "
         "held: those two are told apart by the election record, not by this flag.",
@@ -374,7 +374,7 @@ class _RoundFacts(NamedTuple):
     The ELECTION carries everything it stamps at the end of scoring — the crown, θ, and the
     matched-parent floor the arm was judged against. The CLOSE carries the frontier, and RE-READS
     θ, which is how a warm ruler's restamp reaches round 0; where it answers, it wins. Neither
-    implies the other — a round elects an ``l1_critique`` call before it closes.
+    implies the other — a round elects before its adapters run and it closes.
 
     The whisker is in neither: it is the candidate's own, and a round-scoped copy drew two
     quantities as one band."""

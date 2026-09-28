@@ -1,4 +1,4 @@
-"""The per-round candidate buffer behind ``current_round.nodes.l1_score``. The view's snapshot fan-out routes each kind to
+"""The per-round candidate buffer behind ``current_round.candidates``. The view's snapshot fan-out routes each kind to
 one mutator here, and the render functions read these fields verbatim."""
 
 from __future__ import annotations
@@ -89,8 +89,7 @@ class RoundBuffer:
         account = TokenAccount.from_step_tokens(pd)
         # The scorer rides the candidate's running fitness (composite/accuracy/
         # hits/total over samples-so-far) out on the sample. Store it on the slot
-        # so the live l1_score block serves a moving fitness before the final
-        # ``scores`` land (folder-UI parity for no-browser readers).
+        # so the live row serves a moving fitness before the final ``scores`` land.
         running = result.get("_running")
         if isinstance(running, dict):
             self.slot(ci, ct)["running"] = running

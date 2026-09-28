@@ -185,7 +185,7 @@ budget, so the stratification is not why ε fails to fire. Arms that end close a
 and refuted; don't re-run this hypothesis.
 
 So: **when a round reports `improved: false`, open
-`.runtime/streams/round_NNNN_p_best.jsonl` and read the final `paired_breakdown` before accepting
+`.runtime/streams/round_NNNN_pobb.jsonl` and read the final `paired_breakdown` before accepting
 it.** A held round whose `p_better` sits far off 0.5 is a promotion the gate refused, not a
 candidate that failed. Report it as an instrument disagreement, and name both numbers.
 

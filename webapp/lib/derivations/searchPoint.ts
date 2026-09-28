@@ -1,15 +1,9 @@
 // Selects which searchpoint's served `resolved_pipeline_params` the read-only observe view shows;
 // never re-merges. The origin is a round-0 candidate, not a third state.
 
-import {
-  liveInputCandidate,
-  liveL1InputCandidates,
-  roundOf,
-  type DashboardSnapshot,
-  type LiveInputCandidate,
-} from "@/lib/poll";
-import { candidateLabel } from "@/lib/candidate-label";
+import { liveCandidate, liveCandidates, type DashboardSnapshot } from "@/lib/poll";
 import { PROMPT_STRING_FIELDS } from "@/lib/prompt-fields";
+import type { LiveCandidate } from "@/lib/api/types";
 import type { ElectedRow, RoundResult, SampleRow } from "@/lib/types";
 import { roundHasCandidates, sortedRounds } from "./round-candidates";
 import { wasElected } from "./election";
@@ -93,13 +87,16 @@ function nodePromptFields(
   return out;
 }
 
+// The searchpoint half both a live row and a round file's `candidate_scores[]` carry.
+type SearchpointRow = Pick<LiveCandidate, "prompt_fields" | "resolved_pipeline_params">;
+
 function rowConfig(
-  row: LiveInputCandidate | undefined | null,
+  row: SearchpointRow | undefined | null,
   label: string,
   nodeId?: string | null,
 ): ObserveConfig | null {
   if (!row) return null;
-  const flat = (row.prompt_fields ?? {}) as Record<string, unknown>;
+  const flat = row.prompt_fields ?? {};
   const hasFlatPrompt = PROMPT_STRING_FIELDS.some((k) => k in flat);
   return {
     promptFields: hasFlatPrompt ? flat : nodePromptFields(row.resolved_pipeline_params, nodeId),
@@ -108,20 +105,15 @@ function rowConfig(
   };
 }
 
-// Null only between `L1_GENERATE:enter` (which resets the buffer, `projection.py::_apply_phase`)
+// The latest-seeded row, which the served list orders last. Null only between the buffer's reset
 // and the first candidate starting; the host falls back to the last closed searchpoint.
 export function liveObserveConfig(
   dash: DashboardSnapshot | null,
   nodeId?: string | null,
 ): ObserveConfig | null {
-  const candidates = liveL1InputCandidates(dash);
-  let latest = candidates[0];
+  const latest = liveCandidates(dash).at(-1);
   if (!latest) return null;
-  for (const c of candidates) {
-    if (Number(c.idx ?? -1) > Number(latest.idx ?? -1)) latest = c;
-  }
-  const label = latest.label || candidateLabel(roundOf(dash), latest.idx);
-  return rowConfig(latest, `live — ${label}`, nodeId);
+  return rowConfig(latest, `live — ${latest.label}`, nodeId);
 }
 
 // Null until that candidate is seeded (`candidate_started`).
@@ -130,7 +122,7 @@ export function liveCandidateObserveConfig(
   label: string,
   nodeId?: string | null,
 ): ObserveConfig | null {
-  return rowConfig(liveInputCandidate(dash, label), `live — ${label}`, nodeId);
+  return rowConfig(liveCandidate(dash, label), `live — ${label}`, nodeId);
 }
 
 // Joined on the positional label, never `candidate_id`: a resume re-scores C0 under a NEW id while
@@ -141,9 +133,8 @@ export function candidateObserveConfig(
   display: string,
   nodeId?: string | null,
 ): ObserveConfig | null {
-  const scores = doc?.candidate_scores;
-  if (!Array.isArray(scores) || !courseLabel) return null;
-  const row = (scores as LiveInputCandidate[]).find((c) => c.label === courseLabel);
+  if (!doc || !courseLabel) return null;
+  const row = doc.candidate_scores.find((c) => c.label === courseLabel);
   return rowConfig(row, display, nodeId);
 }
 

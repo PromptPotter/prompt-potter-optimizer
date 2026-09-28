@@ -3,20 +3,21 @@ is per-cycle, so a fork's chart shows the fork's trajectory; the tree is rooted 
 
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 from fastapi import Query, Request, Response
 from fastapi.responses import JSONResponse
 
+from promptpotter.application import optimizers
 from promptpotter.application.evidence.subjects import LENS_SCORE_PREFIX
 from promptpotter.application.mask.divergence import Verdict, find_divergences
 from promptpotter.application.mask.load import load_mask_record, parse_sample_ids
 from promptpotter.application.mask.record import MaskRecord
 from promptpotter.application.mask.verdicts import make_abort_verdict, make_scoring_verdict
-from promptpotter.application.optimization.pobb.checks import ABORT_LENS_LABELS, EliminationGate
 from promptpotter.application.scoring.formula import compile_round_scorer
 from promptpotter.application.scoring.metrics import value_with_mask_applied
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop, CyclePath, WorkspaceDir
+from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.scoring import RoundScorer
 from promptpotter.infrastructure.projections.live_dashboard.projection import fold_at
 from promptpotter.infrastructure.projections.live_dashboard.state import (
@@ -50,24 +51,19 @@ from promptpotter.presentation.api.routers.campaigns._conditional import (
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 
-# Abort-lens variants → the PoBB gate(s) to switch off (the thin API-edge selector for the abort
-# verdict; see docs/operations/mask-projection.md). DERIVED from `EliminationGate`, so a gate added
-# there is switchable here rather than silently unsuppressable.
-_ABORT_SUPPRESS: dict[str, frozenset[str]] = {
-    **{f"{g.value}_off": frozenset({g.value}) for g in EliminationGate},
-    "all_off": frozenset(g.value for g in EliminationGate),
-}
+if TYPE_CHECKING:
+    from promptpotter.application.optimizers.nodes import Eliminator
 
-# The picklist the browser offers must be exactly what this edge accepts. A LABEL cannot be
-# derived — it is copy — so the key set is asserted instead, at import: the browser's options are
-# emitted from `ABORT_LENS_LABELS` by `scripts/build_ts_types.py`, and a gate added to
-# `EliminationGate` without a word for it would otherwise be served and unofferable, which is how
-# `collapsed_off` spent its life reachable only by hand-typing a URL.
-assert set(ABORT_LENS_LABELS) == set(_ABORT_SUPPRESS), (
-    "abort-lens vocabulary drift: "
-    f"unlabelled {sorted(set(_ABORT_SUPPRESS) - set(ABORT_LENS_LABELS))}, "
-    f"unserved {sorted(set(ABORT_LENS_LABELS) - set(_ABORT_SUPPRESS))}"
-)
+
+def _abort_lenses() -> dict[str, frozenset[str]]:
+    """Every registered eliminator's abort-lens variants, read per request: the member table
+    completes at a declared step, never at import."""
+    return {
+        variant: gates
+        for member in optimizers.registered().values()
+        if member.kind is NodeKind.ELIMINATOR
+        for variant, gates in cast("Eliminator", member).abort_lenses.items()
+    }
 
 
 def serve_dashboard_response(
@@ -200,10 +196,11 @@ def _resolve_lens(lens: str | None) -> _Lens:
     criterion the fold asks and the criterion served per node are the same object."""
     if lens and lens.startswith("abort:"):
         variant = lens.removeprefix("abort:")
-        suppress = _ABORT_SUPPRESS.get(variant)
+        lenses = _abort_lenses()
+        suppress = lenses.get(variant)
         if suppress is None:
             raise BadRequestError(
-                f"Unknown abort lens: {variant!r} (expected one of {sorted(_ABORT_SUPPRESS)})"
+                f"Unknown abort lens: {variant!r} (expected one of {sorted(lenses)})"
             )
         return _Lens(make_abort_verdict(suppress), None)
     if lens and not lens.startswith(LENS_SCORE_PREFIX):
@@ -347,8 +344,8 @@ def get_lineage_tree(
     An optional **lens** decorates the nodes with a counterfactual. ``lens=score:<formula>``
     = an alternative scoring formula (each candidate's ``lens_value``, plus a ``divergence``
     marker where that criterion would have elected someone else); ``lens=abort:<variant>``,
-    variant ∈ ``_ABORT_SUPPRESS`` (one ``<gate>_off`` per ``EliminationGate``, plus
-    ``all_off``) = switch off a PoBB abort contributor. ``samples`` = a comma-separated sample-id list (the **sample-set mask**):
+    variant ∈ the registered eliminators' abort lenses (one ``<gate>_off`` per gate, plus
+    ``all_off``) = switch off an elimination gate's abort contribution. ``samples`` = a comma-separated sample-id list (the **sample-set mask**):
     re-score over only those samples. No lens + no samples ⇒ the tree is the raw read.
 
     A shell, deliberately: resolve the path, build the view, serve it. The assembly rules

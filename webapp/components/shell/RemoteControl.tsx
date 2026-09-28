@@ -151,7 +151,7 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
   const discards = dash?.sample_lookahead_discards ?? 0;
   // `1` disables the control WITH ITS REASON; unserved, presses would be silently pinned to 1.
   const maxCells = dash?.max_cells_in_flight ?? 1;
-  // Summed server-side over every candidate walking plus PoBB catch-ups — never a count of
+  // Summed server-side over every candidate walking plus race catch-ups — never a count of
   // `open_sample_ids`. Between rounds `most` is the next round's.
   const inFlight = dash?.in_flight ?? 0;
   const allowed = dash?.lookahead_allowed ?? 0;

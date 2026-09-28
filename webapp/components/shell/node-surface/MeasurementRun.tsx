@@ -15,11 +15,11 @@ import {
 } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
 import type { ArmOutcome, LineageNode } from "@/lib/api";
+import { liveCandidates } from "@/lib/poll";
 import {
   isSelectedCandidate,
   type CandidateRow,
   type ElectedRow,
-  type NodeBlock,
   type SampleRow,
 } from "@/lib/types";
 import type { CandidateSearchPoint, CandidateVerdict } from "@/lib/derivations";
@@ -34,11 +34,8 @@ import { PanelCellRow } from "./PanelCellRow";
 // and what the named one ran. Scored rows are a `MeasurementsPane` preset; L4 cells list here.
 
 export function MeasurementRun({
-  block,
   round,
 }: {
-  // Resolved by `useRoundNodes`, the single live-vs-audit-twin resolver.
-  block: NodeBlock | null;
   // Threaded from the panel, never re-resolved: a second `useEffectiveRound` can disagree for a tick.
   round: number;
 }) {
@@ -84,9 +81,12 @@ export function MeasurementRun({
 
   const [candFilter, setCandFilter] = useState<string>("all");
 
-  // The rejection FLAG rides the row (no fetch); the REASON rides this block, lazily on a
-  // historical round — so a row never shows a rejection as a percentage while waiting.
-  const verdicts = useMemo(() => candidateVerdicts(block), [block]);
+  // The rejection FLAG rides the row (no fetch); the REASON rides the half the rows came from,
+  // lazily on a historical round — so a row never shows a rejection as a percentage while waiting.
+  const verdicts = useMemo(
+    () => candidateVerdicts(isLiveView ? liveCandidates(dash) : (roundDoc?.candidate_scores ?? [])),
+    [isLiveView, dash, roundDoc],
+  );
 
   const groups = useMemo(() => {
     const out: {

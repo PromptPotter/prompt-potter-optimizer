@@ -1,5 +1,6 @@
-"""Appends per-sample P(best) snapshots to each cycle's OWN ``.runtime/streams/``; a runtime check rejects
-misrouted construction, so a fork writes under its own audit tree."""
+"""Appends each eliminator's per-sample race standings to its cycle's OWN ``.runtime/streams/``, one
+file per round named by the manifest member racing it; a runtime check rejects misrouted
+construction, so a fork writes under its own audit tree."""
 
 from __future__ import annotations
 
@@ -15,19 +16,19 @@ from promptpotter.infrastructure.store.layout import CycleLayout
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["PoBBStreamProjection"]
+__all__ = ["RacingStreamProjection"]
 
 _STREAMS_SUBPATH = (".runtime", "streams")
 
 
-class PoBBStreamProjection(Projection):
-    """Per-sample P(best) snapshots, one JSONL per round. **One line describes ONE candidate** — a cid-keyed map gave every
-    prior a trajectory built out of numbers about somebody else."""
+class RacingStreamProjection(Projection):
+    """Per-sample standings, one JSONL per round and member. **One line describes ONE candidate** — a
+    cid-keyed map gave every prior a trajectory built out of numbers about somebody else."""
 
     def __init__(self, streams_dir: Path) -> None:
         if streams_dir.parts[-len(_STREAMS_SUBPATH) :] != _STREAMS_SUBPATH:
             raise ValueError(
-                f"PoBBStreamProjection streams_dir must end in /{'/'.join(_STREAMS_SUBPATH)}; "
+                f"RacingStreamProjection streams_dir must end in /{'/'.join(_STREAMS_SUBPATH)}; "
                 f"got {streams_dir}"
             )
         self.streams_dir = streams_dir
@@ -36,11 +37,11 @@ class PoBBStreamProjection(Projection):
         self._last_round: int | None = None
 
     @classmethod
-    def from_cycle_dir(cls, cycle_dir: CycleDir) -> PoBBStreamProjection:
+    def from_cycle_dir(cls, cycle_dir: CycleDir) -> RacingStreamProjection:
         return cls(CycleLayout(Path(cycle_dir)).streams)
 
     def _handle_snapshot(self, record: SnapshotRecord) -> None:
-        if record.event != "p_best_update":
+        if record.event != "race_standing":
             return
         if record.round is None:
             return
@@ -49,6 +50,7 @@ class PoBBStreamProjection(Projection):
         current_id = str(payload.get("current_id", ""))
         if not current_id:
             return
+        member = str(payload["member"])
         p_best = float(payload.get("p_best") or 0.0)
 
         if self._last_round != record.round:
@@ -76,11 +78,9 @@ class PoBBStreamProjection(Projection):
             "paired_breakdown": paired_breakdown,
         }
 
-        self._append(record.round, line)
-        self._last_p_best[current_id] = p_best
-
-    def _append(self, round_num: int, line: dict[str, Any]) -> None:
+        path = self.streams_dir / f"round_{record.round:04d}_{member}.jsonl"
         try:
-            append_jsonl(self.streams_dir / f"round_{round_num:04d}_p_best.jsonl", line)
+            append_jsonl(path, line)
         except OSError as exc:
-            logger.warning("PoBBStreamProjection: append failed for round %d: %s", round_num, exc)
+            logger.warning("RacingStreamProjection: append to %s failed: %s", path.name, exc)
+        self._last_p_best[current_id] = p_best

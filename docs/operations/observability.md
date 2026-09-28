@@ -27,15 +27,15 @@ Phase events (`domain/phases.py`: the bench's `CampaignPhase` — `init`, `origi
 
 `gate_s` is the one HUMAN leg — time held at the origin gate — and is never folded into a machine one. `unworked_s` is the opposite correction: seconds cells were not *allowed* to spend (machine suspend, or queued behind the shared limiter), summed off each cell's own envelope, and `None` where no cell ran under one. A headline counting a suspended box as work is not publishable, which is why absent and zero stay apart.
 
-## Per-sample P(best) stream
+## Per-sample race stream
 
-PoBB emits a per-sample Posterior-of-Being-Best snapshot for every candidate, on four channels:
+An optimizer's eliminator emits a per-sample standing for every candidate as a `race_standing` snapshot naming its manifest `member` — potter's PoBB (`pobb`) as a Posterior-of-Being-Best — on four channels:
 
 | Channel | Path | Format |
 |---|---|---|
-| Live dashboard | `dashboard.json::current_round.pobb` — `{current_id, n_samples, leader_prob, posterior_width, top}` | scalar floats + a top-5 list |
-| CLI / notebook | stdout, mirrored to `cycles/{cycle_id}/readout.log` | `P(best) @ q14: *c042* 44.0%▲ \| c017 28.4%▼ \| …` |
-| Append-only stream | `cycles/{cycle_id}/.runtime/streams/round_NNNN_p_best.jsonl` | `{round, sample_idx, current_id, n_samples, p_best, p_best_delta}` |
+| Live dashboard | `dashboard.json::current_round.racing` — `{member, current_id, n_samples, leader_prob, posterior_width, top}`, null before a reading | scalar floats + a top-5 list |
+| CLI / notebook | stdout, mirrored to `cycles/{cycle_id}/readout.log` | `pobb P(best) @ q14: *c042* 44.0%▲ \| c017 28.4%▼ \| …` |
+| Append-only stream | `cycles/{cycle_id}/.runtime/streams/round_NNNN_{member}.jsonl` | `{round, sample_idx, current_id, n_samples, p_best, p_best_delta}` |
 | Round digest | `log.md` § P(best) trajectory | per-candidate sparkline + final % |
 
 The JSONL stream is canonical replay; the dashboard fields and the sparkline are derived views.

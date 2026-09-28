@@ -2,9 +2,10 @@
 
 ``*_behavior`` modules SCORE conformance into ``review.md`` and the round file; they never
 block a candidate (`../CLAUDE.md` § A validator either REJECTS or SCORES). The shapes that
-posture is expressed in — one result, one context, one signature — are layer-agnostic, and
-living in ``l1_behavior.py`` made every consumer import L1 to talk about L2: ``l2_behavior``
-took both types from it and then re-declared ``CheckFn`` verbatim beside them.
+posture is expressed in — one context, one signature — are layer-agnostic, and living in
+``l1_behavior.py`` made every consumer import L1 to talk about L2: ``l2_behavior`` took both types
+from it and then re-declared ``CheckFn`` verbatim beside them. The result is the bench's
+``nodes.CheckResult``, since ``review.md`` renders it.
 """
 
 from __future__ import annotations
@@ -13,16 +14,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from promptpotter.application.optimizers.nodes import CheckResult
 from promptpotter.domain.l1_layout import L1Layout
 
-__all__ = ["CheckFn", "CheckResult", "ValidatorContext"]
-
-
-@dataclass(frozen=True)
-class CheckResult:
-    check_id: str
-    passed: bool
-    evidence: str
+__all__ = ["CheckFn", "ValidatorContext"]
 
 
 @dataclass(frozen=True)
@@ -39,7 +34,7 @@ class ValidatorContext:
     # ``evidence_grounding_present`` to reject variants that cite
     # ``axis_memory`` to justify mutating a peaked axis without naming a
     # rebut (the critique naming that axis, or exploration_budget=wide).
-    # Populated by ``review_md.py::_compute_behavior_per_round`` from each round's
+    # Populated by ``l1/stats.py::review_reading`` from each round's
     # ``axis_memory_peaked`` field, stashed by ``persist_round``.
     peaked_axes: frozenset[str] = field(default_factory=frozenset)
 

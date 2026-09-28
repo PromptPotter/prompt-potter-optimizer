@@ -13,7 +13,7 @@ interface RoundSourceState extends RoundFileState<RoundResult> {
 }
 
 // "Does a round FILE exist yet" — not equality with `current_round.round`, and not
-// `closedRoundNumbers`, which drops the empty L2/L3-terminal rounds that still get a file.
+// `closedRoundNumbers`, which drops the empty rounds that closed before measuring and still get a file.
 export function isLiveRound(dash: DashboardSnapshot | null, round: number | null): boolean {
   const closed = (dash?.rounds ?? []).some((r) => r.round === round);
   return round != null && round === roundOf(dash) && !closed;

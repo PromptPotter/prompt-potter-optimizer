@@ -12,7 +12,7 @@ import type {
   RoundSummary,
 } from "@/lib/types";
 
-// A round closed mid-L2/L3 (no `l1_score` fired) is real history with an empty `candidates[]`,
+// A round closed before its measurement ran is real history with an empty `candidates[]`,
 // and must never be plotted or treated as a completed round.
 export function roundHasCandidates(r: RoundSummary): boolean {
   return r.candidates.length > 0;

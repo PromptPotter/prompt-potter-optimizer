@@ -36,7 +36,7 @@ export function deriveDecision(
   return {
     kind: "origin-gate",
     title: `Origin gate — verdict: ${grade}`,
-    lead: `The origin (round 0) scored ${grade} — not healthy enough to optimize against. The run is holding before L1. Fix the connector and re-score to re-check, proceed to optimize anyway, or abort.`,
+    lead: `The origin (round 0) scored ${grade} — not healthy enough to optimize against. The run is holding before round 1. Fix the connector and re-score to re-check, proceed to optimize anyway, or abort.`,
     verdict,
     buttons: GATE_BUTTONS,
   };

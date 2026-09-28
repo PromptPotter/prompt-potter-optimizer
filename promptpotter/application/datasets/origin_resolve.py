@@ -17,12 +17,11 @@ from promptpotter.application.datasets.origin_readiness import (
 )
 from promptpotter.application.jobs.launcher.checkin import save_checkin_draft
 from promptpotter.application.jobs.quota import admit_spend
-from promptpotter.application.optimization.dispatch.llm_call.call import (
-    LLMCallContext,
-    run_optimizer_node,
+from promptpotter.application.optimization.task_context import (
+    CheckinOutput,
+    checkin_campaign_call_context,
+    run_checkin,
 )
-from promptpotter.application.optimization.dispatch.schemas import CheckinOutput
-from promptpotter.application.optimization.task_context import checkin_call_context
 from promptpotter.application.scoring.formula.matchers import extraction_note_for_scoring
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.origin_provenance import Provenance
@@ -141,15 +140,6 @@ def build_origin_consultation(draft: DraftCampaign, message: str | None = None) 
     return user_content, consultation_instruction
 
 
-def _checkin_call_context(stores: Stores, campaign_id: str) -> LLMCallContext:
-    """The turn's audit home — the check-in campaign's own cycle ledger. ``draft_id`` IS the
-    ``campaign_id`` (re-keyed at ``create_checkin_campaign``); both modes bill through the one call."""
-    campaign = stores.campaigns.load_campaign(campaign_id)
-    if campaign is None:
-        raise ValueError(f"check-in campaign {campaign_id!r} not found — cannot resolve its origin")
-    return checkin_call_context(stores, campaign.root_hop)
-
-
 async def resolve_origin_turn(
     *,
     stores: Stores,
@@ -168,7 +158,7 @@ async def resolve_origin_turn(
     # The consultation is deterministic (no timestamps, no ids), so an unchanged turn
     # replays free off `optimizer_reuse/`; a schema or optimizer prompt edit changes
     # `hash_call` and correctly misses.
-    context = _checkin_call_context(stores, draft.draft_id)
+    context = checkin_campaign_call_context(stores, draft.draft_id)
     token = set_cycle_ledger(context.ledger)
     try:
         with spending_under(book):
@@ -179,18 +169,13 @@ async def resolve_origin_turn(
                 campaign_id=draft.draft_id,
                 round_num=0,
             ):
-                raw, _prompt, repair_attempts = await run_optimizer_node(
-                    template_name="checkin",
-                    prompt_vars={"consultation_instruction": consultation_instruction},
+                raw, repair_attempts = await run_checkin(
+                    consultation_instruction=consultation_instruction,
                     user_content=user_content,
                     context=context,
                 )
     finally:
         reset_cycle_ledger(token)
-
-    assert isinstance(raw, CheckinOutput), (
-        f"checkin must return CheckinOutput, got {type(raw).__name__}"
-    )
 
     raised = raised_commands(draft, raw)
     updated = _apply_findings(draft, raw, raised)

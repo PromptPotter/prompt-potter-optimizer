@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -7,9 +9,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.campaign_config import freeze_campaign_config
-from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-    combined_optimizer_prompt_hash,
-)
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import resolved_dataset_name
 from promptpotter.application.run_observers import build_campaign_emitter
@@ -198,8 +197,11 @@ class Session:
 
 
 def _manifest_hashes(config: CampaignConfig) -> dict[str, str]:
+    """An audit JOIN KEY, not the drift gate: drift is asked per ROUND, where the answer can name the
+    round and fork at it. Not part of ``campaign_id``, which is random per ``new``."""
     selected = select_optimizer(config.optimization)
-    return {selected.name: combined_optimizer_prompt_hash(selected)}
+    blob = json.dumps(selected.prompt_hashes(), sort_keys=True)
+    return {selected.name: hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]}
 
 
 def new_session_state(

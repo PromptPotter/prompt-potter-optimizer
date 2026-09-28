@@ -70,7 +70,7 @@ export interface IngestFlow {
   awaitingContext: boolean;
   onDatasetFile: (file: File) => void;
   pickDataset: (entry: DatasetIndexEntry) => void;
-  // No check-in call: the optimizer graph enters at l1_generate.
+  // No check-in call: an origin is already a runnable starting point.
   openOrigin: (entry: OriginEntry) => void;
   reopenCheckin: (campaignId: string) => void;
   submitContext: () => void;
@@ -245,7 +245,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   };
 
   // Only an unauthored draft re-runs the resolver: on an authored one it would re-propose the
-  // L1 fields over the operator's edits.
+  // prompt fields over the operator's edits.
   const reopenCheckin = async (campaignId: string) => {
     setMessages([]);
     setPhase({ stage: "uploading" });

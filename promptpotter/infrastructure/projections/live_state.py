@@ -11,8 +11,8 @@ from promptpotter.domain.run_records import as_view_mapping
 
 __all__ = [
     "LiveStateCore",
-    "apply_p_best_update",
     "apply_phase",
+    "apply_race_standing",
     "roll_p_best_at_round_complete",
     "top_n_p_best",
 ]
@@ -24,13 +24,15 @@ class LiveStateCore:
     origin_acc: float = 0.0
     best_acc: float = 0.0
     # Candidate id → its latest P(best) this round, and the value each held before that —
-    # the population a round-wide reading is about. A ``PoBBSnapshot`` carries ONE
+    # the population a round-wide reading is about. A ``RaceSnapshot`` carries ONE
     # candidate's number, so anything ranking candidates accumulates here instead of
     # reading a single snapshot. ``current_p_best_id`` empty ⇒ no reading this round yet.
     round_p_best: dict[str, float] = field(default_factory=dict)
     round_p_best_prev: dict[str, float] = field(default_factory=dict)
     current_p_best_id: str = ""
     current_p_best_n: int = 0
+    # The manifest node racing the round's candidates; empty before its first standing.
+    race_member: str = ""
 
 
 def apply_phase(core: LiveStateCore, event: PhaseEvent, view: Any = None) -> None:
@@ -67,8 +69,9 @@ def apply_phase(core: LiveStateCore, event: PhaseEvent, view: Any = None) -> Non
             core.best_acc = winner
 
 
-def apply_p_best_update(
+def apply_race_standing(
     core: LiveStateCore,
+    member: str,
     current_id: str,
     n_samples: int,
     p_best: float,
@@ -76,6 +79,7 @@ def apply_p_best_update(
     """Record one candidate's P(best) reading. Empty ``current_id`` ⇒ nothing to record."""
     if not current_id:
         return
+    core.race_member = member
     if current_id in core.round_p_best:
         core.round_p_best_prev[current_id] = core.round_p_best[current_id]
     core.round_p_best[current_id] = float(p_best)

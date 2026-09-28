@@ -368,6 +368,7 @@ async def execute_round(
         CampaignPhase.MEASURE,
         "enter",
         round=round_num,
+        node=plan.measurement,
         n_candidates=len(population.proposals),
         n_samples=len(panel.cells),
         current_best_accuracy=cycle.tracking.current_accuracy,
@@ -579,8 +580,7 @@ async def close_round(
         not_attempted=round_result.not_attempted,
         unscored=round_result.unscored,
     )
-    controller = round_plan(cycle.optimizer).controller
-    stall, hearts = controller.standing(cycle) if controller is not None else (0, None)
+    stall, hearts = cycle.working_state.standing()
     cb.on_round_complete(round_result, stall, hearts)
     persist_round(cycle, round_result, session, cb)
     if cycle.axes and session.store:

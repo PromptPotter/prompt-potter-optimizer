@@ -28,7 +28,7 @@ the election) so nothing decides per-key at the seam what serializes.
 |---|---|---|---|
 | `LiveDashboardProjection` (`projections/live_dashboard/projection.py`) | per cycle | `dashboard.json` | **Display surface** — completed-round summaries (`dash.rounds[]`; **round 0 = the origin's round-0 score**, a one-candidate round emitted via the standard `close_round` path, no separate origin block) + in-flight `current_round` block + `spend` rollup (sole writer for every bucket via `_handle_token_usage`, which picks one through `domain/spend.py::TOKEN_KIND_BUCKET` and folds the totals over `SpendRollup.buckets` — never a hand-named pair, or a new spend kind is money the cap cannot see; a run's spend book is seeded off the `spend_total_used_usd` accessor when it is armed). Sole webapp source for the chart, lineage tree, trend sparkline. |
 | `AuditTrailProjection` (`projections/audit_trail.py`) | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — full LLM I/O, per-sample results, scoreboard with `per_sample`. Fetched lazily by the webapp (`useRoundAudit`) only when an operator drills into a specific round; `useRoundFile` is the peer hook for the PUBLIC `rounds/` tree. |
-| `PoBBStreamProjection` (`projections/pobb_stream.py`) | per cycle | `.runtime/streams/round_NNNN_p_best.jsonl` | Per-sample P(best) trajectory for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
+| `RacingStreamProjection` (`projections/racing_stream.py`) | per cycle | `.runtime/streams/round_NNNN_{member}.jsonl` | Per-sample race standing under the eliminator `member` names, for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
 
 **`dashboard.json` is an operator surface, not a cache, and three guarantees hold at the writer.**
 Someone alt-tabbing to the file tree mid-run has to see the truth, so before deferring or skipping
@@ -44,11 +44,11 @@ sole writer, persisting `RoundResult.model_dump()` — the model **is** the roun
 
 **`LiveDashboardProjection` RESOLVES; it does not hand the browser scalars to join** from facts written on different ledger events. Five rules, each a field or a filter rather than a convention:
 
-- **`active_node` is served**, over a `_STATE_TO_NODE` map TOTAL over `DashboardState` and `PotterDashboardState` with an import-time exhaustiveness raise. A partial map does not fail loudly; it means "nothing is running", which is a lie for every state it omits.
+- **`active_node` is served**, by a `match` TOTAL over `DashboardState` and `PotterDashboardState` (`assert_never`), naming the nodes the ledger recorded at `propose:enter` / `measure:enter` rather than any optimizer's literal. A partial answer does not fail loudly; it means "nothing is running", which is a lie for every state it omits.
 - **`current_round.round` is `state.round`, always**, so a reader selects this block over the audit twin by equality. There is deliberately no `live` flag beside it.
-- **`current_round.nodes` holds only THIS round's blocks.** `_sticky_llm_calls` is most-recent-fire-per-slot and survives round transitions, so it is filtered by each block's own `round`: presence in the served map is the client's whole definition of "this node has fired".
+- **`current_round.nodes` holds only THIS round's optimizer calls.** `_sticky_llm_calls` is most-recent-fire-per-slot and survives round transitions, so it is filtered by each block's own `round`: presence in the served map is the client's whole definition of "this node has fired". The measurement is not a node block: its tape and searchpoints ride `current_round.candidates`.
 - **A measurement at `NO_ROUND_SLOT` moves the RUN's scalars and not the ROUND's population** — it counts as queries scored and drives the in-flight markers, but skips `_buffer.append_sample` (`shared/instrument.py::NO_ROUND_SLOT`).
-- **A live row is the same shape as a closed one** — `DashboardCandidate` and `DashboardSample`, both `domain/dashboard_rows.py`. Two shapes for one entity force the client to merge them field by field. **Each field lands at the moment its FACT exists, and none of them is the round close:** the value and its band ride the scoring gateway's own fold (`search_point_scorer::_composite`) on every sample, so the whisker widens with the bar, while the crown, θ and the matched-parent lift ride `ElectionRecord`. θ cannot come sooner and its nullness before the election is a fact rather than a delay — `calibrate_ruler` extends the δ scale onto the round's cells first, and `fit_theta_given_delta` raises on a cell it does not carry.
+- **A live row is the same shape as a closed one** — `DashboardCandidate` and `DashboardSample`, both `domain/dashboard_rows.py`; `LiveCandidate` only adds what a closed round keeps in its round file. Two shapes for one entity force the client to merge them field by field. **Each field lands at the moment its FACT exists, and none of them is the round close:** the value and its band ride the scoring gateway's own fold (`search_point_scorer::_composite`) on every sample, so the whisker widens with the bar, while the crown, θ and the matched-parent lift ride `ElectionRecord`. θ cannot come sooner and its nullness before the election is a fact rather than a delay — `calibrate_ruler` extends the δ scale onto the round's cells first, and `fit_theta_given_delta` raises on a cell it does not carry.
 
 The **outbound SSE highway is NOT a projection/subscriber** — it *tails* the on-disk
 ledger (`projections/event_stream.py::CycleLedgerTail`), **cross-process**: any reader
@@ -107,13 +107,13 @@ Three bounds — get them wrong and the tree lies without erroring:
 **A round fact lands on the record that OWNS it, and the split is not cosmetic.** Everything
 `elect_round_winner` stamps rides `ElectionRecord` — the crown, each arm's θ and its matched-parent
 lift (`ElectionRecord.fit`, keyed by MINTING label because a resume re-mints ids) — so the tree
-carries the whole verdict a `l1_critique` call before the round closes, and `election_held` is what
+carries the whole verdict before the adapters run and the round closes, and `election_held` is what
 separates a round that HELD from one still scoring (`is_selected: false` reads identically for both).
 The FRONTIER θ is the exception and stays on `round:complete`: it is RESTAMPED when the ruler warms,
 which round 0 reaches twice for exactly that reason, so `LedgerRoundClose.abilities` wins over the
 election's copy wherever it answers. Move either half to the other record and nothing raises: round
 0 silently reverts to its cold θ, or the served verdict goes late. **The lift may not go on
-`LedgerCandidate`**, which that model's docstring invites: `l1_score` stamps it AFTER the ledger's
+`LedgerCandidate`**, which that model's docstring invites: the election stamps it AFTER the ledger's
 `candidate_scored` snapshot, so it would be an all-null column on every live run.
 
 **It is a READ MODEL and decides nothing.** The decision genealogy (`application/mask/`, the

@@ -16,6 +16,7 @@ from typing import Any, Literal
 
 from pydantic import ConfigDict, Field
 
+from promptpotter.domain.escalation_signals import ValidationFailure
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.results import ArmOutcome, DegradationHealth, OverlapReading
 from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
@@ -26,6 +27,7 @@ from promptpotter.domain.strict_model import StrictModel
 __all__ = [
     "DashboardCandidate",
     "DashboardSample",
+    "LiveCandidate",
     "RoundSummary",
     "RoundSummaryCandidate",
     "SampleStatus",
@@ -214,6 +216,25 @@ class DashboardCandidate(StrictModel):
     # surface that can say so then. `False` until it lands, and on every row of a round that
     # held none — never a claim that this candidate lost.
     is_selected: bool = False
+
+
+class LiveCandidate(DashboardCandidate):
+    """A `DashboardCandidate` in the round in flight — `dashboard.json::current_round.candidates`.
+    The only carrier, until the round file lands, of the searchpoint it runs, its sample tape and
+    why validation rejected it."""
+
+    # The evolved prompt (`OptSearchPoint.prompt_field_dict()` shape) and the config-only
+    # resolved params — the half a steered fork seeds from, as `candidate_scores[]` carries it.
+    prompt_fields: dict[str, Any] | None = None
+    resolved_pipeline_params: dict[str, Any] | None = None
+    pipeline_overlay: dict[str, Any] | None = None
+    samples: list[DashboardSample] = Field(default_factory=list)
+    # The tape BESIDE the rows, one producer for both: the browser reads `samples`, the operator
+    # reads this in the file.
+    sample_lines: list[str] = Field(default_factory=list)
+    validation_failures: list[ValidationFailure] = Field(default_factory=list)
+    # The composite's short formula with this candidate's own evaluator values inlined.
+    composite_fitness_formula_short: str | None = None
 
 
 class RoundSummaryCandidate(DashboardCandidate):

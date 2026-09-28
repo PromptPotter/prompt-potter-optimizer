@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.application.scoring.selection import matched_parent_lift
 from promptpotter.domain.bench import BenchReading, BenchScore
+from promptpotter.domain.phases import CampaignPhase, emit_phase
 from promptpotter.domain.results import resolved_fitness
 from promptpotter.infrastructure.llm.telemetry import diagnostic_spend
 from promptpotter.shared.instrument import NO_ROUND_SLOT, MeasurementRole
@@ -94,7 +95,7 @@ async def bench_selection(
         )
     )
     paired = matched_parent_lift(selected.rows, origin.rows)
-    return BenchScore(
+    score = BenchScore(
         bench_size=len(session.scoring.require_partition().bench),
         origin=origin.reading,
         selected=selected.reading,
@@ -102,3 +103,5 @@ async def bench_selection(
         lift_ci_lo=None if paired is None else paired[1],
         lift_ci_hi=None if paired is None else paired[2],
     )
+    emit_phase(cb.on_phase, CampaignPhase.BENCH, "scored", bench=score)
+    return score

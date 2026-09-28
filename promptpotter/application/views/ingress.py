@@ -7,16 +7,15 @@ from typing import Any
 
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
-from promptpotter.application.views.render.optimizer_prompt_text import (
-    format_l1_critique_for_prompt,
-)
 from promptpotter.application.views.view_models import (
     AnyView,
+    BenchScoredView,
     CandidatesGeneratedView,
     InitEnterView,
     InitExitView,
     L2RefineEnterView,
     L2RefineExitView,
+    MeasureEnterView,
     PlanEnterView,
     PlanExitView,
     RoundCompleteView,
@@ -88,10 +87,10 @@ def _init_exit(d: dict[str, Any], ctx: ViewContext) -> InitExitView:
     session = d["env"]
     ctx.parent_accuracy = cycle.tracking.current_accuracy
     ctx.parent_composite_fitness = cycle.tracking.current_composite_fitness
-    # The FSM owns this count and has just been rebuilt from the ledger; `_init_enter` could only
-    # invent a 0. Advanced after this by `on_round_complete`, so reading it any earlier reports a
-    # resumed cycle as further from escalation than it is.
-    ctx.l1_stall_count = cycle.escalation.l1_stall_count
+    # The optimizer's state owns this count and has just been rebuilt from the ledger;
+    # `_init_enter` could only invent a 0. Advanced after this by `on_round_complete`, so reading
+    # it any earlier reports a resumed cycle as further from escalation than it is.
+    ctx.l1_stall_count = cycle.working_state.standing()[0]
     schema = session.pipeline_schema
     full, short = resolve_cell_formula(session.scoring.scorer_cell_formula, schema)
     ctx.composite_fitness_formula = full
@@ -114,7 +113,6 @@ def _init_exit(d: dict[str, Any], ctx: ViewContext) -> InitExitView:
         # only "cached" when a resume's priors superseded it.
         cached_rounds_count=sum(1 for rr in cycle.rounds if rr.round > 0),
         task_context_keys=len(cycle.framing),
-        l2_round=cycle.escalation.l2_round,
         composite_fitness_formula=full,
         composite_fitness_formula_short=short,
     )
@@ -135,6 +133,7 @@ def _l1_generate_enter(d: dict[str, Any], ctx: ViewContext) -> RoundStartView:
     ctx.max_rounds = d["max_rounds"] or 0
 
     return RoundStartView(
+        node=str(d["node"]),
         round=ctx.round_num,
         max_rounds=ctx.max_rounds,
         l1_stall_count=ctx.l1_stall_count,
@@ -189,6 +188,16 @@ def _l1_generate_exit(d: dict[str, Any], ctx: ViewContext) -> CandidatesGenerate
         clone_labels=tuple(clone_labels),
         sp_diff=sp_diff,
     )
+
+
+def _measure_enter(d: dict[str, Any], ctx: ViewContext) -> MeasureEnterView:
+    return MeasureEnterView(
+        node=str(d["node"]), n_candidates=int(d["n_candidates"]), n_samples=int(d["n_samples"])
+    )
+
+
+def _bench_scored(d: dict[str, Any], ctx: ViewContext) -> BenchScoredView:
+    return BenchScoredView(bench=d["bench"].model_dump(mode="json"))
 
 
 def _select_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
@@ -253,7 +262,6 @@ def _select_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
         p_value=p_value,
         verdict_reason=d.get("verdict_reason"),
         next_action=str(d.get("next_action", "?") or "?"),
-        l1_critique_text=format_l1_critique_for_prompt(d.get("critique")),
         composite_fitness_formula=ctx.composite_fitness_formula,
         composite_fitness_formula_short=ctx.composite_fitness_formula_short,
         reference_accuracy=reference_acc,
@@ -313,7 +321,9 @@ _BUILDERS: dict[str, Any] = {
     f"{CampaignPhase.INIT}:exit": _init_exit,
     f"{CampaignPhase.PROPOSE}:enter": _l1_generate_enter,
     f"{CampaignPhase.PROPOSE}:exit": _l1_generate_exit,
+    f"{CampaignPhase.MEASURE}:enter": _measure_enter,
     f"{CampaignPhase.SELECT}:exit": _select_exit,
+    f"{CampaignPhase.BENCH}:scored": _bench_scored,
     f"{PotterPhase.REFINE_STRATEGY}:enter": _refine_enter,
     f"{PotterPhase.REFINE_STRATEGY}:exit": _refine_exit,
     f"{PotterPhase.MODIFY_PLAN}:enter": _plan_enter,

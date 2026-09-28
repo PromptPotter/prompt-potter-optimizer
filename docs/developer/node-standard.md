@@ -135,7 +135,8 @@ under the node's NAME** through the one entry-point registry (`promptpotter.opti
 `paired_t:` in a manifest resolves to the `paired_t` member; the node's `config` is that member's
 typed knobs, and a paper's configuration is a set of those values. No member sees the bench set.
 The target is that none is handed `Cycle`, a store or a live client either — only frozen `domain/`
-inputs; potter's members still read the cycle, which the bench/potter split of `Cycle` retires.
+inputs; potter's members still read the bench's `Cycle`, their own state riding apart on
+`RoundContext.state`.
 
 | Type | Reads | Returns | Binds it |
 |---|---|---|---|

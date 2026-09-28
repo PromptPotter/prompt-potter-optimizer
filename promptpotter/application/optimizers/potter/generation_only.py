@@ -7,6 +7,7 @@ from __future__ import annotations
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.l1.candidate_source import generate_or_load_candidates
+from promptpotter.application.optimizers.potter.state import PotterState
 from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.application.runner.output import (
     write_hard_samples_artifacts,
@@ -20,6 +21,7 @@ from promptpotter.shared.errors import graceful
 
 async def run_generation_only_round(
     cycle: Cycle,
+    state: PotterState,
     session: Session,
     cb: RunCallbacks,
     round_num: int,
@@ -31,6 +33,7 @@ async def run_generation_only_round(
     candidates, yield_stats = await generate_or_load_candidates(
         round_num,
         cycle,
+        state,
         cb.on_phase,
         n_scoring_samples=0,
     )
@@ -56,10 +59,10 @@ async def run_generation_only_round(
                     candidates_scored=0,
                     selected_labels=[],
                     opt_sp=cycle.opt_sp,
-                    optimizer_state=cycle.optimizer_state(
+                    optimizer_state=state.snapshot(
                         l1_yield=yield_stats.l1_yield,
                         l1_parse_failure=yield_stats.l1_parse_failure,
-                        optimizer_prompt_hashes={},
+                        prompt_hashes={},
                     ),
                 ),
             )

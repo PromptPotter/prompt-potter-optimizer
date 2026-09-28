@@ -368,6 +368,42 @@ components:
           type: string
           format: date-time
 
+    BenchScoredPayload:
+      type: object
+      description: |
+        `PhaseRecord.payload.view` of `phase: bench`, `event: scored` — the
+        bench pass graded the selection. `bench` is the `BenchScore` the
+        OpenAPI file declares; the dashboard serves it as `bench_score`.
+      required: [bench]
+      properties:
+        bench: { type: object, additionalProperties: true }
+
+    RaceStandingPayload:
+      type: object
+      description: |
+        `SnapshotRecord.payload` of `event: race_standing` — one candidate's
+        standing in its eliminator's race, per sample. `member` names the
+        manifest node racing it.
+      required: [member, current_id, n_samples, p_best, paired_breakdown]
+      properties:
+        member: { type: string, minLength: 1 }
+        current_id: { type: string }
+        n_samples: { type: integer, minimum: 0 }
+        p_best: { type: number }
+        paired_breakdown: { type: object, additionalProperties: true }
+
+    RaceCatchUpPayload:
+      type: object
+      description: |
+        `SnapshotRecord.payload` of `event: race_catch_up` — the priors the
+        race caught up on the sample just measured; absent where the archive
+        already held them.
+      required: [member, sample_id, prior_ids]
+      properties:
+        member: { type: string, minLength: 1 }
+        sample_id: { type: integer }
+        prior_ids: { type: array, items: { type: string } }
+
     SnapshotPayload:
       type: object
       description: SnapshotRecord — in-flight live-state snapshot.

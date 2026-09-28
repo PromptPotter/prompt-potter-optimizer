@@ -254,7 +254,7 @@ class SubjectReading(StrictModel):
     # searchpoints from different campaigns share no delta to line up.
     config: dict[str, str] | None
     # The configuration the subject's own CYCLE ran under, hashed off round 0's
-    # `optimizer_prompt_hashes`. Two campaigns sharing it are replicates of one arm however much
+    # `optimizer_state.prompt_hashes`. Two campaigns sharing it are replicates of one arm however much
     # else differs, which is the fact a roster listing campaigns cannot show. `None` where round 0
     # carries no hashes: the arm is UNKNOWN, which groups with nothing — least of all with every
     # other unstamped campaign.

@@ -184,15 +184,17 @@ A replayable or archival decision (a checkpoint kind + its gating mode).
 
 1. Add the kind to the deciding party's enum — `BenchCheckpointKind` or the optimizer's own
    (`PotterCheckpointKind`), both `domain/run_records.py` — **and** a gating
-   entry to `RESUME_CHECKPOINT_GATING` (`application/optimization/resume_and_fork/
-   decisions.py` — the gating SoT; the enum and the table live in different files).
-2. If replayable, add it to the replayer; if archival, leave it out.
+   entry beside the party that decides it: `BENCH_CHECKPOINT_GATING`
+   (`application/optimization/resume_and_fork/decisions.py`) or the optimizer runtime's
+   `checkpoint_gating` (potter's is `optimizers/potter/resume.py`). `resume_checkpoint_gating`
+   merges them — the gating SoT.
+2. If replayable, add it to that party's replayers; if archival, leave it out.
 3. Emit it through `record_decision` with the typed kind, never a bare string.
 
-**Guards (all import-time, no standing test):** `decisions.py` raises on a
-kind missing from `RESUME_CHECKPOINT_GATING`;
-`replayers.py` raises when a `REPLAYED` kind has no replayer or an `ARCHIVAL` kind
-has one; `cli/commands/_shared.py` asserts the divergence hint lists every kind.
+**Guards (no standing test), all run where the registries complete
+(`wiring.py::complete_registries`):** `resume_checkpoint_gating` raises on a kind no table
+maps; `replayers.py::replayers` raises when a `REPLAYED` kind has no replayer or an `ARCHIVAL`
+kind has one; `cli/commands/_shared.py::divergence_hint` asserts the hint lists every kind.
 
 ---
 

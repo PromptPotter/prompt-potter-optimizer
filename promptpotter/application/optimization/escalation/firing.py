@@ -7,7 +7,7 @@ instead routes to L2 as a weak preemptor, bypassing ``l1_patience`` so the loop 
 dead rounds, and L2 judges recoverability.
 
 ``_parse_l2`` coerces and validates the layout and merges ``l1_overrides`` over the cycle's;
-``_apply_l2`` installs both into ``Cycle.memory``. A control output fires after the layer's
+``_apply_l2`` installs both into ``PotterState.memory``. A control output fires after the layer's
 normal output is adopted and the exit-phase event emitted.
 
 What each layer may write, and why the framing is not among it:
@@ -47,6 +47,7 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
     record_decision,
 )
 from promptpotter.application.optimization.validators.l3_output import run_l3_output_validators
+from promptpotter.application.optimizers.potter.knobs import potter_knobs
 from promptpotter.domain.l1_layout import (
     NODE_LAYOUTS,
     L1Layout,
@@ -71,6 +72,7 @@ from promptpotter.shared import truncate
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.application.optimizers.potter.state import PotterState
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 
@@ -103,9 +105,9 @@ class TransitionResult:
 
 
 ParseFn = Callable[[Any, OptSearchPoint, L2L3Memory], TransitionResult]
-ApplyFn = Callable[["Cycle", TransitionResult, int], None]
-PayloadFn = Callable[["Cycle"], dict[str, Any]]
-ExitFn = Callable[["Cycle", TransitionResult], dict[str, Any]]
+ApplyFn = Callable[["Cycle", "PotterState", TransitionResult], None]
+PayloadFn = Callable[["Cycle", "PotterState"], dict[str, Any]]
+ExitFn = Callable[["PotterState", TransitionResult], dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -179,39 +181,40 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, memory: L2L3Memory) 
     )
 
 
-def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
-    memory = cycle.memory
+def _apply_l2(cycle: Cycle, state: PotterState, result: TransitionResult) -> None:
+    memory = state.memory
     if result.l1_overrides is not None:
         memory.l1_overrides = result.l1_overrides
     if result.l1_layout is not None:
         memory.l1_layout = result.l1_layout
     memory.wounds.l2_guard_breaches = list(result.l2_guard_breaches)
-    cycle.escalation.record_l2_fired(
+    state.escalation.record_l2_fired(
         best_composite_fitness=cycle.tracking.best_composite_fitness,
         best_theta=cycle.tracking.best_theta,
     )
 
 
-def _l2_enter(cycle: Cycle) -> dict[str, Any]:
+def _l2_enter(cycle: Cycle, state: PotterState) -> dict[str, Any]:
     return {
-        "l2_round": cycle.escalation.l2_round,
-        "l1_stall_count": cycle.escalation.l1_stall_count,
-        "l1_overrides": cycle.memory.l1_overrides,
+        "l2_round": state.escalation.l2_round,
+        "l1_stall_count": state.escalation.l1_stall_count,
+        "l1_overrides": state.memory.l1_overrides,
         "current_accuracy": cycle.tracking.current_accuracy,
         "best_accuracy": cycle.tracking.best_accuracy,
     }
 
 
-def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
+def _l2_exit(state: PotterState, result: TransitionResult) -> dict[str, Any]:
     # ``l2_*_at_entry`` are read by ``EscalationFSM.fold`` on resume, carried onto
     # ``L2RefineExitView`` — the persisted half. No prompt/response: the call is already this
     # ledger's `l2_context` LLMCallRecord and the audit twin's `nodes.l2_context`.
+    esc = state.escalation
     payload: dict[str, Any] = {
-        "l2_round": cycle.escalation.l2_round,
-        "l2_stall_count": cycle.escalation.l2_stall_count,
-        "l2_best_composite_fitness_at_entry": cycle.escalation.l2_best_composite_fitness_at_entry,
-        "l2_best_theta_at_entry": cycle.escalation.l2_best_theta_at_entry,
-        "param_changes_count": len(cycle.memory.l1_overrides),
+        "l2_round": esc.l2_round,
+        "l2_stall_count": esc.l2_stall_count,
+        "l2_best_composite_fitness_at_entry": esc.l2_best_composite_fitness_at_entry,
+        "l2_best_theta_at_entry": esc.l2_best_theta_at_entry,
+        "param_changes_count": len(state.memory.l1_overrides),
         "l1_layout_changed": result.l1_layout is not None,
         "changes_description": result.opt_sp.lineage.changes_description,
         "axis_targeted": result.axis_targeted,
@@ -258,33 +261,34 @@ def _parse_l3(raw: L3PlanOutput, opt_sp: OptSearchPoint, memory: L2L3Memory) -> 
     )
 
 
-def _apply_l3(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
-    cycle.memory.plan = result.plan
+def _apply_l3(cycle: Cycle, state: PotterState, result: TransitionResult) -> None:
+    state.memory.plan = result.plan
     # The overwrite, possibly with ``""``, is the "cleared only when L3 fires again" contract.
-    cycle.memory.wounds.l3_note = result.l3_note
-    cycle.memory.wounds.l3_guard_breaches = list(result.l3_guard_breaches)
-    cycle.escalation.record_l3_fired(
+    state.memory.wounds.l3_note = result.l3_note
+    state.memory.wounds.l3_guard_breaches = list(result.l3_guard_breaches)
+    state.escalation.record_l3_fired(
         best_composite_fitness=cycle.tracking.best_composite_fitness,
         best_theta=cycle.tracking.best_theta,
     )
 
 
-def _l3_enter(cycle: Cycle) -> dict[str, Any]:
+def _l3_enter(cycle: Cycle, state: PotterState) -> dict[str, Any]:
     return {
-        "l3_round": cycle.escalation.l3_round,
-        "l2_stall_count": cycle.escalation.l2_stall_count,
-        "current_plan_preview": cycle.memory.plan[:120],
+        "l3_round": state.escalation.l3_round,
+        "l2_stall_count": state.escalation.l2_stall_count,
+        "current_plan_preview": state.memory.plan[:120],
     }
 
 
-def _l3_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
+def _l3_exit(state: PotterState, result: TransitionResult) -> dict[str, Any]:
     # ``l3_*_at_entry`` are read by ``EscalationFSM.fold`` on resume, carried onto
     # ``PlanExitView``; ``record_l3_fired`` resets L2 state to these.
+    esc = state.escalation
     payload: dict[str, Any] = {
-        "l3_round": cycle.escalation.l3_round,
-        "l3_stall_count": cycle.escalation.l3_stall_count,
-        "l3_best_composite_fitness_at_entry": cycle.escalation.l3_best_composite_fitness_at_entry,
-        "l3_best_theta_at_entry": cycle.escalation.l3_best_theta_at_entry,
+        "l3_round": esc.l3_round,
+        "l3_stall_count": esc.l3_stall_count,
+        "l3_best_composite_fitness_at_entry": esc.l3_best_composite_fitness_at_entry,
+        "l3_best_theta_at_entry": esc.l3_best_theta_at_entry,
         "new_plan_preview": result.plan[:120],
         "changes_description": result.opt_sp.lineage.changes_description,
     }
@@ -309,6 +313,7 @@ L3 = LayerStrategy(
 async def _run_transition(
     transition: LayerStrategy,
     cycle: Cycle,
+    state: PotterState,
     pipeline_schema: PipelineSchema,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
@@ -322,7 +327,11 @@ async def _run_transition(
     current_pp = cycle.tracking.current_sp.pipeline_params
 
     emit_phase(
-        on_phase, transition.phase, "enter", round=round_num, **transition.enter_payload_fn(cycle)
+        on_phase,
+        transition.phase,
+        "enter",
+        round=round_num,
+        **transition.enter_payload_fn(cycle, state),
     )
     async with observed_node(
         f"{transition.template_name}_r{round_num}",
@@ -333,7 +342,7 @@ async def _run_transition(
     ):
         template, prompt_vars, rendered, coverage = DispatchHub.fill(
             load_optimizer_prompt(transition.template_name),
-            build_bundle(cycle),
+            build_bundle(cycle, state),
             node=transition.template_name,
         )
         try:
@@ -350,7 +359,7 @@ async def _run_transition(
                     injection_silent=tuple(injection_silent_panels(coverage)),
                 ),
             )
-            result = transition.parse(raw, cycle.opt_sp, cycle.memory)
+            result = transition.parse(raw, cycle.opt_sp, state.memory)
         except OptimizerPromptParseError as parse_err:
             # A refinement that never parsed costs a REFINEMENT, not a MEASUREMENT. Unhandled
             # it kills the cycle — and under L4 that voids a whole outer sample, scoring one
@@ -386,27 +395,28 @@ async def _run_transition(
             return None
 
     # Same adoption seam as an L1 win: identity advances (fresh lineage, parent = the outgoing
-    # parent). The frame surfaces L2/L3 own land in `cycle.memory` through `transition.apply`.
+    # parent). The frame surfaces L2/L3 own land in `state.memory` through `transition.apply`.
     new_opt = result.opt_sp
     cycle.adopt(new_opt)
     cycle.tracking.current_sp = new_opt.to_job_search_point(
         base_pipeline_params=current_pp, schema=pipeline_schema, framing=cycle.framing
     )
-    transition.apply(cycle, result, round_num)
+    transition.apply(cycle, state, result)
     emit_phase(
         on_phase,
         transition.phase,
         "exit",
         round=round_num,
-        **transition.exit_payload_fn(cycle, result),
+        **transition.exit_payload_fn(state, result),
     )
+    knobs = potter_knobs(cycle.optimizer)
 
     # Terminate outranks rebase: "stop" is more final than "try again from earlier". Both ride
     # this post-apply seam, so the layer's normal output is adopted and the exit-phase event
     # (which carries the proposal to the ledger) is emitted before the raise.
     if result.terminate_proposal is not None:
         reason = result.terminate_proposal.reason.strip()
-        if not cycle.knobs.escalation.terminate_capability:
+        if not knobs.escalation.terminate_capability:
             # Same shape as the fork gate below: off ⇒ the prompt carried no terminate
             # guidance, and a volunteered field must not ABORT the run.
             logger.warning(
@@ -452,7 +462,7 @@ async def _run_transition(
             raise StopLoop(StopReason.OPTIMIZER_ABORT)
 
     if result.fork_proposal is not None:
-        if not cycle.knobs.escalation.rebase_capability:
+        if not knobs.escalation.rebase_capability:
             # A model can volunteer the field even though the prompt carried no fork guidance.
             # Without this the gate is prompt-side only, and a no-rebase ablation — whose
             # whole point is that it cannot fork — silently forks anyway.
@@ -487,7 +497,7 @@ def _stash_rebase_request(
         return False
 
     unlock = bool(proposal.unlock_schema_field_rename) and not (
-        cycle.knobs.l1_generate.schema_field_rename
+        potter_knobs(cycle.optimizer).l1_generate.schema_field_rename
     )
     cycle.rebase_request = RebaseRequest(
         fork_from_round=target_round,
@@ -515,12 +525,13 @@ def _stash_rebase_request(
 
 def _trigger_payload(
     cycle: Cycle,
+    state: PotterState,
     round_num: int,
     patience: int | None,
     *,
     layer: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    esc = cycle.escalation
+    esc = state.escalation
     counter_round = getattr(esc, f"{layer}_round")
     inputs_ref = {
         "round_num": round_num,
@@ -542,6 +553,7 @@ def _trigger_payload(
 
 async def escalate_l2(
     cycle: Cycle,
+    state: PotterState,
     pipeline_schema: PipelineSchema,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None = None,
@@ -550,8 +562,8 @@ async def escalate_l2(
     *,
     node: str,
 ) -> StopReason | None:
-    opt = cycle.knobs.escalation
-    esc = cycle.escalation
+    opt = potter_knobs(cycle.optimizer).escalation
+    esc = state.escalation
 
     event = esc.observe_l2_escalation(
         current_composite_fitness=cycle.tracking.best_composite_fitness,
@@ -563,7 +575,7 @@ async def escalate_l2(
     )
 
     # L2 trigger decision is replayed for divergence — record fired-or-not.
-    l2_inputs, l2_data = _trigger_payload(cycle, round_num, opt.l2_patience, layer="l2")
+    l2_inputs, l2_data = _trigger_payload(cycle, state, round_num, opt.l2_patience, layer="l2")
     record_decision(
         cycle.pending_decisions,
         PotterCheckpointKind.L2_ESCALATION_TRIGGER,
@@ -578,6 +590,7 @@ async def escalate_l2(
         result = await _run_transition(
             L2,
             cycle,
+            state,
             pipeline_schema,
             round_num,
             on_phase,
@@ -596,6 +609,7 @@ async def escalate_l2(
             await _run_transition(
                 L3,
                 cycle,
+                state,
                 pipeline_schema,
                 round_num,
                 on_phase,
@@ -605,7 +619,7 @@ async def escalate_l2(
         return None
 
     # FIRE_L3 or STOP_L3_PATIENCE — record L3 trigger decision either way.
-    l3_inputs, l3_data = _trigger_payload(cycle, round_num, opt.l3_patience, layer="l3")
+    l3_inputs, l3_data = _trigger_payload(cycle, state, round_num, opt.l3_patience, layer="l3")
     record_decision(
         cycle.pending_decisions,
         PotterCheckpointKind.L3_ESCALATION_TRIGGER,
@@ -620,6 +634,7 @@ async def escalate_l2(
         await _run_transition(
             L3,
             cycle,
+            state,
             pipeline_schema,
             round_num,
             on_phase,

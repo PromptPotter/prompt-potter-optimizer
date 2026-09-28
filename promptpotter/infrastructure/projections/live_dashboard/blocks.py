@@ -6,14 +6,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.dashboard_rows import (
-    DashboardCandidate,
     DashboardSample,
+    LiveCandidate,
     SampleStatus,
     sample_status,
 )
-from promptpotter.domain.results import ArmOutcome, candidate_label
+from promptpotter.domain.results import candidate_label
 from promptpotter.domain.scoring import is_verifier_graded
-from promptpotter.infrastructure.projections.live_dashboard.state import PobbBlock
+from promptpotter.infrastructure.projections.live_dashboard.state import RacingBlock
 from promptpotter.shared.composite import inline_short_formula_values
 
 if TYPE_CHECKING:
@@ -111,7 +111,9 @@ def _served(cand: dict[str, Any]) -> dict[str, Any]:
     return cand.get("scores") or cand.get("running") or {}
 
 
-def build_candidate_rows(buffer: RoundBuffer) -> list[DashboardCandidate]:
+def build_candidate_rows(
+    buffer: RoundBuffer, short_formula_template: str | None
+) -> list[LiveCandidate]:
     """This round's candidates in the SAME shape a closed round serves (``rounds[].candidates``), so a reader takes a
     whole row from one half instead of filling one in from the other per field.
 
@@ -120,14 +122,15 @@ def build_candidate_rows(buffer: RoundBuffer) -> list[DashboardCandidate]:
     them is a PRECEDENCE, not two spellings of one thing — only ``scores`` carries ``label``, ``candidate_id``
     and ``outcome``. ``label`` is canonical — display sites read it verbatim, and no ``idx + 1``
     arithmetic exists."""
-    rows: list[DashboardCandidate] = []
+    rows: list[LiveCandidate] = []
     for idx in sorted(buffer.candidates.keys()):
         cand = buffer.candidates[idx]
         served = _served(cand)
         samples = cand.get("samples") or []
         cached = served.get("cached_samples")
+        tape = [sample_row(s) for s in samples]
         rows.append(
-            DashboardCandidate(
+            LiveCandidate(
                 label=candidate_label(buffer.round_num, idx),
                 candidate_id=served.get("candidate_id"),
                 # The report's once it lands, and until then off the samples, which carry it from
@@ -156,7 +159,7 @@ def build_candidate_rows(buffer: RoundBuffer) -> list[DashboardCandidate]:
                 ),
                 mean_fitness_ci_lo=served.get("mean_fitness_ci_lo"),
                 mean_fitness_ci_hi=served.get("mean_fitness_ci_hi"),
-                # Everything below lands at `l1_score:exit`, folded in by `RoundBuffer.stamp_fit`
+                # Everything below lands at the election, folded in by `RoundBuffer.stamp_fit`
                 # and `mark_winner` off the one `ElectionRecord` — so the whole verdict is live
                 # from the election rather than from the round close, two LLM calls later. Absent
                 # before it: the fit needs two arms, and a cold ruler stamps no θ at all.
@@ -169,78 +172,30 @@ def build_candidate_rows(buffer: RoundBuffer) -> list[DashboardCandidate]:
                 reference_lift_ci_lo=served.get("reference_lift_ci_lo"),
                 reference_lift_ci_hi=served.get("reference_lift_ci_hi"),
                 is_selected=bool(cand.get("is_selected")),
+                prompt_fields=cand.get("prompt_fields"),
+                resolved_pipeline_params=cand.get("resolved_pipeline_params"),
+                pipeline_overlay=cand.get("pipeline_overlay"),
+                samples=tape,
+                sample_lines=[fmt_sample_line(row) for row in tape],
+                validation_failures=served.get("validation_failures") or [],
+                composite_fitness_formula_short=inline_short_formula_values(
+                    short_formula_template, dict(served.get("evaluators") or {})
+                ),
             )
         )
     return rows
 
 
-def build_l1_score_block(
-    buffer: RoundBuffer,
-    short_formula_template: str | None,
-) -> dict[str, Any]:
-    """The l1_score NODE block — what the node was handed and what it emitted, nothing else.
-
-    The candidate VALUES left this block for ``current_round.candidates`` (:func:`build_candidate_rows`). What stays is
-    node I/O the webapp reads (the sample tape, the seed-able input half) plus two facts only the FOLDER-UI reader has —
-    the value-inlined formula and the self-healing state — which no closed round has a twin for."""
-    input_candidates: list[dict[str, Any]] = []
-    output_candidates: list[dict[str, Any]] = []
-    for idx in sorted(buffer.candidates.keys()):
-        cand = buffer.candidates[idx]
-        served = _served(cand)
-        label = candidate_label(buffer.round_num, idx)
-        input_candidates.append(
-            {
-                "idx": idx,
-                "label": label,
-                "changes_description": (
-                    cand.get("changes_description") or served.get("changes_description") or ""
-                ),
-                "pipeline_overlay": cand.get("pipeline_overlay"),
-                # The evolved prompt (OptSearchPoint.prompt_field_dict() shape).
-                # Live peer of round_NNNN.json::candidate_scores[].prompt_fields
-                # — `liveCandidateSearchPoint` reads it for steer-fork seeding.
-                "prompt_fields": cand.get("prompt_fields"),
-                # Config-only resolved config the OBSERVE view reads live — the
-                # in-flight peer of round_NNNN.json::candidate_scores[].resolved_pipeline_params.
-                "resolved_pipeline_params": cand.get("resolved_pipeline_params"),
-            }
-        )
-        rows = [sample_row(s) for s in cand.get("samples") or []]
-        output_candidates.append(
-            {
-                "idx": idx,
-                "label": label,
-                # Per-candidate value-inlined short formula; the short codes are
-                # the evaluator keys ``inline_short_formula_values`` substitutes.
-                "composite_fitness_formula_short": inline_short_formula_values(
-                    short_formula_template, dict(served.get("evaluators") or {})
-                ),
-                "invalid": served.get("outcome") == ArmOutcome.INVALID,
-                "validation_failures": served.get("validation_failures") or [],
-                "samples": [row.model_dump() for row in rows],
-                # The tape BESIDE the rows, never instead of them: the browser reads `samples`,
-                # the operator reads this in the file, and one producer builds both so they
-                # cannot disagree. Two branches of `samples` is what forced the browser to
-                # regex a rendering to recover what the other branch already had.
-                "sample_lines": [fmt_sample_line(row) for row in rows],
-            }
-        )
-    return {
-        "input": {"candidates": input_candidates},
-        "output": {"candidates": output_candidates},
-    }
-
-
-def build_pobb_block(core: LiveStateCore, p_best_top: list[dict[str, Any]]) -> PobbBlock:
-    """Round-wide PoBB telemetry. ``leader_prob`` is the best standing among CANDIDATES — never a max over one snapshot's
-    dict, whose other entries are that same candidate's odds against each prior."""
+def build_racing_block(core: LiveStateCore, p_best_top: list[dict[str, Any]]) -> RacingBlock | None:
+    """The round's race standing. ``leader_prob`` is the best standing among CANDIDATES — never a max over one
+    snapshot's dict, whose other entries are that same candidate's odds against each prior."""
     if not core.current_p_best_id:
-        return PobbBlock()
+        return None
     leader_prob = max(
         [float(row["p_best"]) for row in p_best_top] or list(core.round_p_best.values()) or [0.0]
     )
-    return PobbBlock(
+    return RacingBlock(
+        member=core.race_member,
         current_id=core.current_p_best_id,
         n_samples=core.current_p_best_n,
         leader_prob=float(leader_prob),
@@ -251,8 +206,7 @@ def build_pobb_block(core: LiveStateCore, p_best_top: list[dict[str, Any]]) -> P
 
 __all__ = [
     "build_candidate_rows",
-    "build_l1_score_block",
-    "build_pobb_block",
+    "build_racing_block",
     "fmt_sample_line",
     "sample_row",
 ]

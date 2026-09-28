@@ -22,7 +22,7 @@ import {
   ToolbarSep,
   ToolbarSpacer,
 } from "@/components/ui";
-import { liveCandidates } from "@/lib/poll";
+import { isMeasuring, liveCandidates } from "@/lib/poll";
 import { ABORT_LENS_LABELS } from "@/lib/api/types.generated";
 import type { DashboardCandidate, RoundSummary } from "@/lib/api/types";
 import { subjectKey, withMask } from "@/lib/api/reads";
@@ -162,7 +162,7 @@ export function CandidatesCard() {
   }
 
   // The newest round's reading names the basis; the round in flight carries one from its election,
-  // a whole `l1_critique` call before `rounds[]` does.
+  // the adapters' whole pass before `rounds[]` does.
   const overlap = useMemo(
     () =>
       dash?.current_round.overlap ??
@@ -285,15 +285,15 @@ export function CandidatesCard() {
     return idx >= 0 ? idx : null;
   }, [divergentRound, views]);
 
-  // `dash.candidate` goes stale between rounds, so gate on the scorer being the active node.
+  // `dash.candidate` goes stale between rounds, so gate on the measurement being the active node.
+  const measuring = isMeasuring(dash);
   const inFlightIndex = useMemo(() => {
-    if (!isLive) return null;
-    if (dash?.current_round.active_node !== "l1_score") return null;
+    if (!isLive || !measuring) return null;
     const lbl = String(dash?.candidate || "").split("/")[0];
     if (!lbl) return null;
     const idx = views.findIndex((v) => v.label === lbl);
     return idx >= 0 ? idx : null;
-  }, [isLive, dash?.current_round.active_node, dash?.candidate, views]);
+  }, [isLive, measuring, dash?.candidate, views]);
 
   const lensActive = lens !== "" && !scoringMaskActive;
 

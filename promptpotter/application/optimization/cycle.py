@@ -1,5 +1,6 @@
-"""**Wrong-level guardrail:** state potter carries ACROSS rounds rides ``memory``, which every
-round document snapshots as its ``optimizer_state`` — a bare field here does not survive a resume."""
+"""**Wrong-level guardrail:** state an optimizer carries ACROSS rounds rides ``working_state``, which
+every round document snapshots as its ``optimizer_state`` — a bare field here does not survive a
+resume."""
 
 from __future__ import annotations
 
@@ -8,10 +9,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.intelligence.earned_blocks import (
-    answer_space_signature,
-    earned_library_for,
-)
 from promptpotter.application.intelligence.exploration import (
     ORIGIN_ABILITY_ID,
     Observation,
@@ -23,27 +20,12 @@ from promptpotter.application.intelligence.exploration import (
     observations_from_results,
 )
 from promptpotter.application.intelligence.hard_sample_archive import build_archive_observations
-from promptpotter.application.intelligence.sibling_wounds import gather_sibling_runtime_failures
-
-# Leaf import, never the package surface: `escalation/__init__` loads the firing driver, which
-# depends back on Cycle.
-from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-    compute_optimizer_prompt_hashes,
-)
-from promptpotter.application.optimization.escalation.state import EscalationFSM
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
-from promptpotter.application.optimizers.potter.knobs import PotterKnobs, potter_knobs
 from promptpotter.application.scoring.metrics import _compute_accuracy
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.escalation_signals import rf_dedup_key
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.optimizer_state import (
-    POTTER_MANIFEST,
-    L2L3Memory,
-    OptimizerState,
-    PotterRoundState,
-)
+from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.results import (
     ReferenceReading,
@@ -63,7 +45,6 @@ from promptpotter.domain.run_records import RebaseRequest, ResumeCheckpointRecor
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.infrastructure.store.layout import root_cycle_id as _root_cycle_id
 from promptpotter.shared.errors import RulerUnpersistedError, is_error_result
 from promptpotter.shared.instrument import instrument_mode
 
@@ -72,6 +53,7 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.intelligence.exploration import Observation
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
+    from promptpotter.application.optimizers.nodes import WorkingState
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import QueryMeasurement
 
@@ -166,24 +148,6 @@ def _origin_round(
         evaluators=dict(row.evaluators),
         opt_sp=opt_sp,
         optimizer_state=optimizer_state,
-    )
-
-
-def _potter_state(
-    memory: L2L3Memory,
-    *,
-    l1_yield: float,
-    l1_parse_failure: str | None,
-    optimizer_prompt_hashes: dict[str, str],
-) -> OptimizerState:
-    return OptimizerState(
-        manifest=POTTER_MANIFEST,
-        payload=PotterRoundState(
-            memory=memory.model_copy(deep=True),
-            l1_yield=l1_yield,
-            l1_parse_failure=l1_parse_failure,
-            optimizer_prompt_hashes=optimizer_prompt_hashes,
-        ),
     )
 
 
@@ -327,36 +291,6 @@ def _cumulative_theta(
     return fit_theta_given_delta(obs, entries, anchor_id=anchor).get(_FRONTIER_ABILITY_ID)
 
 
-def _inherit_sibling_runtime_failures(memory: L2L3Memory, session: Session) -> None:
-    """Pull RuntimeFailures from sibling forks of this cycle's root so L1 sees configs
-    prior siblings already proved to fail (``wounds.py::_runtime_block`` filters by pipeline
-    match, under the ``l1_wounds`` signal)."""
-
-    if not session.state.cycle_id:
-        return
-    try:
-        root_id = _root_cycle_id(session.state.cycle_id)
-        failures = gather_sibling_runtime_failures(
-            session.store,
-            session.campaign_id,
-            root_id,
-            session.backend_id,
-            exclude_cycle_id=session.state.cycle_id,
-        )
-    except Exception:
-        # Surface, don't swallow: on failure L1 never sees configs sibling forks already proved
-        # to fail, which is an optimization-quality regression rather than noise.
-        logger.warning("sibling runtime_failures inheritance skipped", exc_info=True)
-        return
-    if failures:
-        memory.wounds.runtime_failures.extend(failures)
-        logger.info(
-            "inherited %d runtime_failures from sibling forks of %s",
-            len(failures),
-            session.state.cycle_id,
-        )
-
-
 @dataclass
 class CycleRoundState:
     """Current/best searchpoint trajectory. The origin's own scalars are NOT here —
@@ -395,22 +329,18 @@ class CycleRoundState:
 class Cycle:
     session: Session
     config: CampaignConfig
+    # The selected optimizer's own state, minted by its runtime; carried across every adoption and
+    # snapshotted onto each round. Nothing here reads inside it.
+    working_state: WorkingState
 
     # 0-indexed: ``rounds[0]`` IS the origin's measurement, built by ``start`` before the loop
     # opens, so it is never absent.
     rounds: list[RoundResult] = field(default_factory=list)
     tracking: CycleRoundState = field(default_factory=CycleRoundState)
     opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
-    # Potter's working state, carried across every adoption and snapshotted onto each round.
-    memory: L2L3Memory = field(default_factory=L2L3Memory)
     # The campaign's operator-authored framing, frozen for the run; every target render splices it.
     framing: TaskDecomposition = field(default_factory=TaskDecomposition)
     axes: AxisIndex | None = None
-    # Reusable field values that earned credible lift on a run with the SAME answer-space
-    # signature, mined once at `start` (the walk is cross-campaign). The `guidance` catalogue
-    # renders from it, silent when empty; never the static seed set.
-    earned_blocks: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    escalation: EscalationFSM = field(default_factory=EscalationFSM)
     pending_decisions: list[ResumeCheckpointRecord] = field(default_factory=list)
     archive_observations: list[Observation] = field(default_factory=list)
     # Captured at ``start`` because ``opt_sp`` advances on ``adopt``. The δ fit renames the
@@ -440,7 +370,8 @@ class Cycle:
         composite or evaluator namespace."""
         origin_accuracy = origin_report.accuracy
         opt_sp = resolved_origin
-        memory = L2L3Memory()
+        selected = select_optimizer(config.optimization)
+        working_state = selected.runtime.start(session, config, list(origin_results or []))
         # `session.pipeline_params` carries the dataset overlay; `schema.to_pipeline_params()`
         # is sparse and strips operator config.
         sp = opt_sp.to_job_search_point(
@@ -449,7 +380,6 @@ class Cycle:
             framing=framing,
         )
         _assert_overlay_preserved(sp, session.pipeline_params)
-        _inherit_sibling_runtime_failures(memory, session)
 
         # ONE archive walk, both consumers: the ruler and the intelligence layer ask for the
         # same observations at the same moment.
@@ -475,19 +405,10 @@ class Cycle:
                 archive_obs=archive_obs,
             )
 
-        # Silent when no block earned credible lift on a matching shape — the dispatch-first
-        # "signal or silence" rule.
-        earned_blocks = earned_library_for(
-            session.store,
-            answer_space_signature(
-                (r.get("ground_truth") for r in (origin_results or [])),
-                dataset=config.dataset_name,
-            ),
-        )
         return cls(
             session=session,
             config=config,
-            earned_blocks=earned_blocks,
+            working_state=working_state,
             rounds=[
                 _origin_round(
                     opt_sp,
@@ -503,14 +424,7 @@ class Cycle:
                     # C0's measurement is optimizer-independent but its critique is not, and
                     # a campaign paused before round 1 would otherwise hold nothing naming the
                     # optimizer it ran under.
-                    optimizer_state=_potter_state(
-                        memory,
-                        l1_yield=1.0,
-                        l1_parse_failure=None,
-                        optimizer_prompt_hashes=compute_optimizer_prompt_hashes(
-                            select_optimizer(config.optimization)
-                        ),
-                    ),
+                    optimizer_state=working_state.origin_state(selected),
                 )
             ],
             tracking=CycleRoundState(
@@ -524,7 +438,6 @@ class Cycle:
                 best_theta=origin_theta[0] if origin_theta is not None else None,
             ),
             opt_sp=opt_sp,
-            memory=memory,
             framing=framing,
             archive_observations=archive_obs,
             origin_sp_hash=origin_sp_hash,
@@ -538,12 +451,6 @@ class Cycle:
     @property
     def optimizer(self) -> SelectedOptimizer:
         return select_optimizer(self.config.optimization)
-
-    @property
-    def knobs(self) -> PotterKnobs:
-        """Potter's knobs as this campaign's overlay leaves them; re-read, since the loop moves
-        ``config`` mid-run."""
-        return potter_knobs(self.optimizer)
 
     def cumulative_ability(self, results: list[dict[str, Any]]) -> AbilityReading | None:
         """The frontier's reading on THIS cycle's ruler. Bound here so a caller reading ability
@@ -592,7 +499,7 @@ class Cycle:
         self.opt_sp = last_rr.opt_sp.model_copy(deep=True)
         for f in PROMPT_STRING_FIELDS:
             setattr(self.opt_sp, f, last_rr.prompt_fields.get(f, ""))
-        self.memory = last_rr.optimizer_state.payload.memory.model_copy(deep=True)
+        self.working_state.replay(last_rr)
         # The winner's OWN resolved params, off the round file — without them resume reverts
         # every config axis L1 won back to the origin floor.
         tr.current_sp = self.opt_sp.to_job_search_point(
@@ -736,44 +643,18 @@ class Cycle:
         )
 
     def adopt(self, new_parent: OptSearchPoint) -> None:
-        """The ONE adoption seam for an L1 win and an L2/L3 transition alike. ``memory`` is the
-        cycle's, so it carries across by not moving."""
+        """The ONE adoption seam for a selection and an optimizer's own transition alike.
+        ``working_state`` is the cycle's, so it carries across by not moving."""
         self.opt_sp = new_parent
-
-    def optimizer_state(
-        self,
-        *,
-        l1_yield: float,
-        l1_parse_failure: str | None,
-        optimizer_prompt_hashes: dict[str, str],
-    ) -> OptimizerState:
-        """What a round document banks — a copy, so a later fire cannot rewrite a closed round."""
-        return _potter_state(
-            self.memory,
-            l1_yield=l1_yield,
-            l1_parse_failure=l1_parse_failure,
-            optimizer_prompt_hashes=optimizer_prompt_hashes,
-        )
 
     def absorb_round(
         self,
         rr: RoundResult,
         round_num: int,
     ) -> RoundResult:
-        """Sole sink for a finished L1 round; returns the round, stamped for ``save_round_file``."""
+        """Sole sink for a finished round; returns the round, stamped for ``save_round_file``."""
         schema = self.session.pipeline_schema
         tr = self.tracking
-
-        existing_keys = {
-            rf_dedup_key(rf.model_dump()) for rf in self.memory.wounds.runtime_failures
-        }
-        for cs in rr.candidate_scores:
-            for rf in cs.runtime_failures:
-                k = rf_dedup_key(rf.model_dump())
-                if k in existing_keys:
-                    continue
-                existing_keys.add(k)
-                self.memory.wounds.runtime_failures.append(rf)
 
         self.rounds.append(rr)
         # The winner OSP carries its own lineage, so IDENTITY moves forward rather than just
@@ -804,5 +685,5 @@ class Cycle:
 
         rr.ability = cur
         rr.opt_sp = self.opt_sp
-        rr.optimizer_state.payload.memory = self.memory.model_copy(deep=True)
+        self.working_state.absorb(rr)
         return rr

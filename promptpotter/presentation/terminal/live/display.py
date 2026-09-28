@@ -34,8 +34,8 @@ from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.live_state import (
     LiveStateCore,
-    apply_p_best_update,
     apply_phase,
+    apply_race_standing,
     roll_p_best_at_round_complete,
     top_n_p_best,
 )
@@ -88,7 +88,9 @@ class LiveDisplay(Projection):
         self,
         *,
         origin_acc: float,
-        l1_patience: int,
+        # Potter's escalation patience; `None` on an optimizer that keeps none, which prints no
+        # patience line at all.
+        l1_patience: int | None,
         pipeline_schema: PipelineSchema | None,
         scoring_formula: str | None = None,
         campaign_rounds: list[dict[str, Any]] | None = None,
@@ -115,7 +117,7 @@ class LiveDisplay(Projection):
         self._round_best_acc: float | None = None
         self._round_best_label: str | None = None
         self._round_started_at: float | None = None
-        self._pobb_printed_for: str = ""
+        self._standing_printed_for: str = ""
         self._pending_calls: dict[str, int] = {}
         self._readout: Path | None = None
 
@@ -332,8 +334,9 @@ class LiveDisplay(Projection):
             if isinstance(ctx, dict):
                 self._phase_ctx.update(ctx)
             self.on_candidate_scored(ci, ct, payload.get("scores") or {})
-        elif ev == "p_best_update":
-            self.on_p_best_update(
+        elif ev == "race_standing":
+            self.on_race_standing(
+                str(payload["member"]),
                 str(payload.get("current_id") or ""),
                 int(payload.get("n_samples") or 0),
                 float(payload.get("p_best") or 0.0),
@@ -347,8 +350,9 @@ class LiveDisplay(Projection):
                 [int(sid) for sid in (payload.get("sample_order") or [])],
                 int(payload.get("n_priors") or 0),
             )
-        elif ev == "pobb_backfill":
-            self.on_pobb_backfill(
+        elif ev == "race_catch_up":
+            self.on_race_catch_up(
+                str(payload["member"]),
                 int(payload.get("sample_id") or 0),
                 [str(p) for p in (payload.get("prior_ids") or [])],
             )
@@ -360,8 +364,6 @@ class LiveDisplay(Projection):
         # under no round marker.
         if event.phase == CampaignPhase.ORIGIN and event.event == "enter":
             self._write("\n" + _round_rule("ROUND 0 — ORIGIN", "C0 · campaign root"))
-        if event.phase == CampaignPhase.MEASURE and event.event == "enter":
-            self._write("\n" + _node_top("SCORE"))
         if view is not None and (rendered := to_text(view)):
             self._write(rendered)
         apply_phase(self._core, event, view)
@@ -419,21 +421,22 @@ class LiveDisplay(Projection):
             )
         )
 
-    def on_p_best_update(
+    def on_race_standing(
         self,
+        member: str,
         current_id: str,
         n_samples: int,
         p_best: float,
         paired_breakdown: dict[str, dict[str, float]],
     ) -> None:
-        apply_p_best_update(self._core, current_id, n_samples, p_best)
-        POBB_DISPLAY_MIN_SAMPLES = 8  # matches ``lock_in_n_min`` in pobb/checks.py
+        apply_race_standing(self._core, member, current_id, n_samples, p_best)
+        STANDING_DISPLAY_MIN_SAMPLES = 8  # matches ``lock_in_n_min`` in pobb/checks.py
         if (
             current_id
-            and current_id != self._pobb_printed_for
-            and n_samples >= POBB_DISPLAY_MIN_SAMPLES
+            and current_id != self._standing_printed_for
+            and n_samples >= STANDING_DISPLAY_MIN_SAMPLES
         ):
-            self._pobb_printed_for = current_id
+            self._standing_printed_for = current_id
             current_p = p_best
             # Paired PoBB: hardest prior = min P(cand > prior). Read off the field that NAMES
             # that quantity rather than off the P(best) reading, which is one number about
@@ -448,7 +451,7 @@ class LiveDisplay(Projection):
             n_priors = len(paired_breakdown)
             prior_s = "" if n_priors == 1 else "s"
             self._write(
-                f"  {DIM}pobb:{RESET} P(best)={current_p:.1%} @ q{n_samples}  "
+                f"  {DIM}{member}:{RESET} P(best)={current_p:.1%} @ q{n_samples}  "
                 f"vs hardest={hardest_tag} (P(c>p)={hardest_p:.1%})  "
                 f"(of {n_priors} prior{prior_s})"
             )
@@ -464,11 +467,11 @@ class LiveDisplay(Projection):
             f"{n_priors} candidate prior{prior_s})"
         )
 
-    def on_pobb_backfill(self, sample_id: int, prior_ids: list[str]) -> None:
+    def on_race_catch_up(self, member: str, sample_id: int, prior_ids: list[str]) -> None:
         if not prior_ids:
             return
         tags = [cid if cid == "origin" or cid.endswith("_winner") else cid[:6] for cid in prior_ids]
-        self._write(f"  {DIM}↻ pobb backfill #{sample_id}:{RESET} " + ", ".join(tags))
+        self._write(f"  {DIM}↻ {member} catch-up #{sample_id}:{RESET} " + ", ".join(tags))
 
     def _render_p_best_line(self) -> str | None:
         """Top-5 P(best) across the round's CANDIDATES, with each arrow against that candidate's own previous reading. Ranking one
@@ -487,7 +490,8 @@ class LiveDisplay(Projection):
                     arrow = "▼"
             tag = f"*{cid[:6]}*" if cid == self._core.current_p_best_id else cid[:6]
             parts.append(f"{tag} {prob * 100:4.1f}%{arrow}")
-        return f"P(best) @ q{self._core.current_p_best_n}: " + " | ".join(parts)
+        member = self._core.race_member
+        return f"{member} P(best) @ q{self._core.current_p_best_n}: " + " | ".join(parts)
 
     def on_candidate_started(
         self,
@@ -607,10 +611,11 @@ class LiveDisplay(Projection):
             for line in stats.split("\n"):
                 if line:
                     self._write(line)
-        for line in render_patience_status(
-            round_result.improved, l1_stall_count, self.l1_patience
-        ).split("\n"):
-            self._write(line)
+        if self.l1_patience is not None:
+            for line in render_patience_status(
+                round_result.improved, l1_stall_count, self.l1_patience
+            ).split("\n"):
+                self._write(line)
         self._write(_node_bottom())
 
 

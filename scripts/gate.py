@@ -170,13 +170,19 @@ _IMPORTS_PRESENTATION = re.compile(r"(?:from|import) promptpotter\.presentation"
 _LAYERING_ALLOW = re.compile(r"presentation\.terminal\.live\.display import LiveDisplay")
 
 
-# The round spine reaches an optimizer only through the node members its manifest names; these are
-# potter's modules, the subpackages of `optimization/` that are potter's included.
+# The bench reaches an optimizer only through the registry (`application/optimizers/__init__.py`)
+# and the contract it checks (`optimizers/nodes.py`); these are potter's modules, the subpackages
+# of `optimization/` that are potter's included.
 _IMPORTS_POTTER = re.compile(
     r"(?:from|import) promptpotter\.application\."
     r"(?:optimizers\.potter|optimization\.(?:escalation|l1|pobb|dispatch|validators))\b"
 )
-_ROUND_SPINE = ("loop.py", "round.py", "measurement.py", "overlap.py")
+# Besides the optimizers and the not-yet-split `optimization/`: the ledger, which prices every
+# optimizer's declared surface, and the live readout's cut lines, which name PoBB's own gates.
+_MAY_IMPORT_POTTER = re.compile(
+    r"^promptpotter/(?:application/(?:optimization|optimizers)/|complexity_ledger\.py$"
+    r"|presentation/terminal/live/candidate\.py$)"
+)
 
 
 def _layering(_: Sel) -> Outcome:
@@ -187,9 +193,10 @@ def _layering(_: Sel) -> Outcome:
     )
     if hits:
         return 1, "application must not import presentation:\n" + "\n".join(hits)
-    runner = _REPO / "promptpotter" / "application" / "runner"
-    hits = _scan([runner / name for name in _ROUND_SPINE], _IMPORTS_POTTER)
-    return (1, "the round spine must not import potter:\n" + "\n".join(hits)) if hits else (0, "")
+    hits = _scan(
+        _sources(_REPO / "promptpotter", "*.py"), _IMPORTS_POTTER, allow_path=_MAY_IMPORT_POTTER
+    )
+    return (1, "the bench must not import potter:\n" + "\n".join(hits)) if hits else (0, "")
 
 
 # A control character makes git call the whole FILE binary — the stat line reads `Bin 13089 ->

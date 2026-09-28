@@ -21,13 +21,7 @@ import { failureKind, fetchDashboardByPath, fetchTimeRay } from "./api";
 import { encodeCyclePath, pathLeaf, type CyclePath } from "./ids";
 import { useAuthGate } from "./auth-context";
 import { ageTextSeconds } from "./format";
-import type {
-  DashboardCandidate,
-  DashboardSample,
-  LiveDashboardState,
-  RayItem,
-  ValidationFailure,
-} from "./api/types";
+import type { LiveCandidate, LiveDashboardState, RayItem } from "./api/types";
 import { RUN_FRESH_S } from "./api/types.generated";
 import { usePoll } from "./hooks/usePoll";
 import { bumpRevalidation, useRevalidation } from "./revalidate";
@@ -54,87 +48,26 @@ function isWarming(d: unknown): d is WarmingSnapshot {
   return !!d && typeof d === "object" && (d as WarmingSnapshot).warming_up === true;
 }
 
-export interface LiveCandidate {
-  idx?: number;
-  label?: string;
-  samples?: DashboardSample[];
-  sample_lines?: string[];
-  // The only place a validation rejection's reasons are served; `current_round.candidates`
-  // carries just the `invalid` flag, which is mirrored here.
-  invalid?: boolean;
-  validation_failures?: ValidationFailure[];
-  // Numbers ride `current_round.candidates` in the closed-round shape; this half owns the tape.
-}
-
-export interface LiveInputCandidate {
-  idx?: number;
-  label?: string;
-  changes_description?: string;
-  // Present on settled `round_NNNN.json::candidate_scores[]` rows; absent on in-flight rows.
-  candidate_id?: string;
-  prompt_fields?: Record<string, unknown>;
-  // Server-resolved, config-only effective params (`{node:{param:value}, steps}`), prompt stripped.
-  resolved_pipeline_params?: Record<string, unknown> | null;
-}
-
-export interface L1ScoreOutput {
-  candidates?: LiveCandidate[];
-}
-
-interface L1ScoreInput {
-  candidates?: LiveInputCandidate[];
-}
-
 // A stable empty reference: a fresh `[]` per poll churns the candidates card's Set chain into an
 // unbounded setState loop.
-const NO_CANDIDATES: LiveCandidate[] = Object.freeze([] as LiveCandidate[]) as LiveCandidate[];
+const NO_ROWS: LiveCandidate[] = Object.freeze([] as LiveCandidate[]) as LiveCandidate[];
 
-export function liveL1Candidates(dash: DashboardSnapshot | null): LiveCandidate[] {
-  const nodes = dash?.current_round.nodes;
-  if (!nodes || typeof nodes !== "object") return NO_CANDIDATES;
-  const l1 = (nodes as Record<string, { output?: L1ScoreOutput }>).l1_score;
-  return l1?.output?.candidates ?? NO_CANDIDATES;
-}
-
-const NO_ROWS: DashboardCandidate[] = Object.freeze(
-  [] as DashboardCandidate[],
-) as DashboardCandidate[];
-
-export function liveCandidates(dash: DashboardSnapshot | null): DashboardCandidate[] {
+export function liveCandidates(dash: DashboardSnapshot | null): LiveCandidate[] {
   return dash?.current_round.candidates ?? NO_ROWS;
 }
 
-const NO_INPUT_CANDIDATES: LiveInputCandidate[] = Object.freeze(
-  [] as LiveInputCandidate[],
-) as LiveInputCandidate[];
-
-export function liveL1InputCandidates(
-  dash: DashboardSnapshot | null,
-): LiveInputCandidate[] {
-  const nodes = dash?.current_round.nodes;
-  if (!nodes || typeof nodes !== "object") return NO_INPUT_CANDIDATES;
-  const l1 = (nodes as Record<string, { input?: L1ScoreInput }>).l1_score;
-  return l1?.input?.candidates ?? NO_INPUT_CANDIDATES;
-}
-
 // Joins on `label`: a live row has no lineage id until `candidate_scored` stamps one.
-function matchLiveCandidate<T extends { label?: string }>(
-  candidates: readonly T[],
-  label: string,
-): T | null {
+export function liveCandidate(dash: DashboardSnapshot | null, label: string): LiveCandidate | null {
   if (!label) return null;
-  return candidates.find((c) => c.label === label) ?? null;
+  return liveCandidates(dash).find((c) => c.label === label) ?? null;
 }
 
-export const liveCandidate = (
-  dash: DashboardSnapshot | null,
-  label: string,
-): LiveCandidate | null => matchLiveCandidate(liveL1Candidates(dash), label);
-
-export const liveInputCandidate = (
-  dash: DashboardSnapshot | null,
-  label: string,
-): LiveInputCandidate | null => matchLiveCandidate(liveL1InputCandidates(dash), label);
+// Whether the round's measurement node is the one working — a node the manifest names, never a
+// literal the browser holds.
+export function isMeasuring(dash: DashboardSnapshot | null): boolean {
+  const cr = dash?.current_round;
+  return cr?.measurement_node != null && cr.active_node === cr.measurement_node;
+}
 
 export interface CycleStreamState {
   dash: DashboardSnapshot | null;

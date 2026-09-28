@@ -2,11 +2,11 @@
 
 The prompt is built by ``DispatchHub.fill`` over the ``injection_table()`` registry: ``fill`` takes no
 layout and resolves the node's own via ``node_layout(node, memory)``, which routes to
-``Cycle.memory.l1_layout`` for this node and to the override channel for the ``editor="l4"``
+``PotterState.memory.l1_layout`` for this node and to the override channel for the ``editor="l4"``
 nodes. Two homes because the two edits have different lifetimes; one reader, so no caller
 re-derives the choice.
 
-``task_context`` (the campaign's frozen framing) and ``plan`` (L3 strategy, on ``Cycle.memory``)
+``task_context`` (the campaign's frozen framing) and ``plan`` (L3 strategy, on potter's memory)
 surface alongside the panels — this node is fan-in, reading both layers' outputs in one round.
 
 ``no_op_variant`` is checked at two boundaries, through ONE ``candidate_delta``:
@@ -44,6 +44,7 @@ from promptpotter.application.optimization.dispatch.schemas import (
     VariantEvidenceGrounding,
     build_l1_response_model,
 )
+from promptpotter.application.optimizers.potter.knobs import potter_knobs
 from promptpotter.domain.escalation_signals import ValidationFailure
 from promptpotter.domain.opt_search_point import EvidenceGrounding, OptSearchPoint, node_source
 from promptpotter.domain.optimizer_state import (
@@ -59,6 +60,7 @@ from promptpotter.shared import truncate
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.application.optimizers.potter.state import PotterState
 
 import logging
 
@@ -97,6 +99,7 @@ def candidate_summaries(proposals: list[CandidateProposal], round_num: int) -> l
 
 async def l1_generate(
     cycle: Cycle,
+    state: PotterState,
     *,
     n_variants: int,
     creativity: float,
@@ -111,8 +114,8 @@ async def l1_generate(
     opt_sp = cycle.opt_sp
     pipeline_schema = cycle.session.pipeline_schema
 
-    bundle = build_bundle(cycle)
-    # L2-authored layout rides `cycle.memory`; `fill` resolves each slot's injections into
+    bundle = build_bundle(cycle, state)
+    # L2-authored layout rides `state.memory`; `fill` resolves each slot's injections into
     # `injection_vars`.
     template, injection_vars, rendered, coverage = DispatchHub.fill(
         load_optimizer_prompt("l1_generate"), bundle, node="l1_generate"
@@ -120,7 +123,7 @@ async def l1_generate(
     # What L1 may cite IS what L1 was shown — one derivation, feeding the prompt's menu and
     # the wire schema's enum, so the two can't disagree about which panels exist this round.
     citable = citable_fields(
-        cycle.memory.l1_layout,
+        state.memory.l1_layout,
         exploration_budget=bundle.cycle_slice.exploration_budget,
         rendered=rendered,
     )
@@ -130,7 +133,7 @@ async def l1_generate(
         **injection_vars,
     }
 
-    schema_field_rename = cycle.knobs.l1_generate.schema_field_rename
+    schema_field_rename = potter_knobs(cycle.optimizer).l1_generate.schema_field_rename
     output_schema = (
         build_l1_response_schema(
             pipeline_schema,
@@ -197,7 +200,7 @@ async def l1_generate(
             parse_err.failing_chars,
             parse_err.diagnosis(),
         )
-        cycle.memory.wounds.validation_failures.append(
+        state.memory.wounds.validation_failures.append(
             ValidationFailure(
                 axis="l1_generate.output",
                 value=truncate(parse_err.raw, 300),
@@ -233,7 +236,7 @@ async def l1_generate(
             round_num,
             type(generated).__name__,
         )
-        cycle.memory.wounds.validation_failures.append(
+        state.memory.wounds.validation_failures.append(
             ValidationFailure(
                 axis="l1_generate.output",
                 value=truncate(str(generated), 300),

@@ -22,8 +22,8 @@ from promptpotter.application.optimization.dispatch.bundle import (
     SCHEMA_DESCRIPTIONS_INSTRUCTION,
     SCHEMA_RENAME_INSTRUCTION,
 )
-from promptpotter.application.optimization.dispatch.llm_call.prompts import resolve_node_override
 from promptpotter.application.optimization.dispatch.schemas import L1GenerateOutput, L1Variant
+from promptpotter.application.optimizer_manifest import resolve_node_override
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.l1_layout import NODE_LAYOUTS, layout_json_schema
 from promptpotter.domain.pipeline_schema import (

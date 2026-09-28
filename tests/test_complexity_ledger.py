@@ -140,7 +140,14 @@ LEDGER_BASELINE = {
     # bench's reading of a walk its own checks stopped), and potter's `race.py` (PoBB as the
     # measurement drives it), `election.py` (its selector) and `couplings.py` (the hashed prose,
     # apart so `members.py` can hold behaviour the L4 digest does not read).
-    "modules": 370,
+    # +1: `optimizers/potter/state.py` — potter's working state (memory, the stall ladder, earned
+    # blocks), off `Cycle`, which now carries it opaque. Not `members.py`: every potter internal
+    # that reads the state imports its type, and `members.py` imports all of them.
+    # +1: `optimizers/potter/resume.py` — potter's half of resume: its decision kinds' gating and
+    # replayers, its per-round package fingerprints, its critique re-derivation. They sat in the
+    # generic `resume_and_fork/`, which now reaches them through the runtime; `state.py` is the
+    # state object alone, and this half reads the dispatch hub and the critique node.
+    "modules": 372,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     # +2: `application/optimizers/__init__.py` (the member registry) and its `potter/`, empty.

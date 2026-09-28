@@ -5,7 +5,7 @@ import importlib
 import pkgutil
 import typing
 
-from promptpotter.application.optimizers.nodes import MemberCoupling, NodeMember
+from promptpotter.application.optimizers.nodes import MemberCoupling, NodeMember, OptimizerRuntime
 from promptpotter.domain.pipeline_schema import MEMBER_KINDS, NodeKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -16,11 +16,23 @@ if typing.TYPE_CHECKING:
 
 shapes_optimizer_prompt(__name__)
 
-__all__ = ["ENTRY_POINT_GROUP", "member", "member_origins", "registered"]
+__all__ = [
+    "ENTRY_POINT_GROUP",
+    "RUNTIME_ENTRY_POINT_GROUP",
+    "member",
+    "member_origins",
+    "registered",
+    "runtime",
+    "runtimes",
+]
 
 ENTRY_POINT_GROUP = "promptpotter.optimizer_nodes"
 """Published: a third party ships an optimizer's node implementations under this group, keyed by
 the node name its manifest uses. Renaming it un-registers every plugin at once."""
+
+RUNTIME_ENTRY_POINT_GROUP = "promptpotter.optimizer_runtimes"
+"""Published: a third party ships its optimizer's ``OptimizerRuntime`` under this group, keyed by
+the manifest's name. Renaming it un-registers every plugin at once."""
 
 _MEMBER_KINDS = MEMBER_KINDS | {NodeKind.LLM}
 
@@ -51,17 +63,37 @@ def _validate(obj: object, origin: str) -> NodeMember:
     return typing.cast("NodeMember", obj)
 
 
-def _builtins() -> Iterator[tuple[str, object]]:
+def _validate_runtime(obj: object, origin: str) -> OptimizerRuntime:
+    name = getattr(obj, "name", None)
+    if isinstance(obj, type) or not isinstance(name, str) or not name:
+        raise RuntimeError(
+            f"[{origin}] resolved to {obj!r}: an optimizer runtime is an instance naming the "
+            "manifest it implements in `name`."
+        )
+    return typing.cast("OptimizerRuntime", obj)
+
+
+def _builtin_modules() -> Iterator[typing.Any]:
     for pkg in pkgutil.iter_modules(__path__):
         if pkg.ispkg:
-            module = importlib.import_module(f"{__name__}.{pkg.name}.members")
-            for obj in module.MEMBERS:
-                yield module.__name__, obj
+            yield importlib.import_module(f"{__name__}.{pkg.name}.members")
+
+
+def _builtins() -> Iterator[tuple[str, object]]:
+    for module in _builtin_modules():
+        for obj in module.MEMBERS:
+            yield module.__name__, obj
 
 
 @functools.cache
 def _load() -> tuple[Mapping[str, NodeMember], Mapping[str, str]]:
     return load_registry(ENTRY_POINT_GROUP, _builtins(), _validate)
+
+
+@functools.cache
+def _load_runtimes() -> tuple[Mapping[str, OptimizerRuntime], Mapping[str, str]]:
+    runtimes = ((module.__name__, module.RUNTIME) for module in _builtin_modules())
+    return load_registry(RUNTIME_ENTRY_POINT_GROUP, runtimes, _validate_runtime)
 
 
 def registered() -> Mapping[str, NodeMember]:
@@ -74,3 +106,11 @@ def member_origins() -> Mapping[str, str]:
 
 def member(name: str) -> NodeMember:
     return lookup(ENTRY_POINT_GROUP, _load(), name)
+
+
+def runtimes() -> Mapping[str, OptimizerRuntime]:
+    return _load_runtimes()[0]
+
+
+def runtime(name: str) -> OptimizerRuntime:
+    return lookup(RUNTIME_ENTRY_POINT_GROUP, _load_runtimes(), name)

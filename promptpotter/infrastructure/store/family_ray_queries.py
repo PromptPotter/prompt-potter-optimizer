@@ -62,7 +62,7 @@ _VALID_KINDS: frozenset[str] = frozenset(RENDERS_AS_ACTIVITY)
 # renderer can only throw away. DERIVED from the single declaration rather than restated — this
 # was a hand-typed pair whose comment claimed to mirror the client's translator "exactly", and
 # the client had long since drifted to six. Payload-inspecting drops (a `snapshot` that is a
-# `p_best_update`) are the renderer's and stay there. Depth >= 1 is a different regime — a
+# `race_standing`) are the renderer's and stay there. Depth >= 1 is a different regime — a
 # deliberate server-side milestone cut (see `_INNER_KINDS`).
 _NEVER_KINDS: frozenset[str] = NON_ACTIVITY_KINDS
 

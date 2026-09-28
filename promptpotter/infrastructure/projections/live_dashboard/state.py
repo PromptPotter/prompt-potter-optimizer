@@ -8,9 +8,10 @@ from typing import Any, ClassVar
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.backend import BackpressureReading
+from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.dashboard_rows import DashboardCandidate, RoundSummary
+from promptpotter.domain.dashboard_rows import LiveCandidate, RoundSummary
 from promptpotter.domain.phases import DashboardState, PotterDashboardState, RunPhase
 from promptpotter.domain.results import HeadlineMetric, OverlapReading
 from promptpotter.domain.spend import SpendRollup
@@ -19,12 +20,12 @@ from promptpotter.shared.clock import utcnow_iso
 
 __all__ = [
     "BackendWarning",
-    "BackfillLogEntry",
+    "CatchUpLogEntry",
     "CurrentRound",
     "DashboardError",
     "LiveDashboardState",
     "LoopWarning",
-    "PobbBlock",
+    "RacingBlock",
     "RunLimits",
     "warming_payload",
 ]
@@ -47,10 +48,11 @@ def warming_payload(hop: CycleHop, *, run_phase: str) -> dict[str, Any]:
     }
 
 
-class BackfillLogEntry(StrictModel):
-    """One paired-PoBB backfill event appended by ``LiveDashboardProjection._append_backfill``.
-    The writer caps the list at 256 entries."""
+class CatchUpLogEntry(StrictModel):
+    """One race catch-up — the priors eliminator ``member`` re-measured on one sample.
+    Appended by ``LiveDashboardProjection._append_catch_up``, capped at 256 entries."""
 
+    member: str
     round: int
     candidate_idx: int
     candidate_total: int
@@ -124,14 +126,16 @@ class RunLimits(StrictModel):
     lives_cap: int | None = None
 
 
-class PobbBlock(StrictModel):
-    """``current_round.pobb`` — round-wide elimination telemetry, rebuilt every persist."""
+class RacingBlock(StrictModel):
+    """``current_round.racing`` — the round's standing in its eliminator ``member``'s race.
+    Rebuilt every persist."""
 
-    current_id: str = ""
-    n_samples: int = 0
-    leader_prob: float = 0.0
-    posterior_width: float = 1.0
-    top: list[dict[str, Any]] = Field(default_factory=list)
+    member: str
+    current_id: str
+    n_samples: int
+    leader_prob: float
+    posterior_width: float
+    top: list[dict[str, Any]]
 
 
 class CurrentRound(StrictModel):
@@ -141,10 +145,15 @@ class CurrentRound(StrictModel):
 
     round: int = 0
     active_node: str | None = None
-    candidates: list[DashboardCandidate] = Field(default_factory=list)
-    # Free-form per-node LLM I/O (``build_node_block``), mirroring ``round_NNNN.json::nodes``.
+    # The node the ledger named at `measure:enter`, null before one has; `active_node` equals it
+    # while it measures.
+    measurement_node: str | None = None
+    candidates: list[LiveCandidate] = Field(default_factory=list)
+    # Free-form per-node optimizer LLM I/O (``build_node_block``), mirroring the audit twin's
+    # ``nodes``.
     nodes: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    pobb: PobbBlock = Field(default_factory=PobbBlock)
+    # Null before the round's first standing, and on an optimizer that races nothing.
+    racing: RacingBlock | None = None
     # The best-so-far line on its shared cells, stamped at the ELECTION and null before it; null
     # is "not measured yet", never "withheld". ONLY this one of the round's readings: the others
     # (`verdict_reason`, `electable_count`, `separable`, `ability`, `health`) reach no live
@@ -154,7 +163,7 @@ class CurrentRound(StrictModel):
 
 class LiveDashboardState(StrictModel):
     """``dashboard.json`` — operator-facing snapshot, polled by the webapp.
-    ``current_round`` wipes at ``L1_GENERATE:enter``; past deep audit lives in ``round_NNNN.json``."""
+    ``current_round`` wipes when the round number moves; past deep audit lives in ``round_NNNN.json``."""
 
     model_config = ConfigDict(validate_assignment=False)
 
@@ -221,6 +230,10 @@ class LiveDashboardState(StrictModel):
     # ``None`` until both a lift and a non-zero spend exist; a run with no spend has no rate, and
     # reporting one for it would put an infinity on the strip.
     ability_delta_per_usd: float | None = None
+    # The headline — the selection and the origin graded on the held-out bench set. Null until
+    # the bench pass lands, and on a split holding nothing out; every number beside it is the
+    # optimizer's own, read on the rows that chose its winner.
+    bench_score: BenchScore | None = None
     composite_fitness_formula: str | None = None
     # The same formula as ``{evaluator: coefficient}``, where it IS a weighted sum — what the mask
     # editor's per-evaluator weights seed from. ``None`` says the formula cannot carry them and the
@@ -253,7 +266,7 @@ class LiveDashboardState(StrictModel):
     # The order the running candidate DECLARED it would walk. Served as well as streamed, because
     # the SSE event fires once per candidate and a reader that joins after it has no forward view
     # at all. Named `declared_` because the heatmap's `sample_order` is absolute difficulty and
-    # this one is relevance — and it is a PLAN: PoBB can stop a candidate before the tail is
+    # this one is relevance — and it is a PLAN: an eliminator can stop a candidate before the tail is
     # reached, so no reader may word it as "will".
     declared_sample_order: list[int] = Field(default_factory=list)
 
@@ -266,7 +279,7 @@ class LiveDashboardState(StrictModel):
     # Samples launched then discarded unabsorbed — the depth's whole running cost, cumulative.
     sample_lookahead_discards: int = 0
     # The scoring phase's calls in flight; how many its stop rules allow right now; and the most it
-    # could ever hold — all counted over every candidate walking and the PoBB catch-ups
+    # could ever hold — all counted over every candidate walking and the race catch-ups
     # (`scoring/query_loop.py::FlightGauge`). Between phases `lookahead_most` is the next round's
     # (`n_variants` x `sp_budget_round`), so the operator can size a press before it starts.
     in_flight: int = 0
@@ -321,7 +334,7 @@ class LiveDashboardState(StrictModel):
     # reconciles against `spend`.
     spend_by_round: dict[str, SpendRollup] = Field(default_factory=dict)
 
-    backfill_log: list[BackfillLogEntry] = Field(default_factory=list)
+    catch_up_log: list[CatchUpLogEntry] = Field(default_factory=list)
 
     current_round: CurrentRound = Field(default_factory=CurrentRound)
 
@@ -372,6 +385,8 @@ class LiveDashboardState(StrictModel):
             "declared_phase": RunPhase.RUNNING,
             "stop_reason": None,
             "error": None,
+            # A resumed run grades its selection again; the prior pass graded a stale one.
+            "bench_score": None,
             "current_round": CurrentRound(),
             "current_query_payload": None,
             "current_sample_id": None,

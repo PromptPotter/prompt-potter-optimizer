@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from promptpotter.application.optimization.dispatch.llm_call import prompts as _opt_prompts
+from promptpotter.application.optimizer_manifest import resolve_layout_override
 from promptpotter.application.pipeline_resolve import missing_template_vars
 from promptpotter.config.prompt_blocks import prompt_blocks
 from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
@@ -606,7 +607,7 @@ def _check_l1_inner_layout_applies(
                 )
             )
             continue
-        for outcome in _opt_prompts.resolve_layout_override(node_name, edit)[1]:
+        for outcome in resolve_layout_override(node_name, edit)[1]:
             named = [str(v) for vs in outcome.evidence.values() if isinstance(vs, list) for v in vs]
             failures.append(
                 ValidationFailure(

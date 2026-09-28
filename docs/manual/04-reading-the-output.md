@@ -61,13 +61,13 @@ GENERATE
   Model           openai/gpt-oss-20b
 ```
 
-It closes with a scoreboard, one verdict line, and the critique:
+Scoring opens under a `MEASURE` rule naming the manifest's measurement node, and the round
+closes with a scoreboard and one verdict line:
 
 ```
   Scoreboard: C3.1=74.0% | C3.2=71.0% | C3.3=68.0%
   ✓ IMPROVED  74.0% (was 62.0%, +12.0%)  p=0.003 **  ->  next: continue
   why: …
-  L1 Critique: …
 ```
 
 | Line | Meaning |
@@ -79,7 +79,6 @@ It closes with a scoreboard, one verdict line, and the critique:
 | the verdict | `✓ IMPROVED` or `✗ NOT PROMOTED`. The accuracy on it never decided the round — θ did — so a `why:` line beneath states the reason whichever way it went. |
 | `(was 62.0%, +12.0%)` | The **matched-pair** parent: the parent restricted to the samples this winner actually measured. A winner that stopped before covering the panel gets no such clause, because subtracting the full-set parent from a prefix would publish lift nobody measured. |
 | `p=0.003 **` | Significance of the improvement; the stars are the band. |
-| `L1 Critique:` | The optimizer's own analysis, flattened to a single line. |
 
 Candidate labels are `C0` for the origin and `C{round}.{n}` after it — so `C3.2` is the second candidate of round 3.
 

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 import sys
 from dataclasses import dataclass
@@ -21,8 +22,8 @@ from promptpotter.application.jobs.launcher.admission import (
 )
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimization.resume_and_fork.decisions import (
-    RESUME_CHECKPOINT_GATING,
     GatingMode,
+    resume_checkpoint_gating,
 )
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import run_optimization
@@ -320,16 +321,14 @@ def cycle_result_command(
     )
 
 
-def _build_divergence_hint() -> str:
-    """Derive the divergence-checked kinds from ``RESUME_CHECKPOINT_GATING``. Walking the enum means
+@functools.cache
+def divergence_hint() -> str:
+    """Derive the divergence-checked kinds from ``resume_checkpoint_gating``. Walking the table means
     adding a kind updates the operator message automatically."""
 
-    replayed = sorted(
-        k.value for k, m in RESUME_CHECKPOINT_GATING.items() if m is GatingMode.REPLAYED
-    )
-    archival = sorted(
-        k.value for k, m in RESUME_CHECKPOINT_GATING.items() if m is GatingMode.ARCHIVAL
-    )
+    gating = resume_checkpoint_gating()
+    replayed = sorted(k.value for k, m in gating.items() if m is GatingMode.REPLAYED)
+    archival = sorted(k.value for k, m in gating.items() if m is GatingMode.ARCHIVAL)
     hint = (
         f"Checked decisions: {', '.join(replayed)}.\n"
         f"(Archival, not divergence-gated: {', '.join(archival)}.)\n\n"
@@ -341,15 +340,11 @@ def _build_divergence_hint() -> str:
         "  • Revert `campaign.json::scoring` — continue the original trajectory.\n"
         "  • `python -m promptpotter resume --no-check` — accept the divergence."
     )
-    # Import-time exhaustiveness (built once at module load): every gated kind
-    # must surface in the operator hint. Fails at the source if a format edit
-    # ever drops a branch — replaces a standalone completeness test.
-    if not all(k.value in hint for k in RESUME_CHECKPOINT_GATING):
+    # Exhaustiveness at first build: every gated kind must surface in the operator hint. Fails at
+    # the source if a format edit ever drops a branch — replaces a standalone completeness test.
+    if not all(k.value in hint for k in gating):
         raise RuntimeError("divergence hint must name every ResumeCheckpointKind")
     return hint
-
-
-_DIVERGENCE_HINT = _build_divergence_hint()
 
 
 def _campaign_matches(stores: Stores, needle: str) -> list[str]:

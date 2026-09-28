@@ -1,9 +1,11 @@
-"""Potter's node implementations, each registered under the node name its manifest uses."""
+"""Potter's node implementations, each registered under the node name its manifest uses, and its
+runtime, registered under the manifest's."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from promptpotter.application.intelligence.adaptive_queue_mechanism import build_round_order
 from promptpotter.application.intelligence.exploration import (
@@ -11,14 +13,19 @@ from promptpotter.application.intelligence.exploration import (
     select_round_subset,
 )
 from promptpotter.application.intelligence.indexes.axis import NOISE_THRESHOLD
+from promptpotter.application.optimization.dispatch.facade import injection_source_digest
+from promptpotter.application.optimization.dispatch.injections.registry import injection_table
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     compute_optimizer_prompt_hashes,
 )
+from promptpotter.application.optimization.dispatch.schemas import L2_NODE_AXES
 from promptpotter.application.optimization.escalation.firing import escalate_l2
 from promptpotter.application.optimization.escalation.state import NextAction
 from promptpotter.application.optimization.l1.candidate_source import generate_or_load_candidates
 from promptpotter.application.optimization.l1.critique import run_l1_critique
 from promptpotter.application.optimization.l1.population import parse_population
+from promptpotter.application.optimization.l1.stats import review_reading
+from promptpotter.application.optimization.pobb.checks import ABORT_LENS_SUPPRESS
 from promptpotter.application.optimization.validators.l1_invariants import L1YieldStats
 from promptpotter.application.optimization.validators.l1_strict import DROPPED_MANDATORY_PLACEHOLDER
 from promptpotter.application.optimizers import nodes
@@ -31,9 +38,18 @@ from promptpotter.application.optimizers.potter.knobs import (
     L1GenerateKnobs,
     PoBBKnobs,
     ThetaElectionKnobs,
+    potter_knobs,
 )
 from promptpotter.application.optimizers.potter.race import PoBBRace
+from promptpotter.application.optimizers.potter.resume import (
+    POTTER_CHECKPOINT_GATING,
+    POTTER_REPLAYERS,
+    rederive_critiques,
+    round_packages,
+)
+from promptpotter.application.optimizers.potter.state import PotterState, potter_state
 from promptpotter.application.scoring.candidate_report import fatal_validation_failures
+from promptpotter.domain.optimizer_state import POTTER_MANIFEST
 from promptpotter.domain.phases import StopLoop
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import CandidateProposal
@@ -43,20 +59,31 @@ from promptpotter.infrastructure.tracing.bridge import observed_node
 from promptpotter.shared.errors import graceful, is_error_result
 
 if TYPE_CHECKING:
+    from types import ModuleType
+
+    from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.application.optimization.resume_and_fork.decisions import GatingMode
+    from promptpotter.application.optimization.resume_and_fork.replayers import Replayer
+    from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
         Boundary,
         CatchUpFn,
         Measured,
         Panel,
         Population,
+        ReviewReading,
         RoundContext,
         Selection,
     )
+    from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.results import RoundResult
+    from promptpotter.domain.run_records import ResumeCheckpointKind
     from promptpotter.domain.sample import Sample
+    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
-__all__ = ["MEMBERS"]
+__all__ = ["MEMBERS", "RUNTIME"]
 
 
 class L1CritiqueKnobs(StrictModel):
@@ -77,7 +104,8 @@ class AdaptiveQueue:
     def draw(self, ctx: RoundContext, pool: list[Sample]) -> Panel:
         cycle = ctx.cycle
         config = cycle.config
-        if not cycle.knobs.adaptive_queue.per_round_resubset or cycle.ruler is None:
+        resubset = potter_knobs(cycle.optimizer).adaptive_queue.per_round_resubset
+        if not resubset or cycle.ruler is None:
             # The campaign-start prefix: on a COLD ruler a re-picked subset is difficulty-blind, and
             # freezing concentrates measurements so the ruler warms and locks fastest.
             cells = select_round_subset(pool, [], config.sp_budget_round)
@@ -141,11 +169,13 @@ class L1Generate:
                 "another proposer hands it a population it would discard"
             )
         cycle = ctx.cycle
+        state = potter_state(ctx.state)
         schema = cycle.session.pipeline_schema
         assert schema is not None and cycle.tracking.current_sp is not None
         proposals, yield_stats = await generate_or_load_candidates(
             ctx.round_num,
             cycle,
+            state,
             ctx.callbacks.on_phase,
             n_scoring_samples=len(panel.cells),
             obs=cycle.session.state.obs,
@@ -155,20 +185,22 @@ class L1Generate:
             cycle.opt_sp,
             cycle.tracking.current_sp.pipeline_params,
             schema,
-            runtime_failures=cycle.memory.wounds.runtime_failures,
-            prompt_block_catalogue=cycle.knobs.l1_generate.prompt_block_catalogue,
+            runtime_failures=state.memory.wounds.runtime_failures,
+            prompt_block_catalogue=(
+                potter_knobs(cycle.optimizer).l1_generate.prompt_block_catalogue
+            ),
         )
         yield_stats = _fold_strict_rejections(yield_stats, proposals)
         return nodes.Population(
             proposals=proposals,
             individuals=individuals,
             pipeline_params=params,
-            optimizer_state=cycle.optimizer_state(
+            optimizer_state=state.snapshot(
                 l1_yield=yield_stats.l1_yield,
                 l1_parse_failure=yield_stats.l1_parse_failure,
                 # Stamped with the round rather than at save time: a re-save (a repair, a rescore)
                 # must not restamp a round with the optimizer running NOW.
-                optimizer_prompt_hashes=compute_optimizer_prompt_hashes(cycle.optimizer),
+                prompt_hashes=compute_optimizer_prompt_hashes(cycle.optimizer),
             ),
         )
 
@@ -178,6 +210,7 @@ class PoBB:
     kind: ClassVar[NodeKind] = NodeKind.ELIMINATOR
     knobs: ClassVar[type[StrictModel]] = PoBBKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = couplings.POBB
+    abort_lenses: ClassVar[Mapping[str, frozenset[str]]] = ABORT_LENS_SUPPRESS
 
     def race(self, ctx: RoundContext, panel: Panel, catch_up: CatchUpFn) -> PoBBRace:
         return PoBBRace(ctx, panel, catch_up, node=self.name)
@@ -218,7 +251,11 @@ class L1Critique:
                 round_num=ctx.round_num,
             ):
                 critique = await run_l1_critique(
-                    ctx.cycle, round_result, round_num=ctx.round_num, ledger=session.state.ledger
+                    ctx.cycle,
+                    potter_state(ctx.state),
+                    round_result,
+                    round_num=ctx.round_num,
+                    ledger=session.state.ledger,
                 )
             round_result.optimizer_state.payload.critique = critique
 
@@ -235,15 +272,15 @@ class Escalation:
     def stops_after(self, ctx: RoundContext, round_result: RoundResult) -> bool:
         # Asked through the FSM so the lookahead can never disagree with the banking `observe`
         # is about to do.
-        return ctx.cycle.escalation.would_exhaust_lives(
+        return potter_state(ctx.state).escalation.would_exhaust_lives(
             round_result.improved,
-            ctx.cycle.knobs.escalation.lives,
+            potter_knobs(ctx.cycle.optimizer).escalation.lives,
             compared=round_result.electable_count > 0,
         )
 
     def observe(self, ctx: RoundContext, round_result: RoundResult) -> Boundary:
         cycle = ctx.cycle
-        knobs = cycle.knobs.escalation
+        knobs = potter_knobs(cycle.optimizer).escalation
         axes_with_positive_yield = (
             None
             if cycle.axes is None
@@ -264,7 +301,7 @@ class Escalation:
         evidence_starved = (
             evidence_starved_node(compute_node_failure_rates(round_result.results)) is not None
         )
-        event = cycle.escalation.observe_round(
+        event = potter_state(ctx.state).escalation.observe_round(
             improved=round_result.improved,
             compared=round_result.electable_count > 0,
             separable=round_result.separable,
@@ -284,6 +321,7 @@ class Escalation:
         session = ctx.cycle.session
         stop = await escalate_l2(
             ctx.cycle,
+            potter_state(ctx.state),
             session.pipeline_schema,
             ctx.round_num,
             ctx.callbacks.on_phase,
@@ -294,16 +332,73 @@ class Escalation:
         if stop:
             raise StopLoop(stop)
 
-    def standing(self, cycle: Cycle) -> tuple[int, int | None]:
-        return cycle.escalation.l1_stall_count, cycle.escalation.lives
-
     async def diagnose(self, ctx: RoundContext) -> None:
         # Force L2 (bypass the stall counter) on this round's evidence, then peek the next
         # round's proposals under its overrides.
         await self.act(ctx)
         await run_generation_only_round(
-            ctx.cycle, ctx.cycle.session, ctx.callbacks, ctx.round_num + 1
+            ctx.cycle, potter_state(ctx.state), ctx.cycle.session, ctx.callbacks, ctx.round_num + 1
+        )
+
+
+class PotterRuntime:
+    """Potter beyond its nodes: its working state, prompt identity, review, and resume half."""
+
+    name: ClassVar[str] = POTTER_MANIFEST
+    own_axes: ClassVar[dict[str, set[str]]] = L2_NODE_AXES
+
+    def start(
+        self, session: Session, config: CampaignConfig, origin_results: list[dict[str, Any]]
+    ) -> PotterState:
+        return PotterState.start(session, config, origin_results)
+
+    def prompt_hashes(self, selected: SelectedOptimizer) -> dict[str, str]:
+        return compute_optimizer_prompt_hashes(selected)
+
+    def complete(self) -> None:
+        injection_table()
+
+    def source_digest(self, *covered: ModuleType) -> str:
+        return injection_source_digest(*covered)
+
+    @property
+    def checkpoint_gating(self) -> Mapping[ResumeCheckpointKind, GatingMode]:
+        return POTTER_CHECKPOINT_GATING
+
+    @property
+    def replayers(self) -> Mapping[str, Replayer]:
+        return POTTER_REPLAYERS
+
+    def round_packages(self, cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
+        return round_packages(cycle, rounds)
+
+    async def rederive(
+        self,
+        campaign_store: CampaignStore,
+        hop: CycleHop,
+        session: Session,
+        cycle: Cycle,
+        drifted: list[RoundResult],
+    ) -> None:
+        await rederive_critiques(campaign_store, hop, session, cycle, drifted)
+
+    def review(
+        self,
+        selected: SelectedOptimizer,
+        rounds: list[RoundResult],
+        audits: list[dict[str, Any] | None],
+        *,
+        context_object: list[str],
+        origin_composite_fitness: float | None,
+    ) -> ReviewReading:
+        return review_reading(
+            selected,
+            rounds,
+            audits,
+            context_object=context_object,
+            origin_composite_fitness=origin_composite_fitness,
         )
 
 
 MEMBERS = (AdaptiveQueue(), L1Generate(), PoBB(), ThetaElection(), L1Critique(), Escalation())
+RUNTIME = PotterRuntime()

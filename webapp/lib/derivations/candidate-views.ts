@@ -23,7 +23,7 @@ export function forkKeysOf(viewedNode: LineageNode | undefined): Set<string> {
 }
 
 // Painted only where it is NEWS — under its own budget, or shorter than its round's fullest
-// panel (a PoBB leader-lock cut); the tooltip footer is the denominator of record.
+// panel (an eliminator's cut); the tooltip footer is the denominator of record.
 export function partialPanels(views: readonly CandidateView[]): (number | null)[] {
   const fullest = new Map<number, number>();
   for (const v of views) {

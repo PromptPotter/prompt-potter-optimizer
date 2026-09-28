@@ -11,7 +11,7 @@ export interface RunSummary {
   // The frozen item outlives the address in view.
   cycleId: string;
   stopReason: string | null;
-  // Rounds closed WITH candidates: an L2/L3-terminal round measured nothing.
+  // Rounds closed WITH candidates: a round closed before its measurement measured nothing.
   rounds: number;
   championLabel: string | null;
   // `null` where the candidate never covered the parent's panel — an absent floor is not a zero.

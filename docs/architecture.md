@@ -47,7 +47,7 @@ until the surfaces decide how to draw the rest. The
 operator-authored framing (`task_context`) is the campaign's, frozen for the run, and rides no
 individual. **An optimizer's own working state is not in the individual either**: potter's
 L2/L3 memory and plan, a population, an archive or a front ride the round as
-`optimizer_state: {manifest, payload}`, restored from the ledger on resume and fork, and read by
+`optimizer_state: {manifest, prompt_hashes, payload}`, restored from the ledger on resume and fork, and read by
 no one but that optimizer.
 
 Every optimizer runs on a `promptpotter/assets/optimizers/{name}/pipeline.yaml` — same shape as
@@ -797,7 +797,7 @@ the PR description.
   recent arc that earned its keep. Cross-round AxisIndex digest.
 
 - **`injection_source_digest` inside `_identity_config`**
-  (`dispatch/facade.py` → `connectors/promptpotter.py`) —
+  (`dispatch/facade.py` → potter's `OptimizerRuntime.source_digest` → `connectors/promptpotter.py`) —
   what a node is HANDED is L4 measurement identity, so everything
   deciding it is hashed: the renderers, `bundle` (how much of a panel
   arrives) and `compose` (which arrive at all). AST-normalized — a

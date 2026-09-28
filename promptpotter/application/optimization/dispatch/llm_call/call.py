@@ -14,15 +14,15 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
-from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-    get_optimizer_config_overrides,
-    load_optimizer_prompt,
-    resolve_node_override,
-)
+from promptpotter.application.optimization.dispatch.llm_call.prompts import load_optimizer_prompt
 from promptpotter.application.optimization.dispatch.schemas import (
     OPTIMIZER_RESPONSE_MODELS,
 )
-from promptpotter.application.optimizer_manifest import llm_node_config
+from promptpotter.application.optimizer_manifest import (
+    get_optimizer_config_overrides,
+    llm_node_config,
+    resolve_node_override,
+)
 from promptpotter.config.settings import OPTIMIZER_CALL_DEADLINE_S
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.run_records import (

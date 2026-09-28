@@ -1,5 +1,6 @@
 """Run observers + callbacks — the single ingress for CLI/notebook/webapp. ``build_run_observers``
-wires audit + dashboard + PoBB stream + optional ``LiveDisplay`` to one ledger, re-anchoring a fork."""
+wires audit + dashboard + racing stream + optional ``LiveDisplay`` to one ledger, re-anchoring a
+fork."""
 
 from __future__ import annotations
 
@@ -42,7 +43,7 @@ from promptpotter.infrastructure.projections.live_dashboard.projection import (
     LiveDashboardProjection,
 )
 from promptpotter.infrastructure.projections.live_dashboard.state import RunLimits
-from promptpotter.infrastructure.projections.pobb_stream import PoBBStreamProjection
+from promptpotter.infrastructure.projections.racing_stream import RacingStreamProjection
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 from promptpotter.shared.errors import graceful
 from promptpotter.shared.instrument import NO_ROUND_SLOT, instrument_depth
@@ -50,7 +51,7 @@ from promptpotter.shared.instrument import NO_ROUND_SLOT, instrument_depth
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.optimization.pobb.checks import PoBBSnapshot
+    from promptpotter.application.optimizers.nodes import RaceSnapshot
     from promptpotter.application.scoring.query_loop import Flight
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.phases import PhaseEvent
@@ -79,7 +80,6 @@ def build_campaign_emitter(
     *,
     origin_accuracy: float | None,
     resumed_from_round: int | None = None,
-    recorder: AuditTrailProjection | None = None,
     seed_from_cycle_id: str | None = None,
     langfuse_trace_url: str | None = None,
 ) -> LiveDashboardProjection | None:
@@ -97,7 +97,6 @@ def build_campaign_emitter(
         headline_metric=campaign_config.headline_metric,
         langfuse_trace_url=langfuse_trace_url,
         resumed_from_round=resumed_from_round,
-        recorder=recorder,
         seed_from_cycle_id=seed_from_cycle_id,
         # The connector's own declarations, read at wiring — origin scoring runs before any
         # phase event, so anything that waits for one is absent exactly when round 0 needs it.
@@ -445,14 +444,18 @@ class RunCallbacks:
             sample_total=qt,
         )
 
-    def on_p_best_update(self, round_num: int, ci: int, ct: int, snapshot: PoBBSnapshot) -> None:
-        """Per-sample PoBB snapshot — archive-only, not divergence-gated. ``snapshot`` stays TYPED: an
-        ``Any`` on a seam that only destructures breaks silently on the next field removal."""
+    def on_race_standing(
+        self, member: str, round_num: int, ci: int, ct: int, snapshot: RaceSnapshot
+    ) -> None:
+        """Per-sample race standing from the eliminator ``member`` — archive-only, not
+        divergence-gated. ``snapshot`` stays TYPED: an ``Any`` on a seam that only destructures
+        breaks silently on the next field removal."""
         self._snapshot(
-            "p_best_update",
+            "race_standing",
             ci,
             ct,
             {
+                "member": member,
                 "current_id": str(snapshot.current_id),
                 "n_samples": int(snapshot.n_samples),
                 "p_best": float(snapshot.p_best),
@@ -484,22 +487,27 @@ class RunCallbacks:
             round_num=round_num,
         )
 
-    def on_pobb_backfill(
+    def on_race_catch_up(
         self,
+        member: str,
         round_num: int,
         ci: int,
         ct: int,
         sample_id: int,
         prior_ids: list[str],
     ) -> None:
-        """Paired-PoBB priors caught up on the just-measured sample; absence ⇒ cache covered it."""
+        """The race's priors caught up on the just-measured sample; absence ⇒ cache covered it."""
         if not prior_ids:
             return
         self._snapshot(
-            "pobb_backfill",
+            "race_catch_up",
             ci,
             ct,
-            {"sample_id": int(sample_id), "prior_ids": [str(p) for p in prior_ids]},
+            {
+                "member": member,
+                "sample_id": int(sample_id),
+                "prior_ids": [str(p) for p in prior_ids],
+            },
             round_num=round_num,
         )
 
@@ -520,7 +528,7 @@ class RunObservers:
     callbacks: RunCallbacks
     audit: AuditTrailProjection
     dashboard: LiveDashboardProjection
-    pobb: PoBBStreamProjection
+    racing: RacingStreamProjection
     display: LiveDisplay | None
     _ledger_token: Token[CycleEventLog | None] | None = None
     # The armed spend book's binding, one at a time — see `arm_spend_book`.
@@ -558,7 +566,7 @@ class RunObservers:
         the audit cache reflects the ledger even on interrupt."""
         self.audit.drain()
         self.dashboard.drain()
-        self.pobb.drain()
+        self.racing.drain()
         # The SSE stream isn't a subscriber — it tails the on-disk ledger
         # (``CycleLedgerTail``), so there's nothing to drain/deregister here;
         # open HTTP tails idle on heartbeats once the run stops appending.
@@ -598,7 +606,7 @@ def build_run_observers(
     cycle_dir = CycleDir(session.store.campaigns.cycle_dir(session.hop))
     audit = AuditTrailProjection.from_cycle_dir(cycle_dir)
     session.state.audit_projection = audit
-    pobb = PoBBStreamProjection.from_cycle_dir(cycle_dir)
+    racing = RacingStreamProjection.from_cycle_dir(cycle_dir)
 
     ledger = CycleEventLog.open(cycle_dir)
     # A set-once identity stamp (like session_id), not a tracing-stream read — fan-out-only
@@ -617,7 +625,6 @@ def build_run_observers(
             campaign_config,
             origin_accuracy=origin_accuracy,
             resumed_from_round=resumed_from_round,
-            recorder=audit,
             langfuse_trace_url=trace_url,
         )
     else:
@@ -626,7 +633,6 @@ def build_run_observers(
             campaign_config,
             origin_accuracy=origin_accuracy,
             resumed_from_round=resumed_from_round,
-            recorder=audit,
             seed_from_cycle_id=fork.parent_cycle_id,
             langfuse_trace_url=trace_url,
         )
@@ -662,7 +668,7 @@ def build_run_observers(
     if display is not None:
         display.open_readout(cycle_dir)
         ledger.bind(display)
-    ledger.bind(pobb)
+    ledger.bind(racing)
     session.state.ledger = ledger
 
     callbacks = RunCallbacks(ledger=ledger)
@@ -680,7 +686,7 @@ def build_run_observers(
         callbacks=callbacks,
         audit=audit,
         dashboard=dashboard,
-        pobb=pobb,
+        racing=racing,
         display=display,
         _ledger_token=ledger_token,
     )

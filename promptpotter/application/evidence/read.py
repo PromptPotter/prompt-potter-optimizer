@@ -742,9 +742,7 @@ def _reading_row(
     spend = dash.get("spend")
     # The configuration the cycle ran under IS the arm — its hashes are stamped on round 0
     # precisely so a campaign paused before round 1 still names what it measured.
-    hashes = ((doc.get("optimizer_state") or {}).get("payload") or {}).get(
-        "optimizer_prompt_hashes"
-    )
+    hashes = (doc.get("optimizer_state") or {}).get("prompt_hashes")
     # `None` on any backend declaring no measurement identity — every campaign shares that absence,
     # so the arm alone is the whole grouping there.
     instrument = instrument_of(doc.get("pipeline_params"))

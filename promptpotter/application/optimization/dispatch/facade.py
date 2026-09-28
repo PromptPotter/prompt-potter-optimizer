@@ -40,6 +40,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     load_optimizer_prompt,
     node_layout,
 )
+from promptpotter.application.optimizers.potter.knobs import potter_knobs
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.domain import ruler
 from promptpotter.domain.escalation_signals import exploration_budget
@@ -59,6 +60,7 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.application.optimizers.potter.state import PotterState
     from promptpotter.domain.results import RoundResult
 
 logger = logging.getLogger(__name__)
@@ -295,6 +297,7 @@ def _arm_readings(latest_round: RoundResult | None) -> tuple[ArmReading, ...]:
 
 def build_bundle(
     cycle: Cycle,
+    state: PotterState,
     *,
     latest_round: RoundResult | None = None,
 ) -> InjectionBundle:
@@ -313,15 +316,17 @@ def build_bundle(
         cycle.session.scoring.scorer_cell_formula, cycle.session.pipeline_schema
     )
     spend_used = cycle.session.spend_used
+    knobs = potter_knobs(cycle.optimizer)
+    esc = state.escalation
     cs = CycleSlice(
         round_num=round_num,
-        l1_stall_count=cycle.escalation.l1_stall_count,
-        l2_round=cycle.escalation.l2_round,
-        l2_stall_count=cycle.escalation.l2_stall_count,
-        l3_round=cycle.escalation.l3_round,
-        l3_stall_count=cycle.escalation.l3_stall_count,
+        l1_stall_count=esc.l1_stall_count,
+        l2_round=esc.l2_round,
+        l2_stall_count=esc.l2_stall_count,
+        l3_round=esc.l3_round,
+        l3_stall_count=esc.l3_stall_count,
         exploration_budget=exploration_budget(
-            cycle.escalation.l1_stall_count, cycle.knobs.escalation.l1_patience
+            esc.l1_stall_count, knobs.escalation.l1_patience
         ).value,
         pipeline_params=dict(current_pp) if current_pp else {},
         composite_formula=formula,
@@ -330,7 +335,7 @@ def build_bundle(
         # frozen prefix however the knob is set, so the knob alone would misreport round 0.
         subset_mode=(
             "adaptive"
-            if cycle.knobs.adaptive_queue.per_round_resubset and cycle.ruler is not None
+            if knobs.adaptive_queue.per_round_resubset and cycle.ruler is not None
             else "frozen"
         ),
         elimination_n_min=opt.elimination_n_min,
@@ -364,7 +369,7 @@ def build_bundle(
 
     return InjectionBundle(
         opt_sp=cycle.opt_sp,
-        memory=cycle.memory,
+        memory=state.memory,
         framing=cycle.framing,
         pipeline_schema=cycle.session.pipeline_schema,
         cycle_slice=cs,
@@ -396,11 +401,11 @@ def build_bundle(
         # for the life of a cycle while `detect_invariants` went on rejecting a repeat off the same
         # history: L1 punished for re-proposing an idea it was never shown had been tried.
         measured_rounds=[*prior, latest_round] if latest_round is not None else prior,
-        prompt_block_catalogue=cycle.knobs.l1_generate.prompt_block_catalogue,
-        earned_blocks=cycle.earned_blocks,
-        rebase_capability=cycle.knobs.escalation.rebase_capability,
-        terminate_capability=cycle.knobs.escalation.terminate_capability,
-        schema_field_rename=cycle.knobs.l1_generate.schema_field_rename,
+        prompt_block_catalogue=knobs.l1_generate.prompt_block_catalogue,
+        earned_blocks=state.earned_blocks,
+        rebase_capability=knobs.escalation.rebase_capability,
+        terminate_capability=knobs.escalation.terminate_capability,
+        schema_field_rename=knobs.l1_generate.schema_field_rename,
         measured_unit=cycle.session.backend_client.measured_unit,
         is_origin_round=latest_round is cycle.origin_round,
     )

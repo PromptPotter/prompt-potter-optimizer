@@ -11,6 +11,7 @@ from promptpotter.application.views.view_models import (
     InitExitView,
     L2RefineEnterView,
     L2RefineExitView,
+    MeasureEnterView,
     PlanEnterView,
     PlanExitView,
     RoundCompleteView,
@@ -29,6 +30,7 @@ from promptpotter.presentation.terminal.primitives import (
     _fmt_delta,
     _node_block,
     _node_line,
+    _node_top,
     _round_rule,
     _scoreboard,
     fmt_pvalue,
@@ -56,8 +58,6 @@ def _render_init_exit(v: InitExitView) -> str:
     parts: list[str] = []
     if v.task_context_keys:
         parts.append(f"task_context={v.task_context_keys} keys")
-    if v.l2_round:
-        parts.append(f"l2_round={v.l2_round}")
     suffix = f"  ({', '.join(parts)})" if parts else ""
     if v.cached_rounds_count > 0:
         out.append(
@@ -128,6 +128,12 @@ def _render_candidates_generated(v: CandidatesGeneratedView) -> str:
             "",
             render_sp_diff(v.sp_diff),
         ]
+    )
+
+
+def _render_measure_enter(v: MeasureEnterView) -> str:
+    return "\n" + _node_top(
+        "MEASURE", f"{v.node} · {v.n_candidates} candidates on {v.n_samples} cells"
     )
 
 
@@ -213,9 +219,6 @@ def _render_round_complete(v: RoundCompleteView) -> str:
             use_short_names=bool(v.composite_fitness_formula_short),
         ):
             out.append(f"  {line}")
-
-    if crit := v.l1_critique_text.replace("\n", " ").strip():
-        out.append(f"  {CYAN}L1 Critique:{RESET} {crit}")
     return "\n".join(out)
 
 
@@ -291,6 +294,8 @@ def to_text(view: AnyView) -> str:
             return _render_round_start(view)
         case CandidatesGeneratedView():
             return _render_candidates_generated(view)
+        case MeasureEnterView():
+            return _render_measure_enter(view)
         case RoundCompleteView():
             return _render_round_complete(view)
         case L2RefineEnterView():

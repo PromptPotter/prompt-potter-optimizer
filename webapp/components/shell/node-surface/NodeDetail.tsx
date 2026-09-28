@@ -344,7 +344,7 @@ function RunSection({
             : "This node is not in the served pipeline."}
         </div>
       ) : kind === "measurement" ? (
-        <MeasurementRun block={block} round={round} />
+        <MeasurementRun round={round} />
       ) : (
         <CallRun block={block} loading={loading} inFlight={inFlight} />
       )}

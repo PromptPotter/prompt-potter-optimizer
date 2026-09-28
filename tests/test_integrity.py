@@ -201,9 +201,11 @@ def test_layout_only_override_moves_optimizer_prompt_hash() -> None:
     no override → identical hashes."""
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         compute_optimizer_prompt_hashes,
+    )
+    from promptpotter.application.optimizer_manifest import (
+        resolve_optimizer,
         set_optimizer_prompt_overrides,
     )
-    from promptpotter.application.optimizer_manifest import resolve_optimizer
 
     potter = resolve_optimizer("potter", {})
     try:
@@ -245,9 +247,7 @@ async def test_the_determinism_clamp_outranks_every_other_layer_and_keys_the_ban
     """
     from promptpotter.application.campaign_config import DeterminismClamp
     from promptpotter.application.optimization.dispatch.llm_call import call as call_mod
-    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-        set_determinism_clamp,
-    )
+    from promptpotter.application.optimizer_manifest import set_determinism_clamp
     from promptpotter.infrastructure.llm.response import LLMResponse
     from promptpotter.infrastructure.store.stores import LLMReuseCache
 
@@ -1689,7 +1689,7 @@ def test_nested_param_override_accumulates_instead_of_reverting_its_parent() -> 
     `object` declaration is what buys the depth, so every nested param the schema grafts must
     carry one. An `array` must NOT merge — a list is an ordering.
     """
-    from promptpotter.application.optimization.l1.population import merge_pipeline_params
+    from promptpotter.application.pipeline_resolve import merge_pipeline_params
     from promptpotter.domain.pipeline_schema import description_key
 
     schema = _pipeline_schema("promptpotter-self")
@@ -2717,6 +2717,7 @@ def test_digest_reads_the_ruler_off_the_cycle_not_the_unabsorbed_round() -> None
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.optimization.dispatch.facade import build_bundle
     from promptpotter.application.optimization.dispatch.injections.panels import _r_confounds
+    from promptpotter.application.optimizers.potter.state import PotterState
     from promptpotter.domain.ruler import DeltaRuler
 
     session = Mock()
@@ -2732,9 +2733,11 @@ def test_digest_reads_the_ruler_off_the_cycle_not_the_unabsorbed_round() -> None
         calibration_model="1PL",
         anchor_id="anchor-x",
     )
+    state = PotterState()
     cycle = Cycle(
         session=session,
         config=CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05)),
+        working_state=state,
         rounds=[round_result(0)],
         ruler=warm,
     )
@@ -2748,7 +2751,7 @@ def test_digest_reads_the_ruler_off_the_cycle_not_the_unabsorbed_round() -> None
         ],
     )
     assert latest.ability is None
-    bundle = build_bundle(cycle, latest_round=latest)
+    bundle = build_bundle(cycle, state, latest_round=latest)
 
     ability = bundle.digest.ability
     assert ability is not None
@@ -2769,7 +2772,10 @@ def test_a_round_missing_its_critique_is_re_sent_before_the_generator_reads() ->
     from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.optimization.l1 import critique as critique_mod
+    from promptpotter.application.optimizers.potter.state import PotterState
     from promptpotter.domain.phases import StopLoop, StopReason
+
+    state = PotterState()
 
     def _cycle(prior: object) -> Cycle:
         session = Mock()
@@ -2777,6 +2783,7 @@ def test_a_round_missing_its_critique_is_re_sent_before_the_generator_reads() ->
         return Cycle(
             session=session,
             config=CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05)),
+            working_state=state,
             rounds=[round_result(0), prior],
         )
 
@@ -2788,7 +2795,7 @@ def test_a_round_missing_its_critique_is_re_sent_before_the_generator_reads() ->
     cycle = _cycle(kept)
     calls: list[int] = []
     with patch.object(critique_mod, "run_l1_critique", side_effect=AssertionError("re-sent")):
-        asyncio.run(critique_mod.ensure_prior_critique(cycle))
+        asyncio.run(critique_mod.ensure_prior_critique(cycle, state))
     assert kept.optimizer_state.payload.critique == {"priority_fix": "already here"}
 
     # A round MISSING one is re-sent, and the result lands on disk — or the next resume pays for
@@ -2802,7 +2809,7 @@ def test_a_round_missing_its_critique_is_re_sent_before_the_generator_reads() ->
         return {"priority_fix": "distilled late"}
 
     with patch.object(critique_mod, "run_l1_critique", side_effect=_distil):
-        asyncio.run(critique_mod.ensure_prior_critique(cycle))
+        asyncio.run(critique_mod.ensure_prior_critique(cycle, state))
     assert calls == [1]
     assert bare.optimizer_state.payload.critique == {"priority_fix": "distilled late"}
     cycle.session.store.campaigns.save_round_file.assert_called_once()
@@ -2820,7 +2827,7 @@ def test_a_round_missing_its_critique_is_re_sent_before_the_generator_reads() ->
         return {"priority_fix": "arrived on the re-send"}
 
     with patch.object(critique_mod, "run_l1_critique", side_effect=_second_time):
-        asyncio.run(critique_mod.ensure_prior_critique(cycle))
+        asyncio.run(critique_mod.ensure_prior_critique(cycle, state))
     assert len(tries) == 2
     assert flaky.optimizer_state.payload.critique == {"priority_fix": "arrived on the re-send"}
 
@@ -2842,7 +2849,7 @@ def test_a_round_missing_its_critique_is_re_sent_before_the_generator_reads() ->
         patch.object(critique_mod, "declare_run_phase", lambda *a, **k: None),
         pytest.raises(StopLoop) as halted,
     ):
-        asyncio.run(critique_mod.ensure_prior_critique(cycle))
+        asyncio.run(critique_mod.ensure_prior_critique(cycle, state))
     assert len(attempts) == critique_mod.CRITIQUE_RESEND_ATTEMPTS
     assert halted.value.reason is StopReason.PAUSED
     assert [w["kind"] for w in seen] == ["l1_critique_unavailable"]

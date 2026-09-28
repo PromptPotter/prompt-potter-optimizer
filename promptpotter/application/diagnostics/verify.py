@@ -20,9 +20,9 @@ from promptpotter.application.initialization.loop_start import (
     diagnostic_trace,
 )
 from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.optimization.l1.population import merge_pipeline_params
 from promptpotter.application.optimization.task_context import committed_task_context
 from promptpotter.application.origin import resolve_origin_opt_search_point
+from promptpotter.application.pipeline_resolve import merge_pipeline_params
 from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.metrics import compute_composite_fitness

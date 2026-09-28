@@ -170,10 +170,8 @@ def test_round_winner_replay_ranks_against_the_recorded_parent() -> None:
 
     # A decision carrying no parent is REFUSED, never answered against a reconstructed one —
     # guessing quietly is the whole defect, so the replayer must raise rather than pick a panel.
-    from promptpotter.application.optimization.resume_and_fork.replayers import (
-        ReplayContext,
-        _replay_round_winner,
-    )
+    from promptpotter.application.optimization.resume_and_fork.replayers import ReplayContext
+    from promptpotter.application.optimizers.potter.resume import _replay_round_winner
 
     with pytest.raises(ValueError, match="parent_cells"):
         _replay_round_winner(

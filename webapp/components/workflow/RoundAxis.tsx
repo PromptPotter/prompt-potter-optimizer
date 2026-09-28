@@ -16,7 +16,7 @@ export function RoundAxis() {
   if (completed.length === 0 && !liveActive) return null;
 
   return (
-    <div className="round-axis" role="tablist" aria-label="L1 rounds">
+    <div className="round-axis" role="tablist" aria-label="Rounds">
       <span className="round-axis-label">Round</span>
       <div className="round-axis-scroll">
         {completed.map((r) => {

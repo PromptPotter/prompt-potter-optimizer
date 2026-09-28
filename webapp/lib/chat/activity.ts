@@ -6,7 +6,7 @@ import { cacheShare, prefixReading } from "@/lib/derivations";
 import { fmtDuration, fmtPct0 } from "@/lib/format";
 import type { NonActivityKind, ProjectionEnvelope } from "@/lib/api/types";
 
-// The faster copy of `dashboard.json::declared_sample_order`. A DECLARED order: PoBB can stop a
+// The faster copy of `dashboard.json::declared_sample_order`. A DECLARED order: an eliminator can stop a
 // candidate early, so a surface says "next", never "will".
 export function sampleOrderFrom(env: ProjectionEnvelope): number[] | null {
   if (env.kind !== "snapshot") return null;
@@ -92,19 +92,11 @@ export function snapshotToActivity(payload: Record<string, unknown>): ActivityIt
   const cr = asRec(payload.current_round);
   const crRound = num(cr.round);
   if (crRound != null && crRound >= 0) {
-    // The l1_score INPUT is the only place a candidate appears before it has a number.
-    const l1 = asRec(asRec(cr.nodes).l1_score);
-    const inputs = Array.isArray(asRec(l1.input).candidates) ? asRec(l1.input).candidates : [];
+    // A row is seeded at mint, so a candidate appears here before it has a number.
     const rows = Array.isArray(cr.candidates) ? (cr.candidates as unknown[]) : [];
-    const rowByLabel = new Map<string, Record<string, unknown>>();
-    for (const c of rows) {
-      const label = str(asRec(c).label);
-      if (label) rowByLabel.set(label, asRec(c));
-    }
-    (inputs as unknown[]).forEach((c, i) => {
-      const label = str(asRec(c).label) ?? candidateLabel(crRound, i);
-      const row = rowByLabel.get(label);
-      out.push(candidateItem(label, row ? fitPct(row) : undefined));
+    rows.forEach((c, i) => {
+      const row = asRec(c);
+      out.push(candidateItem(str(row.label) ?? candidateLabel(crRound, i), fitPct(row)));
     });
   }
 

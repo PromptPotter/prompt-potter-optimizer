@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, TypedDict
 
 from promptpotter.application.intelligence.exploration import graded_response
+from promptpotter.application.optimizers.nodes import RaceSnapshot
 from promptpotter.application.scoring.selection import (
     elimination_p_best,
     elimination_p_best_bounds,
@@ -63,6 +63,24 @@ ABORT_LENS_LABELS: dict[str, str] = {
     "all_off": "No early abort",
 }
 
+# Abort-lens variants → the gate(s) each switches off (the mask's abort verdict; see
+# docs/operations/mask-projection.md). DERIVED from `EliminationGate`, so a gate added there is
+# switchable rather than silently unsuppressable.
+ABORT_LENS_SUPPRESS: dict[str, frozenset[str]] = {
+    **{f"{g.value}_off": frozenset({g.value}) for g in EliminationGate},
+    "all_off": frozenset(g.value for g in EliminationGate),
+}
+
+# The picklist the browser offers must be exactly what the API edge accepts. A LABEL cannot be
+# derived — it is copy — so the key set is asserted instead: the browser's options are emitted
+# from `ABORT_LENS_LABELS` by `scripts/build_ts_types.py`, and a gate without a word for it would
+# otherwise be served and unofferable.
+assert set(ABORT_LENS_LABELS) == set(ABORT_LENS_SUPPRESS), (
+    "abort-lens vocabulary drift: "
+    f"unlabelled {sorted(set(ABORT_LENS_SUPPRESS) - set(ABORT_LENS_LABELS))}, "
+    f"unserved {sorted(set(ABORT_LENS_LABELS) - set(ABORT_LENS_SUPPRESS))}"
+)
+
 
 class EliminationContext(TypedDict, total=False):
     """PoBB's ``ScoredCandidate.elimination_context`` for an arm it cut or locked. ``gate`` says
@@ -80,17 +98,6 @@ class EliminationContext(TypedDict, total=False):
 
 def _eliminate(name: str, check_result: dict[str, Any]) -> StopSignal:
     return StopSignal(name, ArmOutcome.ELIMINATED, check_result)
-
-
-@dataclass(frozen=True)
-class PoBBSnapshot:
-    """One candidate's mid-round PoBB standing. ``p_best`` is a SCALAR about ``current_id`` ALONE — a
-    snapshot cannot answer a round-wide question; the per-prior numbers are in :attr:`paired_breakdown`."""
-
-    p_best: float
-    current_id: str
-    n_samples: int
-    paired_breakdown: dict[str, dict[str, float]]
 
 
 class PoBBCheck:
@@ -129,7 +136,7 @@ class PoBBCheck:
         self.prior_sps: dict[str, JobSearchPoint] = {}
         self.prior_ids: list[str] = []
         self._current_id: str = ""
-        self._on_snapshot: Callable[[PoBBSnapshot], None] | None = None
+        self._on_snapshot: Callable[[RaceSnapshot], None] | None = None
         self._on_backfill: Callable[[int, list[str]], None] | None = None
         self._backfill_fn = backfill_fn
         # One measurement per (prior, cell) however many walks reach the cell: started in a free
@@ -139,7 +146,7 @@ class PoBBCheck:
     def set_current(
         self,
         candidate_id: str,
-        on_snapshot: Callable[[PoBBSnapshot], None] | None = None,
+        on_snapshot: Callable[[RaceSnapshot], None] | None = None,
         on_backfill: Callable[[int, list[str]], None] | None = None,
     ) -> None:
         self._current_id = candidate_id
@@ -332,7 +339,7 @@ class PoBBCheck:
             for pid in paired_priors
         }
 
-        snap = PoBBSnapshot(
+        snap = RaceSnapshot(
             p_best=float(p_best_current),
             current_id=cid,
             n_samples=n,
@@ -460,8 +467,8 @@ class PoBBCheck:
 
 __all__ = [
     "ABORT_LENS_LABELS",
+    "ABORT_LENS_SUPPRESS",
     "EliminationContext",
     "EliminationGate",
     "PoBBCheck",
-    "PoBBSnapshot",
 ]

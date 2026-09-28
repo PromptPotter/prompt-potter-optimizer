@@ -29,11 +29,11 @@ from promptpotter.infrastructure.runtime_flags import is_checkin
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
-    _DIVERGENCE_HINT,
     CommandResult,
     backend_unreachable_result,
     confirm_tty,
     cycle_result_command,
+    divergence_hint,
     drive_cycle,
     get_verbose,
     identity_from_args,
@@ -416,7 +416,7 @@ async def _run_loop(
                     "recorded_outcome": div.recorded_outcome,
                     "current_outcome": div.current_outcome,
                 },
-                human=f"{div}\n\n{_DIVERGENCE_HINT}",
+                human=f"{div}\n\n{divergence_hint()}",
             )
         # Interactive: show context + ask y/N; non-TTY falls through to the structured error (scripts get exit-code).
         print()
@@ -435,7 +435,7 @@ async def _run_loop(
                     "recorded_outcome": div.recorded_outcome,
                     "current_outcome": div.current_outcome,
                 },
-                human=f"{div}\n\n{_DIVERGENCE_HINT}",
+                human=f"{div}\n\n{divergence_hint()}",
             )
         if not answer:
             return CommandResult(

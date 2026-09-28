@@ -12,6 +12,7 @@ from promptpotter.domain.spend import SpendRollup
 
 __all__ = [
     "AnyView",
+    "BenchScoredView",
     "CandidatesGeneratedView",
     "DigestStatusView",
     "FinalWinnerView",
@@ -22,6 +23,7 @@ __all__ = [
     "L2RefineEnterView",
     "L2RefineExitView",
     "LogMdView",
+    "MeasureEnterView",
     "PlanEnterView",
     "PlanExitView",
     "RoundCompleteView",
@@ -114,7 +116,6 @@ class InitExitView:
     resumed_from_round: int = 1
     cached_rounds_count: int = 0
     task_context_keys: int = 0
-    l2_round: int = 0
     composite_fitness_formula: str | None = None
     composite_fitness_formula_short: str | None = None
 
@@ -123,6 +124,7 @@ class InitExitView:
 class RoundStartView:
     """L1 generate enter — round banner + generate config block."""
 
+    node: str
     round: int
     max_rounds: int
     l1_stall_count: int
@@ -164,6 +166,19 @@ class CandidatesGeneratedView:
 
 
 @dataclass(frozen=True)
+class MeasureEnterView:
+    node: str
+    n_candidates: int
+    n_samples: int
+
+
+@dataclass(frozen=True)
+class BenchScoredView:
+    # `BenchScore.model_dump(mode="json")` — the dashboard folds `bench_score` from it.
+    bench: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class ScoreEntry:
     label: str
     accuracy: float | None
@@ -193,7 +208,7 @@ class ScoreEntry:
 
 @dataclass(frozen=True)
 class RoundCompleteView:
-    """L1 score exit — round summary. Round-trip invariant target."""
+    """``select:exit`` — the round's summary. Round-trip invariant target."""
 
     round: int
     parent_acc: float
@@ -217,7 +232,6 @@ class RoundCompleteView:
     # verdict either way instead of falling silent exactly when nothing was resolved.
     verdict_reason: str | None
     next_action: str
-    l1_critique_text: str
     composite_fitness_formula: str | None
     composite_fitness_formula_short: str | None
     # The parent restricted to the winner's measured samples; verdict line + Δ read these so
@@ -336,8 +350,8 @@ class RoundDigestView:
     # The best-so-far line read on ONE shared set of cells — the only row two rounds can
     # be differenced on, since `accuracy` above is read on whatever subset the round bought.
     overlap: OverlapReading | None = None
-    # Per-candidate P(best) trajectory from ``.runtime/streams/round_NNNN_p_best.jsonl``;
-    # empty for resumed rounds.
+    # Per-candidate P(best) trajectory from the round's racing stream
+    # (``.runtime/streams/round_NNNN_{member}.jsonl``); empty for resumed rounds.
     p_best_trajectory: dict[str, list[float]] = field(default_factory=dict)
     # Who the round ELECTED. The trajectory above is a STOPPING posterior and cannot answer it —
     # its argmax is regularly not the elected arm, and can name two of them or none.
@@ -396,6 +410,8 @@ AnyView = (
     | InitExitView
     | RoundStartView
     | CandidatesGeneratedView
+    | MeasureEnterView
+    | BenchScoredView
     | RoundCompleteView
     | L2RefineEnterView
     | L2RefineExitView

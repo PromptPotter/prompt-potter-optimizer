@@ -16,9 +16,9 @@ from promptpotter.application.optimization.dispatch.injections.registry import (
 )
 from promptpotter.application.optimization.validators.behavior_base import (
     CheckFn,
-    CheckResult,
     ValidatorContext,
 )
+from promptpotter.application.optimizers.nodes import CheckResult
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.candidate_diff import variant_prose_written
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS

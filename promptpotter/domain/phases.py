@@ -35,6 +35,8 @@ class CampaignPhase(enum.StrEnum):
     MEASURE = "measure"
     SELECT = "select"
     ADAPT = "adapt"
+    # The held-out pass grading the selection; `bench:scored` carries its `BenchScore`.
+    BENCH = "bench"
 
 
 class PotterPhase(enum.StrEnum):

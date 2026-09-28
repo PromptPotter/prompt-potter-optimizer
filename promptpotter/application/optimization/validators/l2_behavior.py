@@ -8,9 +8,9 @@ from typing import Any
 
 from promptpotter.application.optimization.validators.behavior_base import (
     CheckFn,
-    CheckResult,
     ValidatorContext,
 )
+from promptpotter.application.optimizers.nodes import CheckResult
 
 __all__ = ["run_all_l2_checks"]
 

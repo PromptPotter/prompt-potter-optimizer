@@ -14,6 +14,7 @@ from promptpotter.application.optimization.validators.l1_invariants import (
     L1YieldStats,
     detect_invariants,
 )
+from promptpotter.application.optimizers.potter.knobs import potter_knobs
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent, emit_phase
 from promptpotter.domain.results import CandidateProposal, candidate_label, round_document_digest
 from promptpotter.domain.run_records import CandidateMintedRecord, LLMCallRecord
@@ -23,6 +24,7 @@ from promptpotter.infrastructure.tracing.bridge import observed_node
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.application.optimizers.potter.state import PotterState
     from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,7 @@ logger = logging.getLogger(__name__)
 async def generate_or_load_candidates(
     round_num: int,
     cycle: Cycle,
+    state: PotterState,
     on_phase: Callable[[PhaseEvent], None] | None = None,
     n_scoring_samples: int = 0,
     *,
@@ -40,8 +43,8 @@ async def generate_or_load_candidates(
     config = cycle.config
     # Cap n_variants at 3× config so L2 can't blow up the round budget.
     opt = config.optimization
-    opt_params = cycle.memory.l1_overrides
-    n_variants = cycle.knobs.l1_generate.n_variants
+    opt_params = state.memory.l1_overrides
+    n_variants = potter_knobs(cycle.optimizer).l1_generate.n_variants
     _n_variants = min(opt_params.get("n_variants", n_variants), n_variants * 3)
     _creativity = opt_params.get(
         "creativity", float(cycle.optimizer.node_config("l1_generate")["temperature"])
@@ -62,13 +65,14 @@ async def generate_or_load_candidates(
         else None
     )
     if cached is None:
-        await ensure_prior_critique(cycle)
+        await ensure_prior_critique(cycle, state)
 
     emit_phase(
         on_phase,
         CampaignPhase.PROPOSE,
         "enter",
         round=round_num,
+        node="l1_generate",
         max_rounds=opt.max_rounds,
         current_accuracy=cycle.tracking.current_accuracy,
         prompt_preview=prompt_preview,
@@ -134,6 +138,7 @@ async def generate_or_load_candidates(
     ):
         candidates, parse_failure = await l1_generate(
             cycle,
+            state,
             n_variants=_n_variants,
             creativity=_creativity,
             round_num=round_num,

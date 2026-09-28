@@ -1,5 +1,5 @@
 """Per-cycle round recorder — a fork's MUST point at the fork's own rounds dir, so ``__init__`` rejects a path that does
-not end in ``.runtime/cache/rounds``. Pure ledger projection but for ``set_l1_score``, which the dashboard composes."""
+not end in ``.runtime/cache/rounds``."""
 
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ def build_node_block(record: LLMCallRecord) -> dict[str, Any]:
 
 def read_most_recent_round_nodes(rounds_dir: Path) -> dict[str, dict[str, Any]]:
     """The latest round file's ``nodes`` block — the live dashboard seeds its sticky LLM-call mirror from this on resume
-    without re-issuing the calls. ``l1_score`` is skipped, since the dashboard composes it live."""
+    without re-issuing the calls."""
     if not rounds_dir.is_dir():
         return {}
     candidates: list[tuple[int, Path]] = [
@@ -64,8 +64,6 @@ def read_most_recent_round_nodes(rounds_dir: Path) -> dict[str, dict[str, Any]]:
     payload = read_json_tolerant(path, {})
     out: dict[str, dict[str, Any]] = {}
     for key, block in (payload.get("nodes") or {}).items():
-        if key == "l1_score":
-            continue
         if isinstance(block, dict):
             out[key] = {**block, "round": round_num}
     return out
@@ -127,7 +125,6 @@ class AuditTrailProjection(Projection):
         self.rounds_dir = rounds_dir
         self._current_round: int = 0
         self._nodes: dict[str, dict[str, Any]] = {}
-        self._l1_score: dict[str, Any] | None = None
         # Round-scoped degradations (zero candidates, L2 soft-rejects, injection
         # truncations) accumulated for the round_NNNN.json::warnings audit block.
         self._warnings: list[dict[str, Any]] = []
@@ -146,18 +143,13 @@ class AuditTrailProjection(Projection):
         """Start a new round; flush pending state first so L2/L3 calls that arrived between
         `round:complete` and `round:enter` merge into the just-closed round's file (not discarded).
         """
-        if self._nodes or self._l1_score or self._warnings:
+        if self._nodes or self._warnings:
             self.flush()
         self._current_round = round_num
         self._nodes = {}
-        self._l1_score = None
         self._warnings = []
         self._started_at = started_at
         self._finished_at = ""
-
-    def set_l1_score(self, block: dict[str, Any]) -> None:
-        """Deposit the scoring-phase block built by the live dashboard projection."""
-        self._l1_score = block
 
     # -- Ledger subscription (PhaseRecord 3) ----------------------------------------
 
@@ -191,38 +183,23 @@ class AuditTrailProjection(Projection):
         """Write `round_NNNN.json` and reset. Idempotent — second flush merges new nodes into the
         existing file rather than overwriting (so late L2/L3 records aren't lost).
         """
-        if not self._nodes and self._l1_score is None and not self._warnings:
+        if not self._nodes and not self._warnings:
             return None
 
         self.rounds_dir.mkdir(parents=True, exist_ok=True)
         path = self.rounds_dir / round_basename(self._current_round)
 
         prior = read_json_tolerant(path, {})
-        existing_nodes = dict(prior.get("nodes") or {})
         existing_started_at = prior.get("started_at") or self._started_at
         existing_warnings = list(prior.get("warnings") or [])
-
-        nodes_ordered: dict[str, Any] = {}
-        # Reading order: L1 generate/critique → scoring → escalation layers.
-        for preferred in ("l1_generate", "l1_critique"):
-            if preferred in existing_nodes:
-                nodes_ordered[preferred] = existing_nodes[preferred]
-            if preferred in self._nodes:
-                nodes_ordered[preferred] = self._nodes[preferred]
-        if "l1_score" in existing_nodes:
-            nodes_ordered["l1_score"] = existing_nodes["l1_score"]
-        if self._l1_score is not None:
-            nodes_ordered["l1_score"] = self._l1_score
-        for source in (existing_nodes, self._nodes):
-            for key, block in source.items():
-                if key not in nodes_ordered:
-                    nodes_ordered[key] = block
+        # Firing order, a second flush's nodes after the first's.
+        nodes = {**dict(prior.get("nodes") or {}), **self._nodes}
 
         payload: dict[str, Any] = {
             "round": self._current_round,
             "started_at": existing_started_at,
             "finished_at": self._finished_at,
-            "nodes": nodes_ordered,
+            "nodes": nodes,
         }
         merged_warnings = existing_warnings + self._warnings
         if merged_warnings:
@@ -234,12 +211,11 @@ class AuditTrailProjection(Projection):
         logger.debug(
             "Round %d recorded: %d nodes → %s",
             self._current_round,
-            len(nodes_ordered),
+            len(nodes),
             path.name,
         )
 
         self._nodes = {}
-        self._l1_score = None
         self._warnings = []
         return path
 
@@ -247,5 +223,5 @@ class AuditTrailProjection(Projection):
         """Runner's teardown seam — flush buffered state since a mid-candidate interrupt never
         emits `round:complete`. `_halted_mid_round` threads `"interrupted": true` on the partial.
         """
-        if self._nodes or self._l1_score is not None or self._warnings:
+        if self._nodes or self._warnings:
             self.flush()

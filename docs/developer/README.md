@@ -34,11 +34,11 @@ Every optimizer LLM node — `l1_generate`, `l1_critique`, `l2_context`, `l3_pla
 |-------|--------|-----------|----------|
 | `RoundResult.critique` | L1 critique | L1 generate, L2, L3 (`critique` injection via `bundle.digest.critique`) | per round (lives on the round audit, not the memory) |
 | `Cycle.framing` | operator, at check-in (frozen for the run) | L1 generate (`task_context` injection — on that floor only) | persistent; never overwritten by any layer |
-| `Cycle.memory.l1_layout` | L2 | L1 generate (`fill`); L2 (`l1_layout` injection) | persistent (banked per round as `optimizer_state`) |
-| `Cycle.memory.plan` | L3 | L1 generate, L2, L3 (`plan` injection; not on `l1_critique`'s layout) | persistent — never cleared |
-| `Cycle.memory.wounds.l3_note` | L3 | L2 (`l3_to_l2_note` injection — L2 template only) | persistent until L3 next fires |
-| `Cycle.memory.wounds.l2_guard_breaches` | L2 parser + layout validator | L3 (rendered in the merged `guard_breaches` injection) | persistent until L3 fires |
-| `Cycle.memory.wounds.l3_guard_breaches` | L3 parser | L3 next fire (rendered in the merged `guard_breaches` injection) | persistent |
+| `PotterState.memory.l1_layout` | L2 | L1 generate (`fill`); L2 (`l1_layout` injection) | persistent (banked per round as `optimizer_state`) |
+| `PotterState.memory.plan` | L3 | L1 generate, L2, L3 (`plan` injection; not on `l1_critique`'s layout) | persistent — never cleared |
+| `PotterState.memory.wounds.l3_note` | L3 | L2 (`l3_to_l2_note` injection — L2 template only) | persistent until L3 next fires |
+| `PotterState.memory.wounds.l2_guard_breaches` | L2 parser + layout validator | L3 (rendered in the merged `guard_breaches` injection) | persistent until L3 fires |
+| `PotterState.memory.wounds.l3_guard_breaches` | L3 parser | L3 next fire (rendered in the merged `guard_breaches` injection) | persistent |
 
 **One renderer per field:** L3 writes `plan`, and every node whose layout places it reads it through the same `_r_plan`. `task_context` is operator-authored framing, frozen for the run and rendered by `_r_task_context`, but no layer writes it. (`L2ContextOutput` explicitly carries neither `task_context` nor `action` — see `dispatch/schemas.py`.) Which node places which panel is `domain/l1_layout.py::NODE_LAYOUTS`.
 
@@ -58,7 +58,7 @@ round runs L1 → EscalationInputs(current_objective, l1_stall_count, l1_patienc
 
 **Which rules exist, and which of them preempt patience, is owned by [`dispatch-hub.md`](dispatch-hub.md) § Trigger** — read the membership there and in `escalation/rules.py`, never from a copy on this page.
 
-Counter state lives at `Cycle.escalation` (`l1_stall_count`, `l2_stall_count`, …) — the only mutation surface is observation methods. In-memory during a cycle and rebuilt on resume by `EscalationFSM.from_ledger` — a fold over the cycle's escalation history, not re-derived from one round. Every transition is checkpointed.
+Counter state lives at `PotterState.escalation` (`l1_stall_count`, `l2_stall_count`, …) — the only mutation surface is observation methods. In-memory during a cycle and rebuilt on resume by `EscalationFSM.from_ledger` — a fold over the cycle's escalation history, not re-derived from one round. Every transition is checkpointed.
 
 Self-healing fires through a different door, bypassing the escalation ladder. **Which layer heals which wound** — owned by [`self-healing-internals.md`](self-healing-internals.md) § The wounds, mapped to the two axes.
 

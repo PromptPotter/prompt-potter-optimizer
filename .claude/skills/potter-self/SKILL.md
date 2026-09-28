@@ -25,7 +25,7 @@ The optimizer is three nested generation loops (`promptpotter/application/optimi
 
 - **L1** (`l1_generate`) generates candidate prompts with cause from its evidence surface — the panels its live layout renders (`NODE_LAYOUTS["l1_generate"].floor`, `domain/l1_layout.py` — read the membership there) — under `plan` from L3 and the operator's frozen `task_context`.
 - **L2** (`l2_context`) fires on L1 stall and moves L1's surface — `l1_layout` (which panels L1 sees) and `l1_overrides` (how hard it explores). **It cannot write `task_context`**: `L2ContextOutput` has no such field, so a fire that changed neither lever bought nothing.
-- **L3** (`l3_plan`) replans on L2 stall, writing `Cycle.memory.plan`.
+- **L3** (`l3_plan`) replans on L2 stall, writing `PotterState.memory.plan`.
 
 **Never name a panel from memory.** The citable set is *derived* — `@signal(..., citable=True)` intersected with the node's live layout by `citable_fields` (`dispatch/injections/registry.py`). A panel that does not render invites a fabricated citation, which is exactly how `sibling_yield` — a name this skill carried for weeks — went on being cited after it was deleted from the code.
 
@@ -39,7 +39,7 @@ Cycle root: `.promptpotter/projects/{tenant}/campaigns/{campaign_id}/cycles/{cyc
 |---|---|---|
 | 1 | `promptpotter/assets/optimizers/potter/pipeline.yaml` → `resolved_prompts["l1_generate/1"]` (outer: the `*_self_optimizing/1` families beside it, picked by `promptpotter-self`'s `optimization.nodes`) | The current L1 optimizer prompt template — the thing you will edit |
 | 2 | `{cycle_dir}/rounds/round_NNNN.json` | Per-round audit: parsed candidates, per-candidate scores, `overlap`, `separable`, critique text. **No rendered prompt** — see row 4 |
-| 3 | `{cycle_dir}/.runtime/streams/round_NNNN_p_best.jsonl` | PoBB elimination stream — did variants stratify or collapse? Which got eliminated first? |
+| 3 | `{cycle_dir}/.runtime/streams/round_NNNN_pobb.jsonl` | PoBB elimination stream — did variants stratify or collapse? Which got eliminated first? |
 | 4 | `{cycle_dir}/.runtime/ledger.jsonl` | The cycle event log — escalation firings, decisions, spend. There is no `signals.jsonl`. **The ONLY place the rendered optimizer prompt survives**: each `payload_kind: "llm_call"` record carries `template_fields` + `variables` (render one against the other), and the `llm_call_start` beside it carries `prompt_chars`, `injection_chars`, `injection_dropped` and `injection_silent` — the panel-by-panel breakdown of what the node was actually handed. |
 | 5 | `{cycle_dir}/dashboard.json` | Round-by-round composite trajectory + recent rules |
 | 6 | `{cycle_dir}/prompts/{node}.yaml` | Current `PromptTemplate` for each pipeline node — the *target* of L1's mutations (read-only here) |
@@ -143,7 +143,7 @@ Capture the **rendered prompt** (what the LLM actually saw, not the template) fr
 
 ### 3. Read PoBB stream + ledger
 
-`{cycle_dir}/.runtime/streams/round_NNNN_p_best.jsonl` shows the elimination order. If all candidates lasted to `n_min` with near-identical posterior intervals, you have **flat stratification** — L1 didn't generate meaningfully different proposals. If one ran away early, look at *why* it differed. `.runtime/ledger.jsonl` records every escalation rule fire.
+`{cycle_dir}/.runtime/streams/round_NNNN_pobb.jsonl` shows the elimination order. If all candidates lasted to `n_min` with near-identical posterior intervals, you have **flat stratification** — L1 didn't generate meaningfully different proposals. If one ran away early, look at *why* it differed. `.runtime/ledger.jsonl` records every escalation rule fire.
 
 ### 4. Read the critique
 

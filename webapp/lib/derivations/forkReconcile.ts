@@ -17,7 +17,7 @@ export interface ForkReconcileDefaults {
 }
 
 export function forkReconcileDefaults(dash: DashboardSnapshot | null): ForkReconcileDefaults {
-  // `rounds[]` carries the ORIGIN at index 0 while `max_rounds` counts L1 rounds. A rewind clamps
+  // `rounds[]` carries the ORIGIN at index 0 while `max_rounds` counts optimizer rounds. A rewind clamps
   // `rounds[]` below what the parent really spent, so this under-reports there.
   const roundsConsumed = Array.isArray(dash?.rounds)
     ? dash.rounds.filter((r) => r.round > 0).length

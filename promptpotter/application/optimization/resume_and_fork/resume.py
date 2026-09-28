@@ -10,17 +10,11 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.campaign_config import freeze_campaign_config
 from promptpotter.application.knobs import DiffScope, classify_config_diff
-from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-    compute_optimizer_prompt_hashes,
-)
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     ForkResult,
     _mint_fork,
 )
-from promptpotter.application.optimization.resume_and_fork.repair import (
-    apply_correction,
-    round_packages,
-)
+from promptpotter.application.optimization.resume_and_fork.repair import apply_correction
 from promptpotter.application.optimization.resume_and_fork.replayers import (
     ReplayMismatch,
     replay_decisions,
@@ -86,9 +80,9 @@ def _optimizer_mismatches(
     """Rounds produced by a DIFFERENT optimizer than the one loaded now. Asked PER ROUND so an edit
     forks from where it bites; an unstamped round is REPORTED, never guessed."""
 
-    current = compute_optimizer_prompt_hashes(selected)
+    current = selected.prompt_hashes()
     out: dict[int, ReplayMismatch] = {}
-    unstamped = [t.round for t in prior if not t.optimizer_state.payload.optimizer_prompt_hashes]
+    unstamped = [t.round for t in prior if not t.optimizer_state.prompt_hashes]
     if unstamped:
         logger.warning(
             "Round(s) %s carry no optimizer stamp, so whether they ran under the optimizer "
@@ -96,7 +90,7 @@ def _optimizer_mismatches(
             ", ".join(str(r) for r in unstamped),
         )
     for t in prior:
-        recorded = t.optimizer_state.payload.optimizer_prompt_hashes
+        recorded = t.optimizer_state.prompt_hashes
         moved = sorted(n for n, h in recorded.items() if current.get(n) != h)
         if not moved:
             continue
@@ -151,7 +145,9 @@ async def resume_with_divergence_check(
     # Fingerprinted BEFORE any repair, from ONE cycle, so both sets differ by exactly what the
     # repair changed. Deep copies because the repair mutates `prior` in place. No pre-replay:
     # `round_packages` seeds every round's state itself, k=0 included.
-    packages_before = round_packages(cycle, [t.model_copy(deep=True) for t in prior])
+    packages_before = cycle.optimizer.runtime.round_packages(
+        cycle, [t.model_copy(deep=True) for t in prior]
+    )
 
     correction = await apply_correction(
         campaign_store, hop, prior, packages_before, session, cycle, dataset

@@ -12,7 +12,6 @@ export type {
   DashboardCandidate,
   DashboardSnapshot,
   LiveDashboardState,
-  L1ScoreOutput,
   LiveCandidate,
   StatusKind,
 } from "./dashboard";

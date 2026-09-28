@@ -11,8 +11,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from promptpotter.application.optimization.dispatch.facade import build_bundle, node_packages
-from promptpotter.application.optimization.l1.critique import run_l1_critique
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     ForkResult,
     _mint_fork,
@@ -35,10 +33,9 @@ from promptpotter.domain.run_records import (
     SnapshotRecord,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.telemetry import reset_current_round, set_current_round
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_candidates
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.shared.errors import graceful, is_repairable_hole
+from promptpotter.shared.errors import is_repairable_hole
 from promptpotter.shared.instrument import MeasuredCandidate, MeasurementRole
 
 if TYPE_CHECKING:
@@ -54,7 +51,6 @@ __all__ = [
     "apply_correction",
     "repair_cut",
     "repair_incomplete_rounds",
-    "round_packages",
 ]
 
 
@@ -337,61 +333,6 @@ async def repair_incomplete_rounds(
     return repaired
 
 
-def round_packages(cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
-    """``{round: {node: package fingerprint}}``, each rebuilt at ITS OWN point in the run — a bundle
-    carries the cumulative trajectory, so one full rebuild would move round 0's bundle too."""
-
-    out: dict[int, dict[str, str]] = {}
-    for k, rr in enumerate(rounds):
-        # ``max(k, 1)``, because ``replay_priors([])`` is a pure NO-OP — it returns before
-        # touching anything — so k=0 would inherit whatever trajectory the caller walked in
-        # with, i.e. the full one, and round 0's fingerprint would then move whenever a LATER
-        # round was repaired. Round 0 IS the origin, so the state before it is the origin's:
-        # seed from that. Every round's state is now set here, which is why no caller
-        # pre-replays.
-        cycle.replay_priors(rounds[: max(k, 1)])
-        out[rr.round] = node_packages(build_bundle(cycle, latest_round=rr))
-    cycle.replay_priors(rounds)  # leave the caller the full trajectory it walked in with
-    return out
-
-
-async def _rederive_critiques(
-    campaign_store: CampaignStore,
-    hop: CycleHop,
-    session: Session,
-    cycle: Cycle,
-    drifted: list[RoundResult],
-) -> None:
-    """Re-distil the critique of each round whose package drifted, in place on disk. Measurements and
-    winner untouched, so this is a repair, not a rewind; round 0's comes from the ORIGIN path."""
-
-    saved = cycle.rounds
-    try:
-        for rr in drifted:
-            if not rr.optimizer_state.payload.critique or rr.round == 0:
-                continue
-            cycle.rounds = [p for p in saved if p.round < rr.round]
-            # `emit_token_usage` stamps from this ContextVar, which outside the round loop
-            # still holds whatever the last round set — so the cost landed on other books.
-            token = set_current_round(rr.round)
-            try:
-                with graceful(f"round {rr.round} critique re-derivation failed"):
-                    rr.optimizer_state.payload.critique = await run_l1_critique(
-                        cycle, rr, round_num=rr.round, ledger=session.state.ledger
-                    )
-                    campaign_store.save_round_file(hop, rr)
-                    logger.warning(
-                        "Round %d critique re-distilled: its input package drifted when the "
-                        "round was repaired, so the recorded one described evidence that no "
-                        "longer exists.",
-                        rr.round,
-                    )
-            finally:
-                reset_current_round(token)
-    finally:
-        cycle.rounds = saved
-
-
 def _package_drift(
     before: dict[int, dict[str, str]],
     after: dict[int, dict[str, str]],
@@ -486,7 +427,7 @@ async def apply_correction(
     by_round = {t.round: t for t in prior}
     mismatches, drifted = _package_drift(
         packages_before,
-        round_packages(cycle, prior),
+        cycle.optimizer.runtime.round_packages(cycle, prior),
         by_round,
         campaign_store,
         hop,
@@ -503,7 +444,7 @@ async def apply_correction(
         repair_target,
     )
     if drifted:
-        await _rederive_critiques(campaign_store, branch, session, cycle, drifted)
+        await cycle.optimizer.runtime.rederive(campaign_store, branch, session, cycle, drifted)
 
     # GRADE the cut now its consequence is known, by RE-SERIALIZING the spec it was minted
     # from — `update` replaces `index.json::fork` wholesale, so a hand-built dict dropped

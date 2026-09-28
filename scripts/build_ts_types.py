@@ -76,6 +76,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import (
     DashboardCandidate,
     DashboardSample,
+    LiveCandidate,
     RoundSummary,
     RoundSummaryCandidate,
 )
@@ -121,12 +122,12 @@ from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
 from promptpotter.domain.spend import SpendBucket, SpendRollup
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     BackendWarning,
-    BackfillLogEntry,
+    CatchUpLogEntry,
     CurrentRound,
     DashboardError,
     LiveDashboardState,
     LoopWarning,
-    PobbBlock,
+    RacingBlock,
     RunLimits,
 )
 from promptpotter.infrastructure.store.family_ray_queries import RayItem, RayResponse
@@ -224,8 +225,9 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     LoopWarning,
     DashboardError,
     RunLimits,
-    BackfillLogEntry,
-    PobbBlock,
+    CatchUpLogEntry,
+    RacingBlock,
+    LiveCandidate,
     CurrentRound,
     LiveDashboardState,
     # --- datasets router ---

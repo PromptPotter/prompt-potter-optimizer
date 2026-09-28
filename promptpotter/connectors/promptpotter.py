@@ -7,9 +7,9 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application import optimizers
 from promptpotter.application.campaign_config import OptimizationConfig
 from promptpotter.application.intelligence import exploration
-from promptpotter.application.optimization.dispatch.facade import injection_source_digest
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, resolve_optimizer
 from promptpotter.application.runner.inner import ruler
 from promptpotter.application.runner.inner.spawn import inner_cell_envelope_s, run_inner_cycle
@@ -91,7 +91,8 @@ def _measurement_source_digest() -> str:
 
 
 def _check_prompt_closure() -> None:
-    injection_source_digest(*measurement_modules())
+    for runtime in optimizers.runtimes().values():
+        runtime.source_digest(*measurement_modules())
 
 
 def _identity_config(
@@ -104,9 +105,6 @@ def _identity_config(
     sample's ``source_pin`` (:func:`_extract_experiment`), so adding one to ``inner_tasks.yaml``
     voids none of the cells already banked."""
     layouts = {name: spec.model_dump(mode="json") for name, spec in sorted(NODE_LAYOUTS.items())}
-    # `layouts` names WHICH panels fill each prompt; this is what those panels SAY. The text
-    # is code, so nothing above reaches it — see `injection_source_digest`.
-    panel_text = injection_source_digest(*measurement_modules())
     inner_tasks = inner_tasks or {}
     # `config` only, deliberately. `available_models` is a permission list and
     # `optimizer.param_allowed_values` bounds what L1 may PROPOSE — neither changes what the
@@ -141,6 +139,9 @@ def _identity_config(
         },
     )
     inner_optimizer = _inner_optimizer_revision(dataset_dir, inner)
+    # `layouts` names WHICH panels fill each prompt; this is what those panels SAY. The text
+    # is code, so nothing above reaches it — see `OptimizerRuntime.source_digest`.
+    panel_text = inner.runtime.source_digest(*measurement_modules())
     fingerprint = stable_hash(
         [
             inner_optimizer,

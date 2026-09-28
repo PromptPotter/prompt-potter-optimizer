@@ -8,9 +8,11 @@ import {
   observeOptions,
 } from "../searchPoint";
 import type { DashboardSnapshot } from "@/lib/poll";
+import type { LiveCandidate } from "@/lib/types";
 import {
   currentRound,
   dash,
+  liveRow,
   roundDoc,
   scored,
   servedLabel,
@@ -18,17 +20,8 @@ import {
   summaryRound,
 } from "@/lib/test-fixtures";
 
-type InputCandidate = {
-  idx?: number;
-  label?: string;
-  prompt_fields?: Record<string, unknown>;
-  resolved_pipeline_params?: Record<string, unknown> | null;
-};
-
-const liveDash = (candidates: InputCandidate[]): DashboardSnapshot =>
-  dash({
-    current_round: currentRound({ round: 1, nodes: { l1_score: { input: { candidates } } } }),
-  });
+const liveDash = (candidates: Partial<LiveCandidate>[]): DashboardSnapshot =>
+  dash({ current_round: currentRound({ round: 1, candidates: candidates.map(liveRow) }) });
 
 describe("liveObserveConfig", () => {
   it("returns null with no live candidates", () => {
@@ -36,12 +29,12 @@ describe("liveObserveConfig", () => {
     expect(liveObserveConfig(liveDash([]))).toBeNull();
   });
 
-  it("picks the latest-seeded (max idx) candidate's resolved config", () => {
+  it("picks the latest-seeded candidate — the last served row — and its resolved config", () => {
     const r = liveObserveConfig(
       liveDash([
-        { idx: 0, label: "C1.1", prompt_fields: { instruction: "a" }, resolved_pipeline_params: { llm: { model: "x" } } },
-        { idx: 2, label: "C1.3", prompt_fields: { instruction: "c" }, resolved_pipeline_params: { llm: { model: "z" } } },
-        { idx: 1, label: "C1.2", prompt_fields: { instruction: "b" } },
+        { label: "C1.1", prompt_fields: { instruction: "a" }, resolved_pipeline_params: { llm: { model: "x" } } },
+        { label: "C1.2", prompt_fields: { instruction: "b" } },
+        { label: "C1.3", prompt_fields: { instruction: "c" }, resolved_pipeline_params: { llm: { model: "z" } } },
       ]),
     );
     expect(r?.label).toBe("live — C1.3");
@@ -50,15 +43,15 @@ describe("liveObserveConfig", () => {
   });
 
   it("defaults config to {} when the candidate carries none yet", () => {
-    const r = liveObserveConfig(liveDash([{ idx: 0, label: "C1.1", prompt_fields: { instruction: "a" } }]));
+    const r = liveObserveConfig(liveDash([{ label: "C1.1", prompt_fields: { instruction: "a" } }]));
     expect(r?.config).toEqual({});
   });
 });
 
 describe("liveCandidateObserveConfig", () => {
   const snap = liveDash([
-    { idx: 0, label: "C1.1", prompt_fields: { instruction: "a" }, resolved_pipeline_params: { llm: { model: "x" } } },
-    { idx: 1, label: "C1.2", prompt_fields: { instruction: "b" }, resolved_pipeline_params: { llm: { model: "y" } } },
+    { label: "C1.1", prompt_fields: { instruction: "a" }, resolved_pipeline_params: { llm: { model: "x" } } },
+    { label: "C1.2", prompt_fields: { instruction: "b" }, resolved_pipeline_params: { llm: { model: "y" } } },
   ]);
 
   it("locates the in-flight candidate by label (not the latest-seeded one)", () => {

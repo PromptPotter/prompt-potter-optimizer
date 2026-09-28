@@ -19,7 +19,7 @@ from promptpotter.application.diagnostics.seed_screen import class_floor, draw_b
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.mint import prepare_fresh_cycle, resolve_cycle_plan
 from promptpotter.application.jobs.quota import unadmitted_limits
-from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+from promptpotter.application.optimizer_manifest import (
     resolved_overrides,
     set_optimizer_prompt_overrides,
 )

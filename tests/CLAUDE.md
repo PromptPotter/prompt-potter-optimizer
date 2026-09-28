@@ -61,7 +61,7 @@ enforcing becomes a **check in the module that owns the registry** — in the ac
 it, or at import for a table built there (`application/CLAUDE.md` § Subpackages says which) — so it
 fails loud before a run spends, costs nothing to maintain, and needs no
 test to update. They exist across the package, e.g.
-`RESUME_CHECKPOINT_GATING` exhaustiveness (`application/optimization/resume_and_fork/decisions.py`),
+`resume_checkpoint_gating` exhaustiveness (`application/optimization/resume_and_fork/decisions.py`),
 `L1_POSSIBLE ⊆ injection_table()` (`dispatch/injections/registry.py`), the `L1_MANDATORY`/origin-layout
 subset checks (`domain/l1_layout.py`), the unread/abandoned row-key checks (`domain/scoring.py`),
 the divergence-hint exhaustiveness (`cli/commands/_shared.py`). Add new ones the same way — beside

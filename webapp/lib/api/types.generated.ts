@@ -434,12 +434,12 @@ export interface PotterRoundState {
   l1_yield: number;
   l1_parse_failure: string | null;
   axis_memory_peaked: string[];
-  optimizer_prompt_hashes: Record<string, string>;
 }
 
-/** ``{manifest, payload}`` — the one envelope every optimizer's state rides. */
+/** ``{manifest, prompt_hashes, payload}`` — the one envelope every optimizer's state rides. */
 export interface OptimizerState {
   manifest: 'potter';
+  prompt_hashes: Record<string, string>;
   payload: PotterRoundState;
 }
 
@@ -582,8 +582,9 @@ export interface RunLimits {
   lives_cap: number | null;
 }
 
-/** One paired-PoBB backfill event appended by ``LiveDashboardProjection._append_backfill``. */
-export interface BackfillLogEntry {
+/** One race catch-up — the priors eliminator ``member`` re-measured on one sample. */
+export interface CatchUpLogEntry {
+  member: string;
   round: number;
   candidate_idx: number;
   candidate_total: number;
@@ -591,8 +592,9 @@ export interface BackfillLogEntry {
   prior_ids: string[];
 }
 
-/** ``current_round.pobb`` — round-wide elimination telemetry, rebuilt every persist. */
-export interface PobbBlock {
+/** ``current_round.racing`` — the round's standing in its eliminator ``member``'s race. */
+export interface RacingBlock {
+  member: string;
   current_id: string;
   n_samples: number;
   leader_prob: number;
@@ -600,13 +602,50 @@ export interface PobbBlock {
   top: Record<string, unknown>[];
 }
 
+/** A `DashboardCandidate` in the round in flight — `dashboard.json::current_round.candidates`. */
+export interface LiveCandidate {
+  label: string;
+  candidate_id: string | null;
+  run_id: string | null;
+  accuracy: number | null;
+  composite_fitness: number | null;
+  outcome: 'measured' | 'invalid' | 'skipped' | 'broken' | 'eliminated' | 'locked_in' | null;
+  scored_samples: number;
+  cached_samples: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cache_read_tokens: number | null;
+  expected_samples: number | null;
+  evaluators: Record<string, number>;
+  changes_description: string;
+  theta: number | null;
+  theta_se: number | null;
+  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
+  mean_fitness_ci_lo: number | null;
+  mean_fitness_ci_hi: number | null;
+  reference_accuracy: number | null;
+  reference_composite: number | null;
+  reference_lift: number | null;
+  reference_lift_ci_lo: number | null;
+  reference_lift_ci_hi: number | null;
+  is_selected: boolean;
+  prompt_fields: Record<string, unknown> | null;
+  resolved_pipeline_params: Record<string, unknown> | null;
+  pipeline_overlay: Record<string, unknown> | null;
+  samples: DashboardSample[];
+  sample_lines: string[];
+  validation_failures: ValidationFailure[];
+  composite_fitness_formula_short: string | null;
+}
+
 /** ``dashboard.json::current_round`` — the round in flight, rebuilt whole on every persist. */
 export interface CurrentRound {
   round: number;
   active_node: string | null;
-  candidates: DashboardCandidate[];
+  measurement_node: string | null;
+  candidates: LiveCandidate[];
   nodes: Record<string, Record<string, unknown>>;
-  pobb: PobbBlock;
+  racing: RacingBlock | null;
   overlap: OverlapReading | null;
 }
 
@@ -631,6 +670,7 @@ export interface LiveDashboardState {
   current_acc: number | null;
   ability_delta: number | null;
   ability_delta_per_usd: number | null;
+  bench_score: BenchScore | null;
   composite_fitness_formula: string | null;
   composite_fitness_weights: Record<string, number> | null;
   headline_metric: 'accuracy' | 'composite' | 'ability';
@@ -665,7 +705,7 @@ export interface LiveDashboardState {
   run_limits: RunLimits | null;
   spend: SpendRollup;
   spend_by_round: Record<string, SpendRollup>;
-  backfill_log: BackfillLogEntry[];
+  catch_up_log: CatchUpLogEntry[];
   current_round: CurrentRound;
   error: DashboardError | null;
 }
@@ -1515,7 +1555,7 @@ export interface LineageNode {
    * (a holed panel). */
   election_held: boolean;
   /** Elected this round. Stamped at the ELECTION, which is the last thing scoring
-   * does — so it lands a whole `l1_critique` call before the round closes,
+   * does — so it lands before the round's adapters run and the round closes,
    * and a round still running its optimizer calls already reports its winner.
    * False where no election has been held (still scoring, or halted on a
    * holed panel) and on a round that held: those two are told apart by the

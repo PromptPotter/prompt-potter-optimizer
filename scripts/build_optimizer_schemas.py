@@ -14,11 +14,19 @@ import json
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel
+
 from promptpotter.application.optimization.dispatch.schemas import (
     OPTIMIZER_RESPONSE_MODELS,
 )
+from promptpotter.application.optimization.task_context import CheckinOutput
 from promptpotter.config.paths import checkin_assets_root, optimizers_root
 from promptpotter.infrastructure.store.io import read_yaml
+
+RESPONSE_MODELS: dict[str, type[BaseModel]] = {
+    **OPTIMIZER_RESPONSE_MODELS,
+    "checkin": CheckinOutput,
+}
 
 
 def _manifest_dirs() -> list[Path]:
@@ -26,7 +34,7 @@ def _manifest_dirs() -> list[Path]:
 
 
 def _entry(node: str) -> dict[str, Any]:
-    schema = OPTIMIZER_RESPONSE_MODELS[node].model_json_schema()
+    schema = RESPONSE_MODELS[node].model_json_schema()
     return {
         # DECLARATION order, never sorted. `fields` IS the order declaration
         # (`NodeOutputSchema`), and field order is generation order — alphabetizing
@@ -46,7 +54,7 @@ def main() -> int:
     placed: set[str] = set()
     for directory in _manifest_dirs():
         declared = read_yaml(directory / "pipeline.yaml").get("nodes") or {}
-        nodes = [n for n in OPTIMIZER_RESPONSE_MODELS if n in declared]
+        nodes = [n for n in RESPONSE_MODELS if n in declared]
         placed.update(nodes)
         resolved = {f"{node}/1": _entry(node) for node in nodes}
         out_path = directory / "resolved_schemas.json"
@@ -57,7 +65,7 @@ def main() -> int:
             json.dumps(resolved, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
         )
         print(f"wrote {len(resolved)} schemas to {out_path}")
-    if orphans := sorted(set(OPTIMIZER_RESPONSE_MODELS) - placed):
+    if orphans := sorted(set(RESPONSE_MODELS) - placed):
         raise SystemExit(f"response models no manifest declares a node for: {orphans}")
     return 0
 

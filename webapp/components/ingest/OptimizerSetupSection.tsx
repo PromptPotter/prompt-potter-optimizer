@@ -25,8 +25,8 @@ export function OptimizerSetupSection() {
         <span className="setup-preview-sub">the loop that searches</span>
       </Toolbar>
       <p className="bnode-role">
-        The evolution loop itself — generate, score, critique, and the two escalation
-        steps it reaches for when a round stalls. Pick a node to read what it runs on.
+        The optimizer itself — the nodes its manifest walks each round, and any it reaches
+        for between rounds. Pick a node to read what it runs on.
         These are set once for this install, not per campaign.
       </p>
 

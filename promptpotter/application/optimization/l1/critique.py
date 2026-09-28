@@ -27,6 +27,7 @@ from promptpotter.shared.errors import SendRefusedError, graceful
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.application.optimizers.potter.state import PotterState
     from promptpotter.domain.results import RoundResult
     from promptpotter.infrastructure.ledger import CycleEventLog
 
@@ -43,7 +44,7 @@ CRITIQUE_RESEND_ATTEMPTS = 3
 backpressure and 5xx retries sit INSIDE one attempt and do not count against this."""
 
 
-async def ensure_prior_critique(cycle: Cycle) -> None:
+async def ensure_prior_critique(cycle: Cycle, state: PotterState) -> None:
     """Re-send the previous round's critique when it has none, and HALT if it never arrives.
 
     ``critique`` is ``L1_MANDATORY``: without one the generator is asked to fix a prompt nothing
@@ -67,7 +68,7 @@ async def ensure_prior_critique(cycle: Cycle) -> None:
     for attempt in range(1, CRITIQUE_RESEND_ATTEMPTS + 1):
         try:
             prior.optimizer_state.payload.critique = await run_l1_critique(
-                cycle, prior, round_num=prior.round, ledger=session.state.ledger
+                cycle, state, prior, round_num=prior.round, ledger=session.state.ledger
             )
             break
         # A refused send — an empty account, a quota, the ceiling — is decided: re-sent, it is
@@ -110,6 +111,7 @@ async def ensure_prior_critique(cycle: Cycle) -> None:
 
 async def run_l1_critique(
     cycle: Cycle,
+    state: PotterState,
     round_result: RoundResult,
     *,
     round_num: int,
@@ -117,7 +119,7 @@ async def run_l1_critique(
 ) -> CritiqueReadout:
     """Build the critique from pipeline stats + LLM analysis. The output is materialized to a dict so persistence does not
     drag Pydantic into the domain serialization path."""
-    bundle = build_bundle(cycle, latest_round=round_result)
+    bundle = build_bundle(cycle, state, latest_round=round_result)
     template, prompt_vars, rendered, coverage = DispatchHub.fill(
         load_optimizer_prompt("l1_critique"), bundle, node="l1_critique"
     )

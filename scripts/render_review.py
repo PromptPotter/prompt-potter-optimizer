@@ -55,7 +55,7 @@ def main(argv: list[str]) -> int:
         round_audits=audits,
         context_object=context_object,
         accuracy_ceiling=config.accuracy_ceiling,
-        l1_patience=select_optimizer(config.optimization).readout("escalation", "l1_patience"),
+        optimizer=select_optimizer(config.optimization),
     )
     out_path = cycle_dir / "review.md"
     out_path.write_text(content, encoding="utf-8")

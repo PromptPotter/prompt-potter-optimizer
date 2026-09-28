@@ -4,19 +4,13 @@ import type { DashboardSnapshot } from "@/lib/poll";
 import { currentRound, dash, liveRow, sampleRow } from "@/lib/test-fixtures";
 import type { DashboardSample } from "@/lib/api/types";
 
-// Both halves the projection writes: the ROW under `current_round.candidates` (what a bar plots)
-// and the sample rows under the l1_score node block (what the walk reads).
 const live = (
   samples: DashboardSample[],
   currentSampleId: number | null = null,
 ): DashboardSnapshot =>
   dash({
     current_sample_id: currentSampleId,
-    current_round: currentRound({
-      round: 1,
-      candidates: [liveRow({ label: "C1.1" })],
-      nodes: { l1_score: { output: { candidates: [{ idx: 0, label: "C1.1", samples }] } } },
-    }),
+    current_round: currentRound({ round: 1, candidates: [liveRow({ label: "C1.1", samples })] }),
   });
 
 describe("sampleWalk", () => {
@@ -62,8 +56,7 @@ describe("sampleWalk", () => {
       declared_sample_order: order,
       current_round: currentRound({
         round: 1,
-        candidates: [liveRow({ label: "C1.1" })],
-        nodes: { l1_score: { output: { candidates: [{ idx: 0, label: "C1.1", samples: tape }] } } },
+        candidates: [liveRow({ label: "C1.1", samples: tape })],
       }),
     });
     const w = sampleWalk(served, null, true);
@@ -76,11 +69,7 @@ describe("sampleWalk", () => {
     const fresh = dash({
       current_sample_id: 99,
       declared_sample_order: order,
-      current_round: currentRound({
-        round: 1,
-        candidates: [liveRow({ label: "C1.1" })],
-        nodes: { l1_score: { output: { candidates: [{ idx: 0, label: "C1.1", samples: [] }] } } },
-      }),
+      current_round: currentRound({ round: 1, candidates: [liveRow({ label: "C1.1" })] }),
     });
     expect(sampleWalk(fresh, null, true).ids).toEqual(order);
     expect(sampleWalk(fresh, null, true).cursor).toBe(0);
@@ -112,17 +101,7 @@ describe("sampleWalk", () => {
         current_round: currentRound({
           round: 1,
           // Two rows: the walk follows the LATEST-seeded candidate, so C1.2 at position 1.
-          candidates: [liveRow({ label: "C1.1" }), liveRow({ label: "C1.2" })],
-          nodes: {
-            l1_score: {
-              output: {
-                candidates: [
-                  { idx: 0, label: "C1.1", samples: [] },
-                  { idx: 1, label: "C1.2", samples: tape },
-                ],
-              },
-            },
-          },
+          candidates: [liveRow({ label: "C1.1" }), liveRow({ label: "C1.2", samples: tape })],
         }),
       }),
       order,

@@ -3,10 +3,7 @@ import { useMemo, useRef } from "react";
 import { Bar } from "react-chartjs-2";
 import { barChartDefaults, ensureChartRegistered, getCss, useThemeVersion } from "@/lib/theme";
 import { TERMS } from "@/lib/terms";
-import {
-  liveL1Candidates,
-  type DashboardSnapshot,
-} from "@/lib/poll";
+import { liveCandidates, type DashboardSnapshot } from "@/lib/poll";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useEffectiveRound } from "@/lib/hooks/useEffectiveRound";
 import { useRoundRows } from "@/lib/hooks/useRoundRows";
@@ -33,8 +30,8 @@ function bucketScores(results: ResultRow[]): number[] {
 // The live row carries a verdict, not a fitness, so only the two graded marks bucket.
 function liveResultsFrom(dash: DashboardSnapshot | null): ResultRow[] {
   const out: ResultRow[] = [];
-  for (const c of liveL1Candidates(dash)) {
-    for (const s of c.samples ?? []) {
+  for (const c of liveCandidates(dash)) {
+    for (const s of c.samples) {
       if (s.status === "HIT") out.push({ fitness: 1 });
       else if (s.status === "MISS") out.push({ fitness: 0 });
     }

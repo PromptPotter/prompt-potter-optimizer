@@ -12,6 +12,7 @@ from pydantic import Field
 
 from promptpotter.application.campaign_config import Estimand, Knob, Scope
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
@@ -284,6 +285,7 @@ class PotterKnobs:
     escalation: EscalationKnobs
 
 
+@shapes_optimizer_prompt
 def potter_knobs(selected: SelectedOptimizer) -> PotterKnobs:
     return PotterKnobs(
         adaptive_queue=cast("AdaptiveQueueKnobs", selected.knobs("adaptive_queue")),

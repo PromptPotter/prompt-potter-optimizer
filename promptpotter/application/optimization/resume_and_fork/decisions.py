@@ -1,25 +1,29 @@
-"""``RESUME_CHECKPOINT_GATING`` is the sole source for ``REPLAYED`` vs ``ARCHIVAL``; every kind must appear exactly
-once or import fails. **Adding a kind is two edits in one commit**, plus a replayer if it is ``REPLAYED``."""
+"""``resume_checkpoint_gating`` is the sole source for ``REPLAYED`` vs ``ARCHIVAL``: the bench's kinds
+here, each optimizer's through its runtime; every kind must appear exactly once or the registries
+fail to complete. **Adding a kind is two edits in one commit**, plus a replayer if it is ``REPLAYED``."""
 
 from __future__ import annotations
 
 import enum
+import functools
+from collections.abc import Mapping
 from typing import Any, Protocol
 
+from promptpotter.application import optimizers
 from promptpotter.domain.run_records import (
     RESUME_CHECKPOINT_KINDS,
     BenchCheckpointKind,
-    PotterCheckpointKind,
     ResumeCheckpointKind,
     ResumeCheckpointRecord,
 )
 
 __all__ = [
-    "RESUME_CHECKPOINT_GATING",
+    "BENCH_CHECKPOINT_GATING",
     "GatingMode",
     "ResumeCheckpointKind",
     "ResumeCheckpointRecord",
     "record_decision",
+    "resume_checkpoint_gating",
 ]
 
 
@@ -31,25 +35,9 @@ class GatingMode(enum.StrEnum):
     ARCHIVAL = "archival"
 
 
-# Single source of truth for which kinds are divergence-gated. Every kind, the bench's and
-# potter's, MUST appear here exactly once. ``REPLAYED`` kinds
-# also need a registered replayer (see :mod:`.replayers`); ``ARCHIVAL``
+# The bench's own kinds. ``REPLAYED`` kinds need a replayer (see :mod:`.replayers`); ``ARCHIVAL``
 # kinds must NOT have one.
-RESUME_CHECKPOINT_GATING: dict[ResumeCheckpointKind, GatingMode] = {
-    PotterCheckpointKind.ROUND_WINNER: GatingMode.REPLAYED,
-    PotterCheckpointKind.ELIMINATION_CUT: GatingMode.REPLAYED,
-    PotterCheckpointKind.LEADER_LOCK_IN: GatingMode.REPLAYED,
-    # A layer trigger is a FOLD over the cycle's escalation history, not a function of
-    # one round's measurements — the counter bumps once per escalation *request*, resets
-    # on every fire, and compares against the best-at-entry snapshot taken at the last
-    # fire (`EscalationFSM.observe_l2_escalation`). A replayer is pure over
-    # `ReplayContext` (one round + the origin), so that fold is not expressible there;
-    # declaring these REPLAYED once forced a re-derivation on a substrate the loop never
-    # ran. Their scorer-dependence is entirely mediated by `improved`, hence by the round
-    # measurements — which ARE replayed above, so a scorer change that would move a
-    # trigger already shows up as a winner/cut divergence in the same round.
-    PotterCheckpointKind.L2_ESCALATION_TRIGGER: GatingMode.ARCHIVAL,
-    PotterCheckpointKind.L3_ESCALATION_TRIGGER: GatingMode.ARCHIVAL,
+BENCH_CHECKPOINT_GATING: dict[ResumeCheckpointKind, GatingMode] = {
     # Panel coverage re-derives INVARIANTLY under everything replay varies, so replaying it
     # could only ever confirm itself. Replay re-runs the SCORER over stored rows, and
     # rescoring never turns an errored row into a measured one — the hole count is a fact
@@ -71,12 +59,16 @@ RESUME_CHECKPOINT_GATING: dict[ResumeCheckpointKind, GatingMode] = {
 }
 
 
-# Adding a kind without choosing REPLAYED/ARCHIVAL is a programming error;
-# fail at import rather than at first replay attempt.
-_unmapped = [k for k in RESUME_CHECKPOINT_KINDS if k not in RESUME_CHECKPOINT_GATING]
-if _unmapped:
-    raise RuntimeError(f"Checkpoint kinds missing from RESUME_CHECKPOINT_GATING: {_unmapped}")
-del _unmapped
+@functools.cache
+def resume_checkpoint_gating() -> Mapping[ResumeCheckpointKind, GatingMode]:
+    """The bench's gating, then every optimizer runtime's for its own kinds. A kind nobody gates is
+    a programming error, raised where the registries complete rather than at a first replay."""
+    table: dict[ResumeCheckpointKind, GatingMode] = dict(BENCH_CHECKPOINT_GATING)
+    for runtime in optimizers.runtimes().values():
+        table.update(runtime.checkpoint_gating)
+    if unmapped := [k for k in RESUME_CHECKPOINT_KINDS if k not in table]:
+        raise RuntimeError(f"Checkpoint kinds no gating table maps: {unmapped}")
+    return table
 
 
 class _DecisionSink(Protocol):

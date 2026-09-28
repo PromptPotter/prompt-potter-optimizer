@@ -25,8 +25,8 @@ Storage stays four typed lists (+ `l3_note`); **rendering collapses to two owner
 | **Owner source** | structural (L1's own output) | `RuntimeFailure.owner`: `L1` (rate) · `OPERATOR` (fatal) | (patience event) | structural (layout refusal → L3) |
 | **Detector** | `L1_SCHEMA_COMPLIANCE` (`validators/l1_strict.py`), at `parse_population()` | `DegradationCheck` (`scoring/classification.py`), mid-eval | `escalate_l2` patience (`escalation/firing.py`) | `validate_l1_layout` (post-parse) |
 | **Failure record class** | `ValidationFailure` | `RuntimeFailure` | (patience event, no record) | `ValidatorOutcome` |
-| **OSP storage** | `validation_failures` | `runtime_failures` | `cycle.escalation.l2_stall_count` (on the cycle, not the OSP) | `l2_guard_breaches` |
-| **Outer-memory mirror** | none (L2 reads `candidate_scores`) | cumulative on `cycle.memory.wounds.runtime_failures` | none | per-round on the `CandidateProposal` |
+| **OSP storage** | `validation_failures` | `runtime_failures` | `state.escalation.l2_stall_count` (on the cycle, not the OSP) | `l2_guard_breaches` |
+| **Outer-memory mirror** | none (L2 reads `candidate_scores`) | cumulative on `state.memory.wounds.runtime_failures` | none | per-round on the `CandidateProposal` |
 | **Nurse prompt slot** | `{{l1_wounds}}` | `{{l1_wounds}}` | (whole `l3_plan` template) | `{{guard_breaches}}` |
 | **Renderer** | `_r_l1_wounds` | `_r_l1_wounds` | `_r_l1_wounds` | `_r_guard_breaches` |
 | **Nurse's writeback** | L1 re-proposes a valid override | L1 retunes the node config · or operator trims schema/model | `cycle.opt_sp.plan` | `cycle.opt_sp.plan` |
@@ -51,7 +51,7 @@ The measurement (`scoring/candidate_report.py::read_breakage`) synthesises `Runt
 
 ## Wound 3 — what L3 reads and writes
 
-L3 fires when `cycle.escalation.l2_stall_count >= opt.l2_patience`, subject to its own `l3_patience`. What its prompt reads is its layout, `domain/l1_layout.py::NODE_LAYOUTS["l3_plan"]` — read the membership there; what it writes is `dispatch/schemas.py::L3PlanOutput` (`plan`, `note` → `wounds.l3_note`, `rationale`, `fork_proposal`, `terminate_proposal`). The new `plan` feeds every node whose layout places it, L1 and the next L2 fire included. The only wound with cross-layer authority — L3 changes the strategy L2 and L1 work within.
+L3 fires when `state.escalation.l2_stall_count >= opt.l2_patience`, subject to its own `l3_patience`. What its prompt reads is its layout, `domain/l1_layout.py::NODE_LAYOUTS["l3_plan"]` — read the membership there; what it writes is `dispatch/schemas.py::L3PlanOutput` (`plan`, `note` → `wounds.l3_note`, `rationale`, `fork_proposal`, `terminate_proposal`). The new `plan` feeds every node whose layout places it, L1 and the next L2 fire included. The only wound with cross-layer authority — L3 changes the strategy L2 and L1 work within.
 
 ## Wound 4 — immediate, never patient
 

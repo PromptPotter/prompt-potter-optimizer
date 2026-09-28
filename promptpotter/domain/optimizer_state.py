@@ -122,16 +122,16 @@ class PotterRoundState(StrictModel):
     # AxisIndex's peaked set at close, persisted because AxisIndex is not reconstructable from
     # the round file alone and the review writer's `evidence_grounding_present` check needs it.
     axis_memory_peaked: list[str] = Field(default_factory=list)
-    # Which prompts of potter's manifest produced this round, per node — the only thing that can
+
+
+class OptimizerState(StrictModel):
+    """``{manifest, prompt_hashes, payload}`` — the one envelope every optimizer's state rides."""
+
+    manifest: PotterManifest
+    # Which prompts of the manifest produced this round, per llm node — the only thing that can
     # answer "was this round produced by the optimizer I am holding now?" once the process exited.
     # Resume diverges at the FIRST round that disagrees. Empty on a generation-only round.
     # IDENTITY, NOT A FIRE RECORD — every node is named on every round, including ones that never
     # run. Which node RAN, and what each panel cost it, is the ledger's `llm_call`.
-    optimizer_prompt_hashes: dict[str, str] = Field(default_factory=dict)
-
-
-class OptimizerState(StrictModel):
-    """``{manifest, payload}`` — the one envelope every optimizer's state rides."""
-
-    manifest: PotterManifest
+    prompt_hashes: dict[str, str] = Field(default_factory=dict)
     payload: PotterRoundState

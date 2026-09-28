@@ -1,5 +1,5 @@
 // The scoring walk as the whole declared axis plus a cursor. Past the cursor is DECLARED, not
-// promised — PoBB can stop a candidate early, so no caller may word it as "will".
+// promised — an eliminator can stop a candidate early, so no caller may word it as "will".
 
 import { roundCandidates } from "./round-candidates";
 import { samplesForRow } from "./round-samples";

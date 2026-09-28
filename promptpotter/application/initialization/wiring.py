@@ -16,7 +16,7 @@ from promptpotter.application import optimizers
 from promptpotter.application.datasets.csv_ingest import read_candidate_library_file
 from promptpotter.application.datasets.loaders import resolve_dataset_items, samples_from_dicts
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.optimization.dispatch.injections.registry import injection_table
+from promptpotter.application.optimization.resume_and_fork.replayers import replayers
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
@@ -345,7 +345,10 @@ def complete_registries() -> None:
     table = connectors.registered()
     judges.registered()
     optimizers.registered()
-    injection_table()
+    for runtime in optimizers.runtimes().values():
+        runtime.complete()
+    # Every decision kind gated once, and a replayer for exactly the REPLAYED ones.
+    replayers()
     for connector in table.values():
         if connector.completion_check is not None:
             connector.completion_check()

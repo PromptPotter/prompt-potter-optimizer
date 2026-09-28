@@ -7,25 +7,11 @@ that silently shadowed the first, so the file's one externally-called function w
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.l1.stats import L1Stats, compute_l1_stats
-from promptpotter.application.optimization.validators.behavior_base import (
-    CheckResult,
-    ValidatorContext,
-)
-from promptpotter.application.optimization.validators.l1_behavior import (
-    CHECK_REGISTRY,
-    extract_l1_variants,
-    run_all_checks,
-)
-from promptpotter.application.optimization.validators.l2_behavior import run_all_l2_checks
-from promptpotter.application.views.render.optimizer_prompt_text import (
-    fmt_pct,
-    format_l1_critique_for_prompt,
-)
+from promptpotter.application.optimizers.nodes import CheckResult, ReviewReading, ReviewStats
+from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.domain.bench import BenchReading, BenchScore
-from promptpotter.domain.escalation_signals import exploration_budget
 from promptpotter.domain.phases import STOP_REASON_INFO, StopReason
 from promptpotter.domain.results import (
     CEILING_FRACTION,
@@ -38,6 +24,9 @@ from promptpotter.domain.results import (
     round_clocks,
 )
 
+if TYPE_CHECKING:
+    from promptpotter.application.optimizer_manifest import SelectedOptimizer
+
 __all__ = ["render_review_md"]
 
 
@@ -48,28 +37,28 @@ def render_review_md(
     round_audits: list[dict[str, Any] | None] | None = None,
     context_object: list[str] | None = None,
     accuracy_ceiling: float | None,
-    l1_patience: int,
+    optimizer: SelectedOptimizer,
 ) -> str:
     audits = list(round_audits or [None] * len(rounds))
     if len(audits) < len(rounds):
         audits.extend([None] * (len(rounds) - len(audits)))
     ctx_items = [c for c in (context_object or []) if isinstance(c, str) and c.strip()]
 
-    behavior_per_round, l2_behavior_per_round = _compute_behavior_per_round(
-        rounds, audits, ctx_items, l1_patience
-    )
     final = index.get("final") or {}
     # Absent means the origin was never scored, which is not the same as scoring 0.0 — `_top_lifts`
     # drops round 0's lift rather than measuring it against a bar nothing established.
     origin_cf = final.get("origin_composite_fitness")
-    origin_composite_fitness = float(origin_cf) if isinstance(origin_cf, int | float) else None
-    clock = final.get("wall_clock") or {}
-    stats = compute_l1_stats(
+    # An optimizer's own readings — its statistics, behaviour scorers and feedback — exist only
+    # where its runtime keeps them; any other optimizer's review says so rather than printing 0%.
+    review = optimizer.runtime.review(
+        optimizer,
         list(rounds),
-        origin_composite_fitness=origin_composite_fitness,
-        behavior_results=behavior_per_round,
-        l2_behavior_results=l2_behavior_per_round,
+        audits,
+        context_object=ctx_items,
+        origin_composite_fitness=float(origin_cf) if isinstance(origin_cf, int | float) else None,
     )
+    clock = final.get("wall_clock") or {}
+    stats = review.stats if review is not None else None
 
     repairs_per_round = [_schema_repair_count(a) for a in audits]
     calls_per_round = [_optimizer_call_count(a) for a in audits]
@@ -82,10 +71,10 @@ def render_review_md(
     clocks = round_clocks(rounds, accuracy_ceiling=accuracy_ceiling)
     round_ended_s = _float_map(clock.get("round_ended_s"))
     parts += _render_stats_block(
-        clocks, round_ended_s, stats, repairs_per_round, calls_per_round, halt
+        clocks, round_ended_s, stats, repairs_per_round, calls_per_round, halt, optimizer.name
     )
     parts += _render_wall_clock(clock)
-    parts += _render_behavior_summary(behavior_per_round)
+    parts += _render_behavior_summary(review)
     parts += ["## Rounds", ""]
 
     last_idx = len(rounds) - 1
@@ -93,8 +82,8 @@ def render_review_md(
         is_peek = i == last_idx and _is_generation_only(round_data)
         parts += _render_round(
             round_data,
-            audits[i],
-            behavior_per_round[i] if i < len(behavior_per_round) else [],
+            review,
+            i,
             is_peek=is_peek,
             schema_repair_retries=repairs_per_round[i],
         )
@@ -118,56 +107,12 @@ def _schema_repair_count(audit: dict[str, Any] | None) -> int:
 
 
 def _optimizer_call_count(audit: dict[str, Any] | None) -> int:
-    """Count optimizer LLM nodes in this round's audit (excludes ``l1_score``)."""
     if not audit:
         return 0
     nodes = audit.get("nodes") or {}
     if not isinstance(nodes, dict):
         return 0
-    return sum(1 for k, v in nodes.items() if k != "l1_score" and isinstance(v, dict))
-
-
-# --- behaviour-check evaluation -------------------------------------------
-
-
-def _compute_behavior_per_round(
-    rounds: list[RoundResult],
-    audits: list[dict[str, Any] | None],
-    context_object: list[str],
-    l1_patience: int,
-) -> tuple[list[list[CheckResult]], list[list[CheckResult]]]:
-    """Per-round L1 + L2 behaviour-check results (same length as ``rounds``).
-    L2 returns ``[]`` for rounds where L2 didn't fire — absent fire ≠ conformance failure."""
-    l1_out: list[list[CheckResult]] = []
-    l2_out: list[list[CheckResult]] = []
-    prior_audits: list[dict[str, Any]] = []
-    # Stall depth entering each round, reconstructed from the persisted ``improved``
-    # flags (the round file doesn't carry the live l1_stall_count). Same recurrence as
-    # ``EscalationFSM.observe_round``: reset to 0 on improvement, else +1. Read BEFORE
-    # the update so each round's exploration_budget matches what its L1 generation saw.
-    stall = 0
-    for i, round_data in enumerate(rounds):
-        round_num = round_data.round
-        budget = exploration_budget(stall, l1_patience).value if round_num >= 1 else None
-        audit = audits[i] if i < len(audits) else None
-        if round_num >= 1:
-            stall = 0 if round_data.improved else stall + 1
-        if audit is None:
-            l1_out.append([])
-            l2_out.append([])
-            continue
-        ctx = ValidatorContext(
-            round_num=round_num,
-            prior_rounds=list(prior_audits),
-            l1_layout=round_data.optimizer_state.payload.memory.l1_layout,
-            context_object=context_object,
-            exploration_budget=budget,
-            peaked_axes=frozenset(round_data.optimizer_state.payload.axis_memory_peaked),
-        )
-        l1_out.append(run_all_checks(audit, ctx))
-        l2_out.append(run_all_l2_checks(audit, ctx))
-        prior_audits.append(audit)
-    return l1_out, l2_out
+    return sum(1 for v in nodes.values() if isinstance(v, dict))
 
 
 # --- rendering helpers ----------------------------------------------------
@@ -211,14 +156,18 @@ def _stop_next_step(index: dict[str, Any]) -> str:
 
 
 def _render_header(
-    index: dict[str, Any], final: dict[str, Any], stats: L1Stats, halt: dict[str, str] | None
+    index: dict[str, Any],
+    final: dict[str, Any],
+    stats: ReviewStats | None,
+    halt: dict[str, str] | None,
 ) -> list[str]:
     cycle_id = index.get("cycle_id") or "(unknown cycle)"
     mode = (final.get("mode") or "full").strip() or "full"
+    verdict = "N/A" if stats is None else stats.round_1_verdict
     parts: list[str] = [
         f"# Review — {cycle_id}",
         "",
-        f"_mode: **{mode}** · round-1 conformance: **{stats.round_1_verdict}**_",
+        f"_mode: **{mode}** · round-1 conformance: **{verdict}**_",
         "",
     ]
     if halt is not None:
@@ -302,10 +251,11 @@ def _render_bench(final: dict[str, Any]) -> list[str]:
 def _render_stats_block(
     clocks: RoundClocks,
     round_ended_s: dict[str, float],
-    stats: L1Stats,
+    stats: ReviewStats | None,
     repairs_per_round: list[int],
     calls_per_round: list[int],
     halt: dict[str, str] | None,
+    optimizer_name: str,
 ) -> list[str]:
     def _rate(value: float | None, spec: str = ".2f") -> str:
         """An unmeasured rate renders as ``—``, never as a number the cycle never produced."""
@@ -327,18 +277,26 @@ def _render_stats_block(
         else f"{CEILING_FRACTION:.0%} of {clocks.accuracy_ceiling:.2f}"
     )
     lines = [
-        "## L1Stats",
+        "## Round statistics",
         "",
         f"- **rounds_to_separable**: {_clock(clocks.rounds_to_separable)}",
         f"- rounds_to_improved (promotion, no interval): {_clock(clocks.rounds_to_improved)}",
         f"- rounds_to_ceiling ({basis}): {_clock(clocks.rounds_to_ceiling)}",
-        f"- yield_rate: {_rate(stats.yield_rate)}",
-        f"- top_lift_mean: {_rate(stats.top_lift_mean, '+.4f')}",
-        f"- behavior_pass_rate: {_rate(stats.behavior_pass_rate)}",
-        f"- l2_behavior_pass_rate: {_rate(stats.l2_behavior_pass_rate)}",
-        f"- stagnation_max: {stats.stagnation_max}",
-        f"- l2_fires: {stats.l2_fires}",
     ]
+    if stats is None:
+        lines.append(
+            f"- the optimizer's own stats (yield, lift, behaviour pass rates, L2 fires): N/A — "
+            f"`{optimizer_name}` keeps none"
+        )
+    else:
+        lines += [
+            f"- yield_rate: {_rate(stats.yield_rate)}",
+            f"- top_lift_mean: {_rate(stats.top_lift_mean, '+.4f')}",
+            f"- behavior_pass_rate: {_rate(stats.behavior_pass_rate)}",
+            f"- l2_behavior_pass_rate: {_rate(stats.l2_behavior_pass_rate)}",
+            f"- stagnation_max: {stats.stagnation_max}",
+            f"- l2_fires: {stats.l2_fires}",
+        ]
     # A terminate is an L2 fire that produces no l2-sourced round, so `l2_fires`
     # alone reads 0 — name it explicitly so an L2 halt isn't invisible.
     if halt is not None and halt["terminated"]:
@@ -427,13 +385,13 @@ def _node_rows(raw: object) -> list[tuple[str, str, float]]:
     return sorted(rows, key=lambda row: -row[2])
 
 
-def _render_behavior_summary(
-    behavior_per_round: list[list[CheckResult]],
-) -> list[str]:
+def _render_behavior_summary(review: ReviewReading | None) -> list[str]:
+    behavior_per_round = review.checks if review is not None else []
     if not behavior_per_round or not any(behavior_per_round):
         return []
+    assert review is not None
     parts: list[str] = ["## Behaviour-check summary", ""]
-    for check_id in CHECK_REGISTRY:
+    for check_id in review.check_ids:
         fails = sum(
             1
             for round_res in behavior_per_round
@@ -451,12 +409,14 @@ def _render_behavior_summary(
 
 def _render_round(
     round_data: RoundResult,
-    audit: dict[str, Any] | None,
-    checks: list[CheckResult],
+    review: ReviewReading | None,
+    index: int,
     *,
     is_peek: bool,
     schema_repair_retries: int = 0,
 ) -> list[str]:
+    """``review`` is ``None`` on a cycle whose optimizer keeps no reading of its own: its behaviour
+    checks, variant table and critique do not exist."""
     opt_sp = round_data.opt_sp.model_dump() if round_data.opt_sp else {}
     lineage = opt_sp.get("lineage") or {}
     suffix = " (next-gen peek)" if is_peek else ""
@@ -478,15 +438,17 @@ def _render_round(
             parts.append(f"- verdict: {round_data.verdict_reason}")
     if schema_repair_retries:
         parts.append(f"- schema_repair_retries: {schema_repair_retries}")
-    parts += _render_l1_inputs(lineage)
-    parts += _render_check_checklist(checks)
-    parts += _render_variants_table(audit, round_data, scored=not is_peek)
-    parts += _render_critique(round_data)
+    parts += _render_lineage(lineage)
+    if review is None:
+        return parts
+    parts += _render_check_checklist(review.checks[index])
+    parts += _render_variants_table(review.variants[index], round_data, scored=not is_peek)
+    parts += _render_critique(review.feedback[index])
     return parts
 
 
-def _render_l1_inputs(lineage: dict[str, Any]) -> list[str]:
-    parts: list[str] = ["", "**L1 inputs**", ""]
+def _render_lineage(lineage: dict[str, Any]) -> list[str]:
+    parts: list[str] = ["", "**Lineage**", ""]
     src = (lineage.get("source") or "").strip()
     if src:
         parts.append(f"- lineage source: `{src}`")
@@ -509,14 +471,13 @@ def _render_check_checklist(checks: list[CheckResult]) -> list[str]:
 
 
 def _render_variants_table(
-    audit: dict[str, Any] | None,
+    variants: list[dict[str, Any]],
     round_data: RoundResult,
     *,
     scored: bool,
 ) -> list[str]:
     """Per-variant row: the audit dict carries what L1 PROPOSED, ``round_data`` what it MEASURED,
     joined on :func:`candidate_label`. Join on anything else and every score column prints ``—``."""
-    variants = extract_l1_variants(audit)
     if not variants:
         return []
     parts: list[str] = ["**Variants**", ""]
@@ -577,8 +538,7 @@ def _fmt_evidence_cell(raw: object) -> str:
     return f"`{field_name}` _(no citation)_"
 
 
-def _render_critique(round_data: RoundResult) -> list[str]:
-    critique = format_l1_critique_for_prompt(round_data.optimizer_state.payload.critique).strip()
+def _render_critique(critique: str) -> list[str]:
     if not critique:
         return []
     quoted = critique.replace("\n", "\n> ")

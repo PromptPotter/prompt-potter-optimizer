@@ -2842,7 +2842,7 @@ def test_an_inner_cell_id_is_the_prompts_it_runs_not_the_bytes_that_declared_the
     optimizer prompts are one configuration: hashing the declaration bought two inner campaigns for
     it — two sandboxes, no shared cache, read as two independent observations of two levers — and
     left neither able to continue the rounds the other banked."""
-    from promptpotter.application.optimization.dispatch.llm_call.prompts import resolved_overrides
+    from promptpotter.application.optimizer_manifest import resolved_overrides
 
     declared = {"l1_critique": {"instruction": "x"}}
     # Every drop the resolvers make: a rename that cannot be applied (self-rename), and a layout

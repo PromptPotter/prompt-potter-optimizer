@@ -16,10 +16,6 @@ from promptpotter.application.initialization.loop_start import init_optimization
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.exploration import parent_level_trajectory
 from promptpotter.application.optimization.cycle import Cycle
-from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-    compute_optimizer_prompt_hashes,
-    set_determinism_clamp,
-)
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     _mint_fork,
     cleanup_stub_fork_if_empty,
@@ -28,6 +24,7 @@ from promptpotter.application.optimizer_manifest import (
     bind_optimizer,
     bound_optimizer,
     select_optimizer,
+    set_determinism_clamp,
 )
 from promptpotter.application.origin import (
     CampaignOrigin,
@@ -961,7 +958,7 @@ def _finalize_run(
             # is what gets quoted as the result. Seconds are the `wall_clock.round_ended_s` entry
             # under the same round number, never a second copy banked beside it.
             **round_clocks(rounds, accuracy_ceiling=accuracy_ceiling)._asdict(),
-            "prompt_hashes": compute_optimizer_prompt_hashes(bound_optimizer()),
+            "prompt_hashes": bound_optimizer().prompt_hashes(),
             # On the origin's OWN samples — never `rounds[0].reference_composite`, which
             # is round 1's winner's matched floor on a different sample basis.
             "origin_composite_fitness": cycle_result.origin_composite_fitness,

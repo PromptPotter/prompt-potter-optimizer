@@ -9,7 +9,7 @@ export function availableRounds(
   dash: DashboardSnapshot | null,
   isLive: boolean,
 ): RoundAxis {
-  // Excludes empty L2/L3-terminal rows, else `useEffectiveRound` falls back to one as
+  // Excludes empty rows a round that measured nothing closes, else `useEffectiveRound` falls back to one as
   // `lastCompleted` and the round-scoped surfaces blank.
   const closed = closedRoundNumbers(dash);
   const completed = [...closed].sort((a, b) => a - b);

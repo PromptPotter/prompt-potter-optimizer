@@ -120,13 +120,15 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> None:
 def _load_p_best_trajectory(
     streams_dir: Path | None, round_num: int
 ) -> tuple[dict[str, list[float]], dict[str, int]]:
-    """``{candidate_id: [P(best) per query]}``. One stream line is one candidate's reading, so fanning
+    """``{candidate_id: [P(best) per query]}`` off the round's racing stream — one file, since a
+    manifest walks at most one eliminator. One stream line is one candidate's reading, so fanning
     every key of its cid→prob map into a trajectory files the winner under its own defeat."""
     if streams_dir is None:
         return {}, {}
     trajectory: dict[str, list[float]] = {}
     last_seen: dict[str, int] = {}
-    for rec in iter_jsonl(streams_dir / f"round_{round_num:04d}_p_best.jsonl"):
+    streams = sorted(streams_dir.glob(f"round_{round_num:04d}_*.jsonl"))
+    for rec in (rec for stream in streams for rec in iter_jsonl(stream)):
         cid = str(rec.get("current_id") or "")
         if not cid:
             continue
@@ -402,6 +404,6 @@ def write_review_md(session: Session, cycle: Cycle) -> None:
             round_audits=round_audits,
             context_object=context_object,
             accuracy_ceiling=cycle.config.accuracy_ceiling,
-            l1_patience=cycle.knobs.escalation.l1_patience,
+            optimizer=cycle.optimizer,
         )
         write_text(CycleLayout(cycle_dir).review_md, content)

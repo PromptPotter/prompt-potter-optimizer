@@ -64,7 +64,7 @@ export interface CandidateView extends CandidateRow {
   lensRank: number | null;
   // `false` must render as a BLANK, never as a 0.
   started: boolean;
-  // Never inferred from the round closing: the election decides a whole `l1_critique` call
+  // Never inferred from the round closing: the election decides the adapters' whole pass
   // earlier, so only this may explain an absent crown.
   electionPending: boolean;
   diag?: { accuracy: number; workspaceN: number; samplesAdded: number };

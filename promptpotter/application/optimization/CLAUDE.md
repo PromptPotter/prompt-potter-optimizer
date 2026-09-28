@@ -55,7 +55,7 @@ Fires on L1 stall (default), yield drought (`l2_axis_yield_drought`), or evidenc
 
 ## L3 — what `l3_plan` may write
 
-Fires only on L2 stall. Produces a **strategic replan** — what L2 and L1 should do with the levers they hold, escalation policy, which axes are in scope — written to `Cycle.memory.plan` and read by **every** prompt, so it is the frame inside which both L2 and L1 operate. It heals L2 on layout HARD-validator failures or repeated cross-field issues — L2 thrashing within the plan.
+Fires only on L2 stall. Produces a **strategic replan** — what L2 and L1 should do with the levers they hold, escalation policy, which axes are in scope — written to `PotterState.memory.plan` and read by **every** prompt, so it is the frame inside which both L2 and L1 operate. It heals L2 on layout HARD-validator failures or repeated cross-field issues — L2 thrashing within the plan.
 
 **Firing is rarer still than L2**: a fire signals the cycle's plan was wrong, not that one variant missed. If L3 fires repeatedly inside one cycle the plan-space itself is exhausted, and it should terminate rather than replan again.
 
@@ -85,7 +85,7 @@ The hashed set is `bundle` + `compose` + `facade` + `domain/ruler.py` + the rend
 
 `*_strict` / `*_output` / `l1_invariants` **reject**, so a failure routes back up as a `ValidationFailure` and the layer heals. `*_behavior` only **scores** conformance into `review.md` and the round file, and never blocks a candidate.
 
-Within the reject posture, `l1_strict.py` judges ONE proposal against a declared rule; `l1_invariants.py` compares proposals against each other and against history. **Emitting the wire schema is neither posture** — that is `dispatch/l1_wire_schema.py`, which composes a prompt surface. The SCORING vocabulary (`CheckResult`, `ValidatorContext`, `CheckFn`) is owned by `validators/behavior_base.py` and by neither layer that speaks it.
+Within the reject posture, `l1_strict.py` judges ONE proposal against a declared rule; `l1_invariants.py` compares proposals against each other and against history. **Emitting the wire schema is neither posture** — that is `dispatch/l1_wire_schema.py`, which composes a prompt surface. The SCORING vocabulary (`ValidatorContext`, `CheckFn`) is owned by `validators/behavior_base.py` and by neither layer that speaks it; the result is the bench's `optimizers/nodes.py::CheckResult`, which `review.md` renders.
 
 **A rejection the REJECT posture already makes deterministically must not also be taught in prompt text.** The candidate dies before the backend call either way, so the words buy no behaviour and are charged twice — tokens and the quality tax of a longer input (`<simplify-the-problem>`). State that they ARE mechanical in one clause, and spend the prompt on the traps nothing polices.
 
@@ -101,7 +101,7 @@ Conceptually L2 / L3 / L4 are one family, each mutating a slower-changing surfac
 
 ## checkin — the fifth optimizer node
 
-`checkin` is a registered optimizer node (`OPTIMIZER_RESPONSE_MODELS`) but **not a loop layer**: it runs *around* the loop and skips the injection path. It is **not** thereby a "non-ledger" call — both modes bind the seeded campaign's cycle ledger via `task_context.py::checkin_call_context` and wrap in `observed_node`, so tokens, cost and audit record land like any other.
+`checkin` is the bench's node — its response model rides its one call (`task_context.py::run_checkin`), never potter's `OPTIMIZER_RESPONSE_MODELS` — and **not a loop layer**: it runs *around* the loop and skips the injection path. It is **not** thereby a "non-ledger" call — both modes bind the seeded campaign's cycle ledger via `task_context.py::checkin_call_context` and wrap in `observed_node`, so tokens, cost and audit record land like any other.
 
 **One node, two modes, one output schema (`CheckinOutput`) — don't add a second decomposition/resolution node.** Task decomposition (CLI `new`) turns a raw `task_description` into the six Layer-1 prompt strings plus `task_context`; origin resolution (web ingest) turns a draft origin into `assessment` + `findings` + `next_action` + `recap`. Both produce the six decomposition fields and both drivers capture them, so an origin turn returns the resolved origin *and* a seeded starting prompt the operator edits before mint.
 

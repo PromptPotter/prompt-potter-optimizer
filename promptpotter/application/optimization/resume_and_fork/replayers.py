@@ -1,33 +1,30 @@
 """Decision replayers — re-derive each ``REPLAYED`` decision under the active scorer. A replayer is
-PURE over :class:`ReplayContext` and must never touch the live ``Cycle`` or ledger."""
+PURE over :class:`ReplayContext` and must never touch the live ``Cycle`` or ledger; each optimizer's
+runtime declares its own kinds' replayers."""
 
 from __future__ import annotations
 
+import functools
 import logging
-from collections.abc import Callable, Iterator
-from typing import TYPE_CHECKING, Any, NamedTuple, cast
+from collections.abc import Callable, Iterator, Mapping
+from typing import TYPE_CHECKING, Any, NamedTuple
 
-from promptpotter.application.intelligence.exploration import graded_response
-from promptpotter.application.optimization.pobb.checks import EliminationGate
+from promptpotter.application import optimizers
 from promptpotter.application.optimization.resume_and_fork.decisions import (
-    RESUME_CHECKPOINT_GATING,
     GatingMode,
+    resume_checkpoint_gating,
 )
-from promptpotter.application.scoring.selection import elect_round_winner, elimination_p_best
 from promptpotter.domain.results import RoundResult
-from promptpotter.domain.run_records import PotterCheckpointKind
-from promptpotter.domain.scoring import is_answer_collapsed
 
 if TYPE_CHECKING:
     from promptpotter.domain.ruler import DeltaRuler
-    from promptpotter.domain.scoring import QueryMeasurement
 
 __all__ = [
-    "REPLAYERS",
     "ReplayContext",
     "ReplayMismatch",
     "replay_all_mismatches",
     "replay_decisions",
+    "replayers",
 ]
 
 logger = logging.getLogger(__name__)
@@ -68,7 +65,7 @@ def _iter_mismatches(ctx: ReplayContext) -> Iterator[ReplayMismatch]:
     for rec in ctx.decisions:
         # An ARCHIVAL kind, or a kind no replayer knows, is recorded and never replayed.
         kind = str(rec["kind"])
-        fn = REPLAYERS.get(kind)
+        fn = replayers().get(kind)
         if fn is None:
             continue
 
@@ -136,129 +133,18 @@ def replay_all_mismatches(
     return list(_iter_mismatches(ctx))
 
 
-def _replay_round_winner(
-    ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
-) -> str:
-    """Re-derive the round winner through the SAME ``elect_round_winner`` the live scorer ran, against
-    the SAME parent — READ from the decision, never reconstructed. One shared rule is not enough
-    alone: it ranks each arm against the parent panel, and the three callers that each reconstructed
-    one reconstructed a different panel."""
-    parent = data.get("parent_cells")
-    if parent is None:
-        # Never fall back to a reconstruction — guessing quietly is the defect itself.
-        raise ValueError(
-            "this ROUND_WINNER decision carries no `parent_cells`, so the panel its election "
-            "ranked against is unrecoverable and the winner cannot be re-derived"
+@functools.cache
+def replayers() -> Mapping[str, Replayer]:
+    """Every optimizer runtime's replayers, which must cover exactly the REPLAYED kinds — both
+    directions raise: a REPLAYED kind with none is silently never replayed, an ARCHIVAL kind with
+    one re-derives what must never be. Completes with the registries."""
+    table: dict[str, Replayer] = {}
+    for runtime in optimizers.runtimes().values():
+        table.update(runtime.replayers)
+    gating = resume_checkpoint_gating()
+    replayed = {str(k) for k, mode in gating.items() if mode is GatingMode.REPLAYED}
+    if replayed != set(table):
+        raise RuntimeError(
+            f"REPLAYED kinds {sorted(replayed)} and registered replayers {sorted(table)} differ."
         )
-    all_results = ctx.round_data.all_candidate_results
-    candidate_ids = [str(c) for c in (inputs_ref.get("candidate_ids") or [])]
-    coverage_floor = int(inputs_ref["coverage_floor"])
-    # Read, never re-derived: it is a function of the round HISTORY, which this replay does not
-    # hold, so recomputing it is the same defect as reconstructing the parent panel above. A
-    # record missing it RAISES.
-    winner_id, _ = elect_round_winner(
-        candidate_ids,
-        cast("dict[str, list[QueryMeasurement]]", all_results),
-        cast("list[QueryMeasurement]", parent),
-        coverage_floor,
-        ctx.ruler,
-        parent_bias=float(inputs_ref["parent_bias"]),
-    )
-    return winner_id
-
-
-def _pobb_replay_snapshot(
-    ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
-) -> float | None:
-    """Re-derive ``p_best`` on the cycle's fixed δ ruler via the same closed-form ``elimination_p_best``
-    the live check ran. ``None`` when the rescored measurements are not available."""
-    candidate_id = str(inputs_ref.get("candidate_id", ""))
-    candidate_sample_ids = [str(s) for s in (data.get("candidate_sample_ids") or [])]
-    prior_histories: dict[str, dict[str, float]] = data.get("prior_histories") or {}
-    if not candidate_sample_ids or not prior_histories:
-        return None
-
-    all_results = ctx.round_data.all_candidate_results
-    cur_results = all_results.get(candidate_id) or []
-    cur_by_sample = {
-        str(r.get("sample_id")): graded_response(r)
-        for r in cur_results
-        if r.get("sample_id") is not None
-    }
-    if not all(sid in cur_by_sample for sid in candidate_sample_ids):
-        return None
-    candidate_grades = [cur_by_sample[sid] for sid in candidate_sample_ids]
-
-    paired_prior_grades: dict[str, list[float]] = {}
-    for cid, hist in prior_histories.items():
-        if all(sid in hist for sid in candidate_sample_ids):
-            paired_prior_grades[cid] = [float(hist[sid]) for sid in candidate_sample_ids]
-    if not paired_prior_grades:
-        return None
-
-    p_best, _per_prior = elimination_p_best(
-        candidate_grades,
-        paired_prior_grades,
-        [int(s) for s in candidate_sample_ids],
-        ctx.ruler,
-    )
-    return float(p_best)
-
-
-def _replay_elimination_cut(
-    ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
-) -> bool:
-    """Dispatches on the gate the PRODUCER named, never on the ε rule alone: a collapse cut returns
-    before ``elimination_p_best`` is reached, so it holds no posterior and re-deriving it under ε
-    tests a real ``p_best`` against a bar nobody set — which no collapse can re-derive as true."""
-    if inputs_ref.get("gate") == EliminationGate.COLLAPSED:
-        # Re-asked, not re-derived under ε: on a labelled round the answer and its truths decide
-        # it and rescoring touches neither, while a labelless one reads `fitness` — so a formula
-        # that now solves every cell retires the cut, which is the verdict this replay exists for.
-        cid = str(inputs_ref.get("candidate_id", ""))
-        rows = ctx.round_data.all_candidate_results.get(cid) or []
-        return is_answer_collapsed(rows[: int(inputs_ref["queries_scored"])])
-    p_best = _pobb_replay_snapshot(ctx, inputs_ref, data)
-    if p_best is None:
-        return False
-    return p_best < float(inputs_ref["epsilon"])
-
-
-def _replay_leader_lock_in(
-    ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
-) -> bool:
-    if int(inputs_ref["queries_scored"]) < int(inputs_ref["lock_in_n_min"]):
-        return False
-    p_best = _pobb_replay_snapshot(ctx, inputs_ref, data)
-    if p_best is None:
-        return False
-    # ``min`` over priors is the lock-in metric; no separate leader guard.
-    return p_best >= float(inputs_ref["lock_in"])
-
-
-# ``RESUME_CHECKPOINT_GATING`` enumerates the kinds; the assertion below
-# fails import if any REPLAYED kind has no replayer here.
-REPLAYERS: dict[str, Replayer] = {
-    PotterCheckpointKind.ROUND_WINNER: _replay_round_winner,
-    PotterCheckpointKind.ELIMINATION_CUT: _replay_elimination_cut,
-    PotterCheckpointKind.LEADER_LOCK_IN: _replay_leader_lock_in,
-}
-
-# REPLAYERS must register a replayer for exactly the REPLAYED kinds — both
-# directions fail import: a REPLAYED kind with no replayer (silent non-replay on
-# resume) and an ARCHIVAL kind with one (replaying a kind that must never be
-# re-derived). The registry's key set must equal the REPLAYED kind set.
-_replayed_kinds = {k for k, mode in RESUME_CHECKPOINT_GATING.items() if mode is GatingMode.REPLAYED}
-_missing_replayers = _replayed_kinds - set(REPLAYERS)
-if _missing_replayers:
-    raise RuntimeError(
-        f"RESUME_CHECKPOINT_GATING declares {sorted(_missing_replayers)} as REPLAYED, "
-        "but no replayer is registered in resume_and_fork/replayers.py::REPLAYERS."
-    )
-_archival_with_replayer = set(REPLAYERS) - _replayed_kinds
-if _archival_with_replayer:
-    raise RuntimeError(
-        f"REPLAYERS registers {sorted(_archival_with_replayer)}, but those kinds are "
-        "ARCHIVAL in RESUME_CHECKPOINT_GATING — an archival kind must never be replayed."
-    )
-del _replayed_kinds, _missing_replayers, _archival_with_replayer
+    return table

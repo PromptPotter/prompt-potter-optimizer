@@ -10,6 +10,7 @@ import type { NodeReach } from "@/lib/api";
 import type { NodeScope } from "@/lib/SelectionContext";
 import type { PipelineStatus } from "@/lib/types";
 import { useDashboard } from "@/lib/hooks/useDashboard";
+import { isMeasuring } from "@/lib/poll";
 import { useSelection } from "@/lib/SelectionContext";
 import {
   agentLabel,
@@ -23,10 +24,6 @@ import { Icon, pressable } from "@/components/ui";
 import { cx } from "@/lib/cx";
 
 // One level of the pipeline stack; `PipelineStack` owns the chain of levels.
-
-// The target LLM is called exactly while this OPTIMIZER node is active. Compare it against
-// the served `active_node` only, never against a target node's id.
-const OPTIMIZER_SCORING_NODE = "l1_score";
 
 // Each kind is styled in `chat.css`; the wire's `kind` is a bare string, so an unknown one
 // draws as `forward`.
@@ -213,7 +210,7 @@ function PipelineBox({
   // `active_node` speaks for the optimizer, so it names a node here only on a self-optimizing
   // campaign; otherwise the whole chip pulses. Never both.
   const namedHere = isLive && interior.some((n) => n.id === activeNode);
-  const calling = isLive && activeNode === OPTIMIZER_SCORING_NODE && !namedHere;
+  const calling = isLive && isMeasuring(dash) && !namedHere;
 
   const sole = interior.length === 1 ? interior[0] : undefined;
   // The live record alone; never fall back to the config row, which answers for the root.

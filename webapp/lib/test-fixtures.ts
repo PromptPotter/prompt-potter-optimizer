@@ -3,8 +3,8 @@
 
 import type {
   CurrentRound,
-  DashboardCandidate,
   DashboardSample,
+  LiveCandidate,
   LiveDashboardState,
   RoundResult,
   RoundSummary,
@@ -36,16 +36,17 @@ export function currentRound(over: Partial<CurrentRound> = {}): CurrentRound {
   return {
     round: 0,
     active_node: null,
+    measurement_node: null,
     candidates: [],
     nodes: {},
-    pobb: { current_id: "", n_samples: 0, leader_prob: 0, posterior_width: 1, top: [] },
+    racing: null,
     // Null = the round has not elected yet.
     overlap: null,
     ...over,
   };
 }
 
-export function liveRow(over: Partial<DashboardCandidate> = {}): DashboardCandidate {
+export function liveRow(over: Partial<LiveCandidate> = {}): LiveCandidate {
   return {
     label: "C1.1",
     candidate_id: null,
@@ -73,6 +74,13 @@ export function liveRow(over: Partial<DashboardCandidate> = {}): DashboardCandid
     // "Nothing crowned yet": the election lands at the end of scoring, not at round close.
     is_selected: false,
     outcome: null,
+    prompt_fields: null,
+    resolved_pipeline_params: null,
+    pipeline_overlay: null,
+    samples: [],
+    sample_lines: [],
+    validation_failures: [],
+    composite_fitness_formula_short: null,
     ...over,
   };
 }
@@ -151,6 +159,7 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
     opt_sp: null,
     optimizer_state: {
       manifest: "potter",
+      prompt_hashes: {},
       payload: {
         memory: {
           wounds: {
@@ -168,7 +177,6 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
         l1_yield: 1,
         l1_parse_failure: null,
         axis_memory_peaked: [],
-        optimizer_prompt_hashes: {},
       },
     },
     status: "",
@@ -203,6 +211,7 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
     current_acc: 0,
     ability_delta: null,
     ability_delta_per_usd: null,
+    bench_score: null,
     composite_fitness_formula: null,
     composite_fitness_weights: null,
     headline_metric: "accuracy",
@@ -246,7 +255,7 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
       unpriced_tokens: 0,
     },
     spend_by_round: {},
-    backfill_log: [],
+    catch_up_log: [],
     current_round: currentRound(),
     error: null,
     ...over,

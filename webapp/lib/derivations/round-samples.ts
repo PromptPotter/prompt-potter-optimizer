@@ -1,12 +1,9 @@
-// The one reader of the `l1_score` block (`live_dashboard/blocks.py`): each candidate's rows and
-// why it has them. Live and historical samples never merge; `samplesForRow` selects one.
+// Each candidate's rows and why it has them. Live and historical samples never merge;
+// `samplesForRow` selects one.
 
-import {
-  liveCandidate,
-  type DashboardSnapshot,
-} from "@/lib/poll";
-import type { ValidationFailure } from "@/lib/api/types";
-import type { CandidateRow, NodeBlock, SampleRow } from "@/lib/types";
+import { liveCandidate, type DashboardSnapshot } from "@/lib/poll";
+import type { ScoredCandidate, ValidationFailure } from "@/lib/api/types";
+import type { CandidateRow, SampleRow } from "@/lib/types";
 import type { RoundResult } from "@/lib/types";
 import { isHit } from "@/lib/fitness";
 // Never via the barrel: `index.ts` re-exports this module, and the cycle leaves a `const` in the TDZ.
@@ -23,7 +20,7 @@ function liveSamplesFor(
   const out: SampleRow[] = [];
   const c = liveCandidate(dash, label);
   if (!c) return out;
-  (c.samples ?? []).forEach((s, ord) => {
+  c.samples.forEach((s, ord) => {
     out.push({
       key: `${round}|${candidate_id}|${s.sample_id ?? `o${ord}`}`,
       round,
@@ -138,49 +135,12 @@ export interface CandidateVerdict {
   failures: ValidationFailure[];
 }
 
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-function candidatesOf(half: Record<string, unknown> | undefined): Record<string, unknown>[] {
-  if (!isRecord(half)) return [];
-  const raw = half.candidates;
-  return Array.isArray(raw) ? raw.filter(isRecord) : [];
-}
-
-function labelOf(c: Record<string, unknown>): string | null {
-  return typeof c.label === "string" && c.label !== "" ? c.label : null;
-}
-
-function isFailure(v: unknown): v is ValidationFailure {
-  return isRecord(v) && typeof v.value === "string" && typeof v.reason === "string";
-}
-
-// Only EXPLAINS a rejection `ElectedRow.invalid` declared; a missing entry means the block has not
-// arrived. Read defensively: server-side the block is a plain `dict[str, Any]`.
+// Only EXPLAINS a rejection `ElectedRow.invalid` declared. Rows are the live `LiveCandidate`s or a
+// round file's `candidate_scores`, whichever half the rows themselves came from.
 export function candidateVerdicts(
-  block: NodeBlock | null | undefined,
+  rows: readonly Pick<ScoredCandidate, "label" | "changes_description" | "validation_failures">[],
 ): Map<string, CandidateVerdict> {
-  const out = new Map<string, CandidateVerdict>();
-  if (!block) return out;
-
-  for (const c of candidatesOf(block.input)) {
-    const label = labelOf(c);
-    if (!label) continue;
-    out.set(label, {
-      changes: typeof c.changes_description === "string" ? c.changes_description : "",
-      failures: [],
-    });
-  }
-
-  // Mid-round the halves disagree by design: input is seeded at start, output filled on finish.
-  for (const c of candidatesOf(block.output)) {
-    const label = labelOf(c);
-    if (!label) continue;
-    const raw = c.validation_failures;
-    const failures = Array.isArray(raw) ? raw.filter(isFailure) : [];
-    out.set(label, { changes: out.get(label)?.changes ?? "", failures });
-  }
-
-  return out;
+  return new Map(
+    rows.map((c) => [c.label, { changes: c.changes_description, failures: c.validation_failures }]),
+  );
 }

@@ -1,5 +1,5 @@
 """Soft signals on L3-parsed output; the HARD layout validators live in ``domain.l1_layout``. Outcomes land in
-``Cycle.memory.wounds.l3_guard_breaches`` and surface to L3's next fire as self-healing evidence."""
+``PotterState.memory.wounds.l3_guard_breaches`` and surface to L3's next fire as self-healing evidence."""
 
 from __future__ import annotations
 

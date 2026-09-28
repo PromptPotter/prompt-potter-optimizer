@@ -106,7 +106,7 @@ export function OptimizerCard({ pipeline }: Props) {
           connector={null}
           reach={pipeline?.reach ?? null}
           scope="optimizer"
-          // One level drawn, yet `l1_score` still runs the whole campaign pipeline.
+          // One level drawn, yet the measurement node still runs the whole campaign pipeline.
           nestsNode={measurementNode(pipeline)}
           activeNode={isLive && viewingLive ? activeId : null}
           isLive={isLive}

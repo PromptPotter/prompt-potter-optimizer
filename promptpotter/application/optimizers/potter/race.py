@@ -117,8 +117,8 @@ class PoBBRace:
         callbacks, round_num = self._ctx.callbacks, self._ctx.round_num
         self._check.set_current(
             candidate_id,
-            on_snapshot=partial(callbacks.on_p_best_update, round_num, idx, n),
-            on_backfill=partial(callbacks.on_pobb_backfill, round_num, idx, n),
+            on_snapshot=partial(callbacks.on_race_standing, self._node, round_num, idx, n),
+            on_backfill=partial(callbacks.on_race_catch_up, self._node, round_num, idx, n),
         )
 
     def judge(

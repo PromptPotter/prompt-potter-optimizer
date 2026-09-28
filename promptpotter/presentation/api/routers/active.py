@@ -11,7 +11,6 @@ from pydantic import Field
 
 from promptpotter.application.campaign_config import OptimizationConfig
 from promptpotter.application.jobs.capacity import resolve_run_capacity
-from promptpotter.application.optimization.dispatch.schemas import L2_NODE_AXES
 from promptpotter.application.optimizer_manifest import (
     OptimizerKnobsResponse,
     optimizer_knobs,
@@ -376,9 +375,10 @@ def get_optimizer_pipeline(
     selected = resolve_optimizer(optimizer, {})
     schema = selected.schema
     prompts = selected.document.get("resolved_prompts") or {}
-    # This is the OPTIMIZER's own manifest, so it is the one route that names L2's axes — and the
-    # reach below must sum the SAME rows it serves, or the glyph and the padlock disagree.
-    rows = schema.node_config_schema(L2_NODE_AXES)
+    # This is the OPTIMIZER's own manifest, so it is the one route that names the axes it moves on
+    # itself — and the reach below must sum the SAME rows it serves, or the glyph and the padlock
+    # disagree.
+    rows = schema.node_config_schema(selected.runtime.own_axes)
     return OptimizerPipelineResponse(
         view=schema.view,
         node_config_schema=rows,

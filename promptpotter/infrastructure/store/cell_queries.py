@@ -73,26 +73,19 @@ def _live_cells(
     round_no = current.get("round")
     if not isinstance(round_no, int) or round_no in closed:
         return [], []
-    run_of = {
-        str(c.get("label")): c
-        for c in current.get("candidates") or []
-        if isinstance(c, dict) and c.get("label")
-    }
-    block = ((current.get("nodes") or {}).get("l1_score") or {}).get("output") or {}
     candidates: list[CellCandidate] = []
     cells: list[CellRow] = []
-    for cand in block.get("candidates") or []:
+    for cand in current.get("candidates") or []:
         if not isinstance(cand, dict) or not cand.get("label"):
             continue
         label = str(cand["label"])
-        served = run_of.get(label) or {}
-        run_id = served.get("run_id")
+        run_id = cand.get("run_id")
         key = f"{cycle_id}/{label}"
         candidates.append(
             CellCandidate(
                 key=key,
                 label=label,
-                candidate_id=served.get("candidate_id"),
+                candidate_id=cand.get("candidate_id"),
                 run_id=run_id,
                 round=round_no,
                 cycle_id=cycle_id,

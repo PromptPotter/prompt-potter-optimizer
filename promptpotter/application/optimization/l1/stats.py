@@ -4,14 +4,29 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from promptpotter.application.optimization.validators.behavior_base import CheckResult
+from promptpotter.application.optimization.validators.behavior_base import ValidatorContext
+from promptpotter.application.optimization.validators.l1_behavior import (
+    CHECK_REGISTRY,
+    extract_l1_variants,
+    run_all_checks,
+)
+from promptpotter.application.optimization.validators.l2_behavior import run_all_l2_checks
+from promptpotter.application.optimizers.nodes import CheckResult, ReviewReading
+from promptpotter.application.optimizers.potter.knobs import potter_knobs
+from promptpotter.application.views.render.optimizer_prompt_text import (
+    format_l1_critique_for_prompt,
+)
+from promptpotter.domain.escalation_signals import exploration_budget
 from promptpotter.domain.opt_search_point import node_source
 from promptpotter.domain.optimizer_state import L1_PARSE_FAILURE_CHARGED, POTTER_MANIFEST
 from promptpotter.domain.results import RoundResult
 
-__all__ = ["L1Stats", "compute_l1_stats"]
+if TYPE_CHECKING:
+    from promptpotter.application.optimizer_manifest import SelectedOptimizer
+
+__all__ = ["L1Stats", "compute_l1_stats", "review_reading"]
 
 # The four the verdict can take, typed rather than described: the L4 outer loop reads this, so an
 # arm nothing emits is a measurement nobody can get and one nothing checks is a typo that ships.
@@ -63,6 +78,75 @@ def compute_l1_stats(
         l2_behavior_pass_rate=l2_behavior_pass_rate,
         round_1_verdict=round_1_verdict,
     )
+
+
+def review_reading(
+    selected: SelectedOptimizer,
+    rounds: list[RoundResult],
+    audits: list[dict[str, Any] | None],
+    *,
+    context_object: list[str],
+    origin_composite_fitness: float | None,
+) -> ReviewReading:
+    audits = [*audits, *[None] * (len(rounds) - len(audits))]
+    l1_checks, l2_checks = _behavior_per_round(
+        rounds, audits, context_object, potter_knobs(selected).escalation.l1_patience
+    )
+    return ReviewReading(
+        checks=l1_checks,
+        check_ids=tuple(CHECK_REGISTRY),
+        stats=compute_l1_stats(
+            rounds,
+            origin_composite_fitness=origin_composite_fitness,
+            behavior_results=l1_checks,
+            l2_behavior_results=l2_checks,
+        ),
+        variants=[extract_l1_variants(audit) for audit in audits],
+        feedback=[
+            format_l1_critique_for_prompt(r.optimizer_state.payload.critique).strip()
+            for r in rounds
+        ],
+    )
+
+
+def _behavior_per_round(
+    rounds: list[RoundResult],
+    audits: list[dict[str, Any] | None],
+    context_object: list[str],
+    l1_patience: int,
+) -> tuple[list[list[CheckResult]], list[list[CheckResult]]]:
+    """Per-round L1 + L2 behaviour-check results (same length as ``rounds``).
+    L2 returns ``[]`` for rounds where L2 didn't fire — absent fire ≠ conformance failure."""
+    l1_out: list[list[CheckResult]] = []
+    l2_out: list[list[CheckResult]] = []
+    prior_audits: list[dict[str, Any]] = []
+    # Stall depth entering each round, reconstructed from the persisted ``improved``
+    # flags (the round file doesn't carry the live l1_stall_count). Same recurrence as
+    # ``EscalationFSM.observe_round``: reset to 0 on improvement, else +1. Read BEFORE
+    # the update so each round's exploration_budget matches what its L1 generation saw.
+    stall = 0
+    for i, round_data in enumerate(rounds):
+        round_num = round_data.round
+        budget = exploration_budget(stall, l1_patience).value if round_num >= 1 else None
+        audit = audits[i] if i < len(audits) else None
+        if round_num >= 1:
+            stall = 0 if round_data.improved else stall + 1
+        if audit is None:
+            l1_out.append([])
+            l2_out.append([])
+            continue
+        ctx = ValidatorContext(
+            round_num=round_num,
+            prior_rounds=list(prior_audits),
+            l1_layout=round_data.optimizer_state.payload.memory.l1_layout,
+            context_object=context_object,
+            exploration_budget=budget,
+            peaked_axes=frozenset(round_data.optimizer_state.payload.axis_memory_peaked),
+        )
+        l1_out.append(run_all_checks(audit, ctx))
+        l2_out.append(run_all_l2_checks(audit, ctx))
+        prior_audits.append(audit)
+    return l1_out, l2_out
 
 
 def _compute_round_1_verdict(

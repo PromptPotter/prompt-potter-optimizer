@@ -1555,10 +1555,23 @@ paths:
         `/cycles` and `/tree` serve — overriding what the file declares, and
         `Last-Modified` covers that derivation's inputs rather than this file's mtime
         alone, since the phase turns `detached` on the clock with nothing written.
-        The in-flight round's per-candidate searchpoints
-        (`current_round.nodes.l1_score.input.candidates[]`) carry the
-        `SearchpointCandidate` shape — the same shape a round file's
-        `candidate_scores[]` carries historically.
+        The body names no optimizer's node in a key the bench serves.
+        `current_round.candidates[]` (`LiveCandidate`) carries the round in flight
+        whole: the closed-row numbers, the searchpoint in the `SearchpointCandidate`
+        shape a round file's `candidate_scores[]` carries historically, the sample
+        tape (`samples[]`, `sample_lines[]`) and `validation_failures[]`;
+        `current_round.nodes` holds optimizer LLM calls alone.
+        `current_round.measurement_node` names the node the ledger recorded at
+        `measure:enter`, and `active_node` names it while it measures.
+        `current_round.racing` is the eliminator's live standing, named by its
+        manifest `member` and null before a reading; `catch_up_log[]` names the
+        member too. `bench_score` (`BenchScore`) is the headline, folded from the
+        `bench:scored` phase record and null until the bench pass grades the
+        selection.
+
+        DECLARED, not yet written: `run_limits` holds the bench's ceilings alone;
+        a potter cycle's patiences, ε and lives ceiling ride `potter` (null on any
+        other optimizer), and `stall` replaces the `patience` string.
       tags: [cycles]
       parameters:
         - name: campaign_id
@@ -2674,7 +2687,7 @@ components:
         One candidate searchpoint as the webapp joins it — DESCRIPTIVE, not a
         route body: both carriers are `additionalProperties: true` passthroughs
         (the file IS the contract per the folder-UI doctrine). Carried by
-        `dashboard.json::current_round.nodes.l1_score.input.candidates[]` (live,
+        `dashboard.json::current_round.candidates[]` (live, `LiveCandidate`,
         writer `projections/live_dashboard/blocks.py`) and
         `rounds/round_NNNN.json::candidate_scores[]` (historical, writer
         `domain/results.py::ScoredCandidate`, served via the generic file route).
@@ -2691,14 +2704,11 @@ components:
         addressed candidate.
       properties:
         candidate_id:
-          type: string
-          description: Live id is `r{round}_{idx}`; round files carry the stable id.
+          type: [string, 'null']
+          description: Null on a live row until its score report lands; round files carry the stable id.
         label:
           type: string
-          description: Display label, e.g. `C1.2`.
-        idx:
-          type: integer
-          minimum: 0
+          description: Display label, e.g. `C1.2` — the join key on both carriers.
         prompt_fields:
           type: object
           additionalProperties: true
@@ -2716,7 +2726,7 @@ components:
         pipeline_overlay:
           type: object
           additionalProperties: true
-          description: The sparse fork-transport delta. Round files only.
+          description: The sparse fork-transport delta.
 
     CommandEnvelope:
       type: object

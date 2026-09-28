@@ -107,7 +107,7 @@ export function LiveStateCard() {
       <div className="var-label">In-flight query payload</div>
       <div className={cx("payload-block", payloadEmpty && "empty")}>{payloadText}</div>
       <BackendWarnings dash={dash} />
-      <PoBBBackfillLog dash={dash} />
+      <RaceCatchUpLog dash={dash} />
       <div className="lsc-charts">
         <TrendChart />
         <CostStrip />
@@ -117,21 +117,20 @@ export function LiveStateCard() {
   );
 }
 
-function PoBBBackfillLog({ dash }: { dash: DashboardSnapshot | null }) {
-  // Paired-PoBB telemetry: one entry per sample where a prior gained a fresh measurement
-  // (docs/methods/candidate-elimination.md).
-  const log = dash?.backfill_log;
+function RaceCatchUpLog({ dash }: { dash: DashboardSnapshot | null }) {
+  // One entry per sample where a prior in the eliminator's race gained a fresh measurement.
+  const log = dash?.catch_up_log;
   if (!log || log.length === 0) return null;
   return (
     <>
-      <div className="var-label">Paired-PoBB backfill (last {log.length})</div>
+      <div className="var-label">Race catch-up (last {log.length})</div>
       <div className="payload-block">
         {log.slice().reverse().map((e, i) => {
-          const { round, candidate_idx: cidx, candidate_total: ctot, sample_id: sid, prior_ids: priors } = e;
+          const { member, round, candidate_idx: cidx, candidate_total: ctot, sample_id: sid, prior_ids: priors } = e;
           return (
             <div key={i} className="log-row">
               <span className="log-dim">
-                R{round} C{cidx + 1}/{ctot}
+                R{round} C{cidx + 1}/{ctot} · {member}
               </span>{" "}
               <span className="log-mark">↻</span> #{sid}
               {priors.length > 0 && <span className="log-dim"> — {priors.join(", ")}</span>}
