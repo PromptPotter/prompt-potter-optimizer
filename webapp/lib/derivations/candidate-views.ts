@@ -56,6 +56,9 @@ export interface CandidateViewsInput {
   overlapByCandidate: ReadonlyMap<string, OverlapMember>;
   // The denominator a member must match to be readable.
   overlapSize: number | null;
+  // The selected optimizer's own declaration (`LiveDashboardState.stamps_theta`) — a selector
+  // that never fits θ (CAPO) must not read as a cold ruler.
+  stampsTheta: boolean;
 }
 
 export function candidateViews({
@@ -66,6 +69,7 @@ export function candidateViews({
   diagByLabel,
   overlapByCandidate,
   overlapSize,
+  stampsTheta,
 }: CandidateViewsInput): CandidateView[] {
   const pickedSet = sampleSet != null && !barsAreCourses(viewedNode);
   const basis = pickedSet ? (sampleSet?.length ?? null) : overlapSize;
@@ -96,9 +100,9 @@ export function candidateViews({
       label,
       accuracy,
       composite: isCourse ? null : (m.composite_fitness ?? null),
-      theta: m.theta ?? null,
-      theta_se: m.theta_se ?? null,
-      thetaCaveat: m.theta_caveat ?? null,
+      theta: stampsTheta ? (m.theta ?? null) : null,
+      theta_se: stampsTheta ? (m.theta_se ?? null) : null,
+      thetaCaveat: stampsTheta ? (m.theta_caveat ?? null) : null,
       meanFitnessCiLo: m.mean_fitness_ci_lo ?? null,
       meanFitnessCiHi: m.mean_fitness_ci_hi ?? null,
       referenceLift: isCourse ? null : n.reference_lift,

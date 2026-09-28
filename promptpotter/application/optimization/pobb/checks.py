@@ -248,19 +248,12 @@ class PoBBCheck:
         return out
 
     def epsilon_at(self, n: int) -> float:
-        """The ε bar at depth *n*: ``epsilon_floor`` at both ends, ``epsilon`` in the middle,
-        ramping linearly over ``n_min`` cells on each side — and flat wherever the floor is not
-        below ``epsilon``, so a config that sets neither eliminates on one scalar.
-
-        The bar tracks WHAT CUTTING STILL SAVES, which is the cells remaining. The ramp OUT lands
-        on the floor exactly where the tail guard in :meth:`check` begins, so the two meet rather
-        than cliff."""
+        """The ε bar at depth *n*: ``epsilon_floor`` at ``n_min``, ramping linearly up to
+        ``epsilon`` over the next ``n_min`` cells and holding it to the end — flat wherever the
+        floor is not below ``epsilon``, so a config that sets neither eliminates on one scalar."""
         if self.epsilon <= self.epsilon_floor:
             return self.epsilon
-        span = max(self.n_min, 1)
-        ramp_in = (n - self.n_min) / span
-        ramp_out = (self.n_samples - n - self.n_min) / span
-        scale = min(1.0, max(0.0, min(ramp_in, ramp_out)))
+        scale = min(1.0, max(0.0, (n - self.n_min) / max(self.n_min, 1)))
         return self.epsilon_floor + (self.epsilon - self.epsilon_floor) * scale
 
     def check(self, results: list[QueryMeasurement]) -> StopSignal | None:
@@ -380,14 +373,6 @@ class PoBBCheck:
         # is a parameter, not a subsystem. **If the optimizer cannot be made to work and late
         # kills are implicated, bringing that gate back is the considered fallback**; the full
         # implementation is recoverable from ``2ee23d40``.
-        # The TAIL guard, and it is `n_min` at the other end: an arm may not be JUDGED on fewer
-        # than `n_min` cells, nor DISCARDED with fewer than `n_min` left — same knob, both ends.
-        # Cutting in the tail saves almost nothing and costs the comparison: `matched_parent_stats`
-        # needs EVERY cell the parent measured, so an arm stopped one cell short is unrankable
-        # against the parent for the rest of the round.
-        if self.n_samples - n < self.n_min:
-            return None
-
         bar = self.epsilon_at(n)
         if not self.epsilon_elimination or p_best_current >= bar:
             return None
@@ -456,11 +441,7 @@ class PoBBCheck:
             )
             if self.leader_lock_in and m >= self.lock_in_n_min and high >= self.lock_in:
                 return m
-            if (
-                self.epsilon_elimination
-                and self.n_samples - m >= self.n_min
-                and low < self.epsilon_at(m)
-            ):
+            if self.epsilon_elimination and low < self.epsilon_at(m):
                 return m
         return None
 

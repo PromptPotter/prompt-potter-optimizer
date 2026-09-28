@@ -42,9 +42,9 @@ whole sanctioned set; they name a sample's state, never a back-compat shim
   plus the provenance that makes its fitness readable — the formula the number was computed under,
   n, lift + CI, θ, the rows' own hash, the optimizer manifest — and an `artifact_version` a reader
   refuses on. Pure over ONE `RoundResult`, which is what keeps it here: the projection can grow no
-  file read and no session dependency. **The round it projects is the one the composite high-water
-  names, origin round included** — a campaign nothing beat exports its origin under round 0, not
-  nothing. Read the round document's `prompt_fields`, never `CycleResult.result_prompt_fields`:
+  file read and no session dependency. **The round it projects is the optimizer's declared pick,
+  origin round included** — a campaign that never selected past it exports its origin under round
+  0, not nothing. Read the round document's `prompt_fields`, never `CycleResult.result_prompt_fields`:
   that one is the wire-side projection. The shots ride resolved, as `few_shot_block`, because a
   reader outside the campaign has no demo pool to resolve an id against.
 - `spend.py` — tokens and money, at both arities: `TokenAccount` is ONE call's (or one row's)

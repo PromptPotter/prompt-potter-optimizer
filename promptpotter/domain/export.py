@@ -144,8 +144,8 @@ def build_prompt_export(
 ) -> PromptExport:
     """Project the round that crowned the winner into the artifact.
 
-    *winner* is the round the composite high-water names, and **the origin round is one of them**
-    — a campaign nothing beat exports its origin, under round 0, rather than exporting nothing.
+    *winner* is the round whose selection the optimizer declared last, and **the origin round is
+    one of them** — a campaign that never selected past it exports its origin, under round 0.
     That is the whole special-casing: one round shape in, values that differ, no second path.
     """
     fields = dict(winner.prompt_fields)

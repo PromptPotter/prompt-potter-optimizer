@@ -251,6 +251,11 @@ class LiveDashboardState(StrictModel):
     # DISPLAY config — the gate is always θ; this seeds the webapp's client-overridable
     # headline toggle. Stamped at construction (``for_run``), so a fork carries its own.
     headline_metric: HeadlineMetric = "accuracy"
+    # The selected optimizer's own declaration (`Selector.stamps_theta`, mirrors
+    # `RoundResult.stamps_theta`) — a campaign-wide constant, so the webapp's per-arm θ
+    # column reads ONE flag rather than guessing from a candidate's own theta being `None`,
+    # which a cold ruler leaves `None` too for a reason that DOES resolve.
+    stamps_theta: bool = False
 
     degraded_count: int = 0
     error_count: int = 0

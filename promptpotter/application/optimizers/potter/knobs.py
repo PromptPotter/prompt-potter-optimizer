@@ -158,13 +158,12 @@ class PoBBKnobs(StrictModel):
         lt=1.0,
         description=(
             "The ε applied at exactly ``elimination_n_min``, ramping linearly up to "
-            "``epsilon`` by twice that depth. Equal to ``epsilon`` leaves the bar flat and "
-            "elimination unchanged, so it grades only where ε was deliberately raised above "
-            "it. At the floor a single discordant sample already puts P(best) near 0.2, so one "
-            "scalar ε is either too eager there or too permissive deep; grading keeps a raised "
-            "ε's aggression at depth while giving a one-sample-behind arm a few more cells to "
-            "recover. Set ABOVE ``epsilon`` and the bar goes flat at ``epsilon`` instead — the "
-            "``epsilon_floor_inverted`` coupling reports it."
+            "``epsilon`` by twice that depth and holding it to the panel's last cell. Equal to "
+            "``epsilon`` leaves the bar flat and elimination unchanged, so it grades only where "
+            "ε was deliberately raised above it: a raised ε then bites as cells accumulate "
+            "rather than on the thinnest reading, and an arm clearly behind is still cut "
+            "however few cells remain. Set ABOVE ``epsilon`` and the bar goes flat at "
+            "``epsilon`` instead — the ``epsilon_floor_inverted`` coupling reports it."
         ),
     )
     lock_in: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(

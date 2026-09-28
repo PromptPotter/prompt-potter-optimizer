@@ -386,23 +386,23 @@ class FileSink:
             trace_data = read_json_optional(trace_path)
             if trace_data is not None:
                 trace_data["output"] = {
-                    "best_accuracy": event.best_accuracy,
+                    "result_accuracy": event.result_accuracy,
                     "n_l1_rounds": event.n_l1_rounds,
                     "stop_reason": event.stop_reason,
                 }
                 write_json(trace_path, trace_data)
-            if event.best_accuracy is not None:
-                self._write_score(trace_id, "best_accuracy", event.best_accuracy)
+            if event.result_accuracy is not None:
+                self._write_score(trace_id, "result_accuracy", event.result_accuracy)
 
         self._log_event(
             {
                 "event": "campaign_end",
                 "trace_id": trace_id,
                 "campaign_id": event.campaign_id,
-                "best_accuracy": event.best_accuracy,
+                "result_accuracy": event.result_accuracy,
                 "n_l1_rounds": event.n_l1_rounds,
                 "stop_reason": event.stop_reason,
-                "best_round": event.best_round,
+                "result_round": event.result_round,
             }
         )
 

@@ -15,7 +15,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import Field
 
@@ -49,7 +49,7 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import OptimizationConfig
-    from promptpotter.application.optimizers.nodes import OptimizerRuntime
+    from promptpotter.application.optimizers.nodes import OptimizerRuntime, Selector
 
 shapes_optimizer_prompt(__name__)
 
@@ -127,6 +127,16 @@ class SelectedOptimizer:
         if node is None:
             raise KeyError(f"optimizer {self.name!r} declares no node {name!r}")
         return node
+
+    @property
+    def stamps_theta(self) -> bool:
+        """This optimizer's own declaration (``Selector.stamps_theta``) — read before a
+        ``RoundPlan`` exists, for round 0's origin document, which stamps this fact for the same
+        reason the scoreboard reads it: a selector that never fits θ makes round 0's arm no
+        exception."""
+        walk = self.schema.pipelines["default"]
+        name = next(n for n in walk if self.node(n).wire_type is NodeKind.SELECTOR)
+        return cast("Selector", optimizers.member(name)).stamps_theta
 
     def node_config(self, name: str) -> dict[str, Any]:
         return dict(self.node(name).current_config)

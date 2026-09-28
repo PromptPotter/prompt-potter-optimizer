@@ -32,6 +32,9 @@ export function RoundFileView({ doc, raw }: Props) {
   const [showRaw, setShowRaw] = useState(false);
   const results = (doc.results ?? []) as ResultRow[];
   const scoreboard = doc.scoreboard ?? [];
+  // The selected optimizer's own declaration — a selector that never fits θ (CAPO) must not
+  // read as a cold ruler, so the column is absent, not merely blank.
+  const stampsTheta = doc.stamps_theta ?? false;
   // The selected arm's own matched floor: a round that held selected nobody and shows none.
   const selectedLabels = doc.selected_labels ?? [];
   const selected = (doc.candidate_scores ?? []).find((c) => selectedLabels.includes(c.label));
@@ -68,7 +71,9 @@ export function RoundFileView({ doc, raw }: Props) {
                   <th>Candidate</th>
                   <th>Accuracy</th>
                   <th>Composite</th>
-                  <th><Term content="Difficulty-adjusted Rasch ability on the cycle's fixed δ ruler — the metric the round winner is elected on, which is what explains a lower-accuracy winner. Empty outside the election fit, and for every row while the ruler is cold.">θ</Term></th>
+                  {stampsTheta && (
+                    <th><Term content="Difficulty-adjusted Rasch ability on the cycle's fixed δ ruler — the metric the round winner is elected on, which is what explains a lower-accuracy winner. Empty outside the election fit, and for every row while the ruler is cold.">θ</Term></th>
+                  )}
                   <th><Term content="The candidate's blocked lift over the parent on the cells both measured, with its 95% interval. An interval spanning 0 means the round could not separate them.">Lift vs parent</Term></th>
                   <th>Win</th>
                 </tr>
@@ -82,7 +87,7 @@ export function RoundFileView({ doc, raw }: Props) {
                     </td>
                     <td>{fmtPct1(s.accuracy)}</td>
                     <td>{fmtNum(s.composite_fitness)}</td>
-                    <td>{fmtSigned(s.theta, 3)}</td>
+                    {stampsTheta && <td>{fmtSigned(s.theta, 3)}</td>}
                     <td>{fmtLift(s.reference_lift, s.reference_lift_ci_lo, s.reference_lift_ci_hi)}</td>
                     <td>{s.is_selected ? <span className="pass">win</span> : ""}</td>
                   </tr>

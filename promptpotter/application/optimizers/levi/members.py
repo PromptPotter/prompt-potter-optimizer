@@ -22,9 +22,7 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
     GatingMode,
     record_decision,
 )
-from promptpotter.application.optimizers import nodes
-from promptpotter.application.optimizers.capo import operators as capo_operators
-from promptpotter.application.optimizers.capo.operators import ask, marked, unmarked, walk_rng
+from promptpotter.application.optimizers import nodes, paper_templates
 from promptpotter.application.optimizers.descriptors import (
     DescriptorFeature,
     behaviour_descriptor,
@@ -32,6 +30,7 @@ from promptpotter.application.optimizers.descriptors import (
 )
 from promptpotter.application.optimizers.levi import operators
 from promptpotter.application.optimizers.levi.state import LeviState, levi_state
+from promptpotter.application.optimizers.paper_templates import ask, marked, unmarked, walk_rng
 from promptpotter.domain.opt_search_point import OptSearchPoint, node_source
 from promptpotter.domain.optimizer_state import (
     LEVI_MANIFEST,
@@ -593,7 +592,7 @@ class LeviRuntime:
 
     def source_digest(self, *covered: ModuleType) -> str:
         # AST-normalized, so a comment or a reflow does not move it.
-        shaping = [m for m in (capo_operators, operators) if m not in covered]
+        shaping = [m for m in (paper_templates, operators) if m not in covered]
         tree = "".join(ast.dump(ast.parse(inspect.getsource(m))) for m in shaping)
         return hashlib.sha256(tree.encode("utf-8")).hexdigest()[:16]
 

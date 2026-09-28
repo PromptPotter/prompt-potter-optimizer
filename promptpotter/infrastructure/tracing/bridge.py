@@ -247,20 +247,20 @@ class ObservabilityBridge:
         self,
         tracing_campaign_id: str,
         *,
-        best_accuracy: float | None,
+        result_accuracy: float | None,
         n_l1_rounds: int,
         stop_reason: str,
-        best_round: int,
+        result_round: int,
     ) -> str | None:
         langfuse_trace_id: str | None = None
         with graceful("Bridge campaign end failed"):
             self.emit(
                 CampaignEnd(
                     campaign_id=tracing_campaign_id,
-                    best_accuracy=best_accuracy,
+                    result_accuracy=result_accuracy,
                     n_l1_rounds=n_l1_rounds,
                     stop_reason=stop_reason,
-                    best_round=best_round,
+                    result_round=result_round,
                 )
             )
             self.flush()

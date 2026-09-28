@@ -33,14 +33,14 @@ campaign_config:
     #
     # 21301 is C0's median `input + output` across `step_tokens` on this dataset+model, over the
     # 185 origin-labelled rows in the workspace archive; the panel's own median is 22035 over 861
-    # rows and its p90 is 45438. So the origin sits at ~1.0x and only GROWTH past it is charged.
-    # Half-weight and no knee, so a cell one token over the line is not punished. Re-pin it on any
+    # rows and its p90 is 45438. So the origin sits at ~1.0x and only GROWTH past it is charged,
+    # bounded as `justlogic-d234` states: never below 0.92x, no knee. Re-pin it on any
     # model change — it is a typed constant standing in for an origin-relative term. Census and
     # the recompute path: `docs/operations/dataset-selection-rationale.md` § What a cell costs.
     #
     # `per_cell` rather than folding it into `per_sample`: a correct-but-expensive answer must stay
     # a HIT, or L1 is sent to repair reasoning that was right.
-    per_cell: max(0.0, min(1.0, fitness * 21301.0 / (21301.0 + 0.5 * max(0.0, tokens - 21301.0))))
+    per_cell: fitness * (0.92 + 0.08 * 21301.0 / max(21301.0, tokens))
   # The judge schema — the answer step alone — keyed by the term the formula reads.
   #
   # The ANSWER step is `sealqa`, and using SealQA's own published auto-rater is the point: it is

@@ -209,8 +209,18 @@ export function CandidatesCard() {
         diagByLabel,
         overlapByCandidate,
         overlapSize: overlap?.sample_ids.length ?? null,
+        stampsTheta: dash?.stamps_theta ?? false,
       }),
-    [viewedNode, inflightByLabel, sampleSet, mask, diagByLabel, overlapByCandidate, overlap],
+    [
+      viewedNode,
+      inflightByLabel,
+      sampleSet,
+      mask,
+      diagByLabel,
+      overlapByCandidate,
+      overlap,
+      dash?.stamps_theta,
+    ],
   );
 
   const floorPinned = useMemo(
@@ -495,15 +505,19 @@ export function CandidatesCard() {
                 >
                   Compare this searchpoint
                 </MenuCheck>
-                <MenuSep />
-                <MenuCheck
-                  on={showTheta}
-                  onClick={() => setShowTheta((v) => !v)}
-                  title="Why a lower-accuracy candidate can win"
-                >
-                  How candidates are ranked
-                </MenuCheck>
-                {showTheta && (
+                {dash?.stamps_theta && (
+                  <>
+                    <MenuSep />
+                    <MenuCheck
+                      on={showTheta}
+                      onClick={() => setShowTheta((v) => !v)}
+                      title="Why a lower-accuracy candidate can win"
+                    >
+                      How candidates are ranked
+                    </MenuCheck>
+                  </>
+                )}
+                {dash?.stamps_theta && showTheta && (
                   <AbilityHelp
                     model={history.at(-1)?.ability?.calibration_model ?? null}
                     caveat={history.at(-1)?.ability?.caveat ?? null}

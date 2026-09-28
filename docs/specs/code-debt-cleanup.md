@@ -154,10 +154,6 @@ predicates, and later readers accept nothing else.
   (a display token) instead of `is_error_result`, and `domain/sample.py::Measurement` has no
   `error_category`, so a formula-failure row replays as a live answer and verify reads archived
   holes as measured. `grep -n 'predicted") == "ERROR"' promptpotter/infrastructure/store/measurement_archive.py`.
-- `presentation/terminal/completion.py::render_completion` takes the max raw subset accuracy as
-  "Best", a third derivation beside `best_round_on_shared_cells` and the composite high-water that
-  `CycleResult.best_round` names under `index.json`'s field name. `grep -n "r.accuracy), default=None"
-  promptpotter/presentation/terminal/completion.py`.
 
 **Shape 3 — an act or a reading lives in ONE adapter, so the entry points disagree.** The
 canonical mechanisms are ones an adapter may call, not the only path an act can take. Remedy:

@@ -614,15 +614,16 @@ async def run_walks(
     *,
     backfills: CatchUps | None = None,
     blocks: BlockRace | None = None,
-    on_turn: Callable[[int], None] | None = None,
+    on_turn: Callable[[int, int | None], None] | None = None,
     on_decided: Callable[[int], None] | None = None,
 ) -> None:
     """Drive a scoring phase: every walk measures at once, and they are taken and decided one at a
     time, in order, so every row, cut, prior and event lands where a serial phase lands it.
 
-    Only the walk whose TURN it is takes cells, answers a skip and is decided. ``on_turn(i)`` opens
-    its turn before its held launches are released; ``on_decided(i)`` runs once it is decided, before
-    the next turn opens. A ``None`` walk has nothing to measure and is decided on its turn.
+    Only the walk whose TURN it is takes cells, answers a skip and is decided. ``on_turn(i, block)``
+    opens its turn before its held launches are released — ``block`` the 0-based block it walks under
+    a block race, else ``None``; ``on_decided(i)`` runs once it is decided, before the next turn
+    opens. A ``None`` walk has nothing to measure and is decided on its turn.
 
     **Under a block race the turns cycle per block.** Each live walk in index order takes the block
     and hands the turn on; once all have, ``blocks.close`` decides them together on the rows they
@@ -711,7 +712,7 @@ async def run_walks(
             if (walk is None and block > 0) or (walk is not None and walk.outcome is not None):
                 continue
             if on_turn is not None:
-                on_turn(turn)
+                on_turn(turn, None if blocks is None else block)
             if walk is not None:
                 walk.release()
                 if walk.dataset:

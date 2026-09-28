@@ -9,7 +9,7 @@ import {
   layout,
   placeNodes,
 } from "../forest-layout";
-import { candidatesOf, nodeKeyOf } from "@/lib/derivations";
+import { candidatesOf, nodeKeyOf, nodeMetric, nodeOverlays } from "@/lib/derivations";
 
 
 function node(
@@ -30,6 +30,7 @@ function node(
     theta: null,
     theta_se: null,
   theta_caveat: null,
+    stamps_theta: false,
     evaluators: {},
     mean_fitness_ci_lo: null,
     mean_fitness_ci_hi: null,
@@ -410,5 +411,30 @@ describe("placeNodes", () => {
     );
     expect(candidatesOf(tree)).toHaveLength(2);
     expect(candidatesOf(tree).every((c) => c.kind === "candidate")).toBe(true);
+  });
+
+  it("a node heads with θ only where its own optimizer stamps one, campaign by campaign", () => {
+    const arm = (id: string, stamps: boolean): LineageNode =>
+      node({
+        kind: "candidate",
+        id,
+        label: "C1.1",
+        round: 1,
+        accuracy: 0.6,
+        theta: 0.8,
+        stamps_theta: stamps,
+      });
+    const potter = course("cycle_a", [arm("p", true)]);
+    const capo = course("cycle_b", [arm("q", false)], {
+      path: [{ campaign_id: "other", cycle_id: "cycle_b" }],
+    });
+    const { valueByKey, thetaByKey } = nodeOverlays([potter, capo], false);
+    const [p] = candidatesOf(potter);
+    const [q] = candidatesOf(capo);
+    expect(thetaByKey.get(nodeKeyOf(p!))).toBe(0.8);
+    expect(thetaByKey.get(nodeKeyOf(q!))).toBeNull();
+    expect(valueByKey.get(nodeKeyOf(q!))).toBe(0.6);
+    expect(nodeMetric("ability", p!.stamps_theta)).toBe("ability");
+    expect(nodeMetric("ability", q!.stamps_theta)).toBe("accuracy");
   });
 });

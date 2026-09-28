@@ -619,12 +619,17 @@ components:
         optimizer's selector before the round closes, keyed by LABEL because a
         resume re-mints candidate ids. θ stays on `round:complete`, which every
         close re-reads; only the selection never moves.
-      required: [round, fit, timestamp]
+      required: [round, fit, stamps_theta, timestamp]
       additionalProperties: false
       properties:
         round:
           type: integer
           minimum: 0
+        stamps_theta:
+          type: boolean
+          description: |
+            `RoundResult.stamps_theta` — whether the selector fits θ per arm at all.
+            False: θ is not a column of this round, never a cold ruler.
         selected_labels:
           type: array
           items: { type: string, minLength: 1 }

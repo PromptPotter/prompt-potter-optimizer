@@ -194,6 +194,7 @@ export interface RoundSummary {
   electable_count: number | null;
   verdict_reason: string | null;
   separable: boolean | null;
+  stamps_theta: boolean;
   candidates: RoundSummaryCandidate[];
   selection: number[];
   health: DegradationHealth | null;
@@ -497,6 +498,7 @@ export interface RoundResult {
   improved: boolean;
   p_value: number | null;
   verdict_reason: string | null;
+  stamps_theta: boolean;
   degraded_samples: number;
   not_attempted: number;
   unscored: number;
@@ -712,6 +714,7 @@ export interface LiveDashboardState {
   composite_fitness_formula: string | null;
   composite_fitness_weights: Record<string, number> | null;
   headline_metric: 'accuracy' | 'composite' | 'ability';
+  stamps_theta: boolean;
   degraded_count: number;
   error_count: number;
   backend_retry_count: number;
@@ -1609,6 +1612,12 @@ export interface LineageNode {
    * The other three caveats are properties of the round's scale and ride the
    * round's own reading. */
   theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
+  /** Whether the optimizer that elected this candidate's round fits theta per arm
+   * at all (`RoundResult.stamps_theta`, carried on the election). False:
+   * theta is not a column of this node, so a surface hides it rather than
+   * drawing a cold ruler's blank. False on a course and on a round that never
+   * elected. */
+  stamps_theta: boolean;
   /** The candidate's stored evaluator namespace — the measurement a `score:` lens
    * re-scores against. */
   evaluators: Record<string, number>;

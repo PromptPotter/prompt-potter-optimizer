@@ -127,11 +127,11 @@ class RoundEnd:
 @dataclass(frozen=True, slots=True)
 class CampaignEnd:
     campaign_id: str
-    best_accuracy: float | None
+    result_accuracy: float | None
     # Completed L1 rounds, origin-EXCLUSIVE (mirrors CycleResult.n_l1_rounds).
     n_l1_rounds: int
     stop_reason: str
-    best_round: int
+    result_round: int
 
 
 OptimizationEvent = Union[

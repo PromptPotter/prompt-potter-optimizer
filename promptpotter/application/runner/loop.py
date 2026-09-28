@@ -160,7 +160,7 @@ async def run_round_loop(
             # this the origin's ability lives only in memory: the file and the ledger keep the
             # cold value, and every non-live reader shows a θ-less C0 beside candidates that
             # have one.
-            cycle.absorb_round(round_result, round_num)
+            cycle.absorb_round(round_result)
             if ruler_was_cold and cycle.ruler is not None:
                 persist_round(cycle, cycle.origin_round, session, cb)
 

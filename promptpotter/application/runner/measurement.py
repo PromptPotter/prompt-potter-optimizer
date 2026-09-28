@@ -165,35 +165,29 @@ async def _lift_references(
     for ind in scored:
         for pid in ind.lineage.parent_ids:
             needed.setdefault(pid, set()).update(cells_of[ind.lineage.id])
-    configs = {
-        rr.opt_sp.lineage.id: (rr.opt_sp, rr.pipeline_params)
-        for rr in cycle.rounds
-        if rr.opt_sp is not None
-    }
-    configs.update(
-        (ind.lineage.id, (ind, params))
+    # This round's individuals are not banked yet; every earlier one is, in a closed round.
+    populated = {
+        ind.lineage.id: (ind, params)
         for ind, params in zip(population.individuals, population.pipeline_params, strict=True)
-    )
+    }
     demo = cycle.session.scoring.require_partition().demo
     references: dict[str, list[QueryMeasurement]] = {}
     for pid, sids in needed.items():
         if pid == bar_id:
             references[pid] = [r for r in parent_rows if int(r["sample_id"]) in sids]
             continue
-        if pid not in configs:
-            raise ValueError(
-                f"lift_reference 'parents': an arm names parent {pid}, which is neither in round "
-                f"{ctx.round_num}'s population nor any round's selected individual, so the bench "
-                "holds no configuration to re-measure it on the arm's cells"
-            )
-        osp, params = configs[pid]
-        walked = await score_search_point(
-            osp.to_job_search_point(
+        if pid in populated:
+            individual, params = populated[pid]
+            sp = individual.to_job_search_point(
                 base_pipeline_params=params,
                 schema=cycle.session.pipeline_schema,
                 framing=cycle.framing,
                 demo=demo,
-            ),
+            )
+        else:
+            sp = cycle.searchpoint(pid)
+        walked = await score_search_point(
+            sp,
             [s for s in panel.cells if int(s.id) in sids],
             cycle.session,
             label=MeasurementRole.PARENT,
@@ -302,7 +296,9 @@ async def _walk_population(
             walk.skip_at = skips.get(ids[idx])
         walks.append(walk)
 
-    def on_turn(idx: int) -> None:
+    blocks = race.blocks if race is not None else None
+
+    def on_turn(idx: int, block: int | None) -> None:
         if race is not None:
             race.open_turn(ids[idx], idx, n)
         # One call shared with the origin pass; the dashboard keeps the order as
@@ -316,6 +312,14 @@ async def _walk_population(
             sample_order=order,
             n_priors=race.n_priors if race is not None else 0,
             pipeline_overlay=proposals[idx].pipeline_overlay or None,
+            block=None
+            if block is None or blocks is None
+            else {
+                "n": block + 1,
+                "of": -(-len(order) // blocks.block_size),
+                "size": blocks.block_size,
+                "racing": sum(1 for w in walks if w is not None and w.outcome is None),
+            },
         )
 
     def on_decided(idx: int) -> None:
@@ -341,7 +345,7 @@ async def _walk_population(
         walks,
         cycle.session,
         backfills=race,
-        blocks=race.blocks if race is not None else None,
+        blocks=blocks,
         on_turn=on_turn,
         on_decided=on_decided,
     )

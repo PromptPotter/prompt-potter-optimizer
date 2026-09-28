@@ -29,7 +29,7 @@ campaign_config:
     # arithmetically invisible and reads exactly like a real finding, which is the one failure this
     # term exists to make impossible. It is enforced where it can be LOUD instead: the connector
     # warns per cell, and `required_observation_keys` raises at init if a dataset drops the mapping.
-    per_cell: max(0.0, min(1.0, fitness * 56844.0 / (56844.0 + 0.5 * max(0.0, tokens - 56844.0))))
+    per_cell: fitness * (0.92 + 0.08 * 56844.0 / max(56844.0, tokens))
   optimization:
     # ORIGIN ONLY. `max_rounds: 0` is the declared "measure round 0 and stop" — this campaign is
     # an INSTRUMENT CHECK, not a search: it answers whether the model lands mid-range on these

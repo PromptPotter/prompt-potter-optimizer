@@ -295,6 +295,10 @@ class RoundSummary(StrictModel):
     # arm's own bracket cannot answer this, so no surface may stand in for it with the leading
     # arm's.
     separable: bool | None = None
+    # The selected optimizer's own declaration (`Selector.stamps_theta`, mirrors
+    # `RoundResult.stamps_theta`) — whether `candidates[].theta` is a column that APPLIES here at
+    # all, never merely absent. A selector that fits no θ (CAPO) must not read as a cold ruler.
+    stamps_theta: bool = False
     candidates: list[RoundSummaryCandidate] = Field(default_factory=list)
     # Sample ids in measurement order; the longest candidate sequence carries the full series,
     # since PoBB truncates losers rather than the queue mechanism itself.

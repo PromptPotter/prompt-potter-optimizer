@@ -34,7 +34,7 @@ An optimizer's eliminator emits a per-sample standing for every candidate as a `
 | Channel | Path | Format |
 |---|---|---|
 | Live dashboard | `dashboard.json::current_round.racing` — `{member, current_id, n_samples, leader_prob, posterior_width, top}`, null before a reading | scalar floats + a top-5 list |
-| CLI / notebook | stdout, mirrored to `cycles/{cycle_id}/readout.log` | `pobb P(best) @ q14: *c042* 44.0%▲ \| c017 28.4%▼ \| …` |
+| CLI / notebook | stdout, mirrored to `cycles/{cycle_id}/readout.log` | `pobb P(best) @ q14: *c042* 44.0%▲ \| c017 28.4%▼ \| …`; a block race prints what each close decided instead — `block 1/4: 6 raced · outscored C1.3 (by 4) · 5 survive` |
 | Append-only stream | `cycles/{cycle_id}/.runtime/streams/round_NNNN_{member}.jsonl` | `{round, sample_idx, current_id, n_samples, p_best, p_best_delta}` |
 | Round digest | `log.md` § P(best) trajectory | per-candidate sparkline + final % |
 

@@ -423,12 +423,14 @@ function CandidateRow({
               ? "not measured yet"
               : "awaiting election";
 
-  const caveat = cand.theta_caveat;
+  // θ is a row only where this node's optimizer stamps one; elsewhere a blank reads as a cold ruler.
+  const caveat = cand.stamps_theta ? cand.theta_caveat : null;
   const lift = cand.reference_lift;
   const liftLo = cand.reference_lift_ci_lo;
   const liftHi = cand.reference_lift_ci_hi;
-  const stats: RowStat[] = [
-    {
+  const stats: RowStat[] = [];
+  if (cand.stamps_theta) {
+    stats.push({
       label: "Ability θ",
       value:
         cand.theta == null
@@ -436,16 +438,16 @@ function CandidateRow({
           : `${cand.theta.toFixed(2)}${cand.theta_se != null ? ` ± ${cand.theta_se.toFixed(2)}` : ""}`,
       sub: caveat ? "not ability — see below" : "what the round elects on",
       className: caveat ? "rowhover-tone-warn" : undefined,
-    },
-    {
-      label: "Accuracy",
-      value: fmtPct0(cand.accuracy),
-      sub:
-        cand.scored_samples != null
-          ? `${cand.scored_samples}${cand.expected_samples != null ? ` of ${cand.expected_samples}` : ""} scored`
-          : undefined,
-    },
-  ];
+    });
+  }
+  stats.push({
+    label: "Accuracy",
+    value: fmtPct0(cand.accuracy),
+    sub:
+      cand.scored_samples != null
+        ? `${cand.scored_samples}${cand.expected_samples != null ? ` of ${cand.expected_samples}` : ""} scored`
+        : undefined,
+  });
   if (lift != null) {
     stats.push({
       label: "Lift vs parent",

@@ -19,18 +19,18 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
     GatingMode,
     record_decision,
 )
-from promptpotter.application.optimizers import nodes
+from promptpotter.application.optimizers import nodes, paper_templates
 from promptpotter.application.optimizers.capo import operators
-from promptpotter.application.optimizers.capo.operators import (
+from promptpotter.application.optimizers.capo.operators import initial_population
+from promptpotter.application.optimizers.capo.state import CapoState, capo_state
+from promptpotter.application.optimizers.paper_templates import (
     ask,
     fill,
-    initial_population,
     marked,
     task_description,
     unmarked,
     walk_rng,
 )
-from promptpotter.application.optimizers.capo.state import CapoState, capo_state
 from promptpotter.application.scoring.candidate_report import fatal_validation_failures
 from promptpotter.domain.opt_search_point import IndividualLineage, OptSearchPoint, node_source
 from promptpotter.domain.optimizer_state import CAPO_MANIFEST
@@ -388,11 +388,18 @@ class PairedTRace:
         if signal is None or signal.check_name != self.node:
             return None
         cr = signal.check_result
+
+        def walk_order(pids: list[str]) -> list[str]:
+            return [label for pid, label in labels.items() if pid in pids]
+
         context: dict[str, Any] = {
             "gate": cr["gate"],
             "queries_scored": cr["queries_scored"],
             "total_queries": cr["total_samples"],
-            "n_priors": len(cr["raced_against"]),
+            # The close that decided the arm, and the arms still racing at it.
+            "block": -(-cr["queries_scored"] // self._block_size),
+            "blocks": -(-cr["total_samples"] // self._block_size),
+            "raced_against": walk_order(cr["raced_against"]),
         }
         if signal.outcome is not ArmOutcome.ELIMINATED:
             return context
@@ -415,7 +422,7 @@ class PairedTRace:
             data={"outscored_by": list(cr["outscored_by"])},
             round=self._round_num,
         )
-        context["outscored_by"] = [labels.get(pid, pid) for pid in cr["outscored_by"]]
+        context["outscored_by"] = walk_order(cr["outscored_by"])
         return context
 
     def admit(self, candidate_id: str, results: list[QueryMeasurement], sp: JobSearchPoint) -> None:
@@ -793,7 +800,7 @@ class CapoRuntime:
 
     def source_digest(self, *covered: ModuleType) -> str:
         # AST-normalized, so a comment or a reflow does not move it.
-        shaping = [m for m in (operators,) if m not in covered]
+        shaping = [m for m in (paper_templates, operators) if m not in covered]
         tree = "".join(ast.dump(ast.parse(inspect.getsource(m))) for m in shaping)
         return hashlib.sha256(tree.encode("utf-8")).hexdigest()[:16]
 

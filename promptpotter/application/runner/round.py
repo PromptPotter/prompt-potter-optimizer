@@ -181,6 +181,8 @@ def _round_result(
     measured: Measured,
     selection: Selection,
     pipeline_params: dict[str, Any] | None,
+    *,
+    stamps_theta: bool,
 ) -> RoundResult:
     # A held round's headline is the RETAINED parent re-scored on this panel — never
     # `tracking.current_*`, which unions rows DIFFERENT configurations measured.
@@ -235,6 +237,7 @@ def _round_result(
         improved=bool(winner_id),
         p_value=p_value,
         verdict_reason=selection.verdict_reason,
+        stamps_theta=stamps_theta,
         # Over the whole electable field, not the winner's own interval: the question is whether
         # THIS ROUND told the arms apart, and one arm's bracket cannot answer that.
         separable=_separability(ctx.round_num, [cs_by_id[cid] for cid in measured.electable]),
@@ -396,7 +399,12 @@ async def execute_round(
     emit_phase(callbacks.on_phase, CampaignPhase.SELECT, "enter", round=round_num)
     selection = plan.selector.select(ctx, measured, population)
     round_result = _round_result(
-        ctx, population, measured, selection, cycle.tracking.current_sp.pipeline_params
+        ctx,
+        population,
+        measured,
+        selection,
+        cycle.tracking.current_sp.pipeline_params,
+        stamps_theta=plan.selector.stamps_theta,
     )
     emit_phase(
         callbacks.on_phase,

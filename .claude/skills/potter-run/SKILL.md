@@ -150,7 +150,7 @@ Where a loader assigns `sample_id` each display line carries `#NNN` right after 
 `0.0s #042 MISS [ai]📖 -> 'unknown' gt:'disproved' q:'…'` — use it to refer to samples across runs.
 
 Finished cycle: `campaigns/<id>/log.md` (campaign digest, heatmap, final winner) and
-`cycles/<id>/index.json` (`best_accuracy`, `best_round`, `origin_accuracy`, `final.winner_*`,
+`cycles/<id>/index.json` (`best_accuracy`, `best_round`, `origin_accuracy`, `final.result_*`,
 `final.stop_reason` — its label, outcome class and the operator's NEXT STEP all come from the one
 `STOP_REASON_INFO` table, `promptpotter/domain/phases.py`, so the terminal, `log.md`, `review.md`
 and the browser all say the same thing; don't compose a different one here).

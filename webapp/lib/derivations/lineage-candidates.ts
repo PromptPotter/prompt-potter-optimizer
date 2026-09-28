@@ -136,7 +136,7 @@ export function nodeOverlays(
       const key = nodeKeyOf(cand);
       // Every node paints what IT measured, never the round's cumulative frontier.
       valueByKey.set(key, composite ? cand.composite_fitness : (cand.accuracy ?? null));
-      thetaByKey.set(key, cand.theta);
+      thetaByKey.set(key, cand.stamps_theta ? cand.theta : null);
     }
   }
   return { valueByKey, thetaByKey };

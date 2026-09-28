@@ -1,6 +1,6 @@
 """What LEVI's llm nodes send (arXiv 2605.09764 App. E.6, E.7): the paper's own templates filled
 from the manifest's ``resolved_prompts``. The sections the paper leaves unformatted are laid out
-here, and this module is what ``LeviRuntime.source_digest`` hashes beside CAPO's ``operators``."""
+here, and this module is what ``LeviRuntime.source_digest`` hashes beside ``paper_templates``."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.dispatch.bundle import fence_untrusted
-from promptpotter.application.optimizers.capo.operators import fill, task_description
+from promptpotter.application.optimizers.paper_templates import fill, task_description
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:

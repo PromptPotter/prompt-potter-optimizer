@@ -84,17 +84,13 @@ async def score_on_bench(
 async def bench_selection(
     cycle: Cycle, session: Session, *, origin: BenchPass, cb: RunCallbacks, spend: SpendRollup
 ) -> BenchScore:
-    """The selection is the composite high-water the export names — the optimizer's KEPT result,
-    graded here on rows it never read. Scored once where it is the origin itself."""
-    tracking = cycle.tracking
-    selected_sp = tracking.best_sp
+    """The selection is the pick the optimizer declared (``Cycle.selection``), graded here on rows
+    it never read. Scored once where it is the origin itself."""
+    picked, selected_sp = cycle.selection, cycle.selected_sp
     selected = (
         origin
-        if selected_sp is None
-        or selected_sp.sp_hash(session.pipeline_schema) == origin.reading.sp_hash
-        else await score_on_bench(
-            session, selected_sp, round_num=tracking.best_round, cb=cb, spend=spend
-        )
+        if selected_sp.sp_hash(session.pipeline_schema) == origin.reading.sp_hash
+        else await score_on_bench(session, selected_sp, round_num=picked.round, cb=cb, spend=spend)
     )
     paired = matched_parent_lift(selected.rows, origin.rows)
     score = BenchScore(

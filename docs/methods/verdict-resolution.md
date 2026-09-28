@@ -189,7 +189,9 @@ under every optimizer so a comparison of the two readings is one knob apart:
   added anything over its inputs. A crossover child is read against the BETTER of its parents on
   those cells: the bar it must clear to have gained over what it recombined, and a conservative
   one, since the better parent is picked on the same cells the lift is read on. An arm with no
-  parent has no reference.
+  parent has no reference. A parent is any individual a round measured — an archive elite no
+  round selected included — re-measured under the configuration its round banked
+  (`Cycle.searchpoint`).
 
 Neither value moves what an optimizer's selector reads: potter elects on θ against the round's
 best-so-far and CAPO keeps its population on its own length-penalised objective, whichever lift is

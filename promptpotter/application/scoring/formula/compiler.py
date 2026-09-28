@@ -376,6 +376,10 @@ def objective_namespace(result: dict[str, Any]) -> dict[str, Any]:
 
 _LABEL_TERM = "ground_truth"
 
+# The share of the composite a cell would score SOLVED that it keeps when missed, so a miss is
+# ranked by what it cost. Part of the grading function, so `auto_scorer_id` hashes it.
+MISS_COST_SHARE = 0.2
+
 
 def _refuse_label_formula(formula: str, names: frozenset[str], *, source: str) -> None:
     """A formula reading the LABEL, armed against a bank that has none, does not merely score
@@ -444,9 +448,18 @@ def compile_scorer(
         _refuse_label_formula(per_cell, composite.names, source="per_cell scoring formula")
 
     def _objective(result: dict[str, Any]) -> float:
-        query = str(result.get("query", "?"))[:80]
-        value = composite.evaluate(objective_namespace(result), f"query {query!r}")
-        return clamp_unit_score(value, formula=per_cell, subject=f"query {query!r}")
+        subject = f"query {str(result.get('query', '?'))[:80]!r}"
+        namespace = objective_namespace(result)
+        charged = clamp_unit_score(
+            composite.evaluate(namespace, subject), formula=per_cell, subject=subject
+        )
+        solved = clamp_unit_score(
+            composite.evaluate({**namespace, "fitness": 1.0}, subject),
+            formula=per_cell,
+            subject=subject,
+        )
+        # Written as a step from `charged`, so a solved cell returns its composite bit-for-bit.
+        return charged + MISS_COST_SHARE * (solved - charged)
 
     return CellScorer(fitness=_fitness, objective=_objective)
 
@@ -460,7 +473,7 @@ def auto_scorer_id(per_sample: str | None, per_cell: str | None) -> str:
     no composite keeps the id it already has."""
     if not per_sample:
         return DEFAULT_SCORER_ID
-    payload = f"{per_sample}\x1f{per_cell}" if per_cell else per_sample
+    payload = f"{per_sample}\x1f{per_cell}\x1f{MISS_COST_SHARE}" if per_cell else per_sample
     h = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:10]
     return f"auto_{h}"
 

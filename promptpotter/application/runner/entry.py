@@ -392,9 +392,10 @@ def _build_cycle_result(
     bench: BenchScore | None,
 ) -> CycleResult:
     """Assemble the terminal :class:`CycleResult`; ``cycle is None`` is the init-crash fallback, and
-    ``origin is None`` a stop inside origin scoring. Both ``winner_*`` read ``best_sp``, since
-    ``cycle.opt_sp`` is overwritten every round."""
-    best_sp = cycle.tracking.best_sp if cycle is not None else None
+    ``origin is None`` a stop inside origin scoring. Every ``result_*`` names ``Cycle.selection``,
+    the pick the optimizer declared and the bench grades."""
+    picked = cycle.selection if cycle is not None else None
+    picked_sp = cycle.selected_sp if cycle is not None else None
     # Round 0 is the reference the whole result is differenced against, carried beside it as
     # ``origin_accuracy`` / ``origin_level``. Counting it as a search result would credit the
     # outer loop with the floor it started from.
@@ -411,8 +412,8 @@ def _build_cycle_result(
     return CycleResult(
         rounds=cycle_rounds,
         n_l1_rounds=len(cycle_rounds),
-        result_accuracy=cycle.tracking.best_accuracy if cycle is not None else None,
-        result_round=cycle.tracking.best_round if cycle is not None else 0,
+        result_accuracy=picked.accuracy if picked is not None else None,
+        result_round=picked.round if picked is not None else 0,
         origin_accuracy=origin.report.accuracy if origin is not None else None,
         origin_composite_fitness=(
             cycle.origin_round.composite_fitness if cycle is not None else None
@@ -423,8 +424,8 @@ def _build_cycle_result(
         round_level_ses=[se for _, se in levels],
         # An unlimited `max_rounds` declares no budget, which is what this field's 0 means.
         round_budget=(cycle.config.optimization.max_rounds or 0) if cycle is not None else 0,
-        result_prompt_fields=best_sp.prompt_fields if best_sp else {},
-        result_pipeline_params=best_sp.pipeline_params if best_sp else None,
+        result_prompt_fields=picked_sp.prompt_fields if picked_sp else {},
+        result_pipeline_params=picked_sp.pipeline_params if picked_sp else None,
         stop_reason=stop_reason,
         started_at=started_at,
         finished_at=finished_at,
@@ -437,21 +438,6 @@ def _build_cycle_result(
     )
 
 
-def _winning_round(cycle: Cycle | None, result: CycleResult) -> RoundResult | None:
-    """The round the composite high-water names — **round 0 included**, because a campaign nothing
-    beat still has a winner and it is the origin. Read off ``cycle.rounds``, which holds round 0 at
-    index 0, rather than ``result.rounds``, which drops it: the origin is the reference the result
-    is differenced against, so counting it as a search result would credit the loop with its floor.
-
-    It is also the round whose ``prompt_fields`` round-trip. ``CycleResult.result_prompt_fields``
-    is the wire-side projection — it carries the rendered ``few_shot_block`` in place of the
-    ``shot_ids`` it came from, which ``from_prompt_fields`` cannot restore.
-    """
-    if cycle is None:
-        return None
-    return next((rr for rr in cycle.rounds if rr.round == result.result_round), None)
-
-
 def _export_artifact(
     session: Session,
     cycle_result: CycleResult,
@@ -459,11 +445,13 @@ def _export_artifact(
     *,
     formula: str | None,
 ) -> PromptExport | None:
-    """``None`` when no round ever closed: there is no measured prompt to hand a consumer, and an
-    artifact whose whole point is a fitness with provenance may not carry an unmeasured one."""
-    winner = _winning_round(cycle, cycle_result)
-    if cycle is None or winner is None:
+    """``None`` when no cycle started: there is no measured prompt to hand a consumer, and an
+    artifact whose whole point is a fitness with provenance may not carry an unmeasured one. The
+    round it projects is ``Cycle.selection``, whose ``prompt_fields`` round-trip where
+    ``result_prompt_fields`` — the wire side, shots rendered in place of their ids — cannot."""
+    if cycle is None:
         return None
+    winner = cycle.selection
     # `campaign.json` is the one owner of both — every other surface derives from it, and a
     # second copy here would be one more thing to re-sync.
     campaign = session.store.campaigns.load_campaign(session.campaign_id)
@@ -969,10 +957,10 @@ def _finalize_run(
             # a fitness handed to another program without its formula is a number, not a result.
             "scorer_cell_formula": round_formula,
             "mode": "diag" if diag else "full",
-            # Basis: the COMPOSITE-fitness high-water SP — the engine's adoption objective —
-            # which may name a different round than the index's top-level
-            # `best_accuracy`/`best_round`. "How good did it get" reads those top-level fields,
-            # so there is deliberately no accuracy scalar duplicated here.
+            # Basis: the pick the optimizer DECLARED (`Cycle.selection`), which may name a different
+            # round than the index's top-level `best_accuracy`/`best_round` — those read the rounds'
+            # shared cells, so no accuracy scalar is duplicated here.
+            "result_round": cycle_result.result_round,
             "result_prompt_fields": cycle_result.result_prompt_fields,
             "result_pipeline_params": cycle_result.result_pipeline_params,
             # The HEADLINE, on rows no optimizer node read; every basis above is the optimizer's.
@@ -1009,10 +997,10 @@ def _finalize_run(
     if obs:
         langfuse_trace_id = obs.end_campaign(
             session.state.tracing_campaign_id,
-            best_accuracy=cycle_result.result_accuracy,
+            result_accuracy=cycle_result.result_accuracy,
             n_l1_rounds=cycle_result.n_l1_rounds,
             stop_reason=stop_reason,
-            best_round=cycle_result.result_round,
+            result_round=cycle_result.result_round,
         )
     return langfuse_trace_id
 

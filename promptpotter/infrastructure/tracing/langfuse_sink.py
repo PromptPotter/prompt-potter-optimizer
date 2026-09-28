@@ -301,21 +301,21 @@ class LangfuseSink:
         trace_id = self._trace_ids.get(event.campaign_id)
         if not trace_id:
             return
-        if event.best_accuracy is not None:
+        if event.result_accuracy is not None:
             self._lf.create_score(
                 trace_id=trace_id,
-                name="best_accuracy",
-                value=event.best_accuracy,
-                comment=f"Best at round {event.best_round}, stop: {event.stop_reason}",
+                name="result_accuracy",
+                value=event.result_accuracy,
+                comment=f"Selected at round {event.result_round}, stop: {event.stop_reason}",
             )
         self._lf.update_trace(
             trace_id=trace_id,
             output={
-                "best_accuracy": event.best_accuracy,
+                "result_accuracy": event.result_accuracy,
                 "n_l1_rounds": event.n_l1_rounds,
                 "stop_reason": event.stop_reason,
             },
-            metadata={"stop_reason": event.stop_reason, "best_round": event.best_round},
+            metadata={"stop_reason": event.stop_reason, "result_round": event.result_round},
         )
         self._lf.end_trace(trace_id)
         self._persist()

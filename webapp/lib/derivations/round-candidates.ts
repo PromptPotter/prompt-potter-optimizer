@@ -39,6 +39,7 @@ function rowOf(
   idx: number,
   candidateId: string,
   source: CandidateSource,
+  stampsTheta: boolean,
 ): ElectedRow {
   return {
     key: `R${round}.${idx}`,
@@ -48,9 +49,11 @@ function rowOf(
     label: c.label,
     accuracy: c.accuracy,
     composite: c.composite_fitness,
-    theta: c.theta,
-    theta_se: c.theta_se,
-    thetaCaveat: c.theta_caveat,
+    // `null` outright where this campaign's selector never fits one — never a blank cell beside
+    // a column that does not apply (`RoundSummary.stamps_theta`).
+    theta: stampsTheta ? c.theta : null,
+    theta_se: stampsTheta ? c.theta_se : null,
+    thetaCaveat: stampsTheta ? c.theta_caveat : null,
     meanFitnessCiLo: c.mean_fitness_ci_lo,
     meanFitnessCiHi: c.mean_fitness_ci_hi,
     referenceAccuracy: c.reference_accuracy,
@@ -83,6 +86,7 @@ export function scoreboardRow(
 ): ElectedRow | null {
   const c = doc?.scoreboard.find((r) => r.candidate_id === candidateId);
   if (!c) return null;
+  const stampsTheta = doc?.stamps_theta ?? false;
   return {
     key: `R${round}.${idx}`,
     round,
@@ -91,9 +95,9 @@ export function scoreboardRow(
     label,
     accuracy: c.accuracy,
     composite: c.composite_fitness,
-    theta: c.theta,
-    theta_se: c.theta_se,
-    thetaCaveat: c.theta_caveat,
+    theta: stampsTheta ? c.theta : null,
+    theta_se: stampsTheta ? c.theta_se : null,
+    thetaCaveat: stampsTheta ? c.theta_caveat : null,
     meanFitnessCiLo: c.mean_fitness_ci_lo,
     meanFitnessCiHi: c.mean_fitness_ci_hi,
     referenceAccuracy: c.reference_accuracy,
@@ -121,15 +125,21 @@ export function roundCandidates(dash: DashboardSnapshot | null): ElectedRow[] {
     if (!roundHasCandidates(r)) continue;
     // A closed row keys on its LINEAGE id; positional only where the summary never stamped one.
     r.candidates.forEach((c, i) =>
-      out.push(rowOf(c, r.round, i, c.candidate_id || liveCandidateId(r.round, i), "history")),
+      out.push(
+        rowOf(c, r.round, i, c.candidate_id || liveCandidateId(r.round, i), "history", r.stamps_theta),
+      ),
     );
   }
 
   const liveRound = roundOf(dash);
   if (liveRound != null && !closedRoundNumbers(dash).has(liveRound)) {
-    // Positional: a row key, never a join key — live readers join on `label`.
+    // Positional: a row key, never a join key — live readers join on `label`. `stamps_theta` is
+    // campaign-constant (`LiveDashboardState.stamps_theta`), so the live round reads the same
+    // flag a closed one would.
     liveCandidates(dash).forEach((c, i) =>
-      out.push(rowOf(c, liveRound, i, liveCandidateId(liveRound, i), "inflight")),
+      out.push(
+        rowOf(c, liveRound, i, liveCandidateId(liveRound, i), "inflight", dash?.stamps_theta ?? false),
+      ),
     );
   }
 

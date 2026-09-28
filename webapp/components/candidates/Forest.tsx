@@ -5,6 +5,7 @@ import {
   fmtHeadlineValue,
   headlineMetricLabel,
   nodeKeyOf,
+  nodeMetric,
   type HeadlineMetric,
 } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
@@ -79,6 +80,8 @@ const CandidateNode = memo(function CandidateNode({
   d: Density;
 }) {
   const retiredBy = n.retiredBy;
+  const stampsTheta = n.node.stamps_theta;
+  const shown = nodeMetric(metric, stampsTheta);
   return (
     <g
       className={cx(
@@ -93,22 +96,22 @@ const CandidateNode = memo(function CandidateNode({
       )}
       {...pressable(() => onPick(n))}
       aria-pressed={selected}
-      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, ${invalidated ? "unknown — a setting was changed at or above this point" : `${headlineMetricLabel(metric)} ${fmtHeadlineValue(metric, accuracy, theta)}`}${n.isElected ? ", round winner" : ""}${ink ? ", a channel of the comparison" : ""}${retiredBy ? ", retired — the run branched away and continued elsewhere" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
+      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, ${invalidated ? "unknown — a setting was changed at or above this point" : `${headlineMetricLabel(shown)} ${fmtHeadlineValue(shown, accuracy, theta)}`}${n.isElected ? ", round winner" : ""}${ink ? ", a channel of the comparison" : ""}${retiredBy ? ", retired — the run branched away and continued elsewhere" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
       style={{ cursor: "pointer" }}
     >
       <title>
         {n.candidateLabel} ·{" "}
         {invalidated
           ? "unknown"
-          : fmtHeadlineValue(metric, accuracy, theta)}
-        {!invalidated && metric !== "ability" && typeof theta === "number"
+          : fmtHeadlineValue(shown, accuracy, theta)}
+        {!invalidated && shown !== "ability" && typeof theta === "number"
           ? ` · ability θ ${theta.toFixed(2)}`
           : ""}
         {invalidated
           ? "\na setting was changed here or above — nothing ran at that value, so this point's numbers describe a searchpoint it no longer is"
           : ""}
         {n.isElected
-          ? "\nround winner — elected on difficulty-adjusted ability θ, not raw accuracy"
+          ? `\nround winner${stampsTheta ? " — elected on difficulty-adjusted ability θ, not raw accuracy" : ""}`
           : n.isWinner
             ? "\nthe round's only arm — it advances without an election"
             : ""}
@@ -145,7 +148,7 @@ const CandidateNode = memo(function CandidateNode({
           className={cx("lineage-label", n.isWinner && "winner", selected && "selected")}
           style={ink ? { fill: ink } : undefined}
         >
-          {n.candidateLabel} {invalidated ? "?" : fmtHeadlineValue(metric, accuracy, theta)}
+          {n.candidateLabel} {invalidated ? "?" : fmtHeadlineValue(shown, accuracy, theta)}
         </text>
       )}
       <rect
@@ -347,6 +350,7 @@ export function Forest({
               const isDivergence = n.divergence !== null;
               const isDivergent = n.divergent;
               const ink = inkOf(n);
+              const shown = nodeMetric(metric, n.node.stamps_theta);
               return (
                 <g
                   key={`n-${n.courseKey}-${n.round}`}
@@ -383,7 +387,7 @@ export function Forest({
                       className="family-cladogram-roundlabel"
                       textAnchor="middle"
                     >
-                      R{n.round} {fmtHeadlineValue(metric, valOf(n), thetaOf(n))}
+                      R{n.round} {fmtHeadlineValue(shown, valOf(n), thetaOf(n))}
                     </text>
                   )}
                   {d.labels && rowLabelText && (
@@ -402,8 +406,8 @@ export function Forest({
                     </text>
                   )}
                   <title>
-                    {nodeCycleId} · R{n.round} · {fmtHeadlineValue(metric, valOf(n), thetaOf(n))}
-                    {metric !== "ability" && typeof thetaOf(n) === "number"
+                    {nodeCycleId} · R{n.round} · {fmtHeadlineValue(shown, valOf(n), thetaOf(n))}
+                    {shown !== "ability" && typeof thetaOf(n) === "number"
                       ? ` · ability θ ${thetaOf(n)!.toFixed(2)}`
                       : ""}
                     {n.candidateLabel ? `\n${n.candidateLabel}` : ""}

@@ -47,6 +47,10 @@ def fmt_individual_header(
     return f"  {label}/{total}  {body}"
 
 
+def _labels(labels: list[str], cap: int = 3) -> str:
+    return ", ".join(labels[:cap]) + (f" (+{len(labels) - cap})" if len(labels) > cap else "")
+
+
 @dataclass(frozen=True)
 class IndividualSummary:
     tag: str
@@ -142,6 +146,15 @@ def individual_summary_from_dict(
             f"{YELLOW}✂ eliminated {q}{RESET}  p_best={p_best:.1%} < eps={eps:.0%}  "
             f"vs {leader} {priors}"
         )
+    elif gate == "outscored":
+        # CAPO's own gate (`PairedTRace.gate`) — a different vocabulary from `EliminationGate`
+        # because it is a different optimizer's cut, never merged into that enum.
+        block = f"block {int(elim['block'])}/{int(elim['blocks'])}"
+        detail_lines.append(
+            f"{YELLOW}✂ outscored at {block} ({q}){RESET}  by {_labels(elim['outscored_by'])}"
+        )
+        raced = elim["raced_against"]
+        detail_lines.append(f"  raced against {len(raced)}: {_labels(raced, cap=5)}")
     elif outcome == ArmOutcome.BROKEN and degrad:
         dc = int(degrad.get("degraded_count", 0))
         ts = int(degrad.get("total_scored", 0))

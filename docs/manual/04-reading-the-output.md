@@ -127,7 +127,7 @@ Best config, provenance, and per-round digest all live under the campaign's dire
 
 A campaign stops when: round limit reached, perfect accuracy, or Ctrl+C. First Ctrl+C pauses: it saves everything already banked and exits 130, cancelling a sent call only where cancelling stops what it bills (`Connector.cancel_stops_billing`) and otherwise letting it land; second force-quits.
 
-After it **finishes**: best config in `index.json::final` (`result_prompt_fields` / `result_pipeline_params`); the same winner with its provenance, in the shape another program reads, in `export.json`; per-round digest in `log.md`; live state in `dashboard.json`. Open these directly; `evidence` is the one read VERB, because a comparison ACROSS subjects is in no single file. Ctrl+C is a pause, not a finish: it writes no `final` and no `finished_at`, which is what keeps the cycle resumable.
+After it **finishes**: the optimizer's declared pick in `index.json::final` (`result_round` / `result_prompt_fields` / `result_pipeline_params`); the same winner with its provenance, in the shape another program reads, in `export.json`; per-round digest in `log.md`; live state in `dashboard.json`. Open these directly; `evidence` is the one read VERB, because a comparison ACROSS subjects is in no single file. Ctrl+C is a pause, not a finish: it writes no `final` and no `finished_at`, which is what keeps the cycle resumable.
 
 ## Resuming and rewinding
 

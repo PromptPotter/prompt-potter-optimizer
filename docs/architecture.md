@@ -102,7 +102,10 @@ pool** for an optimizer whose individuals carry shots (`CampaignConfig.dataset_s
 the partition). **Every optimizer node sees the search pool alone** — the demo pool only as shot
 material — and no node ever sees the bench set. The bench scores each optimizer's result on the
 bench set with ONE evaluator, and that is the headline every surface serves and `export.json`
-reports. An optimizer's own selection decides what it KEEPS; it never grades what it kept.
+reports. An optimizer's own selection decides what it KEEPS; it never grades what it kept. **What
+the bench grades is the pick the optimizer DECLARED** — its selector's last selection, which the
+envelope carries as `selected_labels` and the `opt_sp` the round ended on — never one the bench
+makes by comparing rounds read on different rows.
 Why the two must be different rows: [`research/benchmarks.md`](research/benchmarks.md) § The
 winner's own number is biased upward.
 
@@ -939,9 +942,9 @@ the PR description.
     optimizer's selection). A cleanup cannot let a node read the bench set, serve an
     optimizer's own selection score as the headline, or fold the bench score into a
     selector — each lets an optimizer grade itself.
-  - **A cycle's "best" deliberately has two bases** — the optimizer's objective (potter's
-    winner choice and its L2/L3 stall comparator take the high-water of each round's own
-    `composite_fitness`) and the bench's headline on the bench set. The shared-cells
+  - **A cycle's "best" deliberately has two bases** — the optimizer's objective (its declared
+    pick, `Cycle.selection`; potter's L2/L3 stall comparator alone keeps the high-water of each
+    round's own `composite_fitness`) and the bench's headline on the bench set. The shared-cells
     `overlap` reading (`domain/results.py::best_round_on_shared_cells`, over
     `overlap_accuracy`) stays a round-level reading beside both. Forcing the two bases to
     agree would either make the deployed result stop optimizing the configured composite or

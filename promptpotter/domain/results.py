@@ -569,18 +569,11 @@ def is_floor_pinned(rows: Sequence[Mapping[str, Any]]) -> bool:
     Errored cells are excluded: they are absence, and ``graded_response`` raises on an unstamped
     row rather than reading it as a zero, so a 0.0 reaching here was really scored 0.0.
 
-    **It reads ``objective``, so it inherits one property of the per-cell formula: that the
-    composite is zero exactly where ``fitness`` is.** Every shipped ``per_cell`` SCALES
-    (``fitness * anchor / (anchor + penalty)``), so the product is zero iff the fitness is and this
-    reads the arm. A formula that instead SUBTRACTS a cost would clamp an expensive-but-correct
-    cell to 0.0 (``formula/compiler.py::clamp_unit_score``, which gates per-cell as well as
-    per-sample), and this would report an arm that answered everything right as having got
-    everything wrong; one that ADDS an unconditional bonus term breaks it the other way, staying
-    positive on a cell the arm failed and suppressing a caveat that should fire. Keep the composite
-    multiplicative in ``fitness``, or give this its own ``fitness``-keyed read.
+    Reads ``fitness``, never ``objective``: a ``per_cell`` composite charges a miss a share of its
+    cost (``formula/compiler.py::MISS_COST_SHARE``), so an all-miss arm's composite is not zero.
     """
-    graded = [r for r in rows if not is_error_result(r) and "objective" in r]
-    return bool(graded) and all(float(r["objective"] or 0.0) <= 0.0 for r in graded)
+    graded = [r for r in rows if not is_error_result(r) and "fitness" in r]
+    return bool(graded) and all(float(r["fitness"]) <= 0.0 for r in graded)
 
 
 def parent_key(rr: RoundResult) -> str:
@@ -779,6 +772,11 @@ class RoundResult(StrictModel):
     # operator's "why did THIS one win?" had no surface to answer it. `None` only before the
     # election runs.
     verdict_reason: str | None = None
+    # The selected optimizer's own declaration (`Selector.stamps_theta`) — whether `scoreboard`
+    # above carries a θ column at all. A selector that never fits θ (CAPO) must not leave every
+    # row's θ silently `None` for a display to render as "not yet computed"; this is the fact
+    # that tells a reader the column does not apply, ever, this campaign.
+    stamps_theta: bool = False
     degraded_samples: int = 0
     # Cells of the winner's panel never sent, copied from its ``ScoredCandidate``. Read by the
     # round's degradation verdict, which without it cannot tell a round that measured badly from

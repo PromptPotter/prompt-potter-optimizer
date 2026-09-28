@@ -158,7 +158,10 @@ LEDGER_BASELINE = {
     # +1: `optimizers/descriptors.py` — an arm's rows as a behaviour descriptor. The bench's rows,
     # read for any archive: no optimizer owns what a row reports, and a second archive-keeping
     # preset (GEPA's per-instance front) reads the same per-cell profile.
-    "modules": 381,
+    # +1: `optimizers/paper_templates.py` — the template fill, the call and the `<prompt>` markers
+    # every paper preset shares, out of CAPO's `operators.py` so LEVI stops importing CAPO. Each
+    # preset's `source_digest` hashes it beside its own operators, which is why it is a module.
+    "modules": 382,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     # +2: `application/optimizers/__init__.py` (the member registry) and its `potter/`, empty.
@@ -310,7 +313,11 @@ LEDGER_BASELINE = {
     # individual's 13) and its rounds without advance. The archive between rounds, re-seated off
     # the round document on resume; the statistics fold every arm ever offered, so no round's rows
     # re-derive them.
-    "cycle_result_fields": 291,
+    # +1: `RoundResult.stamps_theta` — the selected optimizer's own declaration
+    # (`Selector.stamps_theta`), mirrored onto the round document so the webapp's per-arm θ column
+    # can be ABSENT for a selector that never fits one (CAPO) rather than reading as a cold ruler.
+    # The terminal already read this off a phase event; the round document had no field for it.
+    "cycle_result_fields": 292,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
@@ -602,7 +609,10 @@ LEDGER_BASELINE = {
     # +1: a LEVI round walking the whole pool instead of its proxy, routing more than one call per
     # period to the large model, or keeping an elite by correctness over the campaign's objective
     # still selects a winner (test_numerics § 4).
-    "test_functions": 215,
+    # +1: a bench that picks its selection by comparing rounds' composites read on different rows
+    # grades the origin in place of the pick the optimizer declared, and serves lift 0 while every
+    # number renders (test_numerics § 4).
+    "test_functions": 216,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -700,7 +710,11 @@ LEDGER_BASELINE = {
     # +3: `GET /optimizers/{name}/knobs` (`OptimizerKnobsResponse`, `NodeKnobs`, `KnobRow`, 12) NET
     # of the deleted mechanism schema (9): one menu for every optimizer's node knobs replaces a
     # descriptor of two potter toggle groups.
-    "served_fields": 663,
+    # +1: `LineageNode.stamps_theta` — whether the optimizer that elected THIS node's round fits θ,
+    # read off its election record. `/tree` spans campaigns and optimizers, so the viewed cycle's
+    # `LiveDashboardState.stamps_theta` cannot answer for a node; `theta: null` already means "not
+    # fit yet", and a second meaning in that null is what drew CAPO nodes as a cold ruler.
+    "served_fields": 664,
 }
 
 

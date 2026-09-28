@@ -137,6 +137,7 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
     improved: false,
     // Never `false`, which asserts it measured cleanly and told nothing apart.
     separable: null,
+    stamps_theta: true,
     electable_count: 0,
     p_value: null,
     verdict_reason: null,
@@ -215,6 +216,7 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
     composite_fitness_formula: null,
     composite_fitness_weights: null,
     headline_metric: "accuracy",
+    stamps_theta: true,
     degraded_count: 0,
     error_count: 0,
     backend_retry_count: 0,
@@ -312,6 +314,7 @@ export function summaryRound(over: Partial<RoundSummary> = {}): RoundSummary {
     electable_count: null,
     verdict_reason: null,
     separable: null,
+    stamps_theta: true,
     candidates: [],
     selection: [],
     health: null,

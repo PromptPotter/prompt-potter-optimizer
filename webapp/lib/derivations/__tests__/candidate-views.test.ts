@@ -77,6 +77,7 @@ const EMPTY = {
   diagByLabel: new Map(),
   overlapByCandidate: new Map(),
   overlapSize: null,
+  stampsTheta: true,
 };
 
 const course = (kids: LineageNode[]) => node({ kind: "course", id: "c0", label: "root", children: kids });
@@ -93,6 +94,19 @@ describe("the half choice — tree unless it holds no measurement", () => {
     expect(views[0]?.accuracy).toBe(0.7);
     expect(views[0]?.theta).toBe(1.2);
     expect(views[0]?.source).toBe("history");
+  });
+
+  it("nulls θ outright when the selector never stamps one — never a bare blank cell", () => {
+    const views = candidateViews({
+      ...EMPTY,
+      stampsTheta: false,
+      viewedNode: course([
+        node({ kind: "candidate", id: "a", label: "C1.1", round: 1, accuracy: 0.7, theta: 1.2 }),
+      ]),
+    });
+    expect(views[0]?.theta).toBeNull();
+    expect(views[0]?.theta_se).toBeNull();
+    expect(views[0]?.thetaCaveat).toBeNull();
   });
 
   it("takes the WHOLE live row when the tree has nothing — never field by field", () => {

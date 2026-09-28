@@ -155,6 +155,13 @@ class LineageNode(StrictModel):
         "ability from the prior and every lift against it reads 0.000. The other three caveats "
         "are properties of the round's scale and ride the round's own reading.",
     )
+    stamps_theta: bool = Field(
+        default=False,
+        description="Whether the optimizer that elected this candidate's round fits theta per "
+        "arm at all (`RoundResult.stamps_theta`, carried on the election). False: theta is not a "
+        "column of this node, so a surface hides it rather than drawing a cold ruler's blank. "
+        "False on a course and on a round that never elected.",
+    )
     evaluators: dict[str, float] = Field(
         default_factory=dict,
         description="The candidate's stored evaluator namespace — the measurement a `score:` "
@@ -381,6 +388,7 @@ class _RoundFacts(NamedTuple):
 
     election_held: bool = False
     is_selected: bool = False
+    stamps_theta: bool = False
     theta: float | None = None
     theta_se: float | None = None
     theta_caveat: ThetaCaveat | None = None
@@ -417,6 +425,7 @@ def _round_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[s
         out[cand.candidate_id] = _RoundFacts(
             election_held=election is not None,
             is_selected=won,
+            stamps_theta=election is not None and election.stamps_theta,
             theta=ability.theta,
             theta_se=ability.theta_se,
             theta_caveat=ability.theta_caveat,
@@ -756,6 +765,7 @@ def _candidate_node(
         election_held=close.election_held,
         # A RETIRED candidate wears no crown — the branch re-asks that election.
         is_selected=close.is_selected and retired_by is None,
+        stamps_theta=close.stamps_theta,
         theta=close.theta,
         theta_se=close.theta_se,
         theta_caveat=close.theta_caveat,

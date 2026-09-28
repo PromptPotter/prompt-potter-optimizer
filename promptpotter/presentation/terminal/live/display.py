@@ -118,6 +118,12 @@ class LiveDisplay(Projection):
         self._round_best_label: str | None = None
         self._round_started_at: float | None = None
         self._standing_printed_for: str = ""
+        # A block race's round: arms racing per block, each block's decided arms (how many
+        # outscored each, `None` once settled), the arms headed. Empty on a round raced in turn.
+        self._block_racing: dict[int, int] = {}
+        self._block_decided: dict[int, list[tuple[str, int | None]]] = {}
+        self._blocks_of = 0
+        self._headed: set[int] = set()
         self._pending_calls: dict[str, int] = {}
         self._readout: Path | None = None
 
@@ -331,7 +337,11 @@ class LiveDisplay(Projection):
             self.on_sample_scored(ci, payload.get("result") or {}, qi, qt)
         elif ev == "candidate_started":
             self.on_candidate_started(
-                ci, ct, payload.get("changes_description") or "", payload.get("pipeline_overlay")
+                ci,
+                ct,
+                payload.get("changes_description") or "",
+                payload.get("pipeline_overlay"),
+                payload.get("block"),
             )
         elif ev == "candidate_scored":
             ctx = payload.get("phase_ctx")
@@ -435,8 +445,10 @@ class LiveDisplay(Projection):
     ) -> None:
         apply_race_standing(self._core, member, current_id, n_samples, p_best)
         STANDING_DISPLAY_MIN_SAMPLES = 8  # matches ``lock_in_n_min`` in pobb/checks.py
+        # A block race decides at its closes, and the summary names what each close cut.
         if (
-            current_id
+            not self._block_racing
+            and current_id
             and current_id != self._standing_printed_for
             and n_samples >= STANDING_DISPLAY_MIN_SAMPLES
         ):
@@ -461,7 +473,7 @@ class LiveDisplay(Projection):
             )
 
     def on_sample_order_preview(self, sample_order: list[int], n_priors: int) -> None:
-        if not sample_order:
+        if not sample_order or self._block_racing:
             return
         prior_s = "" if n_priors == 1 else "s"
         head = ", ".join(f"#{sid:03d}" for sid in sample_order[:3])
@@ -497,25 +509,52 @@ class LiveDisplay(Projection):
         member = self._core.race_member
         return f"{member} P(best) @ q{self._core.current_p_best_n}: " + " | ".join(parts)
 
+    def _render_block_lines(self) -> list[str]:
+        lines = []
+        for n, racing in sorted(self._block_racing.items()):
+            decided = self._block_decided.get(n, [])
+            cut = [f"{label} (by {by})" for label, by in decided if by is not None]
+            settled = " · settled" if len(cut) < len(decided) else ""
+            lines.append(
+                f"block {n}/{self._blocks_of}: {racing} raced · "
+                f"{'outscored ' + ', '.join(cut) if cut else 'none cut'} · "
+                f"{racing - len(cut)} survive{settled}"
+            )
+        return lines
+
     def on_candidate_started(
         self,
         idx: int,
         total: int,
         changes_description: str,
         pipeline_overlay: dict[str, Any] | None,
+        block: dict[str, int] | None = None,
     ) -> None:
-        self._write(
-            fmt_individual_header(
-                candidate_label(self._core.round_num, idx),
-                total,
-                changes_description,
-                pipeline_overlay,
-            )
-        )
+        label = candidate_label(self._core.round_num, idx)
+        if block is not None:
+            if block["n"] not in self._block_racing:
+                self._block_racing[block["n"]] = block["racing"]
+                self._blocks_of = block["of"]
+                self._write(
+                    f"  {DIM}▦ block {block['n']}/{block['of']} · {block['size']} cells · "
+                    f"{block['racing']} arms racing{RESET}"
+                )
+            # Named once per round; a later block only marks whose cells follow.
+            if idx in self._headed:
+                self._write(f"  {label}/{total}")
+                return
+            self._headed.add(idx)
+        self._write(fmt_individual_header(label, total, changes_description, pipeline_overlay))
 
     def on_candidate_scored(self, idx: int, total: int, scores: dict[str, Any]) -> None:
         w = 66
         label = scores.get("label") or candidate_label(self._core.round_num, idx)
+        elim = scores.get("elimination_context") or {}
+        if self._block_racing and "block" in elim:
+            outscored = elim.get("outscored_by")
+            self._block_decided.setdefault(int(elim["block"]), []).append(
+                (label, None if outscored is None else len(outscored))
+            )
         summary = individual_summary_from_dict(scores, unit=self.measured_unit)
 
         self._write(f"  {_box_top(f'{label}/{total}', summary.tag, width=w)}")
@@ -585,7 +624,9 @@ class LiveDisplay(Projection):
             }
         )
 
-        rn = self._core.round_num
+        # `round_result.round`, never `self._core.round_num` — the block race advances that
+        # counter toward the NEXT round before this round's own summary prints.
+        rn = round_result.round
         elapsed_label = ""
         if self._round_started_at is not None:
             elapsed = time.monotonic() - self._round_started_at
@@ -595,9 +636,13 @@ class LiveDisplay(Projection):
         self._write(_node_top(f"ROUND {rn} SUMMARY{elapsed_label}"))
         for line in render_progress_table(self.campaign_rounds).split("\n"):
             self._write(line)
-        if (p_best_line := self._render_p_best_line()) is not None:
+        if self._block_racing:
+            for line in self._render_block_lines():
+                self._write(_node_line(line))
+        elif (p_best_line := self._render_p_best_line()) is not None:
             self._write(_node_line(p_best_line))
         roll_p_best_at_round_complete(self._core)
+        self._block_racing, self._block_decided, self._headed = {}, {}, set()
         formula_short = self._phase_ctx.get("composite_fitness_formula_short")
         formula_full = self._phase_ctx.get("composite_fitness_formula")
         if formula_short or formula_full:

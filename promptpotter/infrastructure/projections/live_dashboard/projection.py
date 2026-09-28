@@ -279,6 +279,7 @@ class LiveDashboardProjection(Projection):
         seed_from_cycle_id: str | None = None,
         max_cells_in_flight: int | None = None,
         measured_unit: MeasuredUnit | None = None,
+        stamps_theta: bool = False,
     ) -> LiveDashboardProjection | None:
         """``seed_from_cycle_id`` names the cycle to read the prior dashboard from — a fork inherits
         the parent's trajectory up to the cut while counting its own copied round files."""
@@ -320,6 +321,9 @@ class LiveDashboardProjection(Projection):
             view.state.max_cells_in_flight = max_cells_in_flight
         if measured_unit is not None:
             view.state.measured_unit = measured_unit
+        # Campaign-constant, unlike the two above: the same selector runs every round, so this
+        # is never left at the resumed prior's stamp.
+        view.state.stamps_theta = stamps_theta
         return view
 
     def stamp_run_limits(self, limits: RunLimits) -> None:

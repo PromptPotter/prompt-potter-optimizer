@@ -45,10 +45,12 @@ from promptpotter.application.optimization.validators.l1_invariants import (
     detect_invariants,
 )
 from promptpotter.application.optimizer_manifest import bind_optimizer
-from promptpotter.application.optimizers.capo import operators as capo_operators
+from promptpotter.application.optimizers import paper_templates
 from promptpotter.application.optimizers.capo.state import CapoState, capo_state
 from promptpotter.application.optimizers.levi.state import LeviState
 from promptpotter.application.optimizers.nodes import Population, RoundContext
+from promptpotter.application.runner.bench import bench_selection, score_on_bench
+from promptpotter.application.runner.entry import _build_cycle_result
 from promptpotter.application.runner.measurement import measure_population
 from promptpotter.application.runner.round import execute_round, round_plan
 from promptpotter.application.scoring import query_loop
@@ -103,6 +105,7 @@ from promptpotter.domain.run_records import CandidateMintedRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import extract_item_label
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
+from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.wounds import ValidationFailure
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -277,6 +280,71 @@ def test_scorer_rejects_non_finite_instead_of_scoring_it_perfect() -> None:
 
     with pytest.raises(ScoringFormulaError, match="non-finite"):
         compile_round_scorer("accuracy")({"accuracy": float("nan")})
+
+
+def test_a_miss_is_charged_its_cost_and_a_solved_cell_scores_its_composite(monkeypatch) -> None:
+    """A ``per_cell`` composite scales correctness by a cost factor, so on its own every miss
+    scores 0.0 whatever it spent. A miss keeps ``MISS_COST_SHARE`` of what the same cell would
+    score solved; a solved cell scores exactly its composite; an errored row stays out.
+
+    Silent harm: θ reads a runaway miss level with a cheap one, so neither the election nor PoBB
+    ever charges an arm for the tokens it burns on the cells it fails. The shipped length charge
+    is bounded, so length never outranks accuracy: no miss beats a hit, a long 100% arm beats a
+    short 50% one."""
+    from promptpotter.application.scoring.formula import auto_scorer_id, compiler
+    from promptpotter.domain.results import is_floor_pinned
+
+    per_sample = "label_match(predicted, ground_truth)"
+    per_cell = "fitness * (0.92 + 0.08 * 692.0 / max(692.0, tokens))"
+
+    def cell(sid: int, predicted: str, tokens: int, **extra: Any) -> dict[str, Any]:
+        steps = {"solve": {"input": tokens, "output": 0}}
+        return {
+            "sample_id": sid,
+            "query": "q",
+            "predicted": predicted,
+            "ground_truth": "a",
+            "error": None,
+            "pipeline_data": {"step_tokens": steps},
+            **extra,
+        }
+
+    scorer = compile_scorer(per_sample, per_cell, verifier_graded=False)
+    rows = rescore_results(
+        [
+            cell(0, "a", 692),
+            cell(1, "a", 2076),
+            cell(2, "b", 692),
+            cell(3, "b", 2076),
+            cell(4, "b", 20760, error_category="SERVER"),
+        ],
+        scorer,
+    )
+    solved_cheap, solved_costly, miss_cheap, miss_costly, _ = (r["objective"] for r in rows)
+    assert solved_cheap == 1.0, "a solved cell moved off its composite"
+    assert solved_costly == pytest.approx(0.92 + 0.08 / 3)
+    assert miss_cheap == pytest.approx(compiler.MISS_COST_SHARE)
+    assert miss_costly == pytest.approx(compiler.MISS_COST_SHARE * solved_costly)
+    scored = compute_composite_fitness(rows, _single_node_schema())["composite_fitness"]
+    assert scored == pytest.approx((solved_cheap + solved_costly + miss_cheap + miss_costly) / 4)
+    # The 0% floor is a fact about correctness, which a charged miss no longer reads as zero.
+    assert is_floor_pinned(rows[2:4]) and not is_floor_pinned(rows[1:4])
+
+    def objectives(*cells: dict[str, Any]) -> list[float]:
+        return [r["objective"] for r in rescore_results(list(cells), scorer)]
+
+    solved = objectives(*(cell(i, "a", t) for i, t in enumerate((100, 692, 1000, 2076, 10**7))))
+    assert solved[0] == solved[1] and solved[1:] == sorted(set(solved[1:]), reverse=True)
+    costliest_hit, cheapest_miss = objectives(cell(0, "a", 10**7), cell(1, "b", 100))
+    assert costliest_hit > cheapest_miss, "length made a miss outscore a hit"
+    long_perfect = objectives(*(cell(i, "a", 10**6) for i in range(4)))
+    short_half = objectives(*(cell(i, "ab"[i % 2], 100) for i in range(4)))
+    assert sum(long_perfect) > sum(short_half), "length outranked a 2x accuracy gap"
+
+    # The share is half the grading function: a ruler must never pool grades across two of them.
+    before = auto_scorer_id(per_sample, per_cell)
+    monkeypatch.setattr(compiler, "MISS_COST_SHARE", 0.3)
+    assert auto_scorer_id(per_sample, per_cell) != before
 
 
 # 2. Composite fitness — what a score is made of
@@ -1498,6 +1566,10 @@ def _peer_cycle(
     optimizer: str,
     nodes: dict,
     solves: Callable[[str, Sample], bool],
+    *,
+    bench: int = 0,
+    origin_composite: float = 0.0,
+    **optimization: Any,
 ) -> Cycle:
     """A cycle of a peer ``optimizer`` over a sixteen-row bank, whose backend answers a cell right
     where ``solves(prompt, sample)`` says."""
@@ -1514,12 +1586,13 @@ def _peer_cycle(
         {
             "dataset_name": f"{optimizer}-e2e",
             "sp_budget_round": 12,
-            "dataset_split": {"bench": 0, "demo": 2},
+            "dataset_split": {"bench": bench, "demo": 2},
             "optimization": {
                 "optimizer": optimizer,
                 "degradation_threshold": 0.0,
                 "elimination_n_min": 2,
                 "nodes": nodes,
+                **optimization,
             },
         }
     )
@@ -1573,7 +1646,9 @@ def _peer_cycle(
     ]
     cycle = Cycle.start(
         origin,
-        scored_candidate(origin.lineage.id, label="C0", accuracy=0.0, composite_fitness=0.0),
+        scored_candidate(
+            origin.lineage.id, label="C0", accuracy=0.0, composite_fitness=origin_composite
+        ),
         schema=schema,
         framing=framing,
         origin_results=origin_rows,
@@ -1624,7 +1699,7 @@ def test_a_capo_round_races_its_population_beside_the_offspring_and_keeps_the_be
     # GOOD answers every cell, OK the even ones, anything else none.
     good_or_even = lambda prompt, s: "GOOD" in prompt or ("OK" in prompt and s.id % 2 == 0)  # noqa: E731
     cycle = _peer_cycle(built_stores, tmp_path, monkeypatch, "capo", nodes, good_or_even)
-    monkeypatch.setattr(capo_operators, "llm_call", _llm)
+    monkeypatch.setattr(paper_templates, "llm_call", _llm)
     session = cycle.session
     search = list(session.scoring.partition.search)
     callbacks = _QUIET_CALLBACKS
@@ -1653,7 +1728,7 @@ def test_a_capo_round_races_its_population_beside_the_offspring_and_keeps_the_be
     ]
     assert replay_all_mismatches(first, decisions) == [], "a resume re-derives both decisions"
 
-    cycle.absorb_round(first, 1)
+    cycle.absorb_round(first)
     second = asyncio.run(execute_round(cycle, 2, search, callbacks))  # type: ignore[arg-type]
     arms = [cs.candidate_id for cs in second.candidate_scores]
     assert set(arms[:3]) == members, "the kept population races again"
@@ -1672,6 +1747,68 @@ def test_a_capo_round_races_its_population_beside_the_offspring_and_keeps_the_be
     assert [ind.lineage.id for ind in resumed.population] == [ind.lineage.id for ind in carried]
 
 
+def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composite_round(
+    built_stores, tmp_path, monkeypatch
+) -> None:
+    """The bench grades the optimizer's LAST selection. C0's composite, read on its own rows, tops
+    the round CAPO selected in, read on others; a bench that picks by that cross-round comparison
+    grades the origin as the selection and serves a zero lift. Silent: every number renders."""
+
+    async def _llm(messages: list[dict], **_kw: Any) -> Any:
+        if "Create overall 15 prompts" in messages[0]["content"]:
+            return types.SimpleNamespace(content=json.dumps(["Solve it GOOD.", "Solve it OK."]))
+        return types.SimpleNamespace(content="<prompt>Solve it BAD.</prompt>")
+
+    nodes = {
+        "blocks": {"config": {"block_size": 4, "max_blocks": 2}},
+        "capo_crossover": {"config": {"crossovers": 1}},
+        "few_shot": {"config": {"k_max": 0}},
+        "paired_t": {"config": {"survivors": 2}},
+        "population": {"config": {"size": 2}},
+    }
+    solves = lambda prompt, s: "GOOD" in prompt or ("OK" in prompt and s.id % 2 == 0)  # noqa: E731
+    cycle = _peer_cycle(
+        built_stores, tmp_path, monkeypatch, "capo", nodes, solves, bench=4, origin_composite=0.9
+    )
+    monkeypatch.setattr(paper_templates, "llm_call", _llm)
+    session = cycle.session
+    search = list(session.scoring.require_partition().search)
+    picked = cycle.absorb_round(asyncio.run(execute_round(cycle, 1, search, _QUIET_CALLBACKS)))  # type: ignore[arg-type]
+    assert (
+        picked.selected_labels and picked.composite_fitness < cycle.origin_round.composite_fitness
+    )
+
+    spend = SpendRollup()
+    origin = cycle.origin_round.opt_sp
+    assert origin is not None
+    origin_pass = asyncio.run(
+        score_on_bench(
+            session,
+            cycle.searchpoint(origin.lineage.id),
+            round_num=0,
+            cb=_QUIET_CALLBACKS,  # type: ignore[arg-type]
+            spend=spend,
+        )
+    )
+    bench = asyncio.run(
+        bench_selection(cycle, session, origin=origin_pass, cb=_QUIET_CALLBACKS, spend=spend)  # type: ignore[arg-type]
+    )
+    assert (bench.selected.round, bench.selected.sp_hash) == (1, picked.selected_scores[0].sp_hash)
+    assert bench.lift == pytest.approx(1.0), "GOOD solves every bench row the origin misses"
+    result = _build_cycle_result(
+        cycle,
+        None,
+        session,
+        stop_reason=StopReason.MAX_ROUNDS,
+        cycle_error=None,
+        started_at="",
+        finished_at="",
+        spend=None,
+        bench=bench,
+    )
+    assert result.result_round == bench.selected.round, "the result names the round graded"
+
+
 def test_a_levi_run_calibrates_a_proxy_then_spends_one_large_call_per_period(
     built_stores, tmp_path, monkeypatch
 ) -> None:
@@ -1679,7 +1816,9 @@ def test_a_levi_run_calibrates_a_proxy_then_spends_one_large_call_per_period(
     the seeds and the origin on the whole pool and keeps a proxy that ranks them as the pool does;
     every later round walks exactly that proxy with `interval - 1` small-model refinements and one
     large-model paradigm shift, and the archive keeps each cell's best by the campaign's objective.
-    Silent if wrong: a round on the whole pool, or the wrong routing, still selects a winner."""
+    Under `lift_reference: parents` a child is read against an elite no round selected, resolved
+    off the round that measured it. Silent if wrong: a round on the whole pool, the wrong routing
+    or a parent re-measured under another configuration still selects a winner."""
     calls: list[tuple[str, str]] = []
 
     async def _llm(messages: list[dict], **kw: Any) -> Any:
@@ -1709,8 +1848,10 @@ def test_a_levi_run_calibrates_a_proxy_then_spends_one_large_call_per_period(
             or ("LOW" in prompt and s.id < 8)
         )
 
-    cycle = _peer_cycle(built_stores, tmp_path, monkeypatch, "levi", nodes, solves)
-    monkeypatch.setattr(capo_operators, "llm_call", _llm)
+    cycle = _peer_cycle(
+        built_stores, tmp_path, monkeypatch, "levi", nodes, solves, lift_reference="parents"
+    )
+    monkeypatch.setattr(paper_templates, "llm_call", _llm)
     session = cycle.session
     search = list(session.scoring.partition.search)
     origin_id = cycle.opt_sp.lineage.id
@@ -1751,7 +1892,7 @@ def test_a_levi_run_calibrates_a_proxy_then_spends_one_large_call_per_period(
         )
     ]
 
-    cycle.absorb_round(first, 1)
+    cycle.absorb_round(first)
     calls.clear()
     second = asyncio.run(execute_round(cycle, 2, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
     assert [node for node, _ in calls] == ["levi_refine"] * 2 + ["levi_paradigm_shift"], (
@@ -1776,6 +1917,18 @@ def test_a_levi_run_calibrates_a_proxy_then_spends_one_large_call_per_period(
         cs.candidate_id for cs in second.candidate_scores
     ]
     assert all(set(rec.parent_ids) <= elite_ids for rec in minted), "a parent from outside"
+    selected_ids = {rr.opt_sp.lineage.id for rr in cycle.rounds if rr.opt_sp is not None}
+    parents_of = {rec.candidate_id: set(rec.parent_ids) for rec in minted}
+    read = {cs.reference_id for cs in second.candidate_scores if cs.reference_id}
+    assert read - selected_ids, "no child read against an elite no round selected"
+    for cs in second.candidate_scores:
+        assert cs.reference_id in parents_of[cs.candidate_id], "read against its own parent"
+    for pid in read - selected_ids:
+        banked = {r["sample_key"]: r["fitness"] for r in first.all_candidate_results[pid]}
+        again = {r["sample_key"]: r["fitness"] for r in second.reference_results[pid]}
+        assert sorted(again) == sorted(proxy) and all(again[k] == banked[k] for k in again), (
+            "the elite re-measured on the child's cells as it was measured"
+        )
     shift = second.candidate_scores[-1]
     assert second.selected_labels == [shift.label], "the new family outscores every elite"
     kept = second.optimizer_state.payload
@@ -1796,36 +1949,22 @@ def test_a_levi_run_calibrates_a_proxy_then_spends_one_large_call_per_period(
 _DUMMY_SP = JobSearchPoint()
 
 
-def test_pobb_epsilon_is_graded_by_depth_not_scalar():
-    """A raised ε must not spend its aggression at ``n_min``, where ONE discordant sample already
-    drives ``p_best`` to ~0.2, NOR carry it into the tail, where cutting saves almost nothing. The
-    bar is ``epsilon_floor`` at both ends and the full ``epsilon`` in the middle, ramping over
-    ``n_min`` cells each side. Equal floor and ε — the default — leaves the bar flat.
+def test_pobb_epsilon_ramps_in_and_an_arm_behind_is_cut_to_the_last_cell():
+    """The ε bar is ``epsilon_floor`` at ``n_min``, ramps to ``epsilon`` over the next ``n_min``
+    cells and holds it to the panel's end; equal floor and ε — the manifest's — leaves it flat.
+    Past the ramp nothing reprieves an arm: one clearly behind two cells from the end is cut.
 
-    The ramp-OUT is the half that was missing: the bar sat at its maximum from ``2 * n_min`` until
-    the tail guard switched cutting off, so an arm deep in its budget faced the same bar as one
-    with the whole panel still to save. It lands on the floor exactly where the guard begins, so
-    the two meet instead of cliffing.
-
-    The ramp itself is what this pins. The DEPTHS below are a consequence of the dispersion rule
-    and moved by one sample when φ stopped being floored at a constant (`fit_theta_given_delta`):
-    an honest posterior is wider, so the near-tie dies at 9 rather than 8. Re-derive them, do not
-    restore them, if that rule changes again — and they were, when the ~0.2 the first paragraph
-    names stopped being something the bar rides out and became something `elimination_p_best`
-    refuses to claim. A one-cell verdict is now uncuttable at every depth, so the arm carrying the
-    ramp has to be one the pairs can actually speak about."""
+    Silent harm: a bar that sinks, or a guard that stops cutting, near the end of the panel keeps
+    measuring an arm its cells already ruled out, and PoBB then cuts only in a narrow early band.
+    The depths below come from the dispersion rule (`fit_theta_given_delta`) and from
+    `elimination_p_best` refusing a one-cell verdict; re-derive them if either changes."""
     cfg = pobb_knobs(epsilon=0.30, epsilon_floor=0.15)
     graded = PoBBCheck(cfg, n_min=6, n_samples=28, ruler=None)
     assert graded.epsilon_at(6) == pytest.approx(0.15)
     assert graded.epsilon_at(9) == pytest.approx(0.225)
     assert graded.epsilon_at(12) == pytest.approx(0.30)
-    # Clamped, never extrapolated: the ramp must not carry the bar ABOVE ε at any depth.
-    assert graded.epsilon_at(15) == pytest.approx(0.30)
-    assert max(graded.epsilon_at(n) for n in range(graded.n_min, 29)) == pytest.approx(0.30)
-    # …and back down to the floor as the remaining budget — all cutting can still save — runs out.
-    assert graded.epsilon_at(20) == pytest.approx(0.20)
-    # The last cuttable depth (`n_samples - n_min`) is where the guard takes over, at the floor.
-    assert graded.epsilon_at(22) == pytest.approx(0.15)
+    # Clamped, never extrapolated, and never lowered again before the last cell.
+    assert [graded.epsilon_at(n) for n in range(12, 29)] == [pytest.approx(0.30)] * 17
 
     flat = PoBBCheck(
         pobb_knobs(epsilon=0.30, epsilon_floor=0.30), n_min=6, n_samples=28, ruler=None
@@ -1841,11 +1980,9 @@ def test_pobb_epsilon_is_graded_by_depth_not_scalar():
         check.set_current("arm")
         return check.check(measurements([0.0] * misses + [1.0] * (n - misses)))
 
-    # One discordant loss is uncuttable at EVERY depth, not merely reprieved at the floor: a single
-    # adverse cell caps p_best at 0.25, above every bar this ramp reaches.
+    # A single adverse cell caps p_best at 0.25 (`sign_posterior`), so the ramp below it spares it.
     assert arm_behind_perfect_prior(6, 1) is None
     assert arm_behind_perfect_prior(9, 1) is None
-    assert arm_behind_perfect_prior(22, 1) is None
     cut = arm_behind_perfect_prior(9, 2)
     assert cut is not None
     # The bar that FIRED is what the decision archives — a reader must see the ramped 0.225 at
@@ -1853,6 +1990,9 @@ def test_pobb_epsilon_is_graded_by_depth_not_scalar():
     assert cut.check_result["epsilon"] == pytest.approx(0.225)
     # Two behind is still cut at the floor: the reprieve is for a width, not for a loser.
     assert arm_behind_perfect_prior(6, 2) is not None
+    late = arm_behind_perfect_prior(26, 4)
+    assert late is not None and late.outcome is ArmOutcome.ELIMINATED
+    assert late.check_result["epsilon"] == pytest.approx(0.30)
 
 
 def test_pobb_locks_in_dominant_leader():
@@ -1942,33 +2082,6 @@ async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
     # Leader honest mean 1/5; candidate 0/5 — gap small ⇒ p_best must stay ≥ ε=0.05.
     if sig is not None:
         assert sig.check_result["p_best"] >= 0.05
-
-
-def test_an_arm_in_the_last_n_min_cells_is_finished_not_discarded() -> None:
-    """`n_min` at BOTH ends: an arm may not be judged on fewer than that many cells, and may not
-    be discarded with fewer than that many left. Cutting in the tail saves almost nothing and
-    costs the comparison outright — `matched_parent_stats` needs EVERY cell the parent measured,
-    so an arm stopped one cell short is unrankable against the parent for the rest of the round.
-
-    Live on `justlogic-d234__8ada8e` r1: an arm was cut at q27 of 28 having paid 96% of its cost,
-    and the round then reported one readable arm and resolved nothing.
-
-    Silent harm: the arm's rows are still banked, so the round LOOKS measured — it simply has
-    nothing it can rank, and says so only in the `resolved nothing` line."""
-    cfg = pobb_knobs(epsilon=0.30)
-
-    def cut_at(n: int) -> object | None:
-        check = PoBBCheck(cfg, n_min=6, n_samples=28, ruler=None)
-        check.register_completed(measurements([1.0] * 28), candidate_id="winner", sp=_DUMMY_SP)
-        check.set_current("arm")
-        return check.check(measurements([0.0] * n))
-
-    # Hopeless arms in the BODY of the panel still die — the guard is a tail rule, not a reprieve.
-    assert cut_at(9) is not None
-    assert cut_at(22) is not None, "the last cut-eligible depth is n_samples - n_min"
-    # …and in the tail they are finished instead, however far behind they are.
-    assert cut_at(23) is None
-    assert cut_at(27) is None, "one cell short of the panel is the case this exists for"
 
 
 def test_a_collapse_cut_is_never_reported_as_an_epsilon_cut() -> None:
@@ -2380,8 +2493,17 @@ def test_the_paired_t_race_cuts_live_arms_together_at_each_block_on_the_rows_the
         (ArmOutcome.LOCKED_IN, 8),
         (ArmOutcome.ELIMINATED, 4),
     ]
-    outscored_bad = measured.scores[0].elimination_context["outscored_by"]
+    bad_ctx = measured.scores[0].elimination_context
+    outscored_bad = bad_ctx["outscored_by"]
     assert sorted(outscored_bad) == ["C1.2", "C1.3", "C1.4", "C1.5"]
+    # `elimination_context` IS the shape the terminal candidate box reads
+    # (`presentation/terminal/live/candidate.py`) to print the "outscored" line — a different
+    # vocabulary from potter's `EliminationGate`, never merged into that enum.
+    assert bad_ctx["gate"] == "outscored"
+    assert (bad_ctx["queries_scored"], bad_ctx["block"], bad_ctx["blocks"]) == (4, 1, 3)
+    assert bad_ctx["raced_against"] == ["C1.2", "C1.3", "C1.4", "C1.5"]
+    late_ctx = measured.scores[2].elimination_context
+    assert (late_ctx["block"], late_ctx["raced_against"]) == (2, ["C1.2", "C1.4"])
     for arm in arms:
         taken = [r["sample_id"] for r in measured.rows[arm.lineage.id]]
         assert taken == order[: len(taken)], "every arm walks the one shared order"

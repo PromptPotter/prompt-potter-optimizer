@@ -708,13 +708,7 @@ class ElectionRecord(StrictModel):
     it, and every live surface reads in that gap. Keyed by LABEL, like ``selected_labels`` and
     like ``LedgerRoundClose.abilities``, because a resume re-mints candidate ids.
 
-    ``selected_labels`` empty = the round HELD; round 0 selects the ``C0`` it adopted.
-
-    **θ and ``reference_*`` do NOT belong here, and the shape invites re-proposing both.** θ is
-    RESTAMPED when the ruler warms, so it stays on ``round:complete``, which every close re-reads;
-    only the crown never moves, and only the crown belongs on a record that does not replay.
-    ``reference_*`` is not merely unservable here but unwanted — nothing plots a floor on a
-    bar."""
+    ``selected_labels`` empty = the round HELD; round 0 selects the ``C0`` it adopted."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -722,6 +716,9 @@ class ElectionRecord(StrictModel):
     round: int
     selected_labels: list[str] = Field(default_factory=list)
     fit: dict[str, LedgerFit] = Field(default_factory=dict)
+    # `RoundResult.stamps_theta`: whether θ is a column of this round at all. Here, beside the
+    # θ it qualifies, so no reader takes a selector that fits none for a cold ruler.
+    stamps_theta: bool
     # In-memory-only carrier for the live ``RoundResult``, the ``PhaseRecord.live_round_result``
     # shape and rationale: the round's OWN readings (``overlap``, the verdict, the electable count,
     # separability) have no other live carrier, and the fat arrays already live in

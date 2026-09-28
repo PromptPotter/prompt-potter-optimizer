@@ -136,6 +136,7 @@ def build_round_summary(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> R
         electable_count=None if rr.round == 0 else rr.electable_count,
         verdict_reason=None if rr.round == 0 else rr.verdict_reason,
         separable=rr.separable,
+        stamps_theta=rr.stamps_theta,
         candidates=candidates,
         selection=selection,
         health=rr.health,

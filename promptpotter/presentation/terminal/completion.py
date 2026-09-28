@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import html
 import json
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
@@ -48,16 +48,12 @@ def render_completion(
         else f"{GREEN}{BOLD}OPTIMIZATION COMPLETE{RESET}"
     )
 
-    # The best round is derived here rather than taken as an argument: every caller computed the
-    # same `max` over `result.rounds`, and one of them keyed it off a `model_dump()` dict.
-    measured = [r for r in result.rounds if r.accuracy is not None]
-    best = max(measured, key=lambda r: cast("float", r.accuracy), default=None)
     headline = f"Rounds       {result.n_l1_rounds:<15d}"
-    if best is not None and best.accuracy is not None:
-        headline += f"Best         {best.accuracy:.1%} (round {best.round})"
+    if result.result_accuracy is not None:
+        headline += f"Selected     {result.result_accuracy:.1%} (round {result.result_round})"
     fields: list[str] = []
-    # First, because it is the headline: the selection graded on rows it never read. `Best` below
-    # is the optimizer's own reading on the rows that chose it.
+    # First, because it is the headline: the selection graded on rows it never read. `Selected`
+    # below is the optimizer's own reading on the rows that chose it.
     if (bench := result.bench) is not None:
         fields.append(f"Bench        {_bench_text(bench)}")
     fields += [headline, f"Stop reason  {result.stop_reason}"]

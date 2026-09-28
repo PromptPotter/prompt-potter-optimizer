@@ -3870,6 +3870,12 @@
             "title": "Sp Hash",
             "type": "string"
           },
+          "stamps_theta": {
+            "default": false,
+            "description": "Whether the optimizer that elected this candidate's round fits theta per arm at all (`RoundResult.stamps_theta`, carried on the election). False: theta is not a column of this node, so a surface hides it rather than drawing a cold ruler's blank. False on a course and on a round that never elected.",
+            "title": "Stamps Theta",
+            "type": "boolean"
+          },
           "status": {
             "default": "",
             "description": "Candidate: minted | measured | invalid — never 'winner' (that rides `is_selected`). `invalid` was rejected before it cost a sample, so it carries no accuracy: its stored 0.0 is synthetic and reads as getting every answer wrong. Course: `index.json::status`, the same StopReason value `/cycles` serves under this same name. Not `dashboard.json::state`, which names the fine-grained ACTIVITY phase — a different axis, and one word may not serve both.",

@@ -101,12 +101,6 @@ def _reading(
     )
 
 
-def _round_prompt(rr: RoundResult) -> dict[str, Any]:
-    return {f: rr.prompt_fields.get(f, "") for f in PROMPT_STRING_FIELDS} | {
-        "shot_ids": list(rr.prompt_fields.get("shot_ids", []))
-    }
-
-
 def _origin_round(
     opt_sp: OptSearchPoint,
     sp: JobSearchPoint,
@@ -115,6 +109,7 @@ def _origin_round(
     results: list[dict[str, Any]],
     ability: AbilityReading | None,
     optimizer_state: OptimizerState,
+    stamps_theta: bool,
 ) -> RoundResult:
     """C0's row IS what the scoring gateway produced, plus the two facts only a round close can
     add: its θ on the cycle's δ ruler, and a reference that is itself. Nothing re-derived."""
@@ -141,6 +136,7 @@ def _origin_round(
         # fabricated error rows: with the padding, these two were equal on every run.
         not_attempted=max(0, row.expected_samples - row.scored_samples),
         improved=False,
+        stamps_theta=stamps_theta,
         prompt_fields=prompt_fields,
         pipeline_params=sp.config_params,
         results=results,
@@ -299,20 +295,19 @@ def _cumulative_theta(
 
 @dataclass
 class CycleRoundState:
-    """Current/best searchpoint trajectory. The origin's own scalars are NOT here —
-    they are round 0's, read off ``Cycle.origin_round``."""
+    """Current searchpoint and the high-water marks potter's ladder reads. The origin's own
+    scalars are NOT here — they are round 0's, read off ``Cycle.origin_round``."""
 
     current_sp: JobSearchPoint | None = None
     # The high-water is taken on ``composite_fitness``; these two only record the rate of whichever
     # round won it, so ``None`` here is unmeasured and enters no comparison. The composite pair
-    # stays ``float`` — the stall ladder's PERSISTED ``l2_/l3_*_at_entry`` counters read it.
+    # stays ``float`` — the stall ladder's PERSISTED ``l2_/l3_*_at_entry`` counters read it. It
+    # compares rounds read on different rows, so it never names the result: ``Cycle.selection``.
     current_accuracy: float | None = None
     current_composite_fitness: float = 0.0
     current_results: list[dict[str, Any]] = field(default_factory=list)
     best_accuracy: float | None = None
     best_composite_fitness: float = 0.0
-    best_round: int = 0
-    best_sp: JobSearchPoint | None = None
     # Running-max ability θ of the cumulative frontier on the fixed ruler — the θ-space peer of
     # ``best_composite_fitness`` the L2/L3 stall ladder reads. None on a cold-started cycle, and
     # the ladder falls back to ``best_composite_fitness``.
@@ -432,6 +427,7 @@ class Cycle:
                     # a campaign paused before round 1 would otherwise hold nothing naming the
                     # optimizer it ran under.
                     optimizer_state=working_state.origin_state(selected),
+                    stamps_theta=selected.stamps_theta,
                 )
             ],
             tracking=CycleRoundState(
@@ -441,7 +437,6 @@ class Cycle:
                 current_results=origin_results or [],
                 best_accuracy=origin_accuracy,
                 best_composite_fitness=origin_report.composite_fitness,
-                best_sp=sp,
                 best_theta=origin_theta[0] if origin_theta is not None else None,
             ),
             opt_sp=opt_sp,
@@ -458,6 +453,50 @@ class Cycle:
     @property
     def optimizer(self) -> SelectedOptimizer:
         return select_optimizer(self.config.optimization)
+
+    @property
+    def selection(self) -> RoundResult:
+        """The optimizer's declared pick: the last round whose selector kept anybody, round 0
+        keeping the origin. The bench grades it and every result surface names it."""
+        return next(rr for rr in reversed(self.rounds) if rr.selected_labels)
+
+    @property
+    def selected_sp(self) -> JobSearchPoint:
+        picked = self.selection.opt_sp
+        assert picked is not None, "a closed round names the individual it ended on"
+        return self.searchpoint(picked.lineage.id)
+
+    def searchpoint(self, individual_id: str) -> JobSearchPoint:
+        """Any individual a closed round measured, as it was measured — off what each round document
+        banks: the individual it ended on with its params, and every arm's fields and params."""
+        schema = self.session.pipeline_schema
+        assert schema is not None, "a cycle is started under a pipeline_schema"
+
+        def built(individual: OptSearchPoint, params: dict[str, Any]) -> JobSearchPoint:
+            return individual.to_job_search_point(
+                base_pipeline_params=params,
+                schema=schema,
+                framing=self.framing,
+                demo=self.session.scoring.require_partition().demo,
+            )
+
+        for rr in reversed(self.rounds):
+            ended_on = rr.opt_sp
+            if ended_on and ended_on.lineage.id == individual_id and rr.pipeline_params is not None:
+                return built(ended_on, rr.pipeline_params)
+            for cs in rr.candidate_scores:
+                if cs.candidate_id != individual_id or cs.resolved_pipeline_params is None:
+                    continue
+                sp = built(
+                    OptSearchPoint.from_prompt_fields(cs.prompt_fields), cs.resolved_pipeline_params
+                )
+                if cs.sp_hash and sp.sp_hash(schema) != cs.sp_hash:
+                    raise ValueError(
+                        f"{cs.label}: its banked fields and params rebuild searchpoint "
+                        f"{sp.sp_hash(schema)}, not the {cs.sp_hash} its rows were measured under"
+                    )
+                return sp
+        raise KeyError(f"no closed round of this cycle measured individual {individual_id}")
 
     def cumulative_ability(self, results: list[dict[str, Any]]) -> AbilityReading | None:
         """The frontier's reading on THIS cycle's ruler. Bound here so a caller reading ability
@@ -480,6 +519,7 @@ class Cycle:
             results=list(parent.results),
             ability=self.origin_round.ability,
             optimizer_state=self.origin_round.optimizer_state,
+            stamps_theta=self.origin_round.stamps_theta,
         )
 
     def replay_priors(self, priors: list[RoundResult]) -> None:
@@ -523,31 +563,14 @@ class Cycle:
         origin_rr = self.rounds[0]
         tr.best_composite_fitness = origin_rr.composite_fitness
         tr.best_accuracy = origin_rr.accuracy
-        tr.best_round = origin_rr.round
         tr.best_theta = origin_rr.ability.theta if origin_rr.ability is not None else None
         tr.best_theta_se = origin_rr.ability.se if origin_rr.ability is not None else None
-        tr.best_sp = self.opt_sp.model_copy(update=_round_prompt(origin_rr)).to_job_search_point(
-            base_pipeline_params=origin_rr.pipeline_params,
-            schema=schema,
-            framing=self.framing,
-            demo=demo,
-        )
         acc_cum: list[dict[str, Any]] = []
         for rr in self.rounds:
             acc_cum = merge_known_outcomes(acc_cum, list(rr.results))
             if rr.composite_fitness > tr.best_composite_fitness:
                 tr.best_composite_fitness = rr.composite_fitness
                 tr.best_accuracy = rr.accuracy
-                tr.best_round = rr.round
-                # From THIS round's prompts, not `self.opt_sp` (pinned to the last prior above),
-                # or a resumed best≠last cycle pairs best params with last text.
-                best_opt_sp = self.opt_sp.model_copy(update=_round_prompt(rr))
-                tr.best_sp = best_opt_sp.to_job_search_point(
-                    base_pipeline_params=rr.pipeline_params,
-                    schema=schema,
-                    framing=self.framing,
-                    demo=demo,
-                )
             # Re-maxed here so a resumed cycle reconstructs exactly what a fresh
             # `absorb_round` held.
             tr.raise_best_theta(self.cumulative_ability(acc_cum))
@@ -660,11 +683,7 @@ class Cycle:
         ``working_state`` is the cycle's, so it carries across by not moving."""
         self.opt_sp = new_parent
 
-    def absorb_round(
-        self,
-        rr: RoundResult,
-        round_num: int,
-    ) -> RoundResult:
+    def absorb_round(self, rr: RoundResult) -> RoundResult:
         """Sole sink for a finished round; returns the round, stamped for ``save_round_file``."""
         schema = self.session.pipeline_schema
         tr = self.tracking
@@ -694,8 +713,6 @@ class Cycle:
         if tr.current_composite_fitness > tr.best_composite_fitness:
             tr.best_composite_fitness = tr.current_composite_fitness
             tr.best_accuracy = tr.current_accuracy
-            tr.best_round = round_num
-            tr.best_sp = tr.current_sp
         cur = self.cumulative_ability(tr.current_results)
         tr.raise_best_theta(cur)
 

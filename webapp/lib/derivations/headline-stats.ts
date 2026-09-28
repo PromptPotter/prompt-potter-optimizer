@@ -42,6 +42,12 @@ export function primaryMetric(
   return HEADLINE_METRICS.find((m) => metrics.has(m.id))?.id ?? "accuracy";
 }
 
+// θ heads a node only where its optimizer stamps one (`LineageNode.stamps_theta`); elsewhere the
+// node shows the accuracy it measured, never a blank that reads as a cold ruler.
+export function nodeMetric(metric: HeadlineMetric, stampsTheta: boolean): HeadlineMetric {
+  return metric === "ability" && !stampsTheta ? "accuracy" : metric;
+}
+
 export function fmtHeadlineValue(
   metric: HeadlineMetric,
   pct: number | null,

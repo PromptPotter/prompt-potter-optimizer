@@ -5,7 +5,7 @@ fork."""
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextvars import Token
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
@@ -106,6 +106,7 @@ def build_campaign_emitter(
         # phase event, so anything that waits for one is absent exactly when round 0 needs it.
         max_cells_in_flight=session.backend_client.max_cells_in_flight,
         measured_unit=session.backend_client.measured_unit,
+        stamps_theta=selected.stamps_theta,
     )
 
 
@@ -223,6 +224,7 @@ class RunCallbacks:
                 fit=_round_fit(round_result),
                 live_round_result=round_result,
                 selected_labels=list(round_result.selected_labels),
+                stamps_theta=round_result.stamps_theta,
             )
         )
 
@@ -326,6 +328,7 @@ class RunCallbacks:
         pipeline_overlay: dict[str, Any] | None,
         prompt_fields: dict[str, Any],
         resolved_pipeline_params: dict[str, Any] | None,
+        block: Mapping[str, int] | None = None,
     ) -> None:
         # `prompt_fields` + `pipeline_overlay` are the candidate's evolved searchpoint
         # (the seed-able half), surfaced live so the steer panel can fork from a
@@ -342,6 +345,7 @@ class RunCallbacks:
                 "pipeline_overlay": pipeline_overlay,
                 "prompt_fields": prompt_fields,
                 "resolved_pipeline_params": resolved_pipeline_params,
+                "block": None if block is None else dict(block),
             },
         )
 
@@ -356,6 +360,7 @@ class RunCallbacks:
         sample_order: Sequence[int],
         n_priors: int = 0,
         pipeline_overlay: dict[str, Any] | None = None,
+        block: Mapping[str, int] | None = None,
     ) -> None:
         """Everything a reader needs BEFORE an arm walks: WHAT it is, and WHICH cells it will walk.
 
@@ -363,6 +368,9 @@ class RunCallbacks:
         Composed by hand per site, a caller emits one of the two and its round silently loses its
         walk axis or its searchpoint; a third site that scores an arm calls this or goes dark the
         same way.
+
+        ``block`` is the turn's place in a block race — block ``n`` of ``of``, ``size`` cells,
+        ``racing`` arms live — so an arm announces once per block it walks.
 
         `rescore_parent` is deliberately NOT one: the parent occupies no slot in the round's
         population (`NO_ROUND_SLOT`), so it announces no candidate while still ticking samples."""
@@ -373,6 +381,7 @@ class RunCallbacks:
             pipeline_overlay,
             opt_sp.prompt_field_dict(),
             resolved_pipeline_params,
+            block,
         )
         self.on_sample_order_preview(
             round_num, idx, total, n_priors=n_priors, sample_order=list(sample_order)

@@ -16,10 +16,12 @@ campaign_config:
     # since the winning prompts grew +7%, +7%, +23% across three rounds while accuracy stayed flat.
     # Re-pin it on any model or origin change; it is a typed constant standing in for an
     # origin-relative term.
-    # Smooth by construction: no knee, so a cell one token over the line is not punished.
+    # BOUNDED: the length factor falls from 1.0 at the pin toward 0.92 and never below, so length
+    # can cost a cell at most 8% of its worth and accuracy dominates — the guarantee is
+    # `docs/concepts/scoring-and-memory.md` § Composite. Smooth, so no token is a cliff.
     # `per_cell` rather than folding it into `per_sample`: a correct-but-expensive answer must stay
     # a HIT, or L1 is sent to repair reasoning that was right.
-    per_cell: max(0.0, min(1.0, fitness * 692.0 / (692.0 + 0.5 * max(0.0, tokens - 692.0))))
+    per_cell: fitness * (0.92 + 0.08 * 692.0 / max(692.0, tokens))
   sp_budget_round: 34
   exclude_nodes: []
   pipeline_overlay: {}

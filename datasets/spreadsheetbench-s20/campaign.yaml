@@ -11,7 +11,7 @@ campaign_config:
     # median tokens per cell. A campaign scores under ONE composite for its whole life, so this pin
     # moves on the next cut of the panel or on a fork, never on a run already measuring against it.
     per_sample: max(0.0, min(1.0, env_reward))
-    per_cell: max(0.0, min(1.0, fitness * 56844.0 / (56844.0 + 0.5 * max(0.0, tokens - 56844.0))))
+    per_cell: fitness * (0.92 + 0.08 * 56844.0 / max(56844.0, tokens))
   optimization:
     max_rounds: 6
     degradation_threshold: 0.4

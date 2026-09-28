@@ -18,6 +18,7 @@ const round = (r: number, selection: number[]): RoundSummary =>
     electable_count: null,
     verdict_reason: null,
     separable: null,
+    stamps_theta: true,
     overlap: null,
     panel_precision: null,
     candidates: [],
