@@ -126,3 +126,8 @@ class BenchScore(StrictModel):
     )
     lift_ci_lo: float | None
     lift_ci_hi: float | None
+
+    def lift_per_usd(self, incurred_usd: float) -> float | None:
+        """The headline priced in what its cycle incurred, never billed: a replayed cell is billed
+        nothing, which would price arriving second rather than the search."""
+        return None if self.lift is None or incurred_usd <= 0.0 else self.lift / incurred_usd

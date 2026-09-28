@@ -4818,7 +4818,7 @@
       },
       "NestedPipelineRef": {
         "additionalProperties": false,
-        "description": "Which node of THIS pipeline runs another whole pipeline, and whose. Both halves are\nderived from ``inner_tasks.yaml``, never declared a second time. Null on an ordinary dataset.\n\nHere rather than in the router that used to declare it, because the CAMPAIGN resolution has to\ncarry it too and ``application/`` cannot import ``presentation/``. Its derivation lives beside\nthe resolution (``application/pipeline_resolve.py::nested_pipeline_ref``), which is what makes\nthe shape reachable from both doors without either owning the other.",
+        "description": "Which node of THIS pipeline runs another whole pipeline, and whose. Both halves are\nderived from ``inner_tasks.yaml``, never declared a second time. Null on an ordinary dataset.\n\nHere rather than in a router, because the CAMPAIGN resolution has to carry it too and\n``application/`` cannot import ``presentation/``. Its derivation lives beside\nthe resolution (``application/pipeline_resolve.py::nested_pipeline_ref``), which is what makes\nthe shape reachable from both doors without either owning the other.",
         "properties": {
           "dataset": {
             "description": "Slug of the pipeline that node runs; fetch it the same way.",

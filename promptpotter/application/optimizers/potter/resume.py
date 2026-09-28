@@ -46,9 +46,8 @@ POTTER_CHECKPOINT_GATING: dict[ResumeCheckpointKind, GatingMode] = {
     # one round's measurements — the counter bumps once per escalation *request*, resets
     # on every fire, and compares against the best-at-entry snapshot taken at the last
     # fire (`EscalationFSM.observe_l2_escalation`). A replayer is pure over
-    # `ReplayContext` (one round + the origin), so that fold is not expressible there;
-    # declaring these REPLAYED once forced a re-derivation on a substrate the loop never
-    # ran. Their scorer-dependence is entirely mediated by `improved`, hence by the round
+    # `ReplayContext` (one round + the origin), so that fold is not expressible there.
+    # Their scorer-dependence is entirely mediated by `improved`, hence by the round
     # measurements — which ARE replayed above, so a scorer change that would move a
     # trigger already shows up as a winner/cut divergence in the same round.
     PotterCheckpointKind.L2_ESCALATION_TRIGGER: GatingMode.ARCHIVAL,
@@ -60,9 +59,8 @@ def _replay_round_winner(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> str:
     """Re-derive the round winner through the SAME ``elect_round_winner`` the live scorer ran, against
-    the SAME parent — READ from the decision, never reconstructed. One shared rule is not enough
-    alone: it ranks each arm against the parent panel, and the three callers that each reconstructed
-    one reconstructed a different panel."""
+    the SAME parent — READ from the decision, never reconstructed: the rule ranks each arm against
+    the parent panel, so a reconstructed panel re-elects differently under an unchanged scorer."""
     parent = data.get("parent_cells")
     if parent is None:
         # Never fall back to a reconstruction — guessing quietly is the defect itself.
@@ -169,12 +167,9 @@ def round_packages(cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[st
 
     out: dict[int, dict[str, str]] = {}
     for k, rr in enumerate(rounds):
-        # ``max(k, 1)``, because ``replay_priors([])`` is a pure NO-OP — it returns before
-        # touching anything — so k=0 would inherit whatever trajectory the caller walked in
-        # with, i.e. the full one, and round 0's fingerprint would then move whenever a LATER
-        # round was repaired. Round 0 IS the origin, so the state before it is the origin's:
-        # seed from that. Every round's state is now set here, which is why no caller
-        # pre-replays.
+        # ``max(k, 1)``: ``replay_priors([])`` is a NO-OP, so k=0 would inherit the caller's
+        # full trajectory and round 0's fingerprint would move whenever a LATER round was
+        # repaired. Round 0 IS the origin, so the state before it is the origin's.
         cycle.replay_priors(rounds[: max(k, 1)])
         state = potter_state(cycle.working_state)
         out[rr.round] = node_packages(build_bundle(cycle, state, latest_round=rr))
@@ -200,7 +195,7 @@ async def rederive_critiques(
                 continue
             cycle.rounds = [p for p in saved if p.round < rr.round]
             # `emit_token_usage` stamps from this ContextVar, which outside the round loop
-            # still holds whatever the last round set — so the cost landed on other books.
+            # still holds whatever the last round set.
             token = set_current_round(rr.round)
             try:
                 with graceful(f"round {rr.round} critique re-derivation failed"):

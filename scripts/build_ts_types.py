@@ -598,13 +598,8 @@ def _emit_stop_reason_tables() -> str:
 
 
 def _emit_abort_lens_labels() -> str:
-    """Emit ``ABORT_LENS_LABELS`` (``pobb/checks.py``) as the browser's abort-lens picklist.
-
-    Hand-authored twice before — ``CandidatesCard::LENS_OPTIONS`` and ``lib/lineage::LENS_LABELS``
-    — three members each against the four the API edge accepts, with two different words for the
-    ε one. Emitting it in ORDER matters: this is a picklist, and the dict's order is the order the
-    operator reads.
-    """
+    """Emit ``ABORT_LENS_LABELS`` (``pobb/checks.py``) as the browser's abort-lens picklist, IN
+    ORDER: the dict's order is the order the operator reads."""
     from promptpotter.application.optimizers.potter.pobb.checks import ABORT_LENS_LABELS
 
     rows = "\n".join(f"  {variant!r}: {label!r}," for variant, label in ABORT_LENS_LABELS.items())

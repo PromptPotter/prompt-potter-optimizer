@@ -44,7 +44,7 @@ def _compute_accuracy(results: list[QueryMeasurement]) -> dict[str, Any]:
     # and a second `is_error_result` pass is a second place for them to stop doing so.
     errors = len(results) - deprecated - total
     # Same filter behind the mean — `compute_accuracy` calls `scoreable_rows` too, so `total` and
-    # `accuracy` can no longer describe different populations.
+    # `accuracy` describe one population.
     accuracy = compute_accuracy(results=results)
     return {
         "total": total,

@@ -110,7 +110,7 @@ invariants:
   I8_floor_named:     'A rendered Δ NAMES which floor it cleared, and the two floors are not
                       interchangeable. ORIGIN is C0 — the campaign root, or a fork''s branch
                       point: `origin_accuracy` on the campaign index (ForestRows, PanelCellRow,
-                      DatasetPickList, CandidatesCard), `ability_delta` (headline-stats,
+                      DatasetPickList, CandidatesCard), `bench_score.lift` (headline-stats,
                       run-summary), and run_card.flips'' per-sample rows. PARENT is the round''s
                       own floor — the origin at round 0, the prior winner after: every
                       `reference_*` field, wherever it surfaces (the searchpoint drill-in,

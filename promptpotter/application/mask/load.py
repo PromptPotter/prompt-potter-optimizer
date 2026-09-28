@@ -148,12 +148,9 @@ def _parent(
     """The bar this round's arms were held to, read under the same mask they were.
 
     Unmasked it is *carried* — round ``N-1``'s elected winner, whose stored evaluators ARE the
-    record. Under a SAMPLE-SET mask it is not, and the gap was silent: ``_candidates`` re-derives
-    every arm's row-derivable evaluators on the selected cells while the carried scalars stay at
-    their full-set values, so every challenger moves and the bar it must clear does not. A round
-    could flip for no reason but the mask's asymmetry, and it renders exactly like a real
-    divergence. Re-derived from ``reference_results`` — the parent's own rows on THIS round's
-    subset — instead.
+    record. Under a SAMPLE-SET mask ``_candidates`` re-derives every arm on the selected cells, so
+    a carried full-set bar would flip rounds on the mask's asymmetry alone. Re-derived from
+    ``reference_results`` — the parent's own rows on THIS round's subset — instead.
 
     A round with no such rows cannot answer on a subset at all — round 0 has no parent — and nor
     can one whose arms were read against several individuals (``lift_reference: parents``), which

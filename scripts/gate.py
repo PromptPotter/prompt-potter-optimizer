@@ -1,17 +1,13 @@
 """Every check CI runs, in one invocation — the single declaration of the gate.
 
-The list used to exist four times and agree nowhere: root ``CLAUDE.md`` named
-five tools, the PR template a sixth combination, ``.githooks/pre-commit`` a
-different five, and ``ci.yml`` fourteen. The layering guard, the three
-generated-surface diffs, the webapp tests, the anti-rot scan and the deploy
-build appeared in no local command at all, so "green locally, red in `main`"
-was structural rather than careless. All four are callers of this file now.
+Root ``CLAUDE.md``, the PR template, ``.githooks/pre-commit`` and ``ci.yml`` are all
+callers of this file, so no check runs in one of them and not at the desk.
 
 Two properties the shape buys, neither of them speed:
 
-- **Nothing masks anything.** GitHub steps fail-fast, so a red ``ruff`` hid the
-  other eight results and each fix cost another full push. Every selected check
-  runs here, always, and the verdict names all of them.
+- **Nothing masks anything.** GitHub steps fail-fast, so a red ``ruff`` would hide
+  the other results. Every selected check runs here, always, and the verdict names
+  all of them.
 - **The tools run from the already-resolved interpreter** (``sys.executable -m``),
   so the ~3.5s ``uv run`` toll is paid once for the whole gate instead of once
   per tool, and the independent checks run concurrently.
@@ -146,8 +142,8 @@ def _scan(
     comment pointing at one would hide a real violation beside it.
 
     Split on ``\\n`` rather than ``splitlines()``, which also breaks on five of the characters
-    ``_CONTROL_CHAR`` hunts — a needle matching one of those consumed it as a line terminator and
-    never saw it. ``read_text`` already translates newlines, so the two agree everywhere else.
+    ``_CONTROL_CHAR`` hunts and would consume them as line terminators. ``read_text`` already
+    translates newlines, so the two agree everywhere else.
     """
     hits = []
     for path in files:
@@ -576,10 +572,9 @@ _PINNED_EXTRAS = ("stats", "dev", "api", "harbor")
 def _reexec_pinned() -> None:
     """The gate picks its own interpreter, because a verdict must not depend on the caller.
 
-    Launched from the system Python instead of the locked environment, ``mypy`` resolved
-    different stubs and reported two errors that do not exist under ``uv.lock`` — a green
-    CI and a red desk, from the same commit and the same command. Only the Python half
-    needs it: the webapp checks shell out to node, and CI's `webapp` job has no uv.
+    Launched from another interpreter, ``mypy`` resolves different stubs than ``uv.lock`` pins,
+    so one commit reads green in CI and red at the desk. Only the Python half needs it: the
+    webapp checks shell out to node, and CI's `webapp` job has no uv.
     """
     if Path(sys.prefix) == _PINNED or os.environ.get(_REEXEC):
         return

@@ -575,16 +575,12 @@ async def _measure_inner_cell(
         rnd = dash.get("round")
         best = dash.get("best")
         max_rounds = (dash.get("run_limits") or {}).get("max_rounds")
-        # The SERVED ``ability_delta``, the same number the webapp headline reads, so the two
-        # surfaces cannot disagree. It is LOGITS, not a fraction — printed as `%` it read
-        # `Δ+19%` off a cell whose ability never moved.
-        delta = dash.get("ability_delta")
-        if isinstance(delta, int | float) and isinstance(best, int | float):
-            lift = f"Δθ{delta:+.2f} (best measured {best:.0%})"
-        elif isinstance(best, int | float):
-            lift = f"best measured {best:.0%}"
-        else:
-            lift = "best —"
+        # The SERVED bench lift, the webapp's headline too, once the inner pass has graded its
+        # pick; until then only the inner optimizer's own search-pool reading exists.
+        bench = (dash.get("bench_score") or {}).get("lift")
+        lift = f"best measured {best:.0%}" if isinstance(best, int | float) else "best —"
+        if isinstance(bench, int | float):
+            lift += f" · bench lift {bench:+.3f}"
         return f"inner r{rnd if rnd is not None else '?'}/{max_rounds or '?'} · {lift}"
 
     # Awaiting `inner_task` DIRECTLY makes it this coroutine's `_fut_waiter`, so the envelope's

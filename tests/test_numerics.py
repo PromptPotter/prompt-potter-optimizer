@@ -3304,8 +3304,7 @@ def test_parents_lift_reads_a_crossover_against_its_better_parent_on_its_own_cel
 
     # Every child of the parent invalid, so each reads it on no cell: the parent's rows are banked
     # whole even so — LEVI's archive keeps the parent itself, and its next round and a resume read
-    # them back. Banked on the children's cells, they were none, and LEVI's proxy replay raised.
-    # With no arm scored at all, none reads it, and it is banked the same.
+    # them back. With no arm scored at all, none reads it, and it is banked the same.
     seed = OptSearchPoint.derive([best], source="levi:levi_paradigm_shift", instruction="s")
     for arm_rows, arms in (({seed.lineage.id: []}, [seed]), ({}, [])):
         _, alone = asyncio.run(

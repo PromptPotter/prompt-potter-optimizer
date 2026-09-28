@@ -56,8 +56,7 @@ export interface CandidateViewsInput {
   overlapByCandidate: ReadonlyMap<string, OverlapMember>;
   // The denominator a member must match to be readable.
   overlapSize: number | null;
-  // The selected optimizer's own declaration (`LiveDashboardState.stamps_theta`) — a selector
-  // that never fits θ (CAPO) must not read as a cold ruler.
+  // `LiveDashboardState.stamps_theta`.
   stampsTheta: boolean;
 }
 

@@ -201,9 +201,8 @@ def test_sp_hash_is_not_recoverable_from_the_stripped_config() -> None:
 def test_an_l4_override_moves_the_prompt_and_hash_of_every_preset() -> None:
     """A layout-only L4 edit changes which evidence a node sees, so it must move
     that node's ``optimizer_prompt_hash`` — otherwise cross-cycle audits joining
-    on the hash silently pool layout-differing inner cycles (run b786e9: C1.3's
-    inner campaigns stamped the origin's hash). Prose-hash behavior is untouched:
-    no override → identical hashes.
+    on the hash silently pool layout-differing inner cycles. Prose-hash behavior is
+    untouched: no override → identical hashes.
 
     A paper preset's prompt-field edit must reach the request it sends: an inner cell under a
     mutated CAPO prompt otherwise re-measures the parent under the arm's own id and hash."""
@@ -1290,10 +1289,10 @@ def _drawn_row(sample: Sample, session: Any, predicted: str) -> dict[str, Any]:
 
 def test_concurrent_walks_on_one_run_buy_each_cell_once(tmp_path: Path, monkeypatch) -> None:
     """Processes walking one configuration over one panel — four campaigns scoring the same origin —
-    must measure each cell ONCE, every other walk replaying that row. Each read its replay rows
-    when it opened, so each paid for every cell another reached first; the backend is not
-    deterministic, the run log keeps the last row per sample, and all but one walk's headline
-    could no longer be reproduced from the run_id it names. ``b`` trails ``a`` on their shared run
+    must measure each cell ONCE, every other walk replaying that row. Otherwise each pays for
+    every cell another reached first and, the backend being non-deterministic and the run log
+    keeping the last row per sample, all but one walk's headline stops being reproducible from the
+    run_id it names. ``b`` trails ``a`` on their shared run
     and so meets cells still being measured; ``c`` walks the panel backwards and so meets cells
     another walk banked after ``c`` opened."""
     import threading
@@ -1359,8 +1358,8 @@ def test_a_dead_claimers_cell_is_taken_over(tmp_path: Path, monkeypatch) -> None
     timeout: the walk waits exactly as long as the holder lives, then measures the cell itself.
 
     Waiting is not a sent call. Where a sent call bills whether anyone waits, a stop waits it out;
-    one that waited on ANOTHER process's call too held a pause for a whole Harbor cell, and once the
-    holder dropped the cell it bought it here as well."""
+    a stop waiting on ANOTHER process's call too would hold a pause for a whole cell, then buy the
+    cell again once the holder dropped it."""
     import json
     import threading
     from collections import Counter
@@ -1613,9 +1612,7 @@ def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing() -> 
 def test_earned_blocks_gate_on_credible_lift_and_task_fit() -> None:
     """The earned-block library must never feed the optimizer a noise-win or a cross-task block
     — both are wrong-content-forward with no error. Built from real ``ScoredCandidate.model_dump()``
-    so it rides the SAME serialization a round file carries (the earlier fabricated
-    ``prompt_fields_updates`` shape the model never emits made this test green while the feature
-    mined nothing): the changed reusable field is the candidate's RESOLVED ``prompt_fields`` diffed
+    so it rides the SAME serialization a round file carries: the changed reusable field is the candidate's RESOLVED ``prompt_fields`` diffed
     against the round's parent ``prompt_fields``, kept only when its paired accuracy lift over the
     matched parent clears zero, keyed by the run's answer-space signature so a logic block never
     reaches a ranking run."""
@@ -2928,11 +2925,10 @@ def test_composition_selects_round_robin_so_no_panel_starves_the_frame() -> None
 
 
 def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
-    """The regression for `promptpotter-self__b40e8b`: three rounds and $2.61 spent with
-    ``injection_dropped == {'rendered_prompt': 1}`` on every one. The generator's instruction says
-    "CURRENT INNER OPTIMIZER PROMPTS below is the text you are rewriting… carry every contract
-    forward", and the block was never in the prompt — one candidate was then rejected
-    ``guts_inherited_contract`` for shortening a field it had not been shown.
+    """The generator's instruction says "CURRENT INNER OPTIMIZER PROMPTS below is the text you are
+    rewriting… carry every contract forward", so a dropped ``rendered_prompt`` leaves it rewriting
+    text it was never shown — and ``guts_inherited_contract`` rejecting it for shortening a field
+    it could not see.
 
     Composes the real floor layout against an L4-shaped schema, so it fails if the mandatory floor
     ever stops being admitted whatever it costs.
@@ -3165,10 +3161,9 @@ def test_a_solved_cell_the_edits_keep_losing_reaches_the_critique_and_the_genera
 
 
 def test_a_verifier_graded_miss_reaches_the_generator_with_its_reason() -> None:
-    """Six rounds of `spreadsheetbench-s20` where the critique read `Value diff at BN6` and the
-    generator read no miss at all: `failing_samples` went silent on any round without labels, and
-    nothing else on the generator's floor carries one. It oscillated between "verify more" and
-    "verify less" with nothing saying which cells either lost, or at what token bill."""
+    """On a round without labels `failing_samples` is the only panel on the generator's floor that
+    carries a miss, so it must render the verifier's reason and bill rather than go silent — or the
+    generator edits blind to which cells failed, why, and at what token bill."""
     from factories import measurement
 
     from promptpotter.application.optimizers.potter.dispatch.bundle import (

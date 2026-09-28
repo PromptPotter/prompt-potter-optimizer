@@ -115,9 +115,7 @@ SCORING_ERROR_ABORT = "scoring_error_abort"
 
 
 def _build_scoring_error_signal(*, results: list[QueryMeasurement], stop_reason: str) -> StopSignal:
-    # Every error row here is now a cell that was actually SENT. The abort used to pad the tail
-    # with synthetic markers to bring the list up to dataset length, and this had to strip them
-    # back out by matching the stop reason; the padding is gone, so the filter is too.
+    # Every error row here is a cell that was actually SENT: an abort pads no synthetic tail.
     real_errors = [r for r in results if is_error_result(r)]
     warning_types: dict[str, int] = {}
     for r in real_errors:

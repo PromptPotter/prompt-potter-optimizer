@@ -324,11 +324,8 @@ def _read(entry: HeadToHeadEntry) -> _Graded:
             loop_incurred_usd_ratio=None,
             wall_clock_ratio=None,
             lift_per_incurred_usd=None
-            if bench is None
-            or bench.lift is None
-            or spend is None
-            or spend.total_incurred_usd <= 0.0
-            else bench.lift / spend.total_incurred_usd,
+            if bench is None or spend is None
+            else bench.lift_per_usd(spend.total_incurred_usd),
             concurrent_with=[],
         ),
         origin_rows=None if bench is None or bench.origin is None else rows_of(bench.origin.run_id),

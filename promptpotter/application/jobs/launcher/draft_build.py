@@ -76,10 +76,7 @@ def _draft_pipeline_render(draft: DraftCampaign, workspace: Path | None) -> dict
 
     It COMPUTES nothing: ``resolve_pipeline_for_draft`` is the same function
     ``GET /campaigns/{id}/pipeline`` serves for a check-in, so the ingest surface and the campaign
-    route cannot answer differently about the draft between them. It used to parse and narrow the
-    manifest itself, which meant every ingest row came back ``source: "unset"`` with no merge
-    behind it, and the operator's own narrowing reached the editor only through a browser-side
-    derivation."""
+    route cannot answer differently about the draft between them."""
     resolution = resolve_pipeline_for_draft(
         draft,
         campaign_id=draft.draft_id,

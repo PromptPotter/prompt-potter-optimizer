@@ -203,8 +203,8 @@ class RunCallbacks:
         the panel gate has let the round stand, and from ``emit_origin_round`` for round 0, which
         adopts ``C0``. Round 0 differs in the VALUE it carries, never in the record it writes.
 
-        The crown and the per-arm fit travel together because they are stamped together, two LLM
-        calls before the close that used to be their only carrier."""
+        The crown and the per-arm fit travel together because they are stamped together, before
+        the round closes."""
         self._emit(
             ElectionRecord(
                 round=round_result.round,

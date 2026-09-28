@@ -405,10 +405,9 @@ def test_steered_fork_seed_narrowing_overrides_campaign_locks_per_node() -> None
 def test_frozen_campaign_config_ceilings_survive_the_live_dataset_file(tmp_path: Path) -> None:
     """The campaign's own snapshot decides what it RUNS, not the dataset template beside it.
 
-    Carrying only `pipeline_overlay` + `optimizer_narrowing` off the snapshot is what let a
-    mint-time `--config` reach `campaign.json` and never the loop: `run_limits` armed the
-    file's ceilings while every surface reading the campaign showed the operator's. The
-    snapshot is the delta from defaults, so a knob it never named still comes off the file.
+    A mint-time `--config` must reach the loop, not only `campaign.json`, or `run_limits` arms the
+    file's ceilings while every surface reading the campaign shows the operator's. The snapshot is
+    the delta from defaults, so a knob it never named still comes off the file.
     A snapshot selecting another optimizer runs that manifest under ITS overlay alone.
     """
     from types import SimpleNamespace
@@ -624,13 +623,10 @@ def test_l2_l3_escalation_state_survives_resume() -> None:
     """Resume-integrity: L2/L3 counters rebuilt from the ledger must equal the live in-run ones.
 
     Builds the records with the firing seam's own exit views, off the live FSM, so this pins
-    reader-against-writer rather than reader-against-itself. It has to, because the arm has been
-    wrong in both halves at once: ``fold`` compared ``record.phase`` to ``"l2_context"`` /
-    ``"l3_plan"`` (the NODE names, which no PhaseRecord carries) and read the counters from
-    ``payload["data"]``, which is in-memory-only and never reached disk. Either alone rebuilds
-    L2/L3 as never-fired, handing the resumed run a fresh escalation budget and re-firing layers
-    it had already spent. A fire whose output never parsed adopts nothing, so it must fold as
-    nothing. Silent in the resume sense: nothing raises, the counters just read wrong.
+    reader-against-writer rather than reader-against-itself: a fold keyed on the NODE names, which
+    no PhaseRecord carries, or reading the in-memory-only ``payload["data"]``, rebuilds L2/L3 as
+    never-fired and hands the resumed run a fresh escalation budget. A fire whose output never
+    parsed adopts nothing, so it must fold as nothing.
     """
     from types import SimpleNamespace
 
@@ -958,12 +954,11 @@ def test_two_readings_of_one_searchpoint_are_two_runs_and_reindex_destroys_neith
     two runs legitimately share one. The label is not in the hash, so `origin_<h>` and
     `parent_<h>` are the same searchpoint on the same rows read twice.
 
-    Two silent harms, both of which keying the index on ``content_hash`` committed: (1) one entry
-    survived for the pair, so `scores`/`item_count`/`source`/`provenance` were whichever landed
-    last — and `_save_run` fires per sample, so an in-flight 3-of-30 could overwrite a complete
-    30-of-30 — while `AxisIndex` and `archive_top_runs` read exactly those fields into the
-    optimizer prompt; (2) ``reindex`` unlinked the loser's detail file as an orphan, destroying
-    paid LLM spend and reporting it as GC."""
+    Keyed on ``content_hash``, the index harms twice, silently: (1) one entry survives for the
+    pair, its `scores`/`item_count`/`source`/`provenance` whichever landed last — `_save_run` fires
+    per sample, so an in-flight 3-of-30 overwrites a complete 30-of-30 that `AxisIndex` and
+    `archive_top_runs` read into the optimizer prompt; (2) ``reindex`` unlinks the loser's detail
+    file as an orphan, destroying paid LLM spend and reporting it as GC."""
     archive = built_stores.archive
     _archive_run(archive, run_id="run_10", content_hash="h_a")
     _archive_run(archive, run_id="run_11", content_hash="h_b")
@@ -1100,9 +1095,9 @@ def test_compaction_round_trips_every_field_it_moved(built_stores: Stores) -> No
 
 
 def test_compaction_spares_the_runs_that_actually_serve_the_cache(built_stores: Stores) -> None:
-    """``origin`` and ``parent`` replay 78.6% and 84.5% of their cells from the archive
-    against 4.5% for a candidate — 82% of all cache value for a third of the bytes. Compacting one
-    of them would silently turn cache hits into re-measurements: no error, just spend.
+    """``origin`` and ``parent`` runs carry most of the archive's cache value — far more replays
+    per byte than a candidate's. Compacting one of them would silently turn cache hits into
+    re-measurements: no error, just spend.
 
     An unrecognized label is SKIPPED and counted, never compacted on a guess."""
     archive = built_stores.archive

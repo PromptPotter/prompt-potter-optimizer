@@ -99,7 +99,7 @@ A value that departs from its paper says so beside itself in the manifest.
 
 #### The bench score — one evaluator on a held-out set
 
-**The contract is [`../architecture.md`](../architecture.md) § The bench score is not an optimizer's selection, and why selection and estimation need different rows is [`../research/benchmarks.md`](../research/benchmarks.md) § The winner's own number is biased upward.** What this lane builds: the run-init split into search pool, bench set and demo pool, which turns `CampaignConfig.dataset_split` from a display into a partition; the one evaluator scoring each optimizer's final selection — and optionally each round's — on the bench set; and that score as the headline every surface serves and `export.json` reports, so its provenance block states a deployment estimate it can claim. `verify` is the closest existing shape: it re-scores a frozen candidate, C0 included, without touching the cycle. θ election stays potter's selector and stops being anyone's headline. The published BBEH comparison's split already satisfies the requirement. Across campaigns the headline is read by `evidence`'s head-to-head — the CLI and `GET /evidence::head_to_head`; **the webapp's compare pane does not render it yet**.
+**The contract is [`../architecture.md`](../architecture.md) § The bench score is not an optimizer's selection, and why selection and estimation need different rows is [`../research/benchmarks.md`](../research/benchmarks.md) § The winner's own number is biased upward.** What this lane builds: the run-init split into search pool, bench set and demo pool, which turns `CampaignConfig.dataset_split` from a display into a partition; the one evaluator scoring each optimizer's final selection — and optionally each round's — on the bench set; and that score as the headline every surface serves and `export.json` reports, so its provenance block states a deployment estimate it can claim. `verify` is the closest existing shape: it re-scores a frozen candidate, C0 included, without touching the cycle. θ election stays potter's selector and stops being anyone's headline. A per-round bench reading would be new spend, so a round's trend point is the search-pool composite, named as that column, with the two bench readings placed on the rounds they grade. The published BBEH comparison's split already satisfies the requirement. Across campaigns the headline is read by `evidence`'s head-to-head — the CLI and `GET /evidence::head_to_head`; **the webapp's compare pane does not render it yet**.
 
 #### Selector members — parent choice as one acquisition
 
@@ -160,7 +160,6 @@ What collapses: greedy promotion becomes the acquisition at `c = 0`, and the rew
 
 | Surface | Under a peer | Kind |
 |---|---|---|
-| `RemoteControl` lift / efficiency, `TrendChart` | headline θ, which the bench measures for every optimizer; M13's headline is the bench score | decision |
 | `PipelineFlow` node tooltips (`terms.ts::TERMS.node_*`) | taught for potter's node ids alone | empty |
 
 #### Order

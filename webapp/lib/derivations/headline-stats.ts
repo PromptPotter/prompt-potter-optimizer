@@ -1,6 +1,6 @@
 // The one derivation of the headline run KPIs, so no two surfaces show a different headline.
 
-import type { LiveDashboardState, RoundSummary } from "@/lib/api/types";
+import type { BenchScore, LiveDashboardState, RoundSummary } from "@/lib/api/types";
 import type { DashboardSnapshot } from "@/lib/poll";
 import { fmtPct0 } from "@/lib/format";
 
@@ -62,11 +62,11 @@ export function fmtHeadlineValue(
 export interface HeadlineStats {
   best: number | null;
   origin: number | null;
-  // LOGITS, never a percent. Never `best − origin`: under `per_round_resubset` that is the
-  // luckiest draw minus the fullest one.
-  abilityDelta: number | null;
+  // The bench's held-out lift of the selection over the origin, in composite fitness: the
+  // headline for every optimizer, potter included. θ never stands in for it.
+  benchLift: number | null;
   // Served: its two inputs land on different events, so dividing here would divide two polls.
-  abilityDeltaPerUsd: number | null;
+  benchLiftPerUsd: number | null;
 }
 
 function finite(v: unknown): number | null {
@@ -74,18 +74,30 @@ function finite(v: unknown): number | null {
 }
 
 export function headlineStats(dash: DashboardSnapshot | null): HeadlineStats {
-  // Two bases on purpose: `best` is the max a round MEASURED (accuracy, not composite);
-  // `abilityDelta` is how far above origin the parent is.
+  // `best` is the max a round MEASURED on the search pool — the optimizer's own reading.
   const best = finite(dash?.best);
   const round0 = (dash?.rounds ?? []).find((r) => r.round === 0);
   const origin = round0 ? finite(round0.accuracy) : null;
-  const abilityDelta = finite(dash?.ability_delta);
-  return { best, origin, abilityDelta, abilityDeltaPerUsd: finite(dash?.ability_delta_per_usd) };
+  return {
+    best,
+    origin,
+    benchLift: finite(dash?.bench_score?.lift),
+    benchLiftPerUsd: finite(dash?.bench_lift_per_incurred_usd),
+  };
 }
 
 export interface FitnessTrend {
-  // `null` composite draws a GAP: a point at 0 would claim the prompt scored nothing.
-  points: { round: number; composite: number | null; theta: number | null; n: number }[];
+  // `null` draws a GAP: a point at 0 would claim the prompt scored nothing.
+  points: {
+    round: number;
+    accuracy: number | null;
+    composite: number | null;
+    // Only where the round's own selector elects on θ (`RoundSummary.stamps_theta`).
+    theta: number | null;
+    // The bench's held-out reading of the pick this round names — the origin or the selection.
+    bench: number | null;
+    n: number;
+  }[];
   best: number[];
 }
 
@@ -94,24 +106,38 @@ export interface FitnessTrend {
 export function fitnessTrend(
   rounds: readonly RoundSummary[] | undefined,
   servedBest?: number | null,
+  bench?: BenchScore | null,
 ): FitnessTrend {
   const sorted = [...(rounds ?? [])].sort((a, b) => a.round - b.round);
   // θ on a different δ ruler than the first stamped is a different quantity: dropped, not plotted.
   const seriesRuler = sorted.find((r) => r.ability?.ruler_id != null)?.ability?.ruler_id ?? null;
+  // The selection first: where the origin IS the selection both readings name round 0.
+  const benchOn = (round: number): number | null =>
+    bench?.selected?.round === round
+      ? bench.selected.composite_fitness
+      : bench?.origin?.round === round
+        ? bench.origin.composite_fitness
+        : null;
   const points = sorted.map((r) => ({
     round: r.round,
-    composite: r.accuracy,
+    accuracy: r.accuracy,
+    // A round with nothing readable serves `accuracy: null`; its composite is no reading either.
+    composite: r.accuracy === null ? null : r.composite_fitness,
     theta:
-      r.ability != null && r.ability.ruler_id != null && r.ability.ruler_id === seriesRuler
+      r.stamps_theta &&
+      r.ability != null &&
+      r.ability.ruler_id != null &&
+      r.ability.ruler_id === seriesRuler
         ? r.ability.theta
         : null,
+    bench: benchOn(r.round),
     // The rows the plotted value is a mean over, a held round's included.
     n: r.total,
   }));
   const best: number[] = [];
   let runningBest = 0;
   for (const p of points) {
-    if (p.composite != null) runningBest = Math.max(runningBest, p.composite);
+    if (p.accuracy != null) runningBest = Math.max(runningBest, p.accuracy);
     best.push(runningBest);
   }
   // Anchored to the served `dash.best`: a fork's seed can carry a best its own rounds[] never reach.

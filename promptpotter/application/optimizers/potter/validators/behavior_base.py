@@ -2,10 +2,9 @@
 
 ``*_behavior`` modules SCORE conformance into ``review.md`` and the round file; they never
 block a candidate (`../CLAUDE.md` § A validator either REJECTS or SCORES). The shapes that
-posture is expressed in — one context, one signature — are layer-agnostic, and living in
-``l1_behavior.py`` made every consumer import L1 to talk about L2: ``l2_behavior`` took both types
-from it and then re-declared ``CheckFn`` verbatim beside them. The result is the bench's
-``nodes.CheckResult``, since ``review.md`` renders it.
+posture is expressed in — one context, one signature — are layer-agnostic, so no L2 check
+imports L1 to speak them. The result is the bench's ``nodes.CheckResult``, since ``review.md``
+renders it.
 """
 
 from __future__ import annotations

@@ -151,25 +151,6 @@ def _bank_call(spend: SpendRollup, record: TokenUsageRecord, usd: float | None) 
     spend.unpriced_tokens = sum(b.unpriced_tokens for b in spend.buckets)
 
 
-def _ability_delta(rounds: list[RoundSummary]) -> float | None:
-    """Latest round carrying an ability, over the origin — never the max (winner's curse in logit
-    space). Skipping only unfit rounds is ``parent_level_trajectory``'s own carry-forward rule."""
-    origin = next((r.ability for r in rounds if r.round == 0 and r.ability is not None), None)
-    if origin is None:
-        return None
-    latest = next(
-        (
-            r.ability
-            for r in sorted(rounds, key=lambda r: r.round, reverse=True)
-            if r.ability is not None
-        ),
-        None,
-    )
-    if latest is None or not latest.comparable_to(origin):
-        return None
-    return round(latest.theta - origin.theta, 4)
-
-
 class LiveDashboardProjection(Projection):
     """Per-cycle dashboard writer; not an optimizer checkpoint."""
 
@@ -468,7 +449,6 @@ class LiveDashboardProjection(Projection):
                     self._restamp_ability(r, ability) if r.round == record.round else r
                     for r in self.state.rounds
                 ]
-                self.state.ability_delta = _ability_delta(self.state.rounds)
             self._flush_pending_persist()
             return
 
@@ -503,10 +483,6 @@ class LiveDashboardProjection(Projection):
                 rounds_list.append(summary)
                 rounds_list.sort(key=lambda r: r.round)
                 self.state.rounds = rounds_list
-                # AFTER the append, so round 0's summary is present when it computes its first
-                # value. Both ends come off the subset-invariant `ability`, so the
-                # difference is a real lift rather than the luckiest draw minus the fullest one.
-                self.state.ability_delta = _ability_delta(self.state.rounds)
                 self._flush_pending_persist()
             return
 
@@ -529,9 +505,6 @@ class LiveDashboardProjection(Projection):
         so would fold with ``is_selected`` false on the one arm it has. The election record fires
         for round 0 too, saying exactly that it adopted ``C0``.
 
-        Two channels for one fact, and this is the one with its own record. ``Projection`` had no
-        branch for it at all, so the crown reached no fold.
-
         Everything the election stamps rides this record — the per-arm fit and the round's own
         readings — because the alternative carrier is ``rounds[]`` at the close, two LLM calls
         later. The round-level stamp is guarded on the live handle: a REPLAY carries none, and the
@@ -543,14 +516,9 @@ class LiveDashboardProjection(Projection):
         self._flush_pending_persist()
 
     def _handle_candidate_minted(self, record: CandidateMintedRecord) -> None:
-        """A candidate exists the moment its proposer mints it — and this fold learned of one
-        only at ``candidate_started``, a snapshot the measurement fires one whole node later.
-
-        So ``dashboard.json`` — the surface every reader polls — showed an empty round for the
-        length of the generate call, while the ledger had recorded each candidate as it landed and
-        the ray was already serving them. The record had no arm anywhere: ``_handle_candidate_minted``
-        was the base no-op in EVERY projection, which is a writer with no reader rather than a
-        state. Seeding here is what makes the round's shape appear as it is decided.
+        """A candidate exists the moment its proposer mints it, a whole node before the
+        measurement's ``candidate_started`` — seeding here makes the round's shape appear in
+        ``dashboard.json`` as it is decided rather than after the generate call.
 
         The mint carries no candidate TOTAL — nothing knows it until generation returns — so the
         slot opens at the buffer's default and ``candidate_started`` stamps it later. Flushed
@@ -574,9 +542,7 @@ class LiveDashboardProjection(Projection):
         """The warm-ruler correction, applied to the round AND to round 0's candidate row.
 
         Round 0 holds no election fit of its own, so the round's θ IS its one candidate's; later
-        rounds stamp per candidate at the election and are left alone. Only the frontier was
-        patched here before, so ``rounds[0].candidates[0].theta`` stayed null forever while the
-        round file carried the warm value."""
+        rounds stamp per candidate at the election and are left alone."""
         candidates = (
             [
                 c.model_copy(update={"theta": ability.theta, "theta_se": ability.se})
@@ -918,8 +884,7 @@ class LiveDashboardProjection(Projection):
     def _current_round_nodes(self) -> dict[str, dict[str, Any]]:
         """THIS round's optimizer calls. ``_sticky_llm_calls`` is most-recent-fire-per-slot and
         survives round transitions, so it is filtered by each block's own ``round``: presence in
-        this map is the client's whole definition of "this node has fired", and unfiltered, a new
-        round opened showing the previous one's models as its own."""
+        this map is the client's whole definition of "this node has fired"."""
         return {
             node: block
             for node, block in self._sticky_llm_calls.items()
@@ -1012,11 +977,10 @@ class LiveDashboardProjection(Projection):
             s.waiting_on = f"{owner} · sample {self._waiting[0]}"
             s.waiting_since = self._waiting[1]
         s.backpressure = self._backpressure
-        # Both inputs are already served and already settled by here — the fold is one division,
-        # and it is here so that no reader performs it against a different poll of either.
-        used = s.spend.total_used_usd
-        s.ability_delta_per_usd = (
-            None if s.ability_delta is None or used <= 0 else round(s.ability_delta / used, 4)
+        s.bench_lift_per_incurred_usd = (
+            None
+            if s.bench_score is None
+            else s.bench_score.lift_per_usd(s.spend.total_incurred_usd)
         )
         s.wallclock_serialized_at = utcnow_iso()
         # The typed model IS the on-disk shape, and `extra="forbid"` rejects an undeclared

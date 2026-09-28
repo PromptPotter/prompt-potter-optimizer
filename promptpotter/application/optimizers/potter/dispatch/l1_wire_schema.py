@@ -266,7 +266,7 @@ def build_l1_response_schema(
         required.append("targets_cluster")
 
     # 4. Rename LAST. `build_l1_response_model` aliases the same map back so no downstream
-    # reader observes the wire name. (The `description` lever no longer touches THIS schema:
+    # reader observes the wire name. (The `description` lever does not touch THIS schema:
     # it rewrites each TARGET node's own `output_schema` at the wire seam
     # `OptSearchPoint.to_job_search_point`, keyed by that node's fields — the core case.)
     field_names = effective_l1_field_names()

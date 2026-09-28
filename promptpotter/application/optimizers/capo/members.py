@@ -399,7 +399,6 @@ class PairedTRace(nodes.NoCatchUps):
             "gate": cr["gate"],
             "queries_scored": cr["queries_scored"],
             "total_queries": cr["total_samples"],
-            # The close that decided the arm, and the arms still racing at it.
             "block": -(-cr["queries_scored"] // self._block_size),
             "blocks": -(-cr["total_samples"] // self._block_size),
             "raced_against": walk_order(cr["raced_against"]),
@@ -699,7 +698,6 @@ class PopulationSelector:
         labels = {cs.candidate_id: cs.label for cs in measured.scores}
         best = kept[0] if kept else ""
         selected_id = best if best and best != cycle.opt_sp.lineage.id else ""
-        # A round with no survivor replaces nothing: the population it started from stands.
         carried = [by_id[cid] for cid in kept] if kept else state.population
         verdict = (
             f"kept {len(kept)} of {len(survivors)} surviving arms (μ {size}) by mean objective "

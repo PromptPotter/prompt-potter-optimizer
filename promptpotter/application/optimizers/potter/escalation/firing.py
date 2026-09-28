@@ -637,7 +637,7 @@ async def escalate_l2(
         # so resume reproduces it without a decision record. It reads the refusal and not
         # `wounds.l2_guard_breaches`: that stream is prompt EVIDENCE and two of its members are
         # inert — `l1_layout_voids_prefix` is a cache-cost report and
-        # `l1_layout_unchanged_from_prior` a no-op, and both used to replan the cycle.
+        # `l1_layout_unchanged_from_prior` a no-op; neither may replan the cycle.
         if opt.escalation_ladder.fires_l3 and result is not None and result.l1_layout_refused:
             logger.warning(
                 "L3 force-triggered — L2's l1_layout edit was refused at round %d", round_num

@@ -18,10 +18,8 @@ export interface RunSummary {
   // `null` where the candidate never covered the parent's panel — an absent floor is not a zero.
   accuracy: number | null;
   parentAccuracy: number | null;
-  // Served lift over origin, in logits. Format as θ, never as a percent.
-  abilityDelta: number | null;
-  // Whether that θ is the metric this run's winners were elected on — potter's selector, no peer's.
-  electsOnTheta: boolean;
+  // The bench's served held-out lift of the pick over the origin, in composite fitness.
+  benchLift: number | null;
   usedUsd: number | null;
   changes: string;
   // Lets a champion still at the origin tell "nothing tried" from "tried and lost". Round 0
@@ -43,7 +41,7 @@ export function runSummary(dash: DashboardSnapshot | null): RunSummary | null {
   const champion = target
     ? closed.find((r) => r.round === target.round)?.candidates[target.idx]
     : undefined;
-  const { abilityDelta } = headlineStats(dash);
+  const { benchLift } = headlineStats(dash);
   const last = closed.at(-1);
   return {
     cycleId: dash.cycle_id,
@@ -52,8 +50,7 @@ export function runSummary(dash: DashboardSnapshot | null): RunSummary | null {
     championLabel: target?.courseLabel ?? null,
     accuracy: champion?.accuracy ?? null,
     parentAccuracy: champion?.reference_accuracy ?? null,
-    abilityDelta,
-    electsOnTheta: dash.stamps_theta === true,
+    benchLift,
     usedUsd: readSpend(dash).usedUsd,
     changes: champion?.changes_description ?? "",
     lastRound: last

@@ -1,19 +1,5 @@
-"""Builders that return REAL domain models, never duck-typed stand-ins.
-
-Not a test file — no ``test_`` prefix, collects nothing. It exists because a
-``SimpleNamespace`` stand-in for a strict model is the one construct in this suite that
-can carry silent harm past every gate: rename a field on ``RoundResult`` and ruff, mypy
-and pytest all stay green while the real read path breaks. That is exactly the class
-``test_numerics.py`` exists to catch, so the fakes were defeating the guard from inside.
-
-Worse than drift, a fake can assert a shape the model cannot produce. The pair these
-replace stamped ``l1_n_no_op`` / ``l1_n_duplicate`` directly onto the round — but those
-are ``@computed_field`` properties DERIVED from ``candidate_scores`` (a collapsed variant
-rides that list as ``ArmOutcome.INVALID`` with an ``INVARIANT_REASONS`` failure), so a stamped
-value cannot win no matter what a fake asserts — ``@computed_field`` plus ``extra="ignore"``
-already refuse it. Building the real model is what carries that refusal into every test.
-
-Only what a test actually bends is a parameter; everything else is a plausible default.
+"""Builders that return REAL domain models, never duck-typed stand-ins — why is
+``tests/CLAUDE.md`` § Mock strategy. Only what a test actually bends is a parameter.
 """
 
 from __future__ import annotations

@@ -79,7 +79,7 @@ def _resolve_outer_panel(
     file, which the samples and the identity fingerprint were taken from.
 
     ``None`` where the dataset owns no panel: owning one IS what makes a dataset outer, and no
-    name test recognises one. The observation-key half of the contract is now
+    name test recognises one. The observation-key half of the contract is
     ``Connector.required_observation_keys``, verified for every connector at ``init_services``."""
     panel_path = inner_tasks_path(dataset_dir)
     if not panel_path.is_file():

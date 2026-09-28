@@ -624,10 +624,9 @@ class RateLimiter:
     async def acquire(self, estimated_tokens: int) -> _TokenReservation:
         """Block until the request fits RPM+TPM **and this tenant's turn comes**; reserves both.
 
-        The lock guards state mutation only and is never held across a sleep. It used to be, which
-        made ``asyncio.Lock``'s FIFO queue the scheduler: a tenant issuing ten calls put ten of them
-        ahead of a neighbour's one, so the greedier account took the window and the quieter one
-        waited behind all of it. Timed from OUTSIDE the lock either way — the queue is most of the
+        The lock guards state mutation only and is never held across a sleep: held there,
+        ``asyncio.Lock``'s FIFO queue becomes the scheduler and a tenant issuing ten calls puts ten
+        of them ahead of a neighbour's one. Timed from OUTSIDE the lock either way — the queue is most of the
         stall under concurrency and is invisible from within it."""
         started = time.monotonic()
         waiter = _Waiter(tenant=_RATE_TENANT.get(), tokens=estimated_tokens)

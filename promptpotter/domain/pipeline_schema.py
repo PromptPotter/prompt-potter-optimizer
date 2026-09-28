@@ -582,8 +582,8 @@ class NestedPipelineRef(StrictModel):
     """Which node of THIS pipeline runs another whole pipeline, and whose. Both halves are
     derived from ``inner_tasks.yaml``, never declared a second time. Null on an ordinary dataset.
 
-    Here rather than in the router that used to declare it, because the CAMPAIGN resolution has to
-    carry it too and ``application/`` cannot import ``presentation/``. Its derivation lives beside
+    Here rather than in a router, because the CAMPAIGN resolution has to carry it too and
+    ``application/`` cannot import ``presentation/``. Its derivation lives beside
     the resolution (``application/pipeline_resolve.py::nested_pipeline_ref``), which is what makes
     the shape reachable from both doors without either owning the other."""
 

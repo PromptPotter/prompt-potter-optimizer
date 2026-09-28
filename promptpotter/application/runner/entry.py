@@ -694,7 +694,6 @@ async def _run_single_cycle(
         except KeyboardInterrupt:
             stop_reason, cycle_error = StopReason.PAUSED, None
         except asyncio.CancelledError as exc:
-            # Paused, so a resume finds its rounds done and takes the bench pass again.
             cancel_exc = exc
             stop_reason, cycle_error = StopReason.PAUSED, None
 

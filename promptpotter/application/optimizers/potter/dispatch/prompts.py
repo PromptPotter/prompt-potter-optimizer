@@ -95,8 +95,7 @@ def node_layout(node: str, memory: L2L3Memory) -> L1Layout:
     other: L2's edit of `l1_generate` is per-cycle optimizer state that must survive a resume, so
     it lives on `PotterState.memory.l1_layout`; an L4 edit binds a whole inner cycle from OUTSIDE its
     state, so it rides the override ContextVar. `NodeLayoutSpec.editor` is what says which —
-    asked HERE and nowhere else. Every call site that branched on it wrote the ternary again, and
-    the split is what made "which panels does this node see" a three-file question."""
+    asked HERE and nowhere else."""
     if NODE_LAYOUTS[node].editor == "l2":
         return memory.l1_layout
     return resolve_node_layout(node)
@@ -104,8 +103,7 @@ def node_layout(node: str, memory: L2L3Memory) -> L1Layout:
 
 def compute_optimizer_prompt_hashes(selected: SelectedOptimizer) -> dict[str, str]:
     """Per llm node of *selected*: three parts — the template, the resolved layout, the resolved
-    config — because all three decide what the node produces; without config, repointing a node's
-    MODEL left this hash unmoved."""
+    config — because all three decide what the node produces, a repointed MODEL included."""
     out: dict[str, str] = {}
     for name in selected.llm_nodes:
         config = selected.node_config(name)

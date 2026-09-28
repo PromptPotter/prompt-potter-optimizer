@@ -53,9 +53,8 @@ def _inner_optimizer_revision(dataset_dir: Path, inner: SelectedOptimizer) -> di
     from: the manifest by name and version, and each node the OUTER dataset declares as its
     mutation surface by its prompt body, output schema and resolved config.
 
-    NARROW on purpose. Hashing the whole manifest meant a node description, a widened
-    ``available_models`` or a schema regenerated for an unrelated node voided a panel that cost an
-    hour to measure. DERIVED from the outer declaration rather than a name list, so a surface that
+    NARROW on purpose: a node description, a widened ``available_models`` or a schema regenerated
+    for an unrelated node must not void a panel. DERIVED from the outer declaration rather than a name list, so a surface that
     grows a node is covered without an edit here. The PARSED manifest, never its bytes."""
     outer = parse_pipeline_response(read_yaml(dataset_dir / "pipeline.yaml"))
     mutated = sorted(n.name for n in outer.config_nodes if n.tunes_llm)

@@ -139,10 +139,8 @@ class SelectedOptimizer:
 
     @property
     def stamps_theta(self) -> bool:
-        """This optimizer's own declaration (``Selector.stamps_theta``) — read before a
-        ``RoundPlan`` exists, for round 0's origin document, which stamps this fact for the same
-        reason the scoreboard reads it: a selector that never fits θ makes round 0's arm no
-        exception."""
+        """``Selector.stamps_theta``, read before a ``RoundPlan`` exists — round 0's origin
+        document stamps it too."""
         walk = self.schema.pipelines["default"]
         name = next(n for n in walk if self.node(n).wire_type is NodeKind.SELECTOR)
         return cast("Selector", optimizers.member(name)).stamps_theta
@@ -253,7 +251,6 @@ def _knobs(name: str, kind: NodeKind | None, config: Mapping[str, Any]) -> Stric
     model = optimizers.member(name).knobs
     if kind in MEMBER_KINDS:
         return model.model_validate(dict(config))
-    # An llm node's knobs sit beside its call config.
     return model.model_validate({k: v for k, v in config.items() if k in model.model_fields})
 
 
@@ -553,13 +550,11 @@ def resolved_overrides(overrides: dict[str, dict[str, Any]]) -> dict[str, Any]:
     """What a declaration RESOLVES to — the identity `inner_campaign_id` hashes. Everything the
     resolvers drop (a key no template carries, a rename that could not be applied, an optimizer's
     own lever landing back where it started) is dropped here too, so two declarations that render
-    ONE prompt hash alike. Hashing the declaration instead bought two inner campaigns for one
-    configuration and left neither able to continue the rounds the other banked.
+    ONE prompt hash alike, and one inner campaign continues the rounds the other banked.
 
     The model rides OUTSIDE the per-node map because that is where it renders: `_single_model` fans
     one carrier node's choice onto every node, so WHICH node declared it is not a fact about the
-    configuration, and keying it per-node made `{a: {model: X}}` and `{b: {model: X}}` two ids for
-    one inner optimizer — the same defect one level down."""
+    configuration — `{a: {model: X}}` and `{b: {model: X}}` are one inner optimizer."""
     nodes: dict[str, dict[str, Any]] = {}
     for node, raw in overrides.items():
         if not isinstance(raw, dict):

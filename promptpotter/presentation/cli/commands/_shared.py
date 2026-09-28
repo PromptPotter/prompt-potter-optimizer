@@ -340,8 +340,7 @@ def divergence_hint() -> str:
         "  • Revert `campaign.json::scoring` — continue the original trajectory.\n"
         "  • `python -m promptpotter resume --no-check` — accept the divergence."
     )
-    # Exhaustiveness at first build: every gated kind must surface in the operator hint. Fails at
-    # the source if a format edit ever drops a branch — replaces a standalone completeness test.
+    # Exhaustiveness at first build: every gated kind must surface in the operator hint.
     if not all(k.value in hint for k in gating):
         raise RuntimeError("divergence hint must name every ResumeCheckpointKind")
     return hint

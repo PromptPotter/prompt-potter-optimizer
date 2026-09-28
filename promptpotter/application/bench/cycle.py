@@ -132,8 +132,7 @@ def _origin_round(
         accuracy=row.accuracy,
         composite_fitness=row.composite_fitness,
         total=row.total,
-        # What the walk never sent. Truthful only because an abort no longer pads the tail with
-        # fabricated error rows: with the padding, these two were equal on every run.
+        # What the walk never sent — an abort pads no error rows onto the tail.
         not_attempted=max(0, row.expected_samples - row.scored_samples),
         improved=False,
         stamps_theta=stamps_theta,
@@ -510,7 +509,7 @@ class Cycle:
 
     def restamp_origin_round(self, parent: ReferenceReading) -> None:
         """A whole round in, a whole round out, so a re-measure cannot leave one field reading from
-        the run before the fix. The reading is carried, not re-fit: the ruler is locked."""
+        the run it replaces. The reading is carried, not re-fit: the ruler is locked."""
         assert self.tracking.current_sp is not None
         self.rounds[0] = _origin_round(
             self.opt_sp,

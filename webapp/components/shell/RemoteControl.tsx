@@ -6,7 +6,7 @@ import { useCommand } from "@/lib/hooks/useCommand";
 import { cx } from "@/lib/cx";
 import { TERMS } from "@/lib/terms";
 import { headlineStats, pathOf, prefixReading, readSpend, runningInnerRun } from "@/lib/derivations";
-import { fmtText, fmtDuration, fmtTheta, fmtUsd, fmtTokens } from "@/lib/format";
+import { fmtText, fmtDuration, fmtSigned, fmtUsd, fmtTokens } from "@/lib/format";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useLineageTree } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
@@ -139,10 +139,8 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
     judgeCacheWrite,
   } = readSpend(dash);
 
-  // `abilityDelta` is in LOGITS, so it renders as θ and never as a percent.
-  const { abilityDelta, abilityDeltaPerUsd } = headlineStats(dash);
-  const deltaTheta = fmtTheta(abilityDelta);
-  const effChip = abilityDeltaPerUsd != null ? `${abilityDeltaPerUsd.toFixed(2)} θ/$` : "—";
+  // The lift itself is the masthead's BENCH chip; the strip carries its price.
+  const { benchLiftPerUsd } = headlineStats(dash);
   const etaChip = etaToBudget(usedUsd, budgetUsd, cycleStartedAt);
   // SERVER state (I6): the depth clears itself at the round boundary, and the walk re-reads it
   // at every launch, so a press applies to a walk already running.
@@ -249,9 +247,6 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
                 <span className="lbl">ETA</span><span className="val">{etaChip}</span>
               </Term>
             )}
-            <Term className="row" content={TERMS.remote_eff}>
-              <span className="lbl">Δ/$</span><span className="val">{effChip}</span>
-            </Term>
             {babysat ? (
               <div className="row">
                 <span className="lbl">Provenance</span>
@@ -384,8 +379,8 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
       {/* The chip TEACHES and the chevron ACTS: folded into one control, the chip's HoverCard
           trigger would be a focusable descendant, and reading the term would press it. */}
       <div className={cx("remote-readout", open && "remote-readout-on")}>
-        <Term className="chip" content={TERMS.remote_best}>
-          <span className="chip-lbl">Lift</span> <strong>{deltaTheta}</strong>
+        <Term className="chip" content={TERMS.remote_eff}>
+          <span className="chip-lbl">Lift/$</span> <strong>{fmtSigned(benchLiftPerUsd, 2)}</strong>
         </Term>
         <button
           type="button"

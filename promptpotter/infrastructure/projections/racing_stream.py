@@ -22,8 +22,8 @@ _STREAMS_SUBPATH = (".runtime", "streams")
 
 
 class RacingStreamProjection(Projection):
-    """Per-sample standings, one JSONL per round and member. **One line describes ONE candidate** — a
-    cid-keyed map gave every prior a trajectory built out of numbers about somebody else."""
+    """Per-sample standings, one JSONL per round and member. **One line describes ONE candidate** —
+    fanned out by cid, a prior's trajectory would be built out of numbers about somebody else."""
 
     def __init__(self, streams_dir: Path) -> None:
         if streams_dir.parts[-len(_STREAMS_SUBPATH) :] != _STREAMS_SUBPATH:

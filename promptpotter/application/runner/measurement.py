@@ -333,7 +333,6 @@ async def _walk_population(
         on_turn=on_turn,
         on_decided=on_decided,
     )
-    # In walk order, which a block race decides out of.
     ranked = sorted(reports)
     return {ids[i]: rows[ids[i]] for i in ranked}, [reports[i] for i in ranked]
 

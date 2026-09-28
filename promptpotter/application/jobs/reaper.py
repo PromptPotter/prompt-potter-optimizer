@@ -160,10 +160,9 @@ async def periodic_sweep(
     """Background sweep for the server's lifetime, so a CLI-launched death is reaped mid-uptime.
     Two guards against a false reap across a MACHINE sleep: the boot delay, and a skipped tick.
 
-    **How OFTEN it looks and how STALE counts as dead are two facts.** They share a default and
-    used to share the parameter, so shortening the interval to notice a death sooner would also
-    have declared any cycle quiet for that long dead — a false reap of a live run, bought by an
-    edit that looks like pure scheduling."""
+    **How OFTEN it looks and how STALE counts as dead are two facts**, so two parameters sharing
+    a default: one parameter would make shortening the interval also reap any cycle quiet for
+    that long — a false reap of a live run, bought by an edit that looks like pure scheduling."""
     sleep_for = initial_delay_s
     while True:
         overshoot = await sleep_measuring_suspend(sleep_for)

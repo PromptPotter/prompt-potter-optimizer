@@ -703,8 +703,7 @@ class CampaignStore:
         """The finished cycle's export artifact, or ``None`` when it wrote none.
 
         The reader half of "we write a file and provide a reader" (`roadmap.md` § Application
-        radius). It lives here so a consumer never has to know where the file sits — every caller
-        that re-derived the winner from `CycleResult` instead built it out of the wire-side
+        radius), so no consumer re-derives the winner from `CycleResult`'s wire-side
         `result_prompt_fields`, which cannot be rebuilt into a `PromptTemplate`.
         """
         text = read_text_optional(self._layout(hop).export)

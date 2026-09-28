@@ -428,9 +428,8 @@ def load_campaign_config(raw: dict[str, Any] | CampaignConfig) -> CampaignConfig
 
 
 def merge_config_layers(base: dict[str, Any], over: Mapping[str, Any]) -> dict[str, Any]:
-    """Depth-first, so overriding one knob under ``optimization`` keeps its siblings. A shallow
-    ``{**base, **over}`` replaces the whole sub-block, which is how a harness meaning to set
-    ``max_rounds`` silently dropped every other loop knob the dataset declared.
+    """Depth-first, so overriding one knob under ``optimization`` keeps its siblings; a shallow
+    ``{**base, **over}`` would drop every other loop knob the dataset declared.
 
     ``optimization.nodes`` addresses the manifest its OWN layer selects, so a layer naming another
     ``optimizer`` drops the base's node overlay rather than laying it onto a manifest it never named."""

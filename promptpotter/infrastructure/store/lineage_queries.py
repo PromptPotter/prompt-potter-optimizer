@@ -385,7 +385,7 @@ class _RoundFacts(NamedTuple):
     θ, which is how a warm ruler's restamp reaches round 0; where it answers, it wins. Neither
     implies the other — a round elects before its adapters run and it closes.
 
-    The whisker is in neither: it is the candidate's own, and a round-scoped copy drew two
+    The whisker is in neither: it is the candidate's own, and a round-scoped copy would draw two
     quantities as one band."""
 
     election_held: bool = False
@@ -401,12 +401,9 @@ class _RoundFacts(NamedTuple):
 
 def _round_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[str, _RoundFacts]:
     """``candidate_id -> _RoundFacts``, folded from the cycle's OWN ledger — the whole fold, so the
-    tree is no longer a projection of another projection. **The join stays on ``label``**:
-    ``candidate_id`` is a fresh uuid per construction, and a resume re-mints it.
-
-    The lift used to be read out of ``dashboard.json::rounds[]`` because the election stamped it
-    after the ``candidate_scored`` snapshot and the ledger's candidate tier served an all-null
-    column. It rides ``ElectionRecord`` now, at the moment it is stamped."""
+    tree is never a projection of another projection. **The join stays on ``label``**:
+    ``candidate_id`` is a fresh uuid per construction, and a resume re-mints it. The lift rides
+    ``ElectionRecord``, at the moment it is stamped."""
     elections = scan_ledger_elections(ledger_path)
     closes = scan_ledger_round_closes(ledger_path)
     out: dict[str, _RoundFacts] = {}
@@ -756,8 +753,7 @@ def _candidate_node(
         composite_fitness=cand.composite_fitness,
         status=cand.state,
         evaluators=cand.evaluators,
-        # The candidate's own band, and only ever that: the round close no longer carries a
-        # second one to prefer over it.
+        # The candidate's own band, and only ever that.
         mean_fitness_ci_lo=cand.mean_fitness_ci_lo,
         mean_fitness_ci_hi=cand.mean_fitness_ci_hi,
         reference_lift=close.reference_lift,

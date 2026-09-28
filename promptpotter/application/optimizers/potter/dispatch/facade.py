@@ -191,9 +191,9 @@ class DispatchHub:
         channels, one call. ``rendered`` is what the node was actually SHOWN, which is the smaller set.
 
         The layout is RESOLVED here rather than passed in: it is a function of the node and the
-        cycle's memory (`node_layout`), so every caller that supplied one re-derived the same
-        thing — and could hand a node another node's panel set. *node* also names the discretionary
-        allowance this composition must fit, and its mandatory rail."""
+        cycle's memory (`node_layout`), so no caller can hand a node another node's panel set.
+        *node* also names the discretionary allowance this composition must fit, and its mandatory
+        rail."""
         table = injection_table()
         layout = node_layout(node, bundle.memory)
         order = layout.all_placeholders()

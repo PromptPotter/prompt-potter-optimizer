@@ -455,7 +455,6 @@ class PotterRuntime:
             ("l3_patience", "L3 patience", esc.l3_patience),
         ]
         return nodes.OptimizerPacing(
-            # Rounds without advance before L2 fires; the lives bank is the run's allowance.
             patience=esc.l1_patience,
             lives=None if esc.lives is None else (esc.lives.start, esc.lives.cap),
             arms_per_round=knobs.l1_generate.n_variants,

@@ -190,8 +190,8 @@ class LiveDashboardState(StrictModel):
     # PhaseRecords — so a paused run stays readable as paused once this file goes stale.
     # ``state`` above stays the fine-grained activity. It is an INPUT to
     # ``derive_run_phase``, never the answer: its only writer is the runner's own process,
-    # so it cannot report "detached" (a dead producer can't write) and it went on saying
-    # "running" forever after a kill. It is NAMED for what it is, so that nobody reading
+    # so it cannot report "detached" (a dead producer can't write) and says "running" forever
+    # after a kill. It is NAMED for what it is, so that nobody reading
     # this file in an editor — the folder-UI contract's equal consumer — mistakes it for
     # the answer.
     declared_phase: RunPhase = RunPhase.RUNNING
@@ -219,22 +219,12 @@ class LiveDashboardState(StrictModel):
     # pass, which is a measurement nothing has taken (`_update_current_acc` refuses it mid-round).
     best: float | None = None
     current_acc: float | None = None
-    # Served headline lift, in LOGITS on the cycle's fixed δ ruler: the parent's ``ability``
-    # minus the origin's, ``None`` unless the two share a ruler. The ONE derivation — the chip
-    # and the L4 inner progress line read it, neither recomputes. ``None`` until round 0 has
-    # settled with an ability. Accuracy cannot answer this: under ``per_round_resubset`` each
-    # round draws a fresh subset, so a max over rounds selects the luckiest draw.
-    ability_delta: float | None = None
-    # That lift priced in what it cost — logits per dollar, the headline efficiency chip. Settled
-    # in ``compose`` rather than at either input's write, because the two move on different events
-    # (θ at a round close, spend on every call) and a browser dividing them is dividing two polls.
-    # ``None`` until both a lift and a non-zero spend exist; a run with no spend has no rate, and
-    # reporting one for it would put an infinity on the strip.
-    ability_delta_per_usd: float | None = None
-    # The headline — the selection and the origin graded on the held-out bench set. Null until
-    # the bench pass lands; a split holding nothing out says so from run start, in
-    # `missing_reason`. Every number beside it is the optimizer's own.
+    # The headline for every optimizer: the selection and the origin graded on the held-out bench
+    # set. Null until the bench pass lands; a split holding nothing out says so in `missing_reason`.
     bench_score: BenchScore | None = None
+    # That lift per incurred dollar (`BenchScore.lift_per_usd`, `evidence`'s rule too), settled in
+    # ``compose``: spend moves on every call, and a browser dividing the two divides two polls.
+    bench_lift_per_incurred_usd: float | None = None
     composite_fitness_formula: str | None = None
     # The same formula as ``{evaluator: coefficient}``, where it IS a weighted sum — what the mask
     # editor's per-evaluator weights seed from. ``None`` says the formula cannot carry them and the
@@ -244,10 +234,8 @@ class LiveDashboardState(StrictModel):
     # DISPLAY config — the gate is always θ; this seeds the webapp's client-overridable
     # headline toggle. Stamped at construction (``for_run``), so a fork carries its own.
     headline_metric: HeadlineMetric = "accuracy"
-    # The selected optimizer's own declaration (`Selector.stamps_theta`, mirrors
-    # `RoundResult.stamps_theta`) — a campaign-wide constant, so the webapp's per-arm θ
-    # column reads ONE flag rather than guessing from a candidate's own theta being `None`,
-    # which a cold ruler leaves `None` too for a reason that DOES resolve.
+    # Mirrors `RoundResult.stamps_theta` — campaign-wide, so the per-arm θ column reads ONE flag
+    # rather than a candidate's `None` theta, which a cold ruler leaves `None` too.
     stamps_theta: bool = False
 
     degraded_count: int = 0
@@ -265,9 +253,8 @@ class LiveDashboardState(StrictModel):
     current_query_payload: str | None = None
     current_sample_id: int | None = None
     # EVERY sample in flight, oldest first — the membership test `current_sample_id` cannot
-    # answer. That one is the walk's CURSOR and is right to name a single position; asking it
-    # "is this row running?" lit one row of N under look-ahead, silently, since the arming is
-    # exactly when the operator is watching. Two questions, so two fields.
+    # answer. That one is the walk's CURSOR and names a single position; asked "is this row
+    # running?" it lights one row of N under look-ahead. Two questions, so two fields.
     open_sample_ids: list[int] = Field(default_factory=list)
     # The order the running candidate DECLARED it would walk. Served as well as streamed, because
     # the SSE event fires once per candidate and a reader that joins after it has no forward view
@@ -307,7 +294,7 @@ class LiveDashboardState(StrictModel):
     backpressure: BackpressureReading | None = None
     # The connector's own declarations, stamped at INIT:exit. SERVED rather than inferred: the
     # browser's only available guess — "is this self-optimization?" — is not the question. `1`
-    # says the control does not apply, and went unserved before, so the button took dead presses.
+    # says the control does not apply.
     max_cells_in_flight: int = 1
     # The backend's own noun for a measured row, so the browser never picks one off a local flag.
     measured_unit: MeasuredUnit = "sample"
@@ -328,8 +315,7 @@ class LiveDashboardState(StrictModel):
 
     # The SAME fold, keyed by the round each call stamped itself with — so "what did round 3 cost,
     # and how much of its input did providers serve off their own prefix cache" is answerable at
-    # all. `spend` above is one running total for the whole cycle, and `rounds[]` carried no cost,
-    # which left every round-axis surface showing a round with no price on it.
+    # all. `spend` above is one running total for the whole cycle, and `rounds[]` carries no cost.
     #
     # PER ROUND, not cumulative: the atom is what a bar needs and what a cumulative series is
     # summed FROM, and the reverse does not hold. `evidence/read.py::_spend_to_round` folds these

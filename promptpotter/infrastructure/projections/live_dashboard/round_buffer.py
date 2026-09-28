@@ -81,11 +81,7 @@ class RoundBuffer:
         # Both facts, never one picked here: a replay's elapsed is a true 0.0 and this is what the
         # cell took when it was measured. Which one a column SHOWS is `DashboardSample.shown_s`.
         work_time = recorded_cost_s(cast("QueryMeasurement", result))
-        # The row's whole token account, from the one place that carries it. This read used to
-        # prefer a top-level `input_tokens` twin and fall back to a `pipeline_data` one — neither
-        # of which any writer in this tree ever set, so every served row carried `null` and the
-        # tape's `io=` column, and then the cache share beside it, could not render at all.
-        # Measured before the fix: 385 served sample rows across 21 dashboards, none with a count.
+        # The row's whole token account, from the one place that carries it.
         account = TokenAccount.from_step_tokens(pd)
         # The scorer rides the candidate's running fitness (composite/accuracy/
         # hits/total over samples-so-far) out on the sample. Store it on the slot

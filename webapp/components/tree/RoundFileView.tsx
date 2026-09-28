@@ -32,8 +32,7 @@ export function RoundFileView({ doc, raw }: Props) {
   const [showRaw, setShowRaw] = useState(false);
   const results = (doc.results ?? []) as ResultRow[];
   const scoreboard = doc.scoreboard ?? [];
-  // The selected optimizer's own declaration — a selector that never fits θ (CAPO) must not
-  // read as a cold ruler, so the column is absent, not merely blank.
+  // A selector that fits no θ gets no column, not a blank one that reads as a cold ruler.
   const stampsTheta = doc.stamps_theta ?? false;
   // The selected arm's own matched floor: a round that held selected nobody and shows none.
   const selectedLabels = doc.selected_labels ?? [];

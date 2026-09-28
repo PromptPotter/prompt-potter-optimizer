@@ -21,7 +21,7 @@ import {
 import type { ElectedRow } from "@/lib/types";
 import { PROMPT_STRING_FIELDS } from "@/lib/prompt-fields";
 import { runPhaseLabel, stopReasonNextStep } from "@/lib/run-phase";
-import { fmtPct0, fmtTheta, fmtUsd } from "@/lib/format";
+import { fmtPct0, fmtSigned, fmtUsd } from "@/lib/format";
 import { cx } from "@/lib/cx";
 import { CopyButton, HoverCard, SegmentedControl, pressable } from "@/components/ui";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
@@ -79,25 +79,23 @@ export function RunCard({ sampleOrder, onOpenDashboard }: Props) {
   );
 }
 
-// The shown searchpoint's rate against the origin's on the same rows. θ only on `best` (`ability_delta` is
-// the PARENT's lift, per cycle) and never the default (`headline-stats.ts`); `23/28` marks a cut-short panel.
+// The shown searchpoint's rate against its parent's on the same rows. The bench lift only on `best`,
+// the pick the bench graded; `23/28` marks a cut-short panel.
 function Lift({
   accuracy,
   parentAccuracy,
-  theta,
-  electsOnTheta,
+  benchLift,
   scored,
   expected,
 }: {
   accuracy: number | null;
   parentAccuracy: number | null;
-  theta: number | null;
-  electsOnTheta: boolean;
+  benchLift: number | null;
   scored: number | null;
   expected: number | null;
 }) {
   if (accuracy == null) {
-    return <span className="run-headline-lift">lift {fmtTheta(theta)}</span>;
+    return <span className="run-headline-lift">bench lift {fmtSigned(benchLift)}</span>;
   }
   const cut = scored != null && expected != null && scored < expected;
   return (
@@ -105,14 +103,12 @@ function Lift({
       className="run-lift-card"
       content={
         <>
-          {theta != null ? (
+          {benchLift != null ? (
             <>
-              <p className="run-lift-theta">ability lift {fmtTheta(theta)}</p>
+              <p className="run-lift-bench">bench lift {fmtSigned(benchLift)}</p>
               <p className="run-lift-note">
-                {electsOnTheta
-                  ? "The metric the winner is elected on — a logit"
-                  : "Measured by the bench for every optimizer; this one does not elect on it. A logit"}{" "}
-                on this cycle&rsquo;s difficulty ruler, not a percentage.
+                The pick over the origin in composite fitness, on held-out rows no optimizer node
+                read — the same reading for every optimizer.
               </p>
             </>
           ) : null}
@@ -145,8 +141,8 @@ function Lift({
   );
 }
 
-// Spend, lift and changes as one box. All SERVED: the lift is `ability_delta` in logits, never
-// `best − origin` (`run-summary.ts`); the floor is `reference_accuracy`.
+// Spend, lift and changes as one box. All SERVED: the bench lift is `bench_score.lift`, never
+// `best − origin`; the floor is `reference_accuracy`.
 function ConfigBox({
   observe,
   summary,
@@ -185,8 +181,7 @@ function ConfigBox({
           <Lift
             accuracy={shownRow?.accuracy ?? null}
             parentAccuracy={shownRow?.referenceAccuracy ?? null}
-            theta={observe.state === "best" ? summary.abilityDelta : null}
-            electsOnTheta={summary.electsOnTheta}
+            benchLift={observe.state === "best" ? summary.benchLift : null}
             scored={shownRow?.n_samples ?? null}
             expected={shownRow?.n_expected ?? null}
           />

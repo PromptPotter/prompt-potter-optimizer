@@ -929,10 +929,8 @@ def _repeatedly_lost(edits: list[_Edit]) -> list[tuple[Any, _Loss]]:
 def _candidate_fate(cand: ScoredCandidate, unit: MeasuredUnit) -> str:
     """An elimination covers gates that mean OPPOSITE things to a generator, so it asks which
     fired. ε stops BUYING — the idea may still be good and deserves re-proposing; a collapse is a
-    VERDICT, the arm having answered one label to everything. Rendered as the ε sentence, the
-    strongest rejection the loop has read as "not a verdict" and the dead idea stayed live in this
-    very panel — the failure ``answer_distribution`` exists to prevent, one panel over. A BROKEN
-    arm is the candidate's own fault and is said so, apart from both."""
+    VERDICT, the arm having answered one label to everything, and read as the ε sentence it keeps
+    a dead idea live. A BROKEN arm is the candidate's own fault and is said so, apart from both."""
     if cand.outcome is ArmOutcome.INVALID:
         return f"invalid — rejected before it cost a {unit}"
     if cand.total == 0:

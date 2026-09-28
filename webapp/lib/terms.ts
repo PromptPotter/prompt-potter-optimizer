@@ -33,9 +33,8 @@ export const TERMS: Record<string, string> = {
   cache_replayed: "Replayed — OUR content-addressed archive answered, so no provider was reached and the cell cost nothing. Counted per CANDIDATE: how many carry at least one replayed sample.",
   cache_prefix:   "Prefix cache — the PROVIDER served part of a call's input off its own prompt-prefix cache, billed at a discount. The call did happen; part of it was cheaper.",
 
-  remote_best:   "Lift over origin — the running winner's gain in ABILITY (θ, logits), not in accuracy points: the two are different bases. 'θ +0.42' is the spend's return. Where the run stands in accuracy is the masthead's BEST chip.",
   remote_eta:    "Estimated time until spend hits the budget at the current burn rate. Renders '—' when the budget is uncapped or spend is unknown.",
-  remote_eff:    "Improvement-per-spend overall: the ability gain over origin divided by spend used, in θ per dollar. The headline efficiency number.",
+  remote_eff:    "Bench lift per dollar: the selection's composite fitness over the origin's on held-out rows no optimizer node read — the masthead's BENCH lift — divided by what the cycle incurred. The same reading for every optimizer, potter included; θ is potter's election signal and never stands in for it. '—' until the bench grades the pick, when the run ends.",
   arm_broken:     "Its measurements kept failing, so the bench stopped it. That is the candidate's own fault, and it is charged to it.",
   arm_eliminated: "The optimizer's eliminator stopped buying it: a budget call, not a verdict on the idea.",
   arm_locked_in:  "The optimizer's eliminator stopped it far enough ahead to call.",

@@ -1,13 +1,7 @@
 "use client";
 import { memo, useMemo } from "react";
 import { Line } from "react-chartjs-2";
-import {
-  cssRgba,
-  ensureChartRegistered,
-  getCss,
-  lineChartDefaults,
-  useThemeVersion,
-} from "@/lib/theme";
+import { ensureChartRegistered, getCss, lineChartDefaults, useThemeVersion } from "@/lib/theme";
 import { Badge, CardFrame } from "@/components/ui";
 import { metricInkToken } from "@/components/candidates/series";
 import { degradedRoundNotices, fitnessTrend } from "@/lib/derivations";
@@ -16,19 +10,22 @@ import { useMediaQuery } from "@/lib/hooks/useMediaQuery";
 
 ensureChartRegistered();
 
-// `compact` is a DENSITY: the same three series, without the legend, the θ ticks or the
-// degraded-rounds list.
+// The bench (origin and selection on held-out rows) is the headline for every optimizer; the round
+// line is the search-pool composite, θ only where a round elects on it. `compact` is a DENSITY.
 export const TrendChart = memo(function TrendChart({ compact = false }: { compact?: boolean }) {
   const { dash, isLive } = useDashboard();
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   // Subscribe to the theme so a flip pulls fresh canvas inks.
   useThemeVersion();
-  const { points, best: bestData } = useMemo(
-    () => fitnessTrend(dash?.rounds, dash?.best),
-    [dash?.rounds, dash?.best],
+  const bench = dash?.bench_score;
+  const { points } = useMemo(
+    () => fitnessTrend(dash?.rounds, dash?.best, bench),
+    [dash?.rounds, dash?.best, bench],
   );
   const curData = points.map((p) => p.composite);
+  const benchData = points.map((p) => p.bench);
   const thetaData = points.map((p) => p.theta);
+  const hasBench = benchData.some((b) => typeof b === "number");
   // Silent until the ruler warms: a flat ruler makes θ the per-subset accuracy this axis escapes.
   const hasTheta = thetaData.some((t) => typeof t === "number");
   const labels = points.map((p) => String(p.round));
@@ -42,23 +39,30 @@ export const TrendChart = memo(function TrendChart({ compact = false }: { compac
   const data = {
     labels,
     datasets: [
-      { id: "best", data: bestData, borderColor: getCss("--color-accent"), backgroundColor: cssRgba("--color-accent-rgb", 0.08), tension: 0.3, pointRadius: 2, fill: true, borderWidth: 1.5, yAxisID: "y", label: "best accuracy" },
-      { id: `round:${isLive ? dash?.total_queries_scored : "still"}`, data: curData, borderColor: getCss("--color-accent-strong"), tension: 0.3, pointRadius: 2, borderWidth: 1.5, yAxisID: "y", label: "round accuracy" },
+      ...(hasBench
+        ? [{ id: "bench", data: benchData, borderColor: getCss("--color-accent"), backgroundColor: getCss("--color-accent"), borderDash: [2, 3], pointRadius: 4, borderWidth: 1.5, yAxisID: "y", label: "bench · held out", spanGaps: true }]
+        : []),
+      { id: `round:${isLive ? dash?.total_queries_scored : "still"}`, data: curData, borderColor: getCss("--color-accent-strong"), tension: 0.3, pointRadius: 2, borderWidth: 1.5, yAxisID: "y", label: "round composite · search pool" },
       ...(hasTheta
-        ? [{ id: "theta", data: thetaData, borderColor: getCss(metricInkToken("ability", elected)), borderDash: [4, 3], tension: 0.3, pointRadius: 2, borderWidth: 1.5, yAxisID: "theta", label: "ability θ", spanGaps: true }]
+        ? [{ id: "theta", data: thetaData, borderColor: getCss(metricInkToken("ability", elected)), borderDash: [4, 3], tension: 0.3, pointRadius: 2, borderWidth: 1.5, yAxisID: "theta", label: "ability θ · potter's election", spanGaps: true }]
         : []),
     ],
   };
   const options = lineChartDefaults({
     animation: reducedMotion ? false : { duration: 1000, easing: "easeOutQuart" },
     plugins: {
-      legend: { display: hasTheta && !compact, labels: { boxWidth: 10, font: { size: 10 } } },
+      legend: { display: !compact, labels: { boxWidth: 10, font: { size: 10 } } },
       tooltip: {
         callbacks: {
-          afterBody: (items: { dataIndex: number }[]) => {
+          afterBody: (items: { dataIndex: number; datasetIndex: number }[]) => {
             const n = points[items[0]?.dataIndex ?? -1]?.n;
-            // Under `per_round_resubset` two rounds' accuracies sat different exams.
-            return typeof n === "number" ? `n = ${n}` : "";
+            // Under `per_round_resubset` two rounds' composites sat different exams.
+            const lines = typeof n === "number" ? [`n = ${n} on the search pool`] : [];
+            // The bench series is dataset 0 whenever it draws.
+            if (bench && hasBench && items.some((i) => i.datasetIndex === 0)) {
+              lines.push(`bench: ${bench.bench_size} held-out rows`);
+            }
+            return lines;
           },
         },
       },
@@ -69,7 +73,9 @@ export const TrendChart = memo(function TrendChart({ compact = false }: { compac
       theta: { display: hasTheta && !compact, position: "right" as const, grid: { display: false }, ticks: { font: { size: 9 } } },
     },
   });
-  const ariaLabel = `Best and round accuracy per round${hasTheta ? ", with ability θ" : ""}`;
+  const ariaLabel = `Round composite on the search pool per round${
+    hasBench ? ", with the bench score of the origin and the selection on held-out rows" : ""
+  }${hasTheta ? ", with ability θ" : ""}`;
 
   return (
     <CardFrame title={<span>Trend</span>} actions={<Badge>campaign</Badge>}>

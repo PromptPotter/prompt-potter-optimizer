@@ -43,13 +43,8 @@ logger = logging.getLogger(__name__)
 _FOLD_KEY = "k"
 _HEADER_KEY = "run"
 # The INDEX's fold key — a run's identity, which is what addresses its detail file
-# (`runs/{run_id}.jsonl`). It was `content_hash` while the file was `{label}_{content_hash}`, and
-# the two disagree by construction: the label is not in the hash, so `origin_<h>` and
-# `parent_<h>` are one entry, last-wins. Those two are the SAME searchpoint on the same rows
-# and two readings of it, so the surviving entry's `scores`, `item_count`, `source` and
-# `provenance` were whichever landed last, a per-sample write could overwrite a complete run with a
-# 3-of-30 one, and `reindex` unlinked the loser's detail as an orphan: paid measurement, destroyed
-# and reported as GC.
+# (`runs/{run_id}.jsonl`). Never `content_hash`: `origin_<h>` and `parent_<h>` are two readings of
+# one searchpoint, and folded on the hash they merge last-wins and `reindex` unlinks one as an orphan.
 _INDEX_FOLD_KEY = "run_id"
 _DETAIL_SUFFIX = ".jsonl"
 _COLD_SUFFIX = ".jsonl.gz"

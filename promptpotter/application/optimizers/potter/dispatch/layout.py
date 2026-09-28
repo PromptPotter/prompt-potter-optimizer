@@ -160,9 +160,8 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
         mandatory=L1_MANDATORY,
         floor=L1Layout(
             # The one floor placement ahead of `VOLATILE_SLOT`, and it is free: `task_context` is
-            # in `PREFIX_STABLE_PANELS`, whose docstring names the one way it moves. Measured on a
-            # live round pair, the shared prefix survives all 1,788 chars of this slot and breaks inside
-            # `problem_description`. Anything NOT on that list belongs behind the boundary.
+            # in `PREFIX_STABLE_PANELS`, whose docstring names the one way it moves. Anything NOT
+            # on that list belongs behind the boundary.
             task_intent=["task_context"],
             problem_description=[
                 "rendered_prompt",
@@ -197,8 +196,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     # `failing_samples` carries the BREADTH both lack — the deep panels reach ~5 misses of ~20,
     # and clusters ranked "largest first, share of the misses" cannot be read off a sample.
     # `mutation_memory` because the round under critique IS a set of edits: which cells the
-    # parent's run hit that they keep missing is a failure no miss panel can carry, and a critique
-    # never shown it spent six rounds of `spreadsheetbench-s10` steering at cells no edit cracked.
+    # parent's run hit that they keep missing is a failure no miss panel can carry.
     "l1_critique": NodeLayoutSpec(
         editor="l4",
         possible=frozenset(
@@ -295,8 +293,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "archive_top_runs",
                 "rare_hit_samples",
                 "critique",
-                # Both levers' CURRENT state, side by side — an edit needs to read what it lands on,
-                # and only one of the two ever did.
+                # Both levers' CURRENT state, side by side — an edit needs to read what it lands on.
                 "l1_overrides",
                 "l1_layout",
                 "l1_signal_catalogue",
@@ -397,8 +394,7 @@ del _node, _spec, _floor_ph, _early
 def layout_json_schema(spec: NodeLayoutSpec, *, description: str) -> dict[str, Any]:
     """The wire shape of a layout edit against ``spec``: a panel name addresses the ONE slot it fills.
     ONE builder for BOTH seams that offer the edit — L4's per-node ``layout`` param and L2's
-    ``l1_layout`` — because only L4's was ever built this way, and a vocabulary the emitter is never
-    shown is not a vocabulary.
+    ``l1_layout`` — because a vocabulary the emitter is never shown is not a vocabulary.
 
     ``propertyNames`` + ``additionalProperties`` state each enum once. Per-slot arrays restate the
     signal enum for every slot of every node, and this schema is prompt text on each call.

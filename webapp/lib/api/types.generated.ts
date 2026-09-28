@@ -736,9 +736,8 @@ export interface LiveDashboardState {
   rounds: RoundSummary[];
   best: number | null;
   current_acc: number | null;
-  ability_delta: number | null;
-  ability_delta_per_usd: number | null;
   bench_score: BenchScore | null;
+  bench_lift_per_incurred_usd: number | null;
   composite_fitness_formula: string | null;
   composite_fitness_weights: Record<string, number> | null;
   headline_metric: 'accuracy' | 'composite' | 'ability';

@@ -6,7 +6,15 @@ describe("runSummary", () => {
   const finished = dash({
     cycle_id: "cycle_9",
     stop_reason: "lives_exhausted",
-    ability_delta: 0.41,
+    bench_score: {
+      bench_size: 10,
+      origin: null,
+      selected: null,
+      missing_reason: null,
+      lift: 0.12,
+      lift_ci_lo: 0.02,
+      lift_ci_hi: 0.22,
+    },
     rounds: [
       summaryRound({
         round: 0,
@@ -51,9 +59,9 @@ describe("runSummary", () => {
     expect(runSummary(finished)?.rounds).toBe(2);
   });
 
-  it("carries the SERVED lift and stop reason verbatim", () => {
+  it("carries the SERVED bench lift and stop reason verbatim", () => {
     const s = runSummary(finished);
-    expect(s?.abilityDelta).toBe(0.41);
+    expect(s?.benchLift).toBe(0.12);
     expect(s?.stopReason).toBe("lives_exhausted");
     expect(s?.cycleId).toBe("cycle_9");
   });

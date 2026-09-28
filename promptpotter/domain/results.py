@@ -799,10 +799,8 @@ class RoundResult(StrictModel):
     p_value: float | None = None
     # WHY this round ended the way it did, in the numbers it was decided on — the elected arm's θ,
     # the parent's, the margin and its SE, or on a held round the best arm that still failed to
-    # clear. Written on EVERY round, won or held: its predecessor was one constant sentence
-    # emitted only on failure, so a round that crowned somebody explained nothing and the
-    # operator's "why did THIS one win?" had no surface to answer it. `None` only before the
-    # election runs.
+    # clear. Written on EVERY round, won or held, so "why did THIS one win?" has an answer.
+    # `None` only before the election runs.
     verdict_reason: str | None = None
     # The selected optimizer's own declaration (`Selector.stamps_theta`) — whether `scoreboard`
     # above carries a θ column at all. A selector that never fits θ (CAPO) must not leave every
@@ -843,11 +841,9 @@ class RoundResult(StrictModel):
     # Each REFERENCE's rows on THIS round's subset, keyed by the individual an arm's
     # `reference_id` names — one bar for every arm, or under `lift_reference: parents` each
     # arm's parent on the cells its children measured. **Subsets move between
-    # rounds**, so reconstructing a bar from an earlier round reads it on cells this round never
-    # bought — which is how a sample-set mask came to re-score every arm on the selected cells
-    # while leaving the bar they must clear at its full-set value (`mask/load.py`). Empty at round
-    # 0, whose reference is C0 itself. A repair re-measures the ARMS and not the bar, so on a
-    # repaired round this stays the reading the round was actually decided under.
+    # rounds**, so a bar reconstructed from an earlier round reads cells this round never bought.
+    # Empty at round 0, whose reference is C0 itself. A repair re-measures the ARMS and not the
+    # bar, so on a repaired round this stays the reading the round was actually decided under.
     #
     # On a HELD round `results` already IS the parent's rows, so the panel is banked twice there.
     # Deliberately: a reader wanting the bar must not first have to work out whether the round

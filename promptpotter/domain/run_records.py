@@ -710,15 +710,10 @@ class WallClock(StrictModel):
 
 
 class ElectionRecord(StrictModel):
-    """What the round's ELECTION produced, at its own coordinate: ``elect_round_winner`` is the
-    last thing ``l1_score`` does, so all of this exists a whole ``l1_critique`` call before the
-    close it used to ride.
-
-    ``fit`` is here for the same reason the crown is, and the argument that once kept it out —
-    "already addressable in ``rounds/round_NNNN.json``" — is what this record now answers: that
-    document is not addressable until the round CLOSES, two LLM calls after the election stamped
-    it, and every live surface reads in that gap. Keyed by LABEL, like ``selected_labels`` and
-    like ``LedgerRoundClose.abilities``, because a resume re-mints candidate ids.
+    """What the round's ELECTION produced, at its own coordinate — before the round closes, while
+    ``rounds/round_NNNN.json`` is not yet addressable and every live surface reads. Keyed by
+    LABEL, like ``selected_labels`` and ``LedgerRoundClose.abilities``, because a resume re-mints
+    candidate ids.
 
     ``selected_labels`` empty = the round HELD; round 0 selects the ``C0`` it adopted."""
 
@@ -728,8 +723,7 @@ class ElectionRecord(StrictModel):
     round: int
     selected_labels: list[str] = Field(default_factory=list)
     fit: dict[str, LedgerFit] = Field(default_factory=dict)
-    # `RoundResult.stamps_theta`: whether θ is a column of this round at all. Here, beside the
-    # θ it qualifies, so no reader takes a selector that fits none for a cold ruler.
+    # Mirrors `RoundResult.stamps_theta`, beside the θ it qualifies.
     stamps_theta: bool
     # In-memory-only carrier for the live ``RoundResult``, the ``PhaseRecord.live_round_result``
     # shape and rationale: the round's OWN readings (``overlap``, the verdict, the electable count,

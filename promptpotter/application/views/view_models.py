@@ -213,14 +213,10 @@ class RoundCompleteView:
     scores: tuple[ScoreEntry, ...]
     # The selected arm's candidate label; ``""`` on a round that held its best-so-far.
     winner_label: str
-    # The selected optimizer's own declaration (`Selector.stamps_theta`): the scoreboard carries
-    # an ability column only where the selector fits one, so a cold potter round still shows it.
+    # Mirrors `RoundResult.stamps_theta`: the scoreboard's ability column.
     stamps_theta: bool
     # ``None`` where the round graded no cell on accuracy — every arm errored, or the backend is
-    # verifier-graded. It matches ``RoundResult.accuracy``, which has always been optional; this
-    # field narrowed it to ``float`` and the builder bridged the gap with a ``float()`` that
-    # RAISES, taking the whole round loop down (`stop_reason: crashed`) on a round whose only
-    # fault was having nothing to report.
+    # verifier-graded — as ``RoundResult.accuracy`` is.
     winner_accuracy: float | None
     winner_composite_fitness: float | None
     winner_evaluators: dict[str, float]
@@ -308,14 +304,12 @@ class RoundDigestView:
     composite_fitness: float
     changes_description: str
     facts: tuple[OptimizerFact, ...]
-    # The selector's own declaration: a round no θ decided shows none (`RoundResult.stamps_theta`).
+    # Mirrors `RoundResult.stamps_theta`.
     stamps_theta: bool
     evaluators: dict[str, float]
-    # THIS round's own comparison floor — the parent re-scored on the samples this round drew.
-    # `log.md` compared against the whole-cycle origin composite instead, so under
-    # `per_round_resubset` it read draw difficulty as candidate lift and printed a different Δ
-    # from the terminal for the same round. ``None`` where the round matched nothing, and there
-    # is no fallback to the cycle origin: that is a different sample basis, not a default.
+    # THIS round's own comparison floor — the parent re-scored on the samples this round drew, as
+    # the terminal's Δ reads it. ``None`` where the round matched nothing, and there is no
+    # fallback to the cycle origin: that is a different sample basis, not a default.
     reference_composite: float | None = None
     # The subset-invariant series and the scale it was read on, so a reader can see a round
     # scored mostly off that scale. Mirrors ``RoundResult``.

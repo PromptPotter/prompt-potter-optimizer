@@ -42,8 +42,7 @@ def _entry(node: str) -> dict[str, Any]:
         "fields": list(schema.get("properties", {})),
         "json_schema": {
             "name": node,
-            # The wire ships `strict: False` (`openai_compat.py`); claiming True here
-            # made the manifest describe a constraint no provider was ever given.
+            # The wire ships `strict: False` (`openai_compat.py`), so the manifest says so too.
             "strict": False,
             "schema": schema,
         },

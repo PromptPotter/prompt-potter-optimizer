@@ -245,7 +245,6 @@ def _round_result(
         # Counted off the rows: an ungraded cell WAS sent and WAS measured, so it is already
         # inside `scored_samples` and no subtraction can find it.
         unscored=sum(1 for r in best_results if is_unscored(r)),
-        # A round improved iff its selector kept somebody new.
         improved=bool(winner_id),
         p_value=p_value,
         verdict_reason=selection.verdict_reason,
@@ -273,7 +272,6 @@ def _round_result(
         electable_count=len(measured.electable),
         candidate_scores=scores,
         selected_labels=[cs_by_id[winner_id].label] if winner_id else [],
-        # `decisions` is NOT set here: `persist_round` flushes the cycle's sink onto the ledger.
         degraded_samples=count_degraded_samples(best_results),
         deprecated=base["deprecated"],
         evaluators=best_scores,
@@ -633,8 +631,8 @@ def flush_pending_decisions(cycle: Cycle, session: Session) -> int:
 
     The controller acts AFTER the round it belongs to has already persisted, so its decision waits
     for the next ``persist_round``. A cycle that stops right there — max_rounds, a terminate
-    proposal, a spend halt, Ctrl+C — had no next round, and the record died in memory. Nothing
-    raised; the run simply forgot it had acted, which on resume is a re-spent budget.
+    proposal, a spend halt, Ctrl+C — has no next round, and an unflushed record is an act a
+    resume re-spends.
     """
     if not cycle.pending_decisions or (ledger := session.state.ledger) is None:
         return 0
