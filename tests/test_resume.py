@@ -35,6 +35,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import CycleSeed, PotterCheckpointKind
 from promptpotter.domain.scoring import is_unscored
+from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive, ReplayFeed
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import error_category, is_error_result
 from tests.factories import optimizer_state
@@ -441,7 +442,9 @@ def test_frozen_campaign_config_ceilings_survive_the_live_dataset_file(tmp_path:
     )
     emitter = build_campaign_emitter(session, capo, origin_accuracy=None)  # type: ignore[arg-type]
     assert emitter is not None
-    assert emitter.state.n_variants is None
+    # CAPO's own pacing, the overlay's μ included: the population races beside the offspring.
+    crossovers = select_optimizer(capo.optimization).node_config("capo_crossover")["crossovers"]
+    assert emitter.state.arms_per_round == 4 + crossovers
 
     live = load_campaign_config(
         {
@@ -620,19 +623,24 @@ def test_unresolved_round_stalls_and_replays_as_one() -> None:
 def test_l2_l3_escalation_state_survives_resume() -> None:
     """Resume-integrity: L2/L3 counters rebuilt from the ledger must equal the live in-run ones.
 
-    Builds the records the way the firing seam writes them — the same ``PotterPhase``, and the
-    counters on the typed exit VIEW — so this pins reader-against-writer rather than
-    reader-against-itself. It has to, because the arm has been wrong in both halves at once:
-    ``fold`` compared ``record.phase`` to ``"l2_context"``/``"l3_plan"`` (the NODE names, which
-    no PhaseRecord carries) and read the counters from ``payload["data"]``, which is
-    in-memory-only and never reached disk. Either alone rebuilds L2/L3 as never-fired, handing
-    the resumed run a fresh escalation budget and re-firing layers it had already spent. Silent
-    in the resume sense: nothing raises, the counters just read zero.
+    Builds the records with the firing seam's own exit views, off the live FSM, so this pins
+    reader-against-writer rather than reader-against-itself. It has to, because the arm has been
+    wrong in both halves at once: ``fold`` compared ``record.phase`` to ``"l2_context"`` /
+    ``"l3_plan"`` (the NODE names, which no PhaseRecord carries) and read the counters from
+    ``payload["data"]``, which is in-memory-only and never reached disk. Either alone rebuilds
+    L2/L3 as never-fired, handing the resumed run a fresh escalation budget and re-firing layers
+    it had already spent. A fire whose output never parsed adopts nothing, so it must fold as
+    nothing. Silent in the resume sense: nothing raises, the counters just read wrong.
     """
-    from promptpotter.application.optimizers.potter.escalation.state import EscalationFSM
+    from types import SimpleNamespace
+
+    from promptpotter.application.optimizers.potter.escalation.firing import L2, L3
+    from promptpotter.application.optimizers.potter.escalation.state import (
+        EscalationFSM,
+        PotterPhase,
+    )
     from promptpotter.application.optimizers.potter.knobs import EscalationLadder
-    from promptpotter.application.views.view_models import L2RefineExitView, PlanExitView
-    from promptpotter.domain.phases import PotterPhase
+    from promptpotter.application.views.view_models import OptimizerStepExitView
     from promptpotter.domain.run_records import PhaseRecord
 
     def snapshot(f: EscalationFSM) -> tuple[int, int, float, int, int, float, int]:
@@ -648,8 +656,22 @@ def test_l2_l3_escalation_state_survives_resume() -> None:
 
     live = EscalationFSM()
     live_trace = []
+    # What each exit record carries on disk: the view the seam composes off the live state.
+    banked: list[tuple[PotterPhase, OptimizerStepExitView]] = []
+    fired_state = SimpleNamespace(escalation=live, memory=SimpleNamespace(l1_overrides={}))
+    output = SimpleNamespace(
+        l1_layout=None,
+        axis_targeted="",
+        plan="",
+        opt_sp=SimpleNamespace(lineage=SimpleNamespace(changes_description="")),
+    )
+
+    def fired(layer) -> None:
+        live_trace.append(snapshot(live))
+        banked.append((layer.phase, layer.exit_view(fired_state, output)))
+
     live.record_l2_fired(best_composite_fitness=0.60)
-    live_trace.append(snapshot(live))
+    fired(L2)
     # A second request at an unimproved fitness bumps the L2 stall before the fire banks it.
     live.observe_l2_escalation(
         current_composite_fitness=0.60,
@@ -658,41 +680,16 @@ def test_l2_l3_escalation_state_survives_resume() -> None:
         l3_patience=2,
     )
     live.record_l2_fired(best_composite_fitness=0.60)
+    fired(L2)
+    # An unparseable fire closes its bracket and adopts nothing.
     live_trace.append(snapshot(live))
+    discarded = OptimizerStepExitView(headline="", details=(), audit=None, state=None)
+    banked.append((PotterPhase.REFINE_STRATEGY, discarded))
     # L3 firing wipes L2's progress — a new plan invalidates it. Checked BEFORE the wipe above,
     # or the L2 half of this test would assert zeros and pass against the bug it exists for.
     live.record_l3_fired(best_composite_fitness=0.75)
-    live_trace.append(snapshot(live))
+    fired(L3)
 
-    def l2_view(l2_round: int, stall: int, comp: float) -> L2RefineExitView:
-        return L2RefineExitView(
-            param_changes_count=0,
-            l1_layout_changed=False,
-            axis_targeted="",
-            changes_description="",
-            l2_round=l2_round,
-            l2_stall_count=stall,
-            l2_best_composite_fitness_at_entry=comp,
-            l2_best_theta_at_entry=None,
-        )
-
-    # What the exit records carry on disk: the post-fire state, on the persisted view. Real
-    # views, not dicts — a namespace here would let a renamed field pass with every gate green.
-    banked: list[tuple[PotterPhase, object]] = [
-        (PotterPhase.REFINE_STRATEGY, l2_view(1, 0, 0.60)),
-        (PotterPhase.REFINE_STRATEGY, l2_view(2, 1, 0.60)),
-        (
-            PotterPhase.MODIFY_PLAN,
-            PlanExitView(
-                new_plan_preview="",
-                changes_description="",
-                l3_round=1,
-                l3_stall_count=0,
-                l3_best_composite_fitness_at_entry=0.75,
-                l3_best_theta_at_entry=None,
-            ),
-        ),
-    ]
     replay = EscalationFSM()
     replay_trace = []
     for phase, view in banked:
@@ -708,6 +705,7 @@ def test_l2_l3_escalation_state_survives_resume() -> None:
     # Pinned literally too: an arm that never matches leaves every one of these at 0/0.0.
     assert replay_trace == [
         (1, 0, 0.60, 0, 0, 0.0, 0),
+        (2, 1, 0.60, 0, 0, 0.0, 0),
         (2, 1, 0.60, 0, 0, 0.0, 0),
         (0, 0, 0.75, 1, 0, 0.75, 0),
     ]
@@ -908,6 +906,49 @@ def test_partial_walk_log_folds_to_the_full_record(built_stores: Stores) -> None
     # force_fresh REPLACES: an append-only log has to be told to forget.
     archive.reset_run("r_a")
     assert archive.load_by_id("r_a") is None
+
+    # A reader in another process tails both logs from where it stopped, and a compaction swaps
+    # the file under it — onto a freed inode, on ext4. Resumed at the old offset, it skips every
+    # row banked since: never replayed, so bought again.
+    reader = MeasurementArchive(archive.base_dir)
+    feed = ReplayFeed(reader, [("llm_only", {"model": "X"})])
+
+    def _cell(sid: int) -> dict[str, object]:
+        return {"sample_id": sid, "sample_key": f"k{sid}", "predicted": "p"}
+
+    def _bank(run_id: str, sid: int, name: str = "r") -> None:
+        header = {
+            "run_id": run_id,
+            "name": name,
+            "content_hash": "h",
+            "prompt_fields_id": "pf",
+            "item_count": 1,
+            "scores": {"accuracy": 1.0, "total": 1},
+            "node_configs": [("llm_only", {"model": "X"})],
+            "provenance": {"grade": "A", "deliberate_source": True},
+            "created_at": "2026-05-19T00:00:00Z",
+            "dataset_name": "reidx",
+        }
+        archive.append_run(run_id, header, [_cell(sid)])
+
+    for sid in (1, 2, 3):
+        _bank("r_t", sid)
+    assert set(feed.advance()) == {"k1", "k2", "k3"}
+    log = archive._detail_path("r_t")
+    read_to = log.stat().st_size
+    # Rewritten IN PLACE, as a swap onto a reused inode reads: the dead headers go, one row lands.
+    lines = archive.detail_lines("r_t")
+    log.write_text("".join(ln for ln in lines if '"k": "run"' not in ln) + lines[-1])
+    _bank("r_t", 4)
+    assert log.stat().st_size < read_to
+    assert set(feed.advance()) == {"k4"}, "a row banked after the compaction was skipped"
+
+    reader.list_all()
+    tailed = reader._index_path().stat().st_size
+    assert archive.maintain_index()
+    # One entry long enough to straddle the offset the reader stopped at in the old file.
+    _bank("r_long", 5, name="n" * tailed)
+    assert "r_long" in {e["run_id"] for e in reader.list_all()}, "an index entry was skipped"
 
 
 def test_two_readings_of_one_searchpoint_are_two_runs_and_reindex_destroys_neither(
@@ -1270,8 +1311,13 @@ def test_a_resumed_cycle_clocks_only_its_own_launch(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     clock = scan_ledger_wall_clock(
-        ledger, started_at="2026-09-02T09:59:00Z", finished_at="2026-09-02T10:30:00Z"
+        ledger,
+        started_at="2026-09-02T09:59:00Z",
+        finished_at="2026-09-02T10:30:00Z",
+        # An optimizer's own phase brackets only where its runtime declares it.
+        optimizer_phases=frozenset({"l1_score"}),
     )
+    assert clock.phase_s["l1_score"] == pytest.approx(20 * 60)
     assert clock.elapsed_s is not None and sum(clock.phase_s.values()) <= clock.elapsed_s
     assert "1" not in clock.round_ended_s, "a round an earlier launch closed read as instant"
     assert clock.round_ended_s["2"] == pytest.approx(21 * 60 + 1)

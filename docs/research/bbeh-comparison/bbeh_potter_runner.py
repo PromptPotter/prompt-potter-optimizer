@@ -171,7 +171,7 @@ async def run_bbeh_campaign(
             config={
                 "optimizer": "promptpotter",
                 "max_rounds": opt_cfg.max_rounds,
-                "n_variants": select_optimizer(opt_cfg).readout("l1_generate", "n_variants"),
+                "n_variants": select_optimizer(opt_cfg).pacing.arms_per_round,
                 "sp_budget_round": campaign_config.sp_budget_round,
                 "model_id": target_model,
                 "n_train": len(train_pool),

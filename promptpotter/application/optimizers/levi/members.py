@@ -3,10 +3,7 @@ manifest uses, and its runtime, registered under the manifest's."""
 
 from __future__ import annotations
 
-import ast
 import asyncio
-import hashlib
-import inspect
 import math
 import random
 from collections.abc import Mapping, Sequence
@@ -21,14 +18,18 @@ from promptpotter.application.bench.resume_and_fork.decisions import (
     record_decision,
 )
 from promptpotter.application.campaign_config import Estimand, Knob, Scope
-from promptpotter.application.optimizers import fence, nodes, paper_templates
+from promptpotter.application.optimizers import nodes, paper_templates
 from promptpotter.application.optimizers.descriptors import (
     DescriptorFeature,
     behaviour_descriptor,
     cell_objectives,
 )
 from promptpotter.application.optimizers.levi import operators
-from promptpotter.application.optimizers.levi.state import LeviState, levi_state
+from promptpotter.application.optimizers.levi.state import (
+    LeviState,
+    levi_round_state,
+    levi_state,
+)
 from promptpotter.application.optimizers.paper_templates import ask, marked, unmarked, walk_rng
 from promptpotter.domain.opt_search_point import OptSearchPoint, node_source
 from promptpotter.domain.optimizer_state import (
@@ -38,7 +39,7 @@ from promptpotter.domain.optimizer_state import (
     LeviElite,
 )
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.results import CandidateProposal, candidate_label
+from promptpotter.domain.results import CandidateProposal, OptimizerFact, candidate_label
 from promptpotter.domain.run_records import CandidateMintedRecord, LeviCheckpointKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.statistics import greedy_column_subset
@@ -265,11 +266,8 @@ class MapElites:
         cycle = ctx.cycle
         state = levi_state(ctx.state)
         knobs = cast("MapElitesKnobs", cycle.optimizer.knobs(self.name))
-        electable = set(measured.electable)
         offered: list[tuple[OptSearchPoint, Sequence[Mapping[str, Any]]]] = [
-            (ind, measured.rows[ind.lineage.id])
-            for ind in measured.scored
-            if ind.lineage.id in electable
+            (ind, measured.rows[ind.lineage.id]) for ind in measured.electable
         ]
         calibration = state.calibration
         if calibration is None:
@@ -577,6 +575,7 @@ class LeviRuntime:
 
     name: ClassVar[str] = LEVI_MANIFEST
     own_axes: ClassVar[dict[str, set[str]]] = {}
+    phases: ClassVar[tuple[nodes.OptimizerPhase, ...]] = ()
 
     def start(
         self, session: Session, config: CampaignConfig, origin_results: list[dict[str, Any]]
@@ -590,10 +589,7 @@ class LeviRuntime:
         return None
 
     def source_digest(self, *covered: ModuleType) -> str:
-        # AST-normalized, so a comment or a reflow does not move it.
-        shaping = [m for m in (fence, paper_templates, operators) if m not in covered]
-        tree = "".join(ast.dump(ast.parse(inspect.getsource(m))) for m in shaping)
-        return hashlib.sha256(tree.encode("utf-8")).hexdigest()[:16]
+        return paper_templates.preset_source_digest(__name__, *covered)
 
     def override_levers(self, node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
         return {}
@@ -630,6 +626,46 @@ class LeviRuntime:
         origin_composite_fitness: float | None,
     ) -> ReviewReading | None:
         return None
+
+    def pacing(self, selected: SelectedOptimizer) -> nodes.OptimizerPacing:
+        # Calibration races the diverse seeds; every later round, `interval` evaluations.
+        shift = cast("LeviParadigmShiftKnobs", selected.knobs(LeviParadigmShift.name))
+        return nodes.OptimizerPacing(
+            patience=None,
+            lives=None,
+            arms_per_round=max(shift.n_diverse_seeds, shift.interval),
+            limits=(),
+        )
+
+    def opening(self, ctx: RoundContext) -> nodes.RoundOpening:
+        return nodes.standing_opening(ctx)
+
+    def round_facts(
+        self, selected: SelectedOptimizer, round_result: RoundResult
+    ) -> list[OptimizerFact]:
+        state = levi_round_state(round_result)
+        if (calibration := state.calibration) is None:
+            return []
+        elites, k = len(state.elites), len(calibration.proxy)
+        # Calibration is round 1, and every round after it runs one paradigm shift.
+        shifts = round_result.round - 1
+        return [
+            OptimizerFact(
+                key="archive",
+                label="Archive",
+                text=f"{elites} of {len(calibration.centroids)} cells",
+                value=elites,
+                kind="stat",
+            ),
+            OptimizerFact(key="proxy", label="Proxy K", text=str(k), value=k, kind="stat"),
+            OptimizerFact(
+                key="paradigm_shifts",
+                label="Paradigm shifts",
+                text=str(shifts),
+                value=shifts,
+                kind="stat",
+            ),
+        ]
 
 
 MEMBERS = (ProxyCss(), LeviParadigmShift(), LeviRefine(), MapElites())

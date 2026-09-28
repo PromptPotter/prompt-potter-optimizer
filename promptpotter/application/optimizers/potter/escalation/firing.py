@@ -29,6 +29,7 @@ from promptpotter.application.bench.resume_and_fork.decisions import (
 )
 from promptpotter.application.mask.backprop import select_rewind_round
 from promptpotter.application.mask.load import load_lineage_spine
+from promptpotter.application.optimizers.nodes import OptimizerPhase
 from promptpotter.application.optimizers.potter.dispatch.facade import (
     DispatchHub,
     build_bundle,
@@ -51,12 +52,16 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
     L3PlanOutput,
     TerminateProposal,
 )
-from promptpotter.application.optimizers.potter.escalation.state import NextAction
+from promptpotter.application.optimizers.potter.escalation.state import NextAction, PotterPhase
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
 from promptpotter.application.optimizers.potter.validators.l3_output import run_l3_output_validators
+from promptpotter.application.views.view_models import (
+    OptimizerStepEnterView,
+    OptimizerStepExitView,
+)
 from promptpotter.domain.opt_search_point import OptSearchPoint, node_source
 from promptpotter.domain.optimizer_state import POTTER_MANIFEST, L1Layout, L2L3Memory
-from promptpotter.domain.phases import PhaseEvent, PotterPhase, StopLoop, StopReason, emit_phase
+from promptpotter.domain.phases import PhaseEvent, StopLoop, StopReason, emit_phase
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.run_records import (
     ConfigOverrides,
@@ -106,8 +111,8 @@ class TransitionResult:
 
 ParseFn = Callable[[Any, OptSearchPoint, L2L3Memory], TransitionResult]
 ApplyFn = Callable[["Cycle", "PotterState", TransitionResult], None]
-PayloadFn = Callable[["Cycle", "PotterState"], dict[str, Any]]
-ExitFn = Callable[["PotterState", TransitionResult], dict[str, Any]]
+EnterFn = Callable[["Cycle", "PotterState"], OptimizerStepEnterView]
+ExitFn = Callable[["PotterState", TransitionResult], OptimizerStepExitView]
 
 
 @dataclass(frozen=True)
@@ -115,10 +120,16 @@ class LayerStrategy:
     layer_id: Literal["L2", "L3"]
     template_name: str
     phase: PotterPhase
+    # What a surface names the layer's phase by while it runs.
+    activity: str
     parse: ParseFn
     apply: ApplyFn
-    enter_payload_fn: PayloadFn
-    exit_payload_fn: ExitFn
+    enter_view: EnterFn
+    exit_view: ExitFn
+
+    @property
+    def declared(self) -> OptimizerPhase:
+        return OptimizerPhase(phase=self.phase, node=self.template_name, activity=self.activity)
 
 
 def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, memory: L2L3Memory) -> TransitionResult:
@@ -194,46 +205,62 @@ def _apply_l2(cycle: Cycle, state: PotterState, result: TransitionResult) -> Non
     )
 
 
-def _l2_enter(cycle: Cycle, state: PotterState) -> dict[str, Any]:
-    return {
-        "l2_round": state.escalation.l2_round,
-        "l1_stall_count": state.escalation.l1_stall_count,
-        "l1_overrides": state.memory.l1_overrides,
-        "current_accuracy": cycle.tracking.current_accuracy,
-        "best_accuracy": cycle.tracking.best_accuracy,
-    }
-
-
-def _l2_exit(state: PotterState, result: TransitionResult) -> dict[str, Any]:
-    # ``l2_*_at_entry`` are read by ``EscalationFSM.fold`` on resume, carried onto
-    # ``L2RefineExitView`` — the persisted half. No prompt/response: the call is already this
-    # ledger's `l2_context` LLMCallRecord and the audit twin's `nodes.l2_context`.
+def _l2_enter(cycle: Cycle, state: PotterState) -> OptimizerStepEnterView:
+    items = [(k, str(v)) for k, v in state.memory.l1_overrides.items()]
+    if items:
+        shown = [f"{k}={s if len(s) <= 30 else s[:27] + '...'}" for k, s in items[:5]]
+        more = f", +{len(items) - 5} more" if len(items) > 5 else ""
+        overrides = f"l1_overrides: {', '.join(shown)}{more}"
+    else:
+        overrides = "l1_overrides: (none)"
     esc = state.escalation
-    payload: dict[str, Any] = {
-        "l2_round": esc.l2_round,
-        "l2_stall_count": esc.l2_stall_count,
-        "l2_best_composite_fitness_at_entry": esc.l2_best_composite_fitness_at_entry,
-        "l2_best_theta_at_entry": esc.l2_best_theta_at_entry,
-        "param_changes_count": len(state.memory.l1_overrides),
-        "l1_layout_changed": result.l1_layout is not None,
-        "changes_description": result.opt_sp.lineage.changes_description,
-        "axis_targeted": result.axis_targeted,
-    }
-    if result.fork_proposal is not None:
-        payload["fork_proposal"] = result.fork_proposal.model_dump()
-    if result.terminate_proposal is not None:
-        payload["terminate_proposal"] = result.terminate_proposal.model_dump()
-    return payload
+    return OptimizerStepEnterView(
+        node=L2.template_name,
+        activity=L2.activity,
+        title="L2 REFINE CONTEXT",
+        tag=f"L2 fire {esc.l2_round + 1}",
+        lines=(
+            f"L1 stalled {esc.l1_stall_count} rounds  |  "
+            f"acc={cycle.tracking.current_accuracy:.1%}  best={cycle.tracking.best_accuracy:.1%}",
+            overrides,
+            "LLM analyzing failure patterns...",
+        ),
+    )
+
+
+def _l2_exit(state: PotterState, result: TransitionResult) -> OptimizerStepExitView:
+    # The two L1 surfaces a fire can touch — the pair `l2_targets_l1_surface` scores it on.
+    layout = ", l1_layout edited" if result.l1_layout is not None else ""
+    axis = f", axis={result.axis_targeted}" if result.axis_targeted else ""
+    esc = state.escalation
+    return OptimizerStepExitView(
+        headline=f"L2 decision: {len(state.memory.l1_overrides)} param changes{layout}{axis}",
+        details=_described(result),
+        # No prompt/response: the call is this ledger's `l2_context` LLMCallRecord already.
+        audit=("L2 call", L2.template_name),
+        state={
+            "l2_round": esc.l2_round,
+            "l2_stall_count": esc.l2_stall_count,
+            "l2_best_composite_fitness_at_entry": esc.l2_best_composite_fitness_at_entry,
+            "l2_best_theta_at_entry": esc.l2_best_theta_at_entry,
+        },
+    )
+
+
+def _described(result: TransitionResult) -> tuple[str, ...]:
+    described = result.opt_sp.lineage.changes_description
+    return (described,) if described else ()
 
 
 L2 = LayerStrategy(
     layer_id="L2",
     template_name="l2_context",
     phase=PotterPhase.REFINE_STRATEGY,
+    activity="refining strategy",
     parse=_parse_l2,
     apply=_apply_l2,
-    enter_payload_fn=_l2_enter,
-    exit_payload_fn=_l2_exit,
+    enter_view=_l2_enter,
+    exit_view=_l2_exit,
 )
 
 
@@ -272,41 +299,46 @@ def _apply_l3(cycle: Cycle, state: PotterState, result: TransitionResult) -> Non
     )
 
 
-def _l3_enter(cycle: Cycle, state: PotterState) -> dict[str, Any]:
-    return {
-        "l3_round": state.escalation.l3_round,
-        "l2_stall_count": state.escalation.l2_stall_count,
-        "current_plan_preview": state.memory.plan[:120],
-    }
-
-
-def _l3_exit(state: PotterState, result: TransitionResult) -> dict[str, Any]:
-    # ``l3_*_at_entry`` are read by ``EscalationFSM.fold`` on resume, carried onto
-    # ``PlanExitView``; ``record_l3_fired`` resets L2 state to these.
+def _l3_enter(cycle: Cycle, state: PotterState) -> OptimizerStepEnterView:
     esc = state.escalation
-    payload: dict[str, Any] = {
-        "l3_round": esc.l3_round,
-        "l3_stall_count": esc.l3_stall_count,
-        "l3_best_composite_fitness_at_entry": esc.l3_best_composite_fitness_at_entry,
-        "l3_best_theta_at_entry": esc.l3_best_theta_at_entry,
-        "new_plan_preview": result.plan[:120],
-        "changes_description": result.opt_sp.lineage.changes_description,
-    }
-    if result.fork_proposal is not None:
-        payload["fork_proposal"] = result.fork_proposal.model_dump()
-    if result.terminate_proposal is not None:
-        payload["terminate_proposal"] = result.terminate_proposal.model_dump()
-    return payload
+    return OptimizerStepEnterView(
+        node=L3.template_name,
+        activity=L3.activity,
+        title="L3 MODIFY PLAN",
+        tag=f"L3 fire {esc.l3_round + 1}",
+        lines=(
+            f"L2 stalled {esc.l2_stall_count} rounds",
+            f"Current plan: {truncate(state.memory.plan[:120], 55, '...')}",
+            "LLM designing new strategy...",
+        ),
+    )
+
+
+def _l3_exit(state: PotterState, result: TransitionResult) -> OptimizerStepExitView:
+    # `record_l3_fired` resets L2's counters to the `l3_*_at_entry` pair, so a resume folds both.
+    esc = state.escalation
+    return OptimizerStepExitView(
+        headline=f"New plan: {truncate(result.plan[:120], 55, '...')}",
+        details=_described(result),
+        audit=None,
+        state={
+            "l3_round": esc.l3_round,
+            "l3_stall_count": esc.l3_stall_count,
+            "l3_best_composite_fitness_at_entry": esc.l3_best_composite_fitness_at_entry,
+            "l3_best_theta_at_entry": esc.l3_best_theta_at_entry,
+        },
+    )
 
 
 L3 = LayerStrategy(
     layer_id="L3",
     template_name="l3_plan",
     phase=PotterPhase.MODIFY_PLAN,
+    activity="replanning",
     parse=_parse_l3,
     apply=_apply_l3,
-    enter_payload_fn=_l3_enter,
-    exit_payload_fn=_l3_exit,
+    enter_view=_l3_enter,
+    exit_view=_l3_exit,
 )
 
 
@@ -331,7 +363,7 @@ async def _run_transition(
         transition.phase,
         "enter",
         round=round_num,
-        **transition.enter_payload_fn(cycle, state),
+        step=transition.enter_view(cycle, state),
     )
     async with observed_node(
         f"{transition.template_name}_r{round_num}",
@@ -385,13 +417,13 @@ async def _run_transition(
                     **parse_err.warning_detail(),
                 },
             )
+            # Closes the bracket and adopts nothing; the round warning above is its readout.
             emit_phase(
                 on_phase,
                 transition.phase,
                 "exit",
                 round=round_num,
-                view=None,
-                data={"action": "parse_failure", "node": transition.template_name},
+                step=OptimizerStepExitView(headline="", details=(), audit=None, state=None),
             )
             return None
 
@@ -411,13 +443,13 @@ async def _run_transition(
         transition.phase,
         "exit",
         round=round_num,
-        **transition.exit_payload_fn(state, result),
+        step=transition.exit_view(state, result),
     )
     knobs = potter_knobs(cycle.optimizer)
 
     # Terminate outranks rebase: "stop" is more final than "try again from earlier". Both ride
-    # this post-apply seam, so the layer's normal output is adopted and the exit-phase event
-    # (which carries the proposal to the ledger) is emitted before the raise.
+    # this post-apply seam, so the layer's normal output is adopted and the exit-phase event is
+    # emitted before the raise.
     if result.terminate_proposal is not None:
         reason = result.terminate_proposal.reason.strip()
         if not knobs.escalation.terminate_capability:

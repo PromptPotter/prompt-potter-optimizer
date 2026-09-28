@@ -22,6 +22,7 @@ def warm_stats_backend() -> None:
     threading.Thread(target=_warm, name="stats-warm", daemon=True).start()
 
 
+@shapes_optimizer_prompt
 def t_critical(df: int, alpha: float = 0.05) -> float:
     """Two-sided Student-t critical value for a mean whose SE was estimated from the same few observations — the normal
     quantile understates the interval at the panel sizes the paired verdicts run on."""
@@ -64,6 +65,7 @@ def p_exceeds(mean_a: float, se_a: float, mean_b: float, se_b: float) -> float:
 # --- PoBB: Posterior-of-Being-Best (Russo 2016 / Top-Two Thompson family) ---
 
 
+@shapes_optimizer_prompt
 def _normal_posterior(scores: list[float]) -> tuple[float, float]:
     """Normal posterior on the population mean of *scores*. SE is clipped to the Beta-Binomial worst case, which protects the
     small-n binary regime — 4/4 hits has empirical variance 0 and would collapse to a point mass, stopping exploration."""
@@ -86,6 +88,7 @@ def _normal_posterior(scores: list[float]) -> tuple[float, float]:
 # --- Paired-difference posterior — cand-vs-prior on shared sample set ---
 
 
+@shapes_optimizer_prompt
 def paired_diff_posterior(
     candidate_scores: list[float],
     prior_scores: list[float],
@@ -133,6 +136,7 @@ def mean_ci_t(values: list[float], alpha: float = 0.05) -> tuple[float, float, f
     return (mean, mean - half, mean + half, n)
 
 
+@shapes_optimizer_prompt
 def paired_reading(
     candidate_scores: list[float],
     prior_scores: list[float],
@@ -348,10 +352,12 @@ def rank_correlation(xs: list[float], ys: list[float]) -> float | None:
     return None if math.isnan(rho) else rho
 
 
+@shapes_optimizer_prompt
 def _order(a: float, b: float) -> int:
     return (a > b) - (a < b)
 
 
+@shapes_optimizer_prompt
 def _rank_agreement(full: Sequence[float], proxy: Sequence[float]) -> float:
     pairs = [(i, j) for i in range(len(full)) for j in range(i + 1, len(full))]
     if not pairs:
@@ -364,6 +370,7 @@ def _rank_agreement(full: Sequence[float], proxy: Sequence[float]) -> float:
     return total / len(pairs)
 
 
+@shapes_optimizer_prompt
 def _pearson(xs: Sequence[float], ys: Sequence[float]) -> float:
     mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
     sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys, strict=True))
@@ -372,6 +379,7 @@ def _pearson(xs: Sequence[float], ys: Sequence[float]) -> float:
     return sxy / math.sqrt(sxx * syy) if sxx > 0.0 and syy > 0.0 else 0.0
 
 
+@shapes_optimizer_prompt
 def greedy_column_subset(
     matrix: Sequence[Sequence[float]],
     k: int,

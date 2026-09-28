@@ -196,7 +196,10 @@ def _render_header(
     return parts
 
 
-def _bench_line(name: str, reading: BenchReading, bench_size: int) -> str:
+def _bench_line(name: str, reading: BenchReading | None, bench: BenchScore) -> str:
+    if reading is None:
+        return f"- {name}: no reading — {bench.missing_reason}"
+    bench_size = bench.bench_size
     band = (
         ""
         if reading.ci_lo is None or reading.ci_hi is None
@@ -241,8 +244,8 @@ def _render_bench(final: dict[str, Any]) -> list[str]:
         "formula. Every number below this section is the optimizer's own, read on the rows that "
         "chose its winner.",
         "",
-        _bench_line("selected", bench.selected, bench.bench_size),
-        _bench_line("origin", bench.origin, bench.bench_size),
+        _bench_line("selected", bench.selected, bench),
+        _bench_line("origin", bench.origin, bench),
         f"- lift, paired per row: **{lift}**",
         "",
     ]

@@ -9,11 +9,9 @@ from promptpotter.application.views.view_models import (
     CandidatesGeneratedView,
     InitEnterView,
     InitExitView,
-    L2RefineEnterView,
-    L2RefineExitView,
     MeasureEnterView,
-    PlanEnterView,
-    PlanExitView,
+    OptimizerStepEnterView,
+    OptimizerStepExitView,
     RoundCompleteView,
     RoundStartView,
     SpDiffView,
@@ -81,12 +79,6 @@ def _heart_bar(hearts: int, cap: int | None) -> str:
 
 
 def _render_round_start(v: RoundStartView) -> str:
-    if v.has_l1_critique:
-        crit = f"from R{v.round - 1}"
-    elif v.round <= 1:
-        crit = "none yet (first round)"
-    else:
-        crit = f"none (R{v.round - 1} produced none)"
     # Lives mode → show the ♥ bank instead of the fixed round ceiling (which is null/999
     # when lives governs the budget); non-lives runs keep the "ROUND N/max" form.
     round_label = (
@@ -94,26 +86,17 @@ def _render_round_start(v: RoundStartView) -> str:
         if v.hearts is not None
         else f"ROUND {v.round}/{v.max_rounds or 999}"
     )
-    # `l1_patience` is the distance to the next ESCALATION, not the run's remaining life —
-    # hearts own that. Labelling it "patience" beside a ♥ bank put two different facts under
-    # one word and read as a duplicate. At 0 the `l1_to_l2` fall-through fires L2 every round,
-    # which "stall 1/0" would state as a riddle; say it plainly instead.
-    escalation = (
-        "L2 every round" if v.patience == 0 else f"stall {v.l1_stall_count}/{v.patience} → L2"
-    )
+    arms = "?" if v.arms is None else str(v.arms)
     return "\n".join(
         [
             "",
-            _round_rule(
-                round_label,
-                escalation,
-            ),
+            _round_rule(round_label, v.standing),
             "",
             _node_block(
                 "GENERATE",
                 f"Parent accuracy {v.current_acc:.1%}",
                 f"Parent prompt   {v.prompt_preview}",
-                f"Candidates      {v.n_variants}   Prior critique: {crit}",
+                f"Candidates      {arms}" + (f"   {v.note}" if v.note else ""),
                 f"Model           {v.model}",
             ),
         ]
@@ -175,7 +158,7 @@ def _render_round_complete(v: RoundCompleteView) -> str:
     # Accuracy does not disappear; it moves into the parenthetical, so declaring the other loses
     # no reading.
     acc_txt = fmt_pct(v.winner_accuracy)
-    ability = v.headline_metric == "ability" and v.ability_theta is not None
+    ability = v.stamps_theta and v.headline_metric == "ability" and v.ability_theta is not None
     headline = f"θ {v.ability_theta:+.3f}" if ability else acc_txt
     detail = [acc_txt] if ability else []
 
@@ -213,63 +196,21 @@ def _render_round_complete(v: RoundCompleteView) -> str:
     return "\n".join(out)
 
 
-def _render_l2_refine_enter(v: L2RefineEnterView) -> str:
-    if v.l1_overrides:
-        items = list(v.l1_overrides.items())
-        parts = [f"{k}={s if len(s) <= 30 else s[:27] + '...'}" for k, s in items[:5]]
-        extra = len(items) - 5
-        body = ", ".join(parts) + (f", +{extra} more" if extra > 0 else "")
-        params_line = f"l1_overrides: {body}"
-    else:
-        params_line = "l1_overrides: (none)"
-    return "\n" + _node_block(
-        "L2 REFINE CONTEXT",
-        f"L1 stalled {v.l1_stall_count} rounds  |  acc={v.current_acc:.1%}  best={v.best_acc:.1%}",
-        params_line,
-        "LLM analyzing failure patterns...",
-        label_right=f"L2 fire {v.l2_round + 1}",
-    )
+def _render_step_enter(v: OptimizerStepEnterView) -> str:
+    return "\n" + _node_block(v.title, *v.lines, label_right=v.tag)
 
 
-def _render_l2_refine_exit(v: L2RefineExitView) -> str:
-    # The two L1 surfaces an L2 fire can touch — the same pair `l2_targets_l1_surface`
-    # scores it on, so what the operator reads matches what the validator judges. A fire
-    # showing neither is the wasted escalation that check exists to catch.
-    layout = f", {GREEN}l1_layout edited{RESET}" if v.l1_layout_changed else ""
-    axis = f", {CYAN}axis={v.axis_targeted}{RESET}" if v.axis_targeted else ""
-    out = [f"  {GREEN}✓{RESET} L2 decision: {v.param_changes_count} param changes{layout}{axis}"]
-    if v.changes_description:
-        out.append(f"    {v.changes_description}")
-
-    # Address the I/O, never re-print it — and address its CANONICAL home. The audit twin
-    # assembles the whole call human-readably and uncapped; this record carries no copy of it,
-    # so a dump here had nothing local to quote and the old `[:40]` on the response amputated
-    # what it did quote. `AuditTrailProjection` owns deep LLM I/O; this line points at it.
-    out.append(
-        f"  {CYAN}L2 call{RESET} {DIM}→ .runtime/cache/rounds/round_NNNN.json"
-        f"::nodes.l2_context (prompt · response · usage){RESET}"
-    )
-    return "\n".join(out)
-
-
-def _render_plan_enter(v: PlanEnterView) -> str:
-    plan = v.current_plan_preview
-    plan = plan if len(plan) <= 55 else plan[:52] + "..."
-    return "\n" + _node_block(
-        "L3 MODIFY PLAN",
-        f"L2 stalled {v.l2_stall_count} rounds",
-        f"Current plan: {plan}",
-        "LLM designing new strategy...",
-        label_right=f"L3 fire {v.l3_round + 1}",
-    )
-
-
-def _render_plan_exit(v: PlanExitView) -> str:
-    plan = v.new_plan_preview
-    plan = plan if len(plan) <= 55 else plan[:52] + "..."
-    out = [f"  {GREEN}✓{RESET} New plan: {plan}"]
-    if v.changes_description:
-        out.append(f"    {v.changes_description}")
+def _render_step_exit(v: OptimizerStepExitView) -> str:
+    if not v.headline:
+        return ""
+    out = [f"  {GREEN}✓{RESET} {v.headline}", *(f"    {line}" for line in v.details)]
+    if v.audit is not None:
+        # Address the call's canonical home, never re-print it: the audit twin holds it uncapped.
+        label, node = v.audit
+        out.append(
+            f"  {CYAN}{label}{RESET} {DIM}→ .runtime/cache/rounds/round_NNNN.json"
+            f"::nodes.{node} (prompt · response · usage){RESET}"
+        )
     return "\n".join(out)
 
 
@@ -289,18 +230,19 @@ def to_text(view: AnyView) -> str:
             return _render_measure_enter(view)
         case RoundCompleteView():
             return _render_round_complete(view)
-        case L2RefineEnterView():
-            return _render_l2_refine_enter(view)
-        case L2RefineExitView():
-            return _render_l2_refine_exit(view)
-        case PlanEnterView():
-            return _render_plan_enter(view)
-        case PlanExitView():
-            return _render_plan_exit(view)
+        case OptimizerStepEnterView():
+            return _render_step_enter(view)
+        case OptimizerStepExitView():
+            return _render_step_exit(view)
         case _:
             return ""
 
 
+_COLLAPSE_WORDS = {
+    "no_op_variant": "no-op",
+    "duplicate_variant": "duplicate",
+    "repeat_variant": "repeat",
+}
 _SP_DIFF_ABSENT = "-"
 _SP_DIFF_UNCHANGED = "·"
 _SP_DIFF_VAL_INLINE_MAX = 12
@@ -321,28 +263,17 @@ def render_sp_diff(view: SpDiffView) -> str:
     ]
     node_param_keys = view.node_param_keys
     round_num = view.round_num
-    n_no_op = view.l1_n_no_op
-    n_duplicate = view.l1_n_duplicate
-    n_repeat = view.l1_n_repeat
-    l1_yield = view.l1_yield
 
     warning_lines: list[str] = []
-    if n_no_op or n_duplicate or n_repeat:
+    bits = [f"{view.collapses[r]} {w}" for r, w in _COLLAPSE_WORDS.items() if view.collapses.get(r)]
+    if bits:
         n_total = sum(1 for label, _ in columns_in if label.startswith("C"))
-        n_valid = max(0, n_total - n_no_op - n_duplicate - n_repeat)
-        bits: list[str] = []
-        if n_no_op:
-            bits.append(f"{n_no_op} no-op")
-        if n_duplicate:
-            bits.append(f"{n_duplicate} duplicate")
-        if n_repeat:
-            bits.append(f"{n_repeat} repeat")
-        bits_text = " / ".join(bits)
+        n_valid = max(0, n_total - sum(view.collapses.values()))
         cl_text = f" ({', '.join(sorted(clone_labels))})" if clone_labels else ""
         warning_lines.append(
             _node_line(
-                f"{YELLOW}⚠ L1 produced {bits_text} variant(s){cl_text} — "
-                f"synthetic-zeroed (no API cost). yield={l1_yield:.0%} "
+                f"{YELLOW}⚠ {view.proposer} produced {' / '.join(bits)} variant(s){cl_text} — "
+                f"synthetic-zeroed (no API cost). yield={n_valid / n_total:.0%} "
                 f"({n_valid}/{n_total} valid).{RESET}"
             )
         )

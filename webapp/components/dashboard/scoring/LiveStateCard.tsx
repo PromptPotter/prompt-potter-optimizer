@@ -21,7 +21,7 @@ const SHOWN_ELSEWHERE = new Set([
 ]);
 
 const KNOWN_ORDER = [
-  "origin_acc", "current_acc", "n_variants", "sp_budget_round",
+  "origin_acc", "current_acc", "arms_per_round", "sp_budget_round",
   "total_backend_calls", "error_count", "degraded_count", "backend_retry_count",
   "state_since", "stop_reason",
 ];
@@ -68,7 +68,7 @@ export function LiveStateCard() {
   const payload = dash?.current_query_payload ?? "";
   const payloadEmpty = payload === "";
   const payloadText = payloadEmpty
-    ? dash?.state === "scoring"
+    ? Array.isArray(dash?.open_sample_ids) && dash.open_sample_ids.length > 0
       ? "in flight, payload not exposed"
       : "no query in flight"
     : payload;

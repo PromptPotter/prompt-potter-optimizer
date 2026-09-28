@@ -81,6 +81,7 @@ describe("runSummary", () => {
       candidates: 2,
       improved: null,
       verdictReason: null,
+      facts: [],
     });
     const lost = runSummary(
       dash({
@@ -107,6 +108,7 @@ describe("runSummary", () => {
       candidates: 2,
       improved: false,
       verdictReason: null,
+      facts: [],
     });
     // …and the champion correctly walks back to the origin, which is the pairing the
     // surface has to render as one sentence.

@@ -58,13 +58,18 @@ def _inner_optimizer_revision(dataset_dir: Path, inner: SelectedOptimizer) -> di
     hour to measure. DERIVED from the outer declaration rather than a name list, so a surface that
     grows a node is covered without an edit here. The PARSED manifest, never its bytes."""
     outer = parse_pipeline_response(read_yaml(dataset_dir / "pipeline.yaml"))
+    mutated = sorted(n.name for n in outer.config_nodes if n.tunes_llm)
+    if undeclared := [name for name in mutated if name not in inner.llm_nodes]:
+        raise ValueError(
+            f"{dataset_dir.name} mutates {undeclared}, which the inner campaign's optimizer "
+            f"{inner.name!r} does not declare (its llm nodes are {sorted(inner.llm_nodes)}): an "
+            "arm editing one would change nothing its inner cells run. Point the panel's inner "
+            "benchmark at a campaign selecting the optimizer these nodes belong to."
+        )
     return {
         "manifest": inner.name,
         "version": inner.version,
-        "nodes": {
-            name: inner.node_digests[name]
-            for name in sorted(n.name for n in outer.config_nodes if n.tunes_llm)
-        },
+        "nodes": {name: inner.node_digests[name] for name in mutated},
     }
 
 
@@ -120,7 +125,13 @@ def _identity_config(
         ),
         "campaign": inner_campaign_config,
     }
-    inner = select_inner_optimizer(inner_spec["campaign"])
+    # The manifest a cell RUNS, under the panel's overlays; a box with no panel lays none.
+    cfg = InnerTasks.model_validate(inner_tasks).inner_benchmark_config if inner_tasks else None
+    inner = select_inner_optimizer(
+        inner_spec["campaign"],
+        cfg.inner_nodes if cfg else {},
+        cfg.inner_depth_nodes if cfg else {},
+    )
     inner_optimizer = _inner_optimizer_revision(dataset_dir, inner)
     # What the inner optimizer's prompts SAY, and which of its panels fill each one: both are
     # code, so nothing above reaches them — see `OptimizerRuntime.source_digest`.

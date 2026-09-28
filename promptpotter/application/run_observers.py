@@ -42,10 +42,7 @@ from promptpotter.infrastructure.projections.audit_trail import AuditTrailProjec
 from promptpotter.infrastructure.projections.live_dashboard.projection import (
     LiveDashboardProjection,
 )
-from promptpotter.infrastructure.projections.live_dashboard.state import (
-    PotterLimits,
-    RunLimits,
-)
+from promptpotter.infrastructure.projections.live_dashboard.state import RunLimits
 from promptpotter.infrastructure.projections.racing_stream import RacingStreamProjection
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 from promptpotter.shared.errors import graceful
@@ -90,13 +87,13 @@ def build_campaign_emitter(
     cycle to seed prior trajectory from; ``None`` seeds from the cycle's own dir. ``None`` back
     when the session carries no cycle to write into, which the return type states."""
     selected = select_optimizer(campaign_config.optimization)
-    potter = run_limits_from(campaign_config).potter
+    pacing = selected.pacing
     return LiveDashboardProjection.for_session(
         session.hop,
         tenant_root=session.tenant_root,
         session_id=session.session_id,
-        l1_patience=potter.l1_patience if potter is not None else None,
-        n_variants=selected.readout("l1_generate", "n_variants"),
+        patience=pacing.patience,
+        arms_per_round=pacing.arms_per_round,
         sp_budget_round=campaign_config.sp_budget_round,
         headline_metric=campaign_config.headline_metric,
         langfuse_trace_url=langfuse_trace_url,
@@ -116,23 +113,13 @@ def run_limits_from(config: CampaignConfig) -> RunLimits:
     once the held ceiling is set on it: earlier is the unadmitted config, and the ledger's own
     INIT record lands after the entire origin has scored."""
     opt = config.optimization
-    selected = select_optimizer(opt)
-    l1_patience = selected.readout("escalation", "l1_patience")
-    lives = selected.readout("escalation", "lives")
+    pacing = select_optimizer(opt).pacing
     return RunLimits(
         max_rounds=opt.max_rounds or None,
         spend_budget_usd=opt.spend_budget_usd,
         token_budget=opt.token_budget,
-        # Read off the manifest's own nodes: a manifest without potter's ladder serves none.
-        potter=None
-        if l1_patience is None
-        else PotterLimits(
-            l1_patience=l1_patience,
-            l2_patience=selected.readout("escalation", "l2_patience"),
-            l3_patience=selected.readout("escalation", "l3_patience"),
-            pobb_epsilon=selected.readout("pobb", "epsilon"),
-            lives_cap=lives.cap if lives is not None else None,
-        ),
+        lives_cap=pacing.lives[1] if pacing.lives is not None else None,
+        optimizer=list(pacing.limits),
     )
 
 
@@ -268,15 +255,13 @@ class RunCallbacks:
         )
 
     def on_round_complete(
-        self, round_result: RoundResult, l1_stall_count: int, hearts: int | None = None
+        self, round_result: RoundResult, stall: int, hearts: int | None = None
     ) -> None:
         # ``event="display"`` keeps ``EscalationFSM.fold`` reading only the lean ``event="complete"`` audit emit.
         # The full ``RoundResult`` rides ``live_round_result`` (in-memory-only) for
         # the live subscribers; disk persists only the three scalars the SSE→webapp
         # chat reads — the fat arrays are already in round_NNNN.json + dashboard.json.
-        # ``hearts`` = the banked-lives count (``None`` when lives mode is off) — the
-        # high-level ♥ readout, a peer of the stall counter on the same channel.
-        self._phase_ctx.l1_stall_count = l1_stall_count
+        # ``stall`` / ``hearts`` are the optimizer's standing (``WorkingState.standing``).
         self._phase_ctx.hearts = hearts
         self._emit(
             PhaseRecord(
@@ -290,7 +275,7 @@ class RunCallbacks:
                         "accuracy": round_result.accuracy,
                         "composite_fitness": float(round_result.composite_fitness),
                     },
-                    "l1_stall_count": l1_stall_count,
+                    "stall": stall,
                     "hearts": hearts,
                     "phase_ctx": self._phase_ctx.ledger_anchors(),
                 },

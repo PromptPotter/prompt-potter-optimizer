@@ -118,7 +118,6 @@ def _add_new_args(p_new: argparse.ArgumentParser) -> None:
     p_new.add_argument(
         "--task-text", default=None, help="Override datasets/<name>/task_description.md inline"
     )
-    # File-ingest form only (ignored for the name form).
     p_new.add_argument(
         "--slug",
         default=None,
@@ -131,10 +130,10 @@ def _add_new_args(p_new: argparse.ArgumentParser) -> None:
         action="append",
         default=[],
         metavar="FIELD=VALUE",
-        help="(file form) Confirm an origin field directly (operator-stated), e.g. "
-        "`--set task_description='map names to codes'` or "
-        "`--set column.query=input`. Repeatable. Applied before the resolver "
-        "runs, so it seeds the rest.",
+        help="Repeatable. Both forms take the campaign knobs — `--set optimizer=capo`, "
+        "`--set max_rounds=3`, `--set nodes.<node>.<knob>=VALUE`. The file form also "
+        "confirms an origin field, e.g. `--set task_description='map names to codes'` or "
+        "`--set column.query=input`, applied before the resolver runs.",
     )
     p_new.add_argument("--backend-url", default=DEFAULT_BACKEND_URL)
     p_new.add_argument("--backend-id", default=DEFAULT_BACKEND_ID)

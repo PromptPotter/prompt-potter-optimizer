@@ -52,14 +52,15 @@ def fmt_elapsed(seconds: float) -> str:
 _PLATEAU_THETA_BAND = 0.05
 
 
-def render_progress_table(rounds: list[dict[str, Any]]) -> str:
+def render_progress_table(rounds: list[dict[str, Any]], *, stamps_theta: bool) -> str:
+    """``stamps_theta`` is the selector's own declaration: one that elects on no θ gets no θ
+    column, trend or plateau advice, since its rounds were never decided on one."""
     if not rounds:
         return ""
 
-    header = (
-        f"{'Round':<7s} {'Accuracy':>9s} {'n':>5s} {'Composite':>10s} "
-        f"{'Ability θ':>10s} {'Trend':>9s}"
-    )
+    header = f"{'Round':<7s} {'Accuracy':>9s} {'n':>5s} {'Composite':>10s}"
+    if stamps_theta:
+        header += f" {'Ability θ':>10s} {'Trend':>9s}"
     lines: list[str] = [_node_line(header)]
 
     # Trend and the plateau banner read ABILITY, never accuracy. Under `per_round_resubset` each
@@ -87,10 +88,12 @@ def render_progress_table(rounds: list[dict[str, Any]]) -> str:
         # then the fixed yardstick every round shares. One number would hide that two rounds
         # with the same `n` can have bought entirely different cells.
         n = int(rd.get("total") or 0)
-        row = f"  {rl:<5s} {acc:>8.1%} {n:>5d} {comp:>9.4f} {th_str:>10s} {trend:>9s}"
+        row = f"  {rl:<5s} {acc:>8.1%} {n:>5d} {comp:>9.4f}"
+        if stamps_theta:
+            row += f" {th_str:>10s} {trend:>9s}"
         lines.append(_node_line(row))
 
-    if len(thetas) >= 3:
+    if stamps_theta and len(thetas) >= 3:
         recent = thetas[-3:]
         mean = sum(recent) / 3
         if all(abs(t - mean) < _PLATEAU_THETA_BAND for t in recent):
@@ -222,10 +225,10 @@ def render_round_stats(
     return "\n".join(lines)
 
 
-def render_patience_status(improved: bool, l1_stall_count: int, l1_patience: int) -> str:
+def render_patience_status(improved: bool, stall: int, patience: int) -> str:
     if improved:
         return _node_line(f"{GREEN}✓ Improvement detected, auto-continuing...{RESET}")
-    return _node_line(f"{YELLOW}⚠ No improvement ({l1_stall_count}/{l1_patience} patience){RESET}")
+    return _node_line(f"{YELLOW}⚠ No improvement ({stall}/{patience} patience){RESET}")
 
 
 __all__ = [

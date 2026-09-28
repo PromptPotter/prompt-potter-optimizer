@@ -24,7 +24,7 @@ what may not happen here is § Out-of-bounds.
   (display); the per-cycle markdown writers (`log.md`, `review.md`) live
   in `application/runner/output.py` (orchestration-side), not here.
 - **No business logic here** — `cli/` and `api/` parse, check, page and format. Anything deciding WHICH rows or in WHAT ORDER belongs in `application/`, because the CLI, the skill, the embedded launch and any agent tool cannot import a router without FastAPI — the next entry point writes a copy instead.
-  One manifest, one parser: `routers/active.py::get_optimizer_pipeline` calls `get_optimizer_schema`, which IS `parse_pipeline_response`. The prospective origin id is `application/origin.py::prospective_origin_id` — deliberately NOT the campaign resolution: it answers for a dataset with no campaign yet, so it rides `resolve_pipeline_config_params`, never `resolve_pipeline_for_campaign`; collapsing the two is the scope error the split exists to prevent.
+  One manifest, one parser: `routers/active.py::get_optimizer_pipeline` reads `resolve_optimizer(name, {}).schema`, the resolution every run shares, parsed by `parse_pipeline_response`. The prospective origin id is `application/origin.py::prospective_origin_id` — deliberately NOT the campaign resolution: it answers for a dataset with no campaign yet, so it rides `resolve_pipeline_config_params`, never `resolve_pipeline_for_campaign`; collapsing the two is the scope error the split exists to prevent.
 - **One orchestration layer under every adapter.** A behavior reachable from the CLI but not the notebook or webapp is a bug, not a feature.
 
 ## No ad-hoc mutating routes

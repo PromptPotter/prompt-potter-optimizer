@@ -1,6 +1,5 @@
 """The fence every optimizer wraps dataset-derived text in before it reaches an optimizer prompt —
-sample queries, ground truths, model echoes, pipeline warnings. A preset that fences hashes this
-module in its ``source_digest``: the fence's text is prompt text."""
+sample queries, ground truths, model echoes, pipeline warnings."""
 
 from __future__ import annotations
 

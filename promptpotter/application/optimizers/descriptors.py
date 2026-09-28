@@ -7,6 +7,9 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Literal, assert_never
 
 from promptpotter.shared.errors import is_error_result
+from promptpotter.shared.hashing import shapes_optimizer_prompt
+
+shapes_optimizer_prompt(__name__)
 
 __all__ = ["DescriptorFeature", "behaviour_descriptor", "cell_objectives"]
 

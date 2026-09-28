@@ -61,17 +61,14 @@ def effective_optimizer_prompts(
     pipeline_params: dict[str, Any] | None,
     inner: SelectedOptimizer | None,
 ) -> dict[str, dict[str, str]]:
-    """``{}`` off the recursion (*inner* is ``None``) — a node qualifies only if it names one of
-    *inner*'s optimizer prompts AND advertises ``PromptTemplate`` fields."""
+    """``{}`` off the recursion (*inner* is ``None``) — a node qualifies if it advertises
+    ``PromptTemplate`` fields, and the L4 identity refuses an outer one *inner* does not declare."""
     if schema is None or inner is None:
         return {}
-    owned = {*inner.llm_nodes, *checkin_manifest().schema.active_steps}
     keys_by_node = schema.node_param_keys()
     params = pipeline_params or {}
     out: dict[str, dict[str, str]] = {}
     for node_name in schema.active_steps:
-        if node_name not in owned:
-            continue
         fields = [f for f in PROMPT_STRING_FIELDS if f in keys_by_node.get(node_name, set())]
         if not fields:
             continue

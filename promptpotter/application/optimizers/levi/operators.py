@@ -1,6 +1,6 @@
 """What LEVI's llm nodes send (arXiv 2605.09764 App. E.6, E.7): the paper's own templates filled
 from the manifest's ``resolved_prompts``. The sections the paper leaves unformatted are laid out
-here, and this module is what ``LeviRuntime.source_digest`` hashes beside ``paper_templates``."""
+here."""
 
 from __future__ import annotations
 

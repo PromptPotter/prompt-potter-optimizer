@@ -204,10 +204,15 @@ def _overlapped(a: _Graded, b: _Graded) -> bool:
     return a.window[0] < b.window[1] and b.window[0] < a.window[1]
 
 
+def _origin(g: _Graded) -> BenchReading | None:
+    return None if g.row.bench is None else g.row.bench.origin
+
+
 def _same_origin(a: _Graded, b: _Graded) -> bool:
-    if a.row.bench is None or b.row.bench is None or a.row.bench_set != b.row.bench_set:
+    oa, ob = _origin(a), _origin(b)
+    if oa is None or ob is None or a.row.bench_set != b.row.bench_set:
         return False
-    return a.row.bench.origin.sp_hash == b.row.bench.origin.sp_hash
+    return oa.sp_hash == ob.sp_hash
 
 
 def _one_instrument(a: _Graded, b: _Graded) -> bool:
@@ -215,7 +220,9 @@ def _one_instrument(a: _Graded, b: _Graded) -> bool:
     row keeps its old grade, so a grader that moved shows in the headline alone."""
     if a.row.bench_set != b.row.bench_set or a.row.bench is None or b.row.bench is None:
         return False
-    oa, ob = a.row.bench.origin, b.row.bench.origin
+    oa, ob = _origin(a), _origin(b)
+    if oa is None or ob is None:
+        return True
     if oa.sp_hash != ob.sp_hash or a.origin_rows is None or b.origin_rows is None:
         return True
     _gap, lo, hi, _p, _n = _paired(a.origin_rows, b.origin_rows)
@@ -284,7 +291,7 @@ def _read(entry: HeadToHeadEntry) -> _Graded:
                 if "model" in cfg
             },
         )
-        if partition and bench is not None
+        if partition and bench is not None and bench.selected is not None
         else None
     )
     spend_doc = read_json_tolerant(layout.dashboard, {}).get("spend")
@@ -324,8 +331,10 @@ def _read(entry: HeadToHeadEntry) -> _Graded:
             else bench.lift / spend.total_incurred_usd,
             concurrent_with=[],
         ),
-        origin_rows=None if bench is None else rows_of(bench.origin.run_id),
-        selected_rows=None if bench is None else rows_of(bench.selected.run_id),
+        origin_rows=None if bench is None or bench.origin is None else rows_of(bench.origin.run_id),
+        selected_rows=(
+            None if bench is None or bench.selected is None else rows_of(bench.selected.run_id)
+        ),
         window=None if start is None or end is None else (start, end),
         raced=False,
     )

@@ -1,6 +1,7 @@
 // A finished run's chat-thread item, lifted verbatim off `dashboard.json`. Values, not a pointer:
 // a `resume` or rewind moves the dashboard on, and the frozen item must not restate itself.
 
+import type { OptimizerFact } from "@/lib/api/types";
 import type { DashboardSnapshot } from "@/lib/poll";
 import { bestObserveTarget } from "./searchPoint";
 import { headlineStats } from "./headline-stats";
@@ -30,6 +31,8 @@ export interface RunSummary {
     candidates: number;
     improved: boolean | null;
     verdictReason: string | null;
+    // The optimizer's own words about that round, whichever optimizer ran it.
+    facts: OptimizerFact[];
   } | null;
 }
 
@@ -59,6 +62,8 @@ export function runSummary(dash: DashboardSnapshot | null): RunSummary | null {
           candidates: last.candidates.length,
           improved: last.improved,
           verdictReason: last.verdict_reason,
+          // Guarded: `dashboard.json` is served verbatim, and a file an older build wrote lacks it.
+          facts: Array.isArray(last.optimizer_facts) ? last.optimizer_facts : [],
         }
       : null,
   };

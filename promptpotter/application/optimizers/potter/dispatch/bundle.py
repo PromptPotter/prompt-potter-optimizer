@@ -17,16 +17,17 @@ from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
 
+# Every constant below decides what a prompt RECEIVES, so every optimizer's source digest hashes
+# this module: one shaping a prompt from outside it pools corpora the fingerprint keeps apart.
+shapes_optimizer_prompt(__name__)
 
-# Every constant below decides what a prompt RECEIVES, and `injection_source_digest` hashes this
-# module: one shaping a prompt from outside that hash pools corpora the fingerprint keeps apart.
-#
 # What the DISCRETIONARY panels may spend. The mandatory floor and the static template are spent
 # before one is placed and neither is bounded here: the floor is the dataset's — on the recursion it
 # is the inner optimizer prompts — so a whole-prompt ceiling can only guess at it, and guessing low

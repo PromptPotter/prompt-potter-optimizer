@@ -18,7 +18,7 @@ Contract: ``application/optimizers/potter/CLAUDE.md``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.llm_call import (
     LLMCallContext,
@@ -52,7 +52,7 @@ from promptpotter.domain.optimizer_state import (
     PARSE_FAILURE_WRONG_TYPE,
     POTTER_MANIFEST,
 )
-from promptpotter.domain.results import CandidateProposal, candidate_label
+from promptpotter.domain.results import CandidateProposal
 from promptpotter.domain.wounds import ValidationFailure
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
@@ -77,24 +77,6 @@ def _parse_evidence_grounding(raw: VariantEvidenceGrounding | None) -> EvidenceG
         )
         return None
     return EvidenceGrounding(field=raw.field, citation=raw.citation.strip())
-
-
-def candidate_summaries(proposals: list[CandidateProposal], round_num: int) -> list[dict[str, Any]]:
-    """Per-candidate summary dicts for phase events. `label` set once here — no display-side `idx+1`."""
-    summaries = []
-    for i, cp in enumerate(proposals):
-        prompt_fields = cp.opt_sp.prompt_fields()
-        summary: dict[str, Any] = {
-            "idx": i,
-            "label": candidate_label(round_num, i),
-            "changes_description": cp.opt_sp.lineage.changes_description or "",
-        }
-        if cp.pipeline_overlay:
-            summary["pipeline_overlay"] = cp.pipeline_overlay
-        if prompt_fields:
-            summary["prompt_fields"] = prompt_fields
-        summaries.append(summary)
-    return summaries
 
 
 async def l1_generate(
@@ -279,4 +261,4 @@ async def l1_generate(
     return population, None
 
 
-__all__ = ["candidate_summaries", "l1_generate"]
+__all__ = ["l1_generate"]

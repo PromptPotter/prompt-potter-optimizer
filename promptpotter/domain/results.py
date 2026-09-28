@@ -39,6 +39,7 @@ __all__ = [
     "HardSampleOrder",
     "HeadlineMetric",
     "LineStep",
+    "OptimizerFact",
     "OverlapMember",
     "OverlapReading",
     "ReferenceReading",
@@ -63,6 +64,7 @@ __all__ = [
     "overlap_series",
     "parent_key",
     "parse_candidate_label",
+    "proposal_collapses",
     "resolved_fitness",
     "round_clocks",
     "scoreboard_rank_key",
@@ -101,6 +103,7 @@ class DegradationContext(TypedDict, total=False):
     source: str
 
 
+@shapes_optimizer_prompt
 def candidate_label(round_num: int, idx: int) -> str:
     """Sole writer of the label, and readers take it off the row. The browser re-derives the format
     only for the in-flight slot that carries none yet (``webapp/lib/candidate-label.ts``), where it
@@ -445,6 +448,18 @@ class CandidateProposal(StrictModel):
     runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
 
 
+def proposal_collapses(proposals: Sequence[CandidateProposal]) -> dict[str, int]:
+    """``invariant_collapses`` as the round is proposed, off each proposal's own failures."""
+    counts: dict[str, int] = {}
+    for cp in proposals:
+        reason = next(
+            (vf.reason for vf in cp.validation_failures if vf.reason in INVARIANT_REASONS), None
+        )
+        if reason:
+            counts[reason] = counts.get(reason, 0) + 1
+    return counts
+
+
 class ReferenceReading(StrictModel):
     """A round's reference individual re-read on the round's panel — potter's is its parent: the
     origin at round 0, the prior winner after it. Its measurement is a ``ScoredCandidate`` from
@@ -740,6 +755,20 @@ def invariant_collapses(candidate_scores: Sequence[ScoredCandidate]) -> dict[str
     return counts
 
 
+class OptimizerFact(StrictModel):
+    """One labelled reading an optimizer reports about a round, worded by its own runtime."""
+
+    model_config = ConfigDict(frozen=True)
+
+    key: str
+    label: str
+    text: str
+    # The reading as a number where it is one, for a surface that plots it across rounds.
+    value: float | None
+    # A `stat` reads on one line; a `note` is prose the optimizer carries into its next round.
+    kind: Literal["stat", "note"]
+
+
 class RoundResult(StrictModel):
     """Per-round outcome — and the round document itself.
     ``model_dump()`` IS ``rounds/round_NNNN.json`` — declare a field here and it reaches disk."""
@@ -861,6 +890,9 @@ class RoundResult(StrictModel):
     # The optimizer's own state as the round ended on it — restored on resume and fork, and read
     # by nothing outside that optimizer.
     optimizer_state: OptimizerState
+    # What that optimizer says about the round (`OptimizerRuntime.round_facts`), stamped at the
+    # close so every surface renders one wording, the projection included, which cannot ask it.
+    optimizer_facts: list[OptimizerFact] = Field(default_factory=list)
     # "generation_only" for a diag round (L1 variants generated, never scored — every
     # scoring scalar below is a structural zero, not a measurement); "" for a scored round.
     status: str = ""

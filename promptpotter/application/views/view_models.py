@@ -6,7 +6,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from promptpotter.domain.results import ArmOutcome, HardSampleOrder, HeadlineMetric, OverlapReading
+from promptpotter.domain.results import (
+    ArmOutcome,
+    HardSampleOrder,
+    HeadlineMetric,
+    OptimizerFact,
+    OverlapReading,
+)
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.spend import SpendRollup
 
@@ -20,12 +26,10 @@ __all__ = [
     "HardSamplesView",
     "InitEnterView",
     "InitExitView",
-    "L2RefineEnterView",
-    "L2RefineExitView",
     "LogMdView",
     "MeasureEnterView",
-    "PlanEnterView",
-    "PlanExitView",
+    "OptimizerStepEnterView",
+    "OptimizerStepExitView",
     "RoundCompleteView",
     "RoundDigestView",
     "RoundStartView",
@@ -42,9 +46,8 @@ class ViewContext:
     their own copy. Distinct from the frozen ``*View`` payloads: this carries running state the builders mutate."""
 
     max_rounds: int = 0
-    patience: int = 0
+    patience: int | None = None
     round_num: int = 0
-    l1_stall_count: int = 0
     # Banked lives ("hearts") entering the current round; ``None`` when lives mode is off.
     hearts: int | None = None
     # The bank's ceiling — the denominator every ♥ readout renders against. A bare count
@@ -84,8 +87,8 @@ class InitEnterView:
 
     warnings: tuple[WarningEntry, ...] = ()
     max_rounds: int = 0
-    patience: int = 0
-    n_variants: int = 0
+    # The optimizer's own (`OptimizerPacing.patience`); ``None`` where it keeps none.
+    patience: int | None = None
     sp_budget_round: int = 0
     dataset_size: int = 0
     model: str = ""
@@ -122,18 +125,18 @@ class InitExitView:
 
 @dataclass(frozen=True)
 class RoundStartView:
-    """L1 generate enter — round banner + generate config block."""
+    """``propose:enter`` — the round banner and the proposing block, whichever optimizer proposes;
+    ``standing`` and ``note`` are the optimizer's own words (``RoundOpening``)."""
 
     node: str
     round: int
     max_rounds: int
-    l1_stall_count: int
-    patience: int
+    standing: str
     current_acc: float
     prompt_preview: str
-    n_variants: int
+    arms: int | None
+    note: str
     model: str
-    has_l1_critique: bool
     hearts: int | None = None
     hearts_cap: int | None = None
 
@@ -144,23 +147,18 @@ class SpDiffView:
     node_param_keys: dict[str, list[str]] | None
     round_num: int | None
     clone_labels: tuple[str, ...]
-    l1_yield: float
-    l1_n_no_op: int
-    l1_n_duplicate: int
-    l1_n_repeat: int
+    # Proposals each ``INVARIANT_REASONS`` member collapsed, and who proposed them.
+    collapses: dict[str, int]
+    proposer: str
 
 
 @dataclass(frozen=True)
 class CandidatesGeneratedView:
-    """L1 generate exit — N candidates ready, sp_diff table follows."""
+    """``propose:exit`` — N candidates ready, sp_diff table follows."""
 
     n_candidates: int
     source: str  # "disk" | "llm"
     n_scoring_samples: int
-    l1_yield: float
-    l1_n_no_op: int
-    l1_n_duplicate: int
-    l1_n_repeat: int
     clone_labels: tuple[str, ...]
     sp_diff: SpDiffView
 
@@ -253,49 +251,27 @@ class RoundCompleteView:
 
 
 @dataclass(frozen=True)
-class L2RefineEnterView:
-    l2_round: Any
-    l1_stall_count: Any
-    current_acc: float
-    best_acc: float
-    l1_overrides: dict[str, str]
+class OptimizerStepEnterView:
+    """An optimizer's own phase opening (``OptimizerRuntime.phases``), in its own words."""
+
+    node: str
+    activity: str
+    title: str
+    tag: str
+    lines: tuple[str, ...]
 
 
 @dataclass(frozen=True)
-class L2RefineExitView:
-    # The two surfaces L2 writes (`escalation/firing.py::_l2_exit`), plus its prose.
-    param_changes_count: int
-    l1_layout_changed: bool
-    axis_targeted: str
-    changes_description: str
-    # Post-fire L2 counters — the four scalars ``EscalationFSM.fold`` rebuilds resume state
-    # from. They ride the VIEW because the view is the persisted half of the record.
-    l2_round: int
-    l2_stall_count: int
-    l2_best_composite_fitness_at_entry: float
-    l2_best_theta_at_entry: float | None
-    # `l2_prompt` / `l2_response_json` are NOT here. The rendered call is already on this
-    # ledger as the `l2_context` LLMCallRecord and assembled human-readably in the audit twin
-    # (`.runtime/cache/rounds/round_NNNN.json::nodes.l2_context`, uncapped) — one prompt, three
-    # copies, two of them in this file. The terminal readout addresses the twin.
+class OptimizerStepExitView:
+    """An optimizer's own phase closing. ``headline`` is empty where the step adopted nothing."""
 
-
-@dataclass(frozen=True)
-class PlanEnterView:
-    l3_round: Any
-    l2_stall_count: Any
-    current_plan_preview: str
-
-
-@dataclass(frozen=True)
-class PlanExitView:
-    new_plan_preview: str
-    changes_description: str
-    # Post-fire L3 counters — same contract as ``L2RefineExitView``'s four above.
-    l3_round: int
-    l3_stall_count: int
-    l3_best_composite_fitness_at_entry: float
-    l3_best_theta_at_entry: float | None
+    headline: str
+    details: tuple[str, ...]
+    # The pointer's label and the node whose call the audit twin holds — addressed, never reprinted.
+    audit: tuple[str, str] | None
+    # What the optimizer's own resume fold rebuilds from, the view being the record's persisted
+    # half; ``None`` where the step adopted nothing and so advanced no state.
+    state: dict[str, Any] | None
 
 
 # --- Aggregate views for log.md (post-hoc, disk-derived only) -------------
@@ -305,6 +281,8 @@ class PlanExitView:
 class DigestStatusView:
     campaign_id: str
     parent_session_id: str | None
+    # The manifest the rounds were run under, off their own documents; ``None`` before round 0.
+    optimizer: str | None
     status: str
     stop_reason: str
     # ``None`` where the cycle banked no round 0 — `origin_accuracy_of` reads it off the round
@@ -329,13 +307,9 @@ class RoundDigestView:
     total: int
     composite_fitness: float
     changes_description: str
-    l1_critique_text: str
-    # ``None`` on another optimizer's round, which has no generator yield.
-    l1_yield: float | None
-    l1_n_no_op: int
-    l1_n_duplicate: int
-    l1_n_repeat: int
-    candidates_scored: int
+    facts: tuple[OptimizerFact, ...]
+    # The selector's own declaration: a round no θ decided shows none (`RoundResult.stamps_theta`).
+    stamps_theta: bool
     evaluators: dict[str, float]
     # THIS round's own comparison floor — the parent re-scored on the samples this round drew.
     # `log.md` compared against the whole-cycle origin composite instead, so under
@@ -414,10 +388,8 @@ AnyView = (
     | MeasureEnterView
     | BenchScoredView
     | RoundCompleteView
-    | L2RefineEnterView
-    | L2RefineExitView
-    | PlanEnterView
-    | PlanExitView
+    | OptimizerStepEnterView
+    | OptimizerStepExitView
     | LogMdView
     | FinalWinnerView
     | ForkSummaryView

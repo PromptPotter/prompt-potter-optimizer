@@ -35,15 +35,12 @@ from promptpotter.application.maintenance.archive_maintenance import (
     iter_cycle_ledgers,
     workspace_trees,
 )
-from promptpotter.application.views.view_models import (
-    L2RefineExitView,
-    PlanExitView,
-    ViewContext,
-)
+from promptpotter.application.optimizers import runtimes
+from promptpotter.application.views.view_models import OptimizerStepExitView, ViewContext
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.phases import PotterPhase, RunPhase
+from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results import DiagnosticRunRecord, RoundResult
 from promptpotter.domain.run_records import CycleRecord
 from promptpotter.domain.scoring import ledger_sample_view
@@ -327,12 +324,7 @@ def restamp_campaign_configs(*, apply: bool) -> dict[str, int]:
 # The keys each projection leaves behind, DERIVED from the writer's own definitions so a field
 # added to either view reaches this pass without a second edit.
 _ANCHOR_KEYS: frozenset[str] = frozenset(ViewContext().ledger_anchors())
-_L2_EXIT_VIEW_KEYS: frozenset[str] = frozenset(L2RefineExitView.__dataclass_fields__)
-_PLAN_EXIT_VIEW_KEYS: frozenset[str] = frozenset(PlanExitView.__dataclass_fields__)
-_EXIT_VIEW_KEYS: dict[str, frozenset[str]] = {
-    PotterPhase.REFINE_STRATEGY: _L2_EXIT_VIEW_KEYS,
-    PotterPhase.MODIFY_PLAN: _PLAN_EXIT_VIEW_KEYS,
-}
+_STEP_EXIT_VIEW_KEYS: frozenset[str] = frozenset(OptimizerStepExitView.__dataclass_fields__)
 # Rewrite only a cycle nothing is appending to. A live producer holds `_next_offset`, and every
 # `sequence`/`offset` join (the SSE tail, the family ray) is that line index — renumber under one
 # and the stream skips or repeats. PAUSED qualifies on the run-phase contract's own terms ("a
@@ -370,6 +362,11 @@ def _prune_record(rec: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     return (pruned, [dotted for dotted, _ in dropped]) if dropped else (rec, [])
 
 
+def _optimizer_phases() -> frozenset[str]:
+    """Every optimizer's own phases: a ledger carries no manifest name for this pass to read."""
+    return frozenset(p.phase for rt in runtimes().values() for p in rt.phases)
+
+
 def _compact_record(rec: dict[str, Any]) -> dict[str, Any] | None:
     """One stored record → what the writer would emit for it today. ``None`` ⇒ already current."""
     payload = rec.get("payload")
@@ -401,10 +398,10 @@ def _compact_record(rec: dict[str, Any]) -> dict[str, Any] | None:
     ctx = new.get("phase_ctx")
     if isinstance(ctx, dict):
         new["phase_ctx"] = {k: ctx.get(k) for k in _ANCHOR_KEYS}
-    keep = _EXIT_VIEW_KEYS.get(str(rec.get("phase"))) if rec.get("event") == "exit" else None
     view = new.get("view")
-    if keep is not None and isinstance(view, dict):
-        new["view"] = {k: v for k, v in view.items() if k in keep}
+    step_exit = rec.get("event") == "exit" and str(rec.get("phase")) in _optimizer_phases()
+    if step_exit and isinstance(view, dict):
+        new["view"] = {k: v for k, v in view.items() if k in _STEP_EXIT_VIEW_KEYS}
     return None if new == payload else rec | {"payload": new}
 
 

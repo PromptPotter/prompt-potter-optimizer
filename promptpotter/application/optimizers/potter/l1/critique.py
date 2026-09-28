@@ -34,6 +34,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "critique_owed",
     "ensure_prior_critique",
     "run_l1_critique",
 ]
@@ -42,6 +43,15 @@ __all__ = [
 CRITIQUE_RESEND_ATTEMPTS = 3
 """Distillations one round will buy before the cycle halts. Each is a whole call — the client's
 backpressure and 5xx retries sit INSIDE one attempt and do not count against this."""
+
+
+def critique_owed(cycle: Cycle) -> bool:
+    """Whether the prior round closed without the critique its next generation is owed — the
+    re-send `ensure_prior_critique` makes, or the halt it takes instead."""
+    prior = cycle.rounds[-1] if cycle.rounds else None
+    if prior is None or prior.round == 0 or not prior.results:
+        return False
+    return not potter_round_state(prior.optimizer_state).critique
 
 
 async def ensure_prior_critique(cycle: Cycle, state: PotterState) -> None:
@@ -55,12 +65,10 @@ async def ensure_prior_critique(cycle: Cycle, state: PotterState) -> None:
 
     The stop is ``PAUSED``, the same resumable halt a holed panel takes: nothing is lost, and the
     operator resumes into a round that re-sends against a provider that has recovered."""
-    prior = cycle.rounds[-1] if cycle.rounds else None
-    if prior is None or prior.round == 0 or not prior.results:
+    if not critique_owed(cycle):
         return
+    prior = cycle.rounds[-1]
     payload = potter_round_state(prior.optimizer_state)
-    if payload.critique:
-        return
     session = cycle.session
     last: Exception | None = None
     for attempt in range(1, CRITIQUE_RESEND_ATTEMPTS + 1):

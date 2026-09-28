@@ -156,14 +156,10 @@ What collapses: greedy promotion becomes the acquisition at `c = 0`, and the rew
 
 #### Surface parity — what a peer's campaign still reads wrong
 
-**Whatever optimizer a campaign runs gets the same surfaces wherever the method permits; where a feature cannot apply, the surface says so.** A surface learns which manifest a course runs from the served `optimizer` (`CampaignPipelineResponse`, `CampaignRunsWith`) and which apply from served facts (`stamps_theta`, `run_limits.potter`), never from a default or a name test; the check-in picks from `GET /optimizers`. The gaps a `capo` / `levi` / `gepa` campaign still hits:
+**Whatever optimizer a campaign runs gets the same surfaces wherever the method permits; where a feature cannot apply, the surface says so.** A surface learns which manifest a course runs from the served `optimizer` (`CampaignPipelineResponse`, `CampaignRunsWith`) and which apply from served facts (`stamps_theta`, `run_limits.optimizer`), never from a default or a name test; the check-in picks from `GET /optimizers`. What an optimizer says in its own words rides its runtime's declarations — `phases`, `opening`, `round_facts`, `pacing` (`optimizers/nodes.py`) — and every surface renders them as served. The gaps a `capo` / `levi` / `gepa` campaign still hits:
 
 | Surface | Under a peer | Kind |
 |---|---|---|
-| terminal readout (`views/ingress.py`) | no `PROPOSE` phase, so no ROUND banner or candidates table | empty |
-| `dashboard.json::state` / `active_node` | no proposing phase, so the optimizer card lights no node while a peer proposes | empty |
-| `terminal/live/phase.py::render_progress_table`, `terminal/ansi.py` headline | the θ column, the θ headline and "Plateau: ability flat" advice, ungated on `stamps_theta` | potter-only |
-| `log.md` (`views/render/markdown.py`) | "ability θ" per round ungated; the header never names the optimizer | potter-only |
 | `RemoteControl` lift / efficiency, `TrendChart` | headline θ, which the bench measures for every optimizer; M13's headline is the bench score | decision |
 | `PipelineFlow` node tooltips (`terms.ts::TERMS.node_*`) | taught for potter's node ids alone | empty |
 

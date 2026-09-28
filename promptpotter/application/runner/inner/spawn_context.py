@@ -115,7 +115,11 @@ def publish_inner_spawn_context(session: Session, campaign_config: CampaignConfi
     )
     panel = _resolve_outer_panel(session, campaign_config, Path(dataset_dir))
     bind_inner_optimizer(
-        select_inner_optimizer(inner_benchmark_documents(session.store, panel.inner_benchmark)[1])
+        select_inner_optimizer(
+            inner_benchmark_documents(session.store, panel.inner_benchmark)[1],
+            panel.inner_benchmark_config.inner_nodes,
+            panel.inner_benchmark_config.inner_depth_nodes,
+        )
         if panel is not None
         else None
     )

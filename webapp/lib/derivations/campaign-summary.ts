@@ -68,14 +68,18 @@ export function spendLabel(c: CampaignSummary): string {
   return `${spendFloor(c)}${fmtUsdCents(c.spend_used_usd)}`;
 }
 
-// The headline: the selection graded on held-out rows no optimizer node read. Every value served.
+// The headline: the selection graded on held-out rows no optimizer node read. Every value served,
+// and a pass that stopped short shows the served reason in place of a number.
 export function benchStat(bench: BenchScore): RowStat {
+  const { selected, origin, missing_reason } = bench;
   return {
     label: "Bench",
-    value: fmtPct0(bench.selected.composite_fitness),
+    value: selected === null ? "—" : fmtPct0(selected.composite_fitness),
     sub:
-      `origin ${fmtPct0(bench.origin.composite_fitness)} · lift ${fmtSigned(bench.lift)} · ` +
-      `${bench.bench_size} held-out rows`,
+      missing_reason !== null
+        ? missing_reason
+        : `origin ${origin === null ? "—" : fmtPct0(origin.composite_fitness)} · ` +
+          `lift ${fmtSigned(bench.lift)} · ${bench.bench_size} held-out rows`,
   };
 }
 

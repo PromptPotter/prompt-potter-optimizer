@@ -56,7 +56,7 @@ export function useRunControl(): RunControl | null {
     pending: cmd.pending !== null,
     // A refused pause retires the note, or it promises a wait that never ends.
     pausing: pausing && cmd.failure === null,
-    pausingNote: `Finishing ${phasePauseLabel(dash?.state)} — will pause after the current sample.`,
+    pausingNote: `Finishing ${phasePauseLabel(dash?.state, dash?.optimizer_step)} — will pause after the current sample.`,
     err: cmd.failure?.message ?? null,
     label: action === "pause" ? "Pause run" : action === "resume" ? "Resume run" : "Start run",
     noneReason:

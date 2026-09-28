@@ -157,10 +157,12 @@ class LineageNode(StrictModel):
     )
     stamps_theta: bool = Field(
         default=False,
-        description="Whether the optimizer that elected this candidate's round fits theta per "
-        "arm at all (`RoundResult.stamps_theta`, carried on the election). False: theta is not a "
-        "column of this node, so a surface hides it rather than drawing a cold ruler's blank. "
-        "False on a course and on a round that never elected.",
+        description="Whether the optimizer fits theta per arm at all. Candidate: the declaration "
+        "its round's election carried (`RoundResult.stamps_theta`), false on a round that never "
+        "elected. Course: the campaign-constant declaration of the optimizer it runs "
+        "(`LiveDashboardState.stamps_theta`), so a course says whether its rounds are won on "
+        "theta. False: theta is not a column here, so a surface hides it rather than drawing a "
+        "cold ruler's blank.",
     )
     evaluators: dict[str, float] = Field(
         default_factory=dict,
@@ -449,6 +451,7 @@ class _CourseScalars(TypedDict):
     origin_accuracy: float | None
     hearts: int | None
     lives_cap: int | None
+    stamps_theta: bool
 
 
 def _course_scalars(
@@ -464,8 +467,7 @@ def _course_scalars(
     fork, spawned = _block(index, "fork"), _block(index, "spawned_by")
     limits = dash.get("run_limits") if isinstance(dash.get("run_limits"), dict) else {}
     best, hearts = index.get("best_accuracy"), dash.get("hearts")
-    potter = limits.get("potter") if isinstance(limits, dict) else None
-    cap = potter.get("lives_cap") if isinstance(potter, dict) else None
+    cap = limits.get("lives_cap") if isinstance(limits, dict) else None
     campaign = reads.campaign(stores, hop.campaign_id)
 
     # INNER by where it LIVES, not by saying so: a rebase pair in the sandbox has no
@@ -489,6 +491,7 @@ def _course_scalars(
         "origin_accuracy": origin_accuracy_of(index),
         "hearts": hearts if isinstance(hearts, int) else None,
         "lives_cap": cap if isinstance(cap, int) else None,
+        "stamps_theta": dash.get("stamps_theta") is True,
     }
 
 
@@ -617,6 +620,7 @@ def _empty_attempt(course: LineageNode, *, cut_from: str, round_: int) -> Lineag
             "parent_ids": [cut_from],
             "round": round_,
             "accuracy": None,
+            "stamps_theta": False,
             "children": [],
         }
     )

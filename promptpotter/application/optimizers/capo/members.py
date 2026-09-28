@@ -3,10 +3,7 @@ runtime, registered under the manifest's."""
 
 from __future__ import annotations
 
-import ast
 import asyncio
-import hashlib
-import inspect
 import random
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -20,9 +17,12 @@ from promptpotter.application.bench.resume_and_fork.decisions import (
 )
 from promptpotter.application.campaign_config import Estimand, Knob, Scope
 from promptpotter.application.optimizers import nodes, paper_templates
-from promptpotter.application.optimizers.capo import operators
 from promptpotter.application.optimizers.capo.operators import initial_population
-from promptpotter.application.optimizers.capo.state import CapoState, capo_state
+from promptpotter.application.optimizers.capo.state import (
+    CapoState,
+    capo_round_state,
+    capo_state,
+)
 from promptpotter.application.optimizers.paper_templates import (
     ask,
     fill,
@@ -35,7 +35,12 @@ from promptpotter.application.scoring.candidate_report import fatal_validation_f
 from promptpotter.domain.opt_search_point import IndividualLineage, OptSearchPoint, node_source
 from promptpotter.domain.optimizer_state import CAPO_MANIFEST
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.results import ArmOutcome, CandidateProposal, candidate_label
+from promptpotter.domain.results import (
+    ArmOutcome,
+    CandidateProposal,
+    OptimizerFact,
+    candidate_label,
+)
 from promptpotter.domain.run_records import CandidateMintedRecord, CapoCheckpointKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import StopSignal
@@ -135,13 +140,11 @@ class FewShot:
         cycle = ctx.cycle
         k_max = cast("FewShotKnobs", cycle.optimizer.knobs(self.name)).k_max
         pool = [s.id for s in cycle.session.scoring.require_partition().demo]
-        clamp = cycle.config.optimization.determinism
-        seed = None if clamp is None else clamp.seed
         proposals, individuals = [], []
         for i, (proposal, individual) in enumerate(
             zip(population.proposals, population.individuals, strict=True)
         ):
-            rng = random.Random(f"{seed}:{ctx.round_num}:{i}")
+            rng = walk_rng(cycle, ctx.round_num, f"{self.name}:{i}")
             shots = mutate_shots(individual.shot_ids, pool, k_max=k_max, rng=rng)
             mutated = individual.model_copy(update={"shot_ids": shots})
             proposals.append(proposal.model_copy(update={"opt_sp": mutated}))
@@ -674,12 +677,8 @@ class PopulationSelector:
         cycle = ctx.cycle
         state = capo_state(ctx.state)
         size = cast("PopulationKnobs", cycle.optimizer.knobs(self.name)).size
-        electable = set(measured.electable)
-        survivors = [
-            cs.candidate_id
-            for cs in measured.scores
-            if cs.candidate_id in electable and cs.outcome is not ArmOutcome.ELIMINATED
-        ]
+        cut = {cs.candidate_id for cs in measured.scores if cs.outcome is ArmOutcome.ELIMINATED}
+        survivors = [ind.lineage.id for ind in measured.electable if ind.lineage.id not in cut]
         objective = _objective(ctx)
         kept = _rank_survivors(survivors, measured.rows, size=size, objective=objective)
         record_decision(
@@ -696,7 +695,7 @@ class PopulationSelector:
             node=self.name,
             round=ctx.round_num,
         )
-        by_id = {ind.lineage.id: ind for ind in measured.scored}
+        by_id = {ind.lineage.id: ind for ind in measured.electable}
         labels = {cs.candidate_id: cs.label for cs in measured.scores}
         best = kept[0] if kept else ""
         selected_id = best if best and best != cycle.opt_sp.lineage.id else ""
@@ -765,6 +764,7 @@ class CapoRuntime:
 
     name: ClassVar[str] = CAPO_MANIFEST
     own_axes: ClassVar[dict[str, set[str]]] = {}
+    phases: ClassVar[tuple[nodes.OptimizerPhase, ...]] = ()
 
     def start(
         self, session: Session, config: CampaignConfig, origin_results: list[dict[str, Any]]
@@ -778,10 +778,7 @@ class CapoRuntime:
         return None
 
     def source_digest(self, *covered: ModuleType) -> str:
-        # AST-normalized, so a comment or a reflow does not move it.
-        shaping = [m for m in (paper_templates, operators) if m not in covered]
-        tree = "".join(ast.dump(ast.parse(inspect.getsource(m))) for m in shaping)
-        return hashlib.sha256(tree.encode("utf-8")).hexdigest()[:16]
+        return paper_templates.preset_source_digest(__name__, *covered)
 
     def override_levers(self, node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
         return {}
@@ -818,6 +815,48 @@ class CapoRuntime:
         origin_composite_fitness: float | None,
     ) -> ReviewReading | None:
         return None
+
+    def pacing(self, selected: SelectedOptimizer) -> nodes.OptimizerPacing:
+        # The population races beside the round's offspring (`PopulationRejoin`).
+        size = cast("PopulationKnobs", selected.knobs(PopulationSelector.name)).size
+        offspring = cast("CapoCrossoverKnobs", selected.knobs(CapoCrossover.name)).crossovers
+        return nodes.OptimizerPacing(
+            patience=None, lives=None, arms_per_round=size + offspring, limits=()
+        )
+
+    def opening(self, ctx: RoundContext) -> nodes.RoundOpening:
+        return nodes.standing_opening(ctx)
+
+    def round_facts(
+        self, selected: SelectedOptimizer, round_result: RoundResult
+    ) -> list[OptimizerFact]:
+        # The origin's round races nothing: the population is born in round 1.
+        if round_result.round == 0:
+            return []
+        arms = round_result.candidate_scores
+        cut = sum(1 for cs in arms if cs.outcome is ArmOutcome.ELIMINATED)
+        block_size = cast("BlocksKnobs", selected.knobs(Blocks.name)).block_size
+        deepest = max(
+            (-(-len(rows) // block_size) for rows in round_result.all_candidate_results.values()),
+            default=0,
+        )
+        kept = len(capo_round_state(round_result).population)
+        size = cast("PopulationKnobs", selected.knobs(PopulationSelector.name)).size
+        return [
+            OptimizerFact(
+                key="blocks", label="Blocks raced", text=str(deepest), value=deepest, kind="stat"
+            ),
+            OptimizerFact(
+                key="cut", label="Cut", text=f"{cut} of {len(arms)} arms", value=cut, kind="stat"
+            ),
+            OptimizerFact(
+                key="population",
+                label="Population",
+                text=f"{kept} kept (μ {size})",
+                value=kept,
+                kind="stat",
+            ),
+        ]
 
 
 MEMBERS = (

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.datasets.loaders import build_dataset_run_data
+from promptpotter.application.run_phase_control import pause_requested
 from promptpotter.application.scoring.classification import is_deprecated
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.metrics import compute_composite_fitness
@@ -235,7 +236,8 @@ async def _claim_cell(
     shareable: Callable[[dict[str, Any]], bool],
 ) -> tuple[QueryMeasurement | None, CellClaim | None]:
     """The row a concurrent walk banked or is measuring for this cell, else this walk's hold on it:
-    a cell another process reached after this walk opened is never bought, or drawn, twice."""
+    a cell another process reached after this walk opened is never bought, or drawn, twice. The
+    wait sends nothing, so a pause breaks it at once, as it breaks a throttle wait."""
     waiting: asyncio.Task[None] | None = None
     try:
         while True:
@@ -264,6 +266,8 @@ async def _claim_cell(
                         detail_fn=lambda: "another run is measuring this cell",
                     )
                 )
+            if pause_requested(session):
+                raise asyncio.CancelledError("claim wait aborted by a pause")
             await asyncio.sleep(_CLAIM_POLL_S)
     finally:
         if waiting is not None:

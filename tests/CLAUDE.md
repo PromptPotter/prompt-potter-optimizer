@@ -69,7 +69,9 @@ the thing they validate, never as a repo-wide structure scan.
 
 ## Adding a test
 
-Answer the three axes in order. The first "no" ends it. If all three are yes, it rides an
+**"This change moves no decision" is not a test** — prove it once with the offline run
+([`../docs/developer/offline-run.md`](../docs/developer/offline-run.md)) and put the diff in the
+commit body. Answer the three axes in order. The first "no" ends it. If all three are yes, it rides an
 existing file's existing section by adding a function — **never a new file**, and never a new
 section invented to house it. Both counts are ledger rows (`test_files`, `test_functions`), so the
 function costs a baseline edit naming its invariant, and a file goes red.

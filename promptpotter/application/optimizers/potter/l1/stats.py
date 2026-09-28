@@ -25,12 +25,12 @@ from promptpotter.domain.optimizer_state import (
     POTTER_MANIFEST,
     potter_round_state,
 )
-from promptpotter.domain.results import RoundResult
+from promptpotter.domain.results import OptimizerFact, RoundResult, invariant_collapses
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
 
-__all__ = ["L1Stats", "compute_l1_stats", "review_reading"]
+__all__ = ["L1Stats", "compute_l1_stats", "review_reading", "round_facts"]
 
 # The four the verdict can take, typed rather than described: the L4 outer loop reads this, so an
 # arm nothing emits is a measurement nobody can get and one nothing checks is a typo that ships.
@@ -111,6 +111,34 @@ def review_reading(
             for r in rounds
         ],
     )
+
+
+_COLLAPSE_WORDS = {"no_op_variant": "no-op", "duplicate_variant": "dup", "repeat_variant": "repeat"}
+
+
+def round_facts(round_result: RoundResult) -> list[OptimizerFact]:
+    """Potter's words about a round: L1's yield where a proposal collapsed — a full yield is no
+    news — and the critique the round hands its next generation."""
+    state = potter_round_state(round_result.optimizer_state)
+    facts: list[OptimizerFact] = []
+    if state.l1_yield < 1.0:
+        collapses = invariant_collapses(round_result.candidate_scores)
+        n_total = round_result.candidates_scored
+        n_valid = max(0, n_total - sum(collapses.get(r, 0) for r in _COLLAPSE_WORDS))
+        bits = ", ".join(
+            f"{collapses[r]} {w}" for r, w in _COLLAPSE_WORDS.items() if collapses.get(r)
+        )
+        text = f"{n_valid}/{n_total} ({bits})"
+        facts.append(
+            OptimizerFact(
+                key="l1_yield", label="L1 yield", text=text, value=state.l1_yield, kind="stat"
+            )
+        )
+    if critique := format_l1_critique_for_prompt(state.critique):
+        facts.append(
+            OptimizerFact(key="critique", label="Critique", text=critique, value=None, kind="note")
+        )
+    return facts
 
 
 def _behavior_per_round(

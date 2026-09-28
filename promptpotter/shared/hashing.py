@@ -109,6 +109,10 @@ def _marked(tree: ast.Module) -> list[ast.AST]:
 PLUMBING_MODULES = frozenset(
     {
         "promptpotter.infrastructure.llm.telemetry",  # records what a fill did
+        "promptpotter.application.bench.llm_call",  # sends the messages it is handed
+        "promptpotter.application.bench.resume_and_fork.decisions",  # records what a node decided
+        "promptpotter.application.optimizers.nodes",  # the contract a manifest is walked through
+        "promptpotter.application.runner.measurement",  # measures cells; their rows are data
         "promptpotter.shared.hashing",  # the digest itself
         "promptpotter.infrastructure.store.io",  # reads files the identity hashes as data
         "promptpotter.config.paths",  # says where those files live

@@ -278,16 +278,31 @@ def inner_benchmark_documents(
     )
 
 
-def select_inner_optimizer(campaign_config: Mapping[str, Any] | None) -> SelectedOptimizer:
-    """The manifest the inner campaign selects under its own overlay — what every L4 arm mutates.
-    One naming none, or an unresolvable benchmark (``None``), runs the default manifest."""
+def _inner_manifest_nodes(
+    own: Mapping[str, ManifestNodeOverlay],
+    nodes: Mapping[str, ManifestNodeOverlay],
+    depth_nodes: Mapping[str, ManifestNodeOverlay],
+) -> dict[str, ManifestNodeOverlay]:
+    """The overlay an inner cell runs its manifest under: the inner dataset's *own*, then the
+    panel's ``inner_nodes``, then its ``inner_depth_nodes``."""
+    return merge_node_overlays(merge_node_overlays(own, nodes), depth_nodes)
+
+
+def select_inner_optimizer(
+    campaign_config: Mapping[str, Any] | None,
+    nodes: Mapping[str, ManifestNodeOverlay],
+    depth_nodes: Mapping[str, ManifestNodeOverlay],
+) -> SelectedOptimizer:
+    """The manifest an inner cell runs, under the overlay it runs it with — what every L4 arm
+    mutates. One naming none, or an unresolvable benchmark (``None``), runs the default manifest."""
     opt = (campaign_config or {}).get("optimization") or {}
+    own = {
+        node: ManifestNodeOverlay.model_validate(raw)
+        for node, raw in (opt.get("nodes") or {}).items()
+    }
     return resolve_optimizer(
         opt.get("optimizer", OptimizationConfig.model_fields["optimizer"].default),
-        {
-            node: ManifestNodeOverlay.model_validate(raw)
-            for node, raw in (opt.get("nodes") or {}).items()
-        },
+        _inner_manifest_nodes(own, nodes, depth_nodes),
     )
 
 
@@ -350,11 +365,8 @@ def inner_instrument_config(
         # not of the optimizer prompt under test — noise entering as a units change. Off here
         # only; a top-level campaign keeps the graduation, which is where it earns its keep.
         "enable_2pl_graduation": False,
+        "nodes": _inner_manifest_nodes(base.optimization.nodes, spec.nodes, spec.depth_nodes),
     }
-    if spec.nodes or spec.depth_nodes:
-        opt_update["nodes"] = merge_node_overlays(
-            merge_node_overlays(base.optimization.nodes, spec.nodes), spec.depth_nodes
-        )
     if spec.inner_optimizer_temperature is not None:
         # The clamp's seed is the CELL's, matching the target model's, so every candidate measured
         # on a cell draws one random stream (CRN). Laid ONTO the inner dataset's own declaration.

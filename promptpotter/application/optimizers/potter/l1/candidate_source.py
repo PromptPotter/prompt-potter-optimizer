@@ -1,22 +1,17 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
 from promptpotter.application.optimizers.potter.l1.critique import ensure_prior_critique
-from promptpotter.application.optimizers.potter.l1.generate import (
-    candidate_summaries,
-    l1_generate,
-)
+from promptpotter.application.optimizers.potter.l1.generate import l1_generate
 from promptpotter.application.optimizers.potter.validators.l1_invariants import (
     L1YieldStats,
     detect_invariants,
 )
-from promptpotter.domain.optimizer_state import potter_round_state
-from promptpotter.domain.phases import CampaignPhase, PhaseEvent, emit_phase
+from promptpotter.application.runner.round import proposal_summaries
 from promptpotter.domain.results import CandidateProposal, candidate_label, round_document_digest
 from promptpotter.domain.run_records import CandidateMintedRecord, LLMCallRecord
 
@@ -31,63 +26,44 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def variants_this_round(cycle: Cycle, state: PotterState) -> int:
+    """L2's `n_variants` override, capped at 3× the knob so L2 cannot blow up the round budget."""
+    n_variants = potter_knobs(cycle.optimizer).l1_generate.n_variants
+    return min(int(state.memory.l1_overrides.get("n_variants", n_variants)), n_variants * 3)
+
+
+def replayed_candidates(cycle: Cycle, round_num: int) -> tuple[list[Any], str] | None:
+    """The round's persisted generation, which a resume replays rather than calling L1 again."""
+    session = cycle.session
+    if not session.state.cycle_id:
+        return None
+    return session.store.campaigns.load_round_candidates(session.hop, round_num)
+
+
 async def generate_or_load_candidates(
     round_num: int,
     cycle: Cycle,
     state: PotterState,
-    on_phase: Callable[[PhaseEvent], None] | None = None,
-    n_scoring_samples: int = 0,
     *,
     obs: ObservabilityBridge | None = None,
 ) -> tuple[list[CandidateProposal], L1YieldStats]:
     session = cycle.session
-    config = cycle.config
-    # Cap n_variants at 3× config so L2 can't blow up the round budget.
-    opt = config.optimization
     opt_params = state.memory.l1_overrides
-    n_variants = potter_knobs(cycle.optimizer).l1_generate.n_variants
-    _n_variants = min(opt_params.get("n_variants", n_variants), n_variants * 3)
+    _n_variants = variants_this_round(cycle, state)
     _creativity = opt_params.get(
         "creativity", float(cycle.optimizer.node_config("l1_generate")["temperature"])
     )
-    prompt_preview = cycle.opt_sp.render()[:120]
 
     assert cycle.tracking.current_sp is not None
     # The parent's RESOLVED, folded config — the baseline every candidate's param override is
     # a delta against (`detect_invariants`). Bound once: the narrowing does not survive the await.
     parent_pipeline_params = cycle.tracking.current_sp.pipeline_params
 
-    # Read BEFORE the phase emit: a round that will replay its candidates makes no LLM call, so it
-    # is the one round not worth re-sending a missing critique for — and `has_l1_critique` is the
-    # operator's readout of whether the generator got one, so it has to be true after the re-send.
-    cached = (
-        session.store.campaigns.load_round_candidates(session.hop, round_num)
-        if session.state.cycle_id
-        else None
-    )
+    # A round that will replay its candidates makes no LLM call, so it is the one round not worth
+    # re-sending a missing critique for.
+    cached = replayed_candidates(cycle, round_num)
     if cached is None:
         await ensure_prior_critique(cycle, state)
-
-    emit_phase(
-        on_phase,
-        CampaignPhase.PROPOSE,
-        "enter",
-        round=round_num,
-        node="l1_generate",
-        max_rounds=opt.max_rounds,
-        current_accuracy=cycle.tracking.current_accuracy,
-        prompt_preview=prompt_preview,
-        n_variants=_n_variants,
-        creativity=_creativity,
-        model=cycle.optimizer.model(),
-        has_l1_critique=(
-            bool(potter_round_state(cycle.rounds[-1].optimizer_state).critique)
-            if cycle.rounds
-            else False
-        ),
-        pipeline_params=parent_pipeline_params,
-        parent_prompt_fields={k: v for k, v in cycle.opt_sp.prompt_field_dict().items() if v},
-    )
 
     if cached is not None:
         persisted_raw, _consumed = cached
@@ -96,7 +72,6 @@ async def generate_or_load_candidates(
         yield_stats = detect_invariants(
             persisted, cycle.opt_sp, parent_pipeline_params, cycle.rounds
         )
-        summaries = candidate_summaries(persisted, round_num)
         # llm_call never fires on this branch — synthesize an
         # ``LLMCallRecord(payload_kind="synthesized")`` so the audit
         # trail + dashboard see the node, without lying about a real
@@ -110,24 +85,10 @@ async def generate_or_load_candidates(
                     payload={
                         "type": "l1_generate",
                         "input": {"source": "loaded_from_disk", "round": round_num},
-                        "response": {"candidates": summaries},
+                        "response": {"candidates": proposal_summaries(persisted, round_num)},
                     },
                 )
             )
-        emit_phase(
-            on_phase,
-            CampaignPhase.PROPOSE,
-            "exit",
-            round=round_num,
-            n_candidates=len(persisted),
-            n_scoring_samples=n_scoring_samples,
-            loaded_from_disk=True,
-            candidates=summaries,
-            l1_yield=yield_stats.l1_yield,
-            l1_n_no_op=yield_stats.l1_n_no_op,
-            l1_n_duplicate=yield_stats.l1_n_duplicate,
-            l1_n_repeat=yield_stats.l1_n_repeat,
-        )
         return persisted, yield_stats
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
@@ -188,22 +149,7 @@ async def generate_or_load_candidates(
                 )
             )
 
-    emit_phase(
-        on_phase,
-        CampaignPhase.PROPOSE,
-        "exit",
-        round=round_num,
-        n_candidates=len(candidates),
-        n_scoring_samples=n_scoring_samples,
-        loaded_from_disk=False,
-        candidates=candidate_summaries(candidates, round_num),
-        l1_yield=yield_stats.l1_yield,
-        l1_n_no_op=yield_stats.l1_n_no_op,
-        l1_n_duplicate=yield_stats.l1_n_duplicate,
-        l1_n_repeat=yield_stats.l1_n_repeat,
-    )
-
     return candidates, yield_stats
 
 
-__all__ = ["generate_or_load_candidates"]
+__all__ = ["generate_or_load_candidates", "replayed_candidates", "variants_this_round"]

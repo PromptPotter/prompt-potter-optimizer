@@ -121,7 +121,7 @@ def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
         f"- samples: {rd.total}",
         f"- composite_fitness: `{rd.composite_fitness:.4f}`",
     ]
-    if rd.ability is not None:
+    if rd.ability is not None and rd.stamps_theta:
         # The cross-round series, with the ruler it was read on beside it: accuracy above is
         # subset-relative and this is not, so they can move in opposite directions legitimately.
         parts.append(f"- ability θ: `{rd.ability.theta:+.3f}` ({rd.ability.scale()})")
@@ -135,17 +135,7 @@ def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
         parts.append(cost)
     if rd.changes_description:
         parts.append(f"- changes: {rd.changes_description}")
-    if rd.l1_yield is not None and rd.l1_yield < 1.0:
-        n_total = rd.candidates_scored
-        n_valid = max(0, n_total - rd.l1_n_no_op - rd.l1_n_duplicate - rd.l1_n_repeat)
-        bits: list[str] = []
-        if rd.l1_n_no_op:
-            bits.append(f"{rd.l1_n_no_op} no-op")
-        if rd.l1_n_duplicate:
-            bits.append(f"{rd.l1_n_duplicate} dup")
-        if rd.l1_n_repeat:
-            bits.append(f"{rd.l1_n_repeat} repeat")
-        parts.append(f"- L1 yield: {n_valid}/{n_total} ({', '.join(bits)})")
+    parts += [f"- {f.label}: {f.text}" for f in rd.facts if f.kind == "stat"]
     composite_fitness_block = render_composite_fitness_block(
         rd.composite_fitness,
         rd.evaluators,
@@ -157,8 +147,8 @@ def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
     )
     if composite_fitness_block:
         parts += ["", "```", *composite_fitness_block, "```"]
-    if rd.l1_critique_text:
-        parts += ["", "> " + rd.l1_critique_text.replace("\n", "\n> ")]
+    for note in (f for f in rd.facts if f.kind == "note"):
+        parts += ["", "> " + note.text.replace("\n", "\n> ")]
     parts += _render_p_best_trajectory(rd)
     parts.append("")
     return parts
@@ -208,6 +198,7 @@ def to_markdown(view: LogMdView) -> str:
     parts += [
         "## Status",
         "",
+        *([f"- optimizer: `{status.optimizer}`"] if status.optimizer else []),
         f"- status: **{status.status}**",
         f"- stop reason: `{status.stop_reason}`",
         *(

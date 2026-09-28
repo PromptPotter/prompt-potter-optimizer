@@ -44,7 +44,7 @@ sole writer, persisting `RoundResult.model_dump()` — the model **is** the roun
 
 **`LiveDashboardProjection` RESOLVES; it does not hand the browser scalars to join** from facts written on different ledger events. Five rules, each a field or a filter rather than a convention:
 
-- **`active_node` is served**, by a `match` TOTAL over `DashboardState` and `PotterDashboardState` (`assert_never`), naming the nodes the ledger recorded at `propose:enter` / `measure:enter` rather than any optimizer's literal. A partial answer does not fail loudly; it means "nothing is running", which is a lie for every state it omits.
+- **`active_node` is served**, by a `match` TOTAL over `DashboardState` (`assert_never`), naming the nodes the ledger recorded at `propose:enter` / `measure:enter` / an optimizer step's enter rather than any optimizer's literal. A partial answer does not fail loudly; it means "nothing is running", which is a lie for every state it omits.
 - **`current_round.round` is `state.round`, always**, so a reader selects this block over the audit twin by equality. There is deliberately no `live` flag beside it.
 - **`current_round.nodes` holds only THIS round's optimizer calls.** `_sticky_llm_calls` is most-recent-fire-per-slot and survives round transitions, so it is filtered by each block's own `round`: presence in the served map is the client's whole definition of "this node has fired". The measurement is not a node block: its tape and searchpoints ride `current_round.candidates`.
 - **A measurement at `NO_ROUND_SLOT` moves the RUN's scalars and not the ROUND's population** — it counts as queries scored and drives the in-flight markers, but skips `_buffer.append_sample` (`shared/instrument.py::NO_ROUND_SLOT`).

@@ -64,6 +64,8 @@ export type {
   NodeConfigParam,
   NodeOutputSchema,
   NodeReach,
+  OptimizerFact,
+  OptimizerLimit,
   OptimizerPipelineResponse,
   PipelineView,
   PipelineViewEdge,

@@ -44,6 +44,7 @@ from promptpotter.domain.run_records import SnapshotRecord
 from promptpotter.shared.instrument import NO_ROUND_SLOT, MeasuredCandidate, MeasurementRole
 
 if TYPE_CHECKING:
+    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.optimizers.nodes import (
         CatchUp,
         Eliminator,
@@ -96,7 +97,7 @@ async def measure_population(
     # Clamped so a tiny dataset stays electable.
     coverage_floor = min(cycle.config.optimization.elimination_n_min, len(panel.cells))
     cs_by_id = {cs.candidate_id: i for i, cs in enumerate(scores)}
-    electable: list[str] = []
+    electable: list[OptSearchPoint] = []
     for ind in scored:
         cs_idx = cs_by_id.get(ind.lineage.id)
         if cs_idx is None:
@@ -125,7 +126,7 @@ async def measure_population(
         # a reason other than elimination, an operator skip.
         if distinct_valid_cells(cand_rows) < coverage_floor:
             continue
-        electable.append(ind.lineage.id)
+        electable.append(ind)
 
     # Before the selector, which reads it: the ≥2-arm floor is satisfiable now, and on return the
     # ruler covers every cell above, so a θ fit raises on a hole instead of grading it δ=0.
@@ -171,10 +172,9 @@ async def _lift_references(
         for ind, params in zip(population.individuals, population.pipeline_params, strict=True)
     }
     demo = cycle.session.scoring.require_partition().demo
-    references: dict[str, list[QueryMeasurement]] = {}
+    references: dict[str, list[QueryMeasurement]] = {bar_id: parent_rows}
     for pid, sids in needed.items():
         if pid == bar_id:
-            references[pid] = [r for r in parent_rows if int(r["sample_id"]) in sids]
             continue
         if pid in populated:
             individual, params = populated[pid]
@@ -201,7 +201,9 @@ async def _lift_references(
             # `max` keeps the first of a tie, so a tie falls to `parent_ids` order.
             better = max(on_arm, key=lambda pid: _mean_on(rows[ind.lineage.id], on_arm[pid]))
             read_against[ind.lineage.id] = (better, on_arm[better])
-    named = {pid for pid, _ in read_against.values()}
+    # The parent's rows are banked though no arm read against them: a selector may keep the parent
+    # itself, and a later round or a resume reads its rows back off this round.
+    named = {bar_id} | {pid for pid, _ in read_against.values()}
     return read_against, {pid: rs for pid, rs in references.items() if pid in named}
 
 
@@ -247,37 +249,9 @@ async def _walk_population(
     rows: dict[str, list[QueryMeasurement]] = {}
     reports: dict[int, ScoredCandidate] = {}
 
-    def catch_up(sp: JobSearchPoint, sample: Sample, prior_id: str) -> CatchUp:
-        # No display callbacks, which would mint a bogus `C{round}.0` row, and no stop rule, which
-        # would recurse into the eliminator; the row is written when the commit takes it.
-        walk = open_walk(
-            sp,
-            [sample],
-            cycle.session,
-            label=MeasurementRole.BACKFILL,
-            axes=cycle.axes,
-            on_sample_scored=None,
-            on_sample_starting=None,
-            # The PRIOR being caught up, never the arm whose cell triggered it; ``role`` marks
-            # the row as measured for a paired comparison, outside the round's shared order.
-            measured=MeasuredCandidate(
-                idx=NO_ROUND_SLOT,
-                candidate_id=prior_id,
-                label=f"prior:{prior_id[:8]}",
-                role=MeasurementRole.BACKFILL,
-            ),
-        )
-        walk.release()
-        _, cell = walk.launch(1, None)
-
-        def commit() -> list[QueryMeasurement]:
-            walk.collect()
-            walk.end(walk.take(cell) or walk.judge(), cancel=True)
-            return close_walk(walk).results
-
-        return cell, commit
-
-    race: Race | None = eliminator.race(ctx, panel, catch_up) if eliminator is not None else None
+    race: Race | None = (
+        eliminator.race(ctx, panel, partial(_catch_up, cycle)) if eliminator is not None else None
+    )
     ids = [ind.lineage.id for ind in population.individuals]
     labels = {cid: candidate_label(round_num, idx) for idx, cid in enumerate(ids)}
     order = [int(s.id) for s in panel.order]
@@ -362,6 +336,42 @@ async def _walk_population(
     # In walk order, which a block race decides out of.
     ranked = sorted(reports)
     return {ids[i]: rows[ids[i]] for i in ranked}, [reports[i] for i in ranked]
+
+
+def _catch_up(cycle: Cycle, sp: JobSearchPoint, sample: Sample, prior_id: str) -> CatchUp:
+    # No display callbacks, which would mint a bogus `C{round}.0` row, and no stop rule, which
+    # would recurse into the eliminator; the row is written when the commit takes it.
+    walk = open_walk(
+        sp,
+        [sample],
+        cycle.session,
+        label=MeasurementRole.BACKFILL,
+        axes=cycle.axes,
+        on_sample_scored=None,
+        on_sample_starting=None,
+        # The PRIOR being caught up, never the arm whose cell triggered it; ``role`` marks
+        # the row as measured for a paired comparison, outside the round's shared order.
+        measured=MeasuredCandidate(
+            idx=NO_ROUND_SLOT,
+            candidate_id=prior_id,
+            label=f"prior:{prior_id[:8]}",
+            role=MeasurementRole.BACKFILL,
+        ),
+    )
+    walk.release()
+    _, cell = walk.launch(1, None)
+
+    def commit() -> list[QueryMeasurement]:
+        walk.collect()
+        walk.end(walk.take(cell) or walk.judge(), cancel=True)
+        return close_walk(walk).results
+
+    def discard() -> None:
+        # Collected first, so a cell already back releases its claim now rather than on a callback.
+        walk.collect()
+        walk.end(None, cancel=True)
+
+    return cell, commit, discard
 
 
 def _open_candidate(

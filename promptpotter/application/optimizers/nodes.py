@@ -27,11 +27,13 @@ if TYPE_CHECKING:
     from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.application.scoring.query_loop import BlockRace, Walk
     from promptpotter.domain.cycle_paths import CycleHop
+    from promptpotter.domain.dashboard_rows import OptimizerLimit
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.optimizer_state import OptimizerState
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.results import (
         CandidateProposal,
+        OptimizerFact,
         ReferenceReading,
         RoundResult,
         ScoredCandidate,
@@ -45,8 +47,9 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
     # A catch-up the bench measures for an eliminator: a prior's configuration on one cell, the
-    # call already started and the commit that writes its row once a walk takes the cell.
-    CatchUp = tuple[asyncio.Future[Any], Callable[[], list[QueryMeasurement]]]
+    # call already started, the commit that writes its row once a walk takes the cell, and the
+    # discard that drops it unwritten and frees the cell for every other walk.
+    CatchUp = tuple[asyncio.Future[Any], Callable[[], list[QueryMeasurement]], Callable[[], None]]
     CatchUpFn = Callable[[JobSearchPoint, Sample, str], CatchUp]
 
 __all__ = [
@@ -59,6 +62,8 @@ __all__ = [
     "MemberCoupling",
     "NoCatchUps",
     "NodeMember",
+    "OptimizerPacing",
+    "OptimizerPhase",
     "OptimizerRuntime",
     "Panel",
     "Population",
@@ -68,11 +73,13 @@ __all__ = [
     "ReviewReading",
     "ReviewStats",
     "RoundContext",
+    "RoundOpening",
     "Sampler",
     "Selection",
     "Selector",
     "WorkingState",
     "rows_read_packages",
+    "standing_opening",
 ]
 
 
@@ -173,12 +180,70 @@ class WorkingState(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class OptimizerPhase:
+    """A phase an optimizer brackets on the ledger beside the bench's ``CampaignPhase``: the node it
+    runs and the words a surface names the activity by. Its enter event carries an
+    ``OptimizerStepEnterView`` and its exit an ``OptimizerStepExitView``."""
+
+    phase: str
+    node: str
+    activity: str
+
+
+@dataclass(frozen=True)
+class OptimizerPacing:
+    """How an optimizer paces its run, for every surface showing where it stands. ``patience`` is
+    what ``WorkingState.standing``'s stall counts toward and ``lives`` the ``(opening, ceiling)`` of
+    the bank its allowance draws on; ``None`` where it keeps neither."""
+
+    patience: int | None
+    lives: tuple[int, int] | None
+    # The most arms one round races, which sizes a look-ahead before the round opens.
+    arms_per_round: int | None
+    limits: tuple[OptimizerLimit, ...]
+
+
+@dataclass(frozen=True)
+class RoundOpening:
+    """What an optimizer says as a round's proposing opens, inside the bench's round banner:
+    ``standing`` right of the rule, ``note`` after the arm count, ``proposer`` naming who
+    proposes wherever a collapse is reported, and whether the arms come back off disk."""
+
+    standing: str
+    note: str
+    arms: int | None
+    proposer: str
+    replayed: bool
+
+
+def standing_opening(ctx: RoundContext) -> RoundOpening:
+    """The opening of an optimizer that keeps no words of its own beyond its standing."""
+    selected = ctx.cycle.optimizer
+    return RoundOpening(
+        standing=f"no advance {ctx.state.standing()[0]}",
+        note="",
+        arms=selected.pacing.arms_per_round,
+        proposer=selected.proposer,
+        replayed=False,
+    )
+
+
 class OptimizerRuntime(Protocol):
     """An optimizer's implementation beyond its nodes, registered under its manifest's ``name``:
     it mints the working state the bench carries."""
 
     @property
     def name(self) -> str: ...
+
+    @property
+    def phases(self) -> tuple[OptimizerPhase, ...]: ...
+
+    def pacing(self, selected: SelectedOptimizer) -> OptimizerPacing: ...
+
+    def opening(self, ctx: RoundContext) -> RoundOpening:
+        """Read as the bench opens the round's proposing, before any proposer runs."""
+        ...
 
     @property
     def own_axes(self) -> dict[str, set[str]]:
@@ -249,6 +314,13 @@ class OptimizerRuntime(Protocol):
         """``None`` where the optimizer keeps no reading of its own; ``review.md`` then says N/A."""
         ...
 
+    def round_facts(
+        self, selected: SelectedOptimizer, round_result: RoundResult
+    ) -> list[OptimizerFact]:
+        """What it reports about a closed round, in its own words, off the round document alone —
+        the close stamps it as ``RoundResult.optimizer_facts``."""
+        ...
+
 
 def rows_read_packages(
     rounds: Sequence[RoundResult], proposers: Sequence[str]
@@ -308,7 +380,8 @@ class Population:
 class Measured:
     """The measurement's output. ``parent`` is the round's best-so-far re-scored on the panel;
     ``scores`` carry each arm's lift against its ``reference_id``, whose rows ``references``
-    holds; ``electable`` is who the round can read, coverage floor applied."""
+    holds; ``electable`` is the arms the round can read, coverage floor applied, in walk order —
+    the only arms a selector may keep."""
 
     rows: dict[str, list[QueryMeasurement]]
     scores: list[ScoredCandidate]
@@ -316,13 +389,14 @@ class Measured:
     parent: ReferenceReading
     parent_rows: list[QueryMeasurement]
     references: dict[str, list[QueryMeasurement]]
-    electable: list[str]
+    electable: list[OptSearchPoint]
     coverage_floor: int
 
 
 @dataclass(frozen=True)
 class Selection:
-    """What the selector keeps. ``selected_id`` is empty when the round holds its parent."""
+    """What the selector keeps. ``selected_id`` is empty when the round holds its parent, and
+    otherwise names one of ``Measured.electable``."""
 
     selected_id: str
     scores: list[ScoredCandidate]

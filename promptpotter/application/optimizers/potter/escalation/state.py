@@ -7,13 +7,20 @@ import enum
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from promptpotter.domain.phases import PotterPhase, StopReason
+from promptpotter.domain.phases import StopReason
 from promptpotter.domain.run_records import CycleRecord, PhaseRecord, view_fields
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizers.potter.knobs import EscalationLadder, LivesConfig
     from promptpotter.infrastructure.ledger import CycleEventLog
+
+
+class PotterPhase(enum.StrEnum):
+    """Potter's controller phases: L2 refines the strategy, L3 modifies the plan."""
+
+    REFINE_STRATEGY = "refine_strategy"
+    MODIFY_PLAN = "modify_plan"
 
 
 @shapes_optimizer_prompt
@@ -342,8 +349,8 @@ class EscalationFSM:
     # enum reference makes a wrong name an import-time AttributeError instead of an arm that
     # silently never matches. The L2/L3 node names are NOT their phase names.
     #
-    # Read the counters off `payload["view"]` — the PERSISTED half; `PhaseRecord.data` never
-    # reaches disk. `L2RefineExitView` / `PlanExitView` declare the four scalars each arm needs.
+    # Read the counters off `payload["view"]["state"]` — the PERSISTED half; `PhaseRecord.data`
+    # never reaches disk. A step that adopted nothing banks no state, and advanced none.
 
     def fold(self, record: CycleRecord, *, lives: LivesConfig | None = None) -> None:
         """Advance state from one ledger record. ``lives`` reconstructs from the same ``improved`` sequence
@@ -369,8 +376,13 @@ class EscalationFSM:
                 compared=int(record.payload["electable_count"]) > 0,
                 separable=None if sep is None else bool(sep),
             )
-        elif record.phase == PotterPhase.REFINE_STRATEGY and record.event == "exit":
-            escalation_state = view_fields(record)
+        elif (
+            record.event != "exit"
+            or record.phase not in set(PotterPhase)
+            or (escalation_state := view_fields(record)["state"]) is None
+        ):
+            return
+        elif record.phase == PotterPhase.REFINE_STRATEGY:
             self._l1_stall_count = 0
             self._l2_round = int(escalation_state["l2_round"])
             self._l2_stall_count = int(escalation_state["l2_stall_count"])
@@ -379,8 +391,7 @@ class EscalationFSM:
             )
             l2_theta = escalation_state["l2_best_theta_at_entry"]
             self._l2_best_theta_at_entry = None if l2_theta is None else float(l2_theta)
-        elif record.phase == PotterPhase.MODIFY_PLAN and record.event == "exit":
-            escalation_state = view_fields(record)
+        elif record.phase == PotterPhase.MODIFY_PLAN:
             best_comp = float(escalation_state["l3_best_composite_fitness_at_entry"])
             l3_theta = escalation_state["l3_best_theta_at_entry"]
             best_theta = None if l3_theta is None else float(l3_theta)
@@ -414,5 +425,6 @@ __all__ = [
     "EscalationFSM",
     "ExplorationBudget",
     "NextAction",
+    "PotterPhase",
     "exploration_budget",
 ]

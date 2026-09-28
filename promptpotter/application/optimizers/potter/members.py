@@ -24,7 +24,7 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import (
 )
 from promptpotter.application.optimizers.potter.dispatch.schemas import L2_NODE_AXES
 from promptpotter.application.optimizers.potter.election import elect_on_theta
-from promptpotter.application.optimizers.potter.escalation.firing import escalate_l2
+from promptpotter.application.optimizers.potter.escalation.firing import L2, L3, escalate_l2
 from promptpotter.application.optimizers.potter.escalation.state import NextAction
 from promptpotter.application.optimizers.potter.generation_only import run_generation_only_round
 from promptpotter.application.optimizers.potter.knobs import (
@@ -37,10 +37,12 @@ from promptpotter.application.optimizers.potter.knobs import (
 )
 from promptpotter.application.optimizers.potter.l1.candidate_source import (
     generate_or_load_candidates,
+    replayed_candidates,
+    variants_this_round,
 )
-from promptpotter.application.optimizers.potter.l1.critique import run_l1_critique
+from promptpotter.application.optimizers.potter.l1.critique import critique_owed, run_l1_critique
 from promptpotter.application.optimizers.potter.l1.population import parse_population
-from promptpotter.application.optimizers.potter.l1.stats import review_reading
+from promptpotter.application.optimizers.potter.l1.stats import review_reading, round_facts
 from promptpotter.application.optimizers.potter.pobb.checks import ABORT_LENS_SUPPRESS
 from promptpotter.application.optimizers.potter.race import PoBBRace
 from promptpotter.application.optimizers.potter.resume import (
@@ -55,6 +57,7 @@ from promptpotter.application.optimizers.potter.validators.l1_strict import (
     DROPPED_MANDATORY_PLACEHOLDER,
 )
 from promptpotter.application.scoring.candidate_report import fatal_validation_failures
+from promptpotter.domain.dashboard_rows import OptimizerLimit
 from promptpotter.domain.optimizer_state import POTTER_MANIFEST, potter_round_state
 from promptpotter.domain.phases import StopLoop
 from promptpotter.domain.pipeline_schema import NodeKind
@@ -84,7 +87,7 @@ if TYPE_CHECKING:
         Selection,
     )
     from promptpotter.domain.cycle_paths import CycleHop
-    from promptpotter.domain.results import RoundResult
+    from promptpotter.domain.results import OptimizerFact, RoundResult
     from promptpotter.domain.run_records import ResumeCheckpointKind
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -180,12 +183,7 @@ class L1Generate:
         schema = cycle.session.pipeline_schema
         assert schema is not None and cycle.tracking.current_sp is not None
         proposals, yield_stats = await generate_or_load_candidates(
-            ctx.round_num,
-            cycle,
-            state,
-            ctx.callbacks.on_phase,
-            n_scoring_samples=len(panel.cells),
-            obs=cycle.session.state.obs,
+            ctx.round_num, cycle, state, obs=cycle.session.state.obs
         )
         knobs = potter_knobs(cycle.optimizer).l1_generate
         individuals, params = parse_population(
@@ -358,6 +356,7 @@ class PotterRuntime:
 
     name: ClassVar[str] = POTTER_MANIFEST
     own_axes: ClassVar[dict[str, set[str]]] = L2_NODE_AXES
+    phases: ClassVar[tuple[nodes.OptimizerPhase, ...]] = (L2.declared, L3.declared)
 
     def start(
         self, session: Session, config: CampaignConfig, origin_results: list[dict[str, Any]]
@@ -412,6 +411,69 @@ class PotterRuntime:
             audits,
             context_object=context_object,
             origin_composite_fitness=origin_composite_fitness,
+        )
+
+    def round_facts(
+        self, selected: SelectedOptimizer, round_result: RoundResult
+    ) -> list[OptimizerFact]:
+        return round_facts(round_result)
+
+    def opening(self, ctx: RoundContext) -> nodes.RoundOpening:
+        cycle = ctx.cycle
+        state = potter_state(ctx.state)
+        replayed = replayed_candidates(cycle, ctx.round_num) is not None
+        # The distance to the next ESCALATION, not the run's remaining life, which hearts own. At 0
+        # the `l1_to_l2` fall-through fires L2 every round, which "stall 1/0" states as a riddle.
+        patience = potter_knobs(cycle.optimizer).escalation.l1_patience
+        stall = state.escalation.l1_stall_count
+        standing = "L2 every round" if patience == 0 else f"stall {stall}/{patience} → L2"
+        # A generation that calls L1 is handed the prior critique, re-sent if owed, or never runs.
+        prior = potter_round_state(cycle.rounds[-1].optimizer_state) if cycle.rounds else None
+        handed = (prior is not None and bool(prior.critique)) or (
+            not replayed and critique_owed(cycle)
+        )
+        if handed:
+            critique = f"from R{ctx.round_num - 1}"
+        elif ctx.round_num <= 1:
+            critique = "none yet (first round)"
+        else:
+            critique = f"none (R{ctx.round_num - 1} produced none)"
+        return nodes.RoundOpening(
+            standing=standing,
+            note=f"Prior critique: {critique}",
+            arms=variants_this_round(cycle, state),
+            proposer="L1",
+            replayed=replayed,
+        )
+
+    def pacing(self, selected: SelectedOptimizer) -> nodes.OptimizerPacing:
+        knobs = potter_knobs(selected)
+        esc = knobs.escalation
+        patiences = [
+            ("l1_patience", "L1 patience", esc.l1_patience),
+            ("l2_patience", "L2 patience", esc.l2_patience),
+            ("l3_patience", "L3 patience", esc.l3_patience),
+        ]
+        return nodes.OptimizerPacing(
+            # Rounds without advance before L2 fires; the lives bank is the run's allowance.
+            patience=esc.l1_patience,
+            lives=None if esc.lives is None else (esc.lives.start, esc.lives.cap),
+            arms_per_round=knobs.l1_generate.n_variants,
+            limits=(
+                *(
+                    OptimizerLimit(
+                        node=Escalation.name, knob=knob, label=label, value=value, integer=True
+                    )
+                    for knob, label, value in patiences
+                ),
+                OptimizerLimit(
+                    node=PoBB.name,
+                    knob="epsilon",
+                    label="PoBB ε",
+                    value=knobs.pobb.epsilon,
+                    integer=False,
+                ),
+            ),
         )
 
 

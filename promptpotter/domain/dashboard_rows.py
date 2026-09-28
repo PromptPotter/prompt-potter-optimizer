@@ -17,7 +17,12 @@ from typing import Any, Literal
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.l4.proxies import PanelPrecision
-from promptpotter.domain.results import ArmOutcome, DegradationHealth, OverlapReading
+from promptpotter.domain.results import (
+    ArmOutcome,
+    DegradationHealth,
+    OptimizerFact,
+    OverlapReading,
+)
 from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
 from promptpotter.domain.scoring import is_hit, is_unscored
 from promptpotter.domain.spend import TokenAccount
@@ -28,6 +33,7 @@ __all__ = [
     "DashboardCandidate",
     "DashboardSample",
     "LiveCandidate",
+    "OptimizerLimit",
     "RoundSummary",
     "RoundSummaryCandidate",
     "SampleStatus",
@@ -257,6 +263,20 @@ class RoundSummaryCandidate(DashboardCandidate):
     is_leading: bool = False
 
 
+class OptimizerLimit(StrictModel):
+    """One knob an optimizer declares as bounding its run, which a fork may reconcile."""
+
+    model_config = ConfigDict(frozen=True)
+
+    node: str
+    knob: str
+    label: str
+    # ``None`` where the knob is declared off.
+    value: float | None
+    # A whole count; otherwise a fraction in [0, 1].
+    integer: bool
+
+
 class RoundSummary(StrictModel):
     """Display row for `dashboard.json::rounds[]` — webapp's completed-round source.
     Top-level `accuracy` is what the round MEASURED; `ability` is the invariant series."""
@@ -317,3 +337,5 @@ class RoundSummary(StrictModel):
     # round: an ordinary sample is graded and carries no error bar to decompose. The VERDICT is
     # not here; it rides `candidates[].reference_lift*` like every other level's.
     panel_precision: PanelPrecision | None = None
+    # Mirrors `RoundResult.optimizer_facts`: the optimizer's own words about this round.
+    optimizer_facts: list[OptimizerFact] = Field(default_factory=list)

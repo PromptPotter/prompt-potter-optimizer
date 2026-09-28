@@ -28,7 +28,7 @@ export interface ConnectorView {
   isTls: boolean | null;
   currentNodes: Record<string, NodeDataLike>;
   isLive: boolean;
-  // `dashboard.json::state`; the target LLM is called only during "scoring" and "origin".
+  // `dashboard.json::state`; the target LLM is called only during "scoring", "origin" and "bench".
   phase: string | null;
   // Real reachability, distinct from `isLive` (is the optimizer scoring through it right now).
   health: BackendHealthResponse | null;

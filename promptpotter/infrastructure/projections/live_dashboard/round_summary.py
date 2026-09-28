@@ -148,6 +148,7 @@ def build_round_summary(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> R
                 rr.all_candidate_results.get(leading.candidate_id, []), origin_rows
             )
         ),
+        optimizer_facts=rr.optimizer_facts,
     )
 
 

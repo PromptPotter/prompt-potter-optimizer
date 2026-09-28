@@ -85,10 +85,13 @@ def _bench_text(bench: BenchScore) -> str:
         return "—" if x is None else f"{x:.3f}"
 
     lift = "—" if bench.lift is None else f"{bench.lift:+.3f}"
+    selected, origin = bench.selected, bench.origin
+    missing = "" if bench.missing_reason is None else f" · missing: {bench.missing_reason}"
     return (
-        f"{_value(bench.selected.composite_fitness)} selected (round {bench.selected.round}) · "
-        f"{_value(bench.origin.composite_fitness)} origin · lift {lift} · "
-        f"{bench.bench_size} held-out rows"
+        f"{'—' if selected is None else _value(selected.composite_fitness)} selected"
+        f"{'' if selected is None else f' (round {selected.round})'} · "
+        f"{'—' if origin is None else _value(origin.composite_fitness)} origin · lift {lift} · "
+        f"{bench.bench_size} held-out rows{missing}"
     )
 
 

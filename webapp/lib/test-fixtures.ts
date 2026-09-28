@@ -180,6 +180,7 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
       },
     },
     axis_memory_peaked: [],
+    optimizer_facts: [],
     status: "",
     overlap: null,
     overlap_results: {},
@@ -198,6 +199,7 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
     at_offset: -1,
     langfuse_trace_url: null,
     state: "init",
+    optimizer_step: null,
     state_since: "",
     // `declared_phase` is what the runner wrote, `run_phase` what the route derived; set both.
     declared_phase: "running",
@@ -243,7 +245,7 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
     measured_unit: "sample",
     last_query_elapsed_s: 0,
     wallclock_serialized_at: null,
-    n_variants: 0,
+    arms_per_round: 0,
     sp_budget_round: 0,
     run_limits: null,
     spend: {
@@ -320,6 +322,7 @@ export function summaryRound(over: Partial<RoundSummary> = {}): RoundSummary {
     health: null,
     overlap: null,
     panel_precision: null,
+    optimizer_facts: [],
     ...over,
   };
 }

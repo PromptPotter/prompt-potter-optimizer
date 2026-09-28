@@ -42,7 +42,11 @@ from promptpotter.infrastructure.store.io import read_json, read_yaml
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimizers.nodes import OptimizerRuntime, Selector
+    from promptpotter.application.optimizers.nodes import (
+        OptimizerPacing,
+        OptimizerRuntime,
+        Selector,
+    )
 
 shapes_optimizer_prompt(__name__)
 
@@ -156,16 +160,13 @@ class SelectedOptimizer:
     def declared_knobs(self, name: str) -> StrictModel:
         return _knobs(name, self.node(name).wire_type, self.file_config(name))
 
-    def readout(self, node: str, knob: str) -> Any:
-        """One knob's effective value for a SURFACE to display, ``None`` where this manifest
-        declares no such node: an optimizer without a patience has none to show."""
-        if self.schema.get_node(node) is None:
-            return None
-        return getattr(self.knobs(node), knob)
-
     @property
     def runtime(self) -> OptimizerRuntime:
         return optimizers.runtime(self.name)
+
+    @property
+    def pacing(self) -> OptimizerPacing:
+        return self.runtime.pacing(self)
 
     def prompt_hashes(self) -> dict[str, str]:
         return self.runtime.prompt_hashes(self)

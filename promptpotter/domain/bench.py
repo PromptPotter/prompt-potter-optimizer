@@ -96,11 +96,11 @@ class BenchReading(StrictModel):
         description="The 95% band on `composite_fitness`, drawn from the same per-row values."
     )
     ci_hi: float | None
-    n_scored: int
+    n_scored: int = Field(description="Bench rows that carry a verdict; an errored row never does.")
     run_id: str = Field(description="The archive run its bench rows were filed under.")
     stopped: str | None = Field(
-        description="Why the pass ended before its last bench row — a spend ceiling, a skip — "
-        "or `None` when it scored every one."
+        description="`skip` where the operator ended the pass before its last bench row, or "
+        "`None` when it scored every one."
     )
 
 
@@ -110,8 +110,16 @@ class BenchScore(StrictModel):
     model_config = ConfigDict(frozen=True)
 
     bench_size: int
-    origin: BenchReading
-    selected: BenchReading
+    origin: BenchReading | None = Field(
+        description="`None` where its pass stopped short; `missing_reason` says why."
+    )
+    selected: BenchReading | None = Field(
+        description="The headline. `None` where its pass stopped short; `missing_reason` says why."
+    )
+    missing_reason: str | None = Field(
+        description="Why a reading above is `None`: each pass that stopped short, with the stop "
+        "and the error it stopped on. `None` when both passes read."
+    )
     lift: float | None = Field(
         description="`selected` over `origin` in `composite_fitness`, paired per bench row both "
         "scored; `None` below two shared rows, and 0.0 where the origin is the selection."

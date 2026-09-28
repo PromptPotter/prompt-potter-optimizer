@@ -184,6 +184,15 @@ export interface OverlapReading {
   measured: number;
 }
 
+/** One labelled reading an optimizer reports about a round, worded by its own runtime. */
+export interface OptimizerFact {
+  key: string;
+  label: string;
+  text: string;
+  value: number | null;
+  kind: 'stat' | 'note';
+}
+
 /** Display row for `dashboard.json::rounds[]` — webapp's completed-round source. */
 export interface RoundSummary {
   round: number;
@@ -200,6 +209,7 @@ export interface RoundSummary {
   health: DegradationHealth | null;
   overlap: OverlapReading | null;
   panel_precision: PanelPrecision | null;
+  optimizer_facts: OptimizerFact[];
 }
 
 /** One on-demand workspace-scope diagnostic run — the ``verify`` and ``noise-floor`` */
@@ -536,6 +546,7 @@ export interface RoundResult {
   health: DegradationHealth | null;
   opt_sp: OptSearchPoint | null;
   optimizer_state: OptimizerState;
+  optimizer_facts: OptimizerFact[];
   status: string;
   round_id: string;
   /** Rank-ordered display table — the selection first, then θ, then composite.
@@ -619,13 +630,13 @@ export interface DashboardError {
   stop_reason: string;
 }
 
-/** ``run_limits.potter`` — a potter cycle's own ceilings: its stall ladder's patiences, PoBB's */
-export interface PotterLimits {
-  l1_patience: number;
-  l2_patience: number | null;
-  l3_patience: number | null;
-  pobb_epsilon: number;
-  lives_cap: number | null;
+/** One knob an optimizer declares as bounding its run, which a fork may reconcile. */
+export interface OptimizerLimit {
+  node: string;
+  knob: string;
+  label: string;
+  value: number | null;
+  integer: boolean;
 }
 
 /** ``state.run_limits`` — the cycle's run-limit ceilings, stamped at WIRING off the effective */
@@ -633,7 +644,8 @@ export interface RunLimits {
   max_rounds: number | null;
   spend_budget_usd: number | null;
   token_budget: number | null;
-  potter: PotterLimits | null;
+  lives_cap: number | null;
+  optimizer: OptimizerLimit[];
 }
 
 /** One race catch-up — the priors eliminator ``member`` re-measured on one sample. */
@@ -710,7 +722,8 @@ export interface LiveDashboardState {
   session_id: string;
   at_offset: number;
   langfuse_trace_url: string | null;
-  state: 'init' | 'origin' | 'proposing' | 'scoring' | 'between_samples' | 'between_candidates' | 'stopped' | 'l2_refining' | 'l3_replanning';
+  state: 'init' | 'origin' | 'proposing' | 'scoring' | 'between_samples' | 'between_candidates' | 'optimizer_step' | 'bench' | 'stopped';
+  optimizer_step: string | null;
   state_since: string;
   declared_phase: 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
   run_phase: 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
@@ -755,7 +768,7 @@ export interface LiveDashboardState {
   measured_unit: 'sample' | 'cell';
   last_query_elapsed_s: number | null;
   wallclock_serialized_at: string | null;
-  n_variants: number | null;
+  arms_per_round: number | null;
   sp_budget_round: number;
   run_limits: RunLimits | null;
   spend: SpendRollup;
@@ -1064,19 +1077,25 @@ export interface BenchReading {
   /** The 95% band on `composite_fitness`, drawn from the same per-row values. */
   ci_lo: number | null;
   ci_hi: number | null;
+  /** Bench rows that carry a verdict; an errored row never does. */
   n_scored: number;
   /** The archive run its bench rows were filed under. */
   run_id: string;
-  /** Why the pass ended before its last bench row — a spend ceiling, a skip — or
-   * `None` when it scored every one. */
+  /** `skip` where the operator ended the pass before its last bench row, or `None`
+   * when it scored every one. */
   stopped: string | null;
 }
 
 /** The headline: the selection and the origin, scored on a bench set no optimizer node read. */
 export interface BenchScore {
   bench_size: number;
-  origin: BenchReading;
-  selected: BenchReading;
+  /** `None` where its pass stopped short; `missing_reason` says why. */
+  origin: BenchReading | null;
+  /** The headline. `None` where its pass stopped short; `missing_reason` says why. */
+  selected: BenchReading | null;
+  /** Why a reading above is `None`: each pass that stopped short, with the stop and
+   * the error it stopped on. `None` when both passes read. */
+  missing_reason: string | null;
   /** `selected` over `origin` in `composite_fitness`, paired per bench row both
    * scored; `None` below two shared rows, and 0.0 where the origin is the
    * selection. */
@@ -1698,11 +1717,12 @@ export interface LineageNode {
    * The other three caveats are properties of the round's scale and ride the
    * round's own reading. */
   theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
-  /** Whether the optimizer that elected this candidate's round fits theta per arm
-   * at all (`RoundResult.stamps_theta`, carried on the election). False:
-   * theta is not a column of this node, so a surface hides it rather than
-   * drawing a cold ruler's blank. False on a course and on a round that never
-   * elected. */
+  /** Whether the optimizer fits theta per arm at all. Candidate: the declaration
+   * its round's election carried (`RoundResult.stamps_theta`), false on a
+   * round that never elected. Course: the campaign-constant declaration of
+   * the optimizer it runs (`LiveDashboardState.stamps_theta`), so a course
+   * says whether its rounds are won on theta. False: theta is not a column
+   * here, so a surface hides it rather than drawing a cold ruler's blank. */
   stamps_theta: boolean;
   /** The candidate's stored evaluator namespace — the measurement a `score:` lens
    * re-scores against. */
@@ -2340,10 +2360,7 @@ export type ArmOutcome = 'measured' | 'invalid' | 'skipped' | 'broken' | 'elimin
 export type RunPhase = 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
 
 // The fine-grained activity axis, `dashboard.json::state` (domain/phases.py::DashboardState).
-export type DashboardState = 'init' | 'origin' | 'proposing' | 'scoring' | 'between_samples' | 'between_candidates' | 'stopped';
-
-// Potter's own activities on that axis (domain/phases.py::PotterDashboardState).
-export type PotterDashboardState = 'l2_refining' | 'l3_replanning';
+export type DashboardState = 'init' | 'origin' | 'proposing' | 'scoring' | 'between_samples' | 'between_candidates' | 'optimizer_step' | 'bench' | 'stopped';
 
 // Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).
 export type CommandKind = 'archive-campaign' | 'cancel-queued-run' | 'change-run-limits' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-campaign-label' | 'set-concurrent-cycles' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'unarchive-campaign' | 'verify-candidate';

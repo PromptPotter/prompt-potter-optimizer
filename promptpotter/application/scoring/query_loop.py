@@ -355,11 +355,15 @@ def _quiet(call: asyncio.Future[Any]) -> None:
         call.exception()
 
 
-async def _acquire(sample: Sample, idx: int, ctx: QueryLoopState) -> _Acquired:
+async def _acquire(sample: Sample, idx: int, ctx: QueryLoopState, claiming: set[int]) -> _Acquired:
     cached = ctx.cached_sample_results.get(sample.id)
     claim: CellClaim | None = None
     if cached is None and ctx.claim_cell is not None:
-        cached, claim = await ctx.claim_cell(sample)
+        claiming.add(idx)
+        try:
+            cached, claim = await ctx.claim_cell(sample)
+        finally:
+            claiming.discard(idx)
     if cached is not None:
         cached_r = _materialize_cached(cached, ctx.scorer)
         # Can re-measure for real, so a hit gets a slot like anything else.
@@ -421,6 +425,9 @@ class Walk:
     consecutive_errors: int = 0
     submitted: int = 0
     running: dict[int, asyncio.Task[_Acquired]] = field(default_factory=dict)
+    # The running cells still waiting on another process's claim: nothing sent, so every stop and
+    # end cancels them. Each keeps its slot, which its send takes if the holder drops the cell.
+    claiming: set[int] = field(default_factory=set)
     finished: dict[int, asyncio.Task[_Acquired]] = field(default_factory=dict)
     launched_at: dict[int, float] = field(default_factory=dict)
     # Launch events of a walk measuring ahead of its turn, released at it, so each candidate's
@@ -451,7 +458,7 @@ class Walk:
         elif self.on_sample_starting is not None:
             self.on_sample_starting(*event)
         cell = asyncio.create_task(
-            _acquire(sample, idx, self.ctx),
+            _acquire(sample, idx, self.ctx, self.claiming),
             name=f"scoring:{sample.id}",
             context=self.context.copy(),
         )
@@ -631,6 +638,7 @@ class Walk:
         for cell in self.finished.values():
             _quiet(cell)
             _release_claim(cell)
+        self.drop_claim_waits()
         draining = list(self.running.values())
         for cell in draining:
             if cancel:
@@ -639,6 +647,11 @@ class Walk:
             cell.add_done_callback(_release_claim)
         self.running, self.finished = {}, {}
         return draining
+
+    def drop_claim_waits(self) -> None:
+        for idx, cell in self.running.items():
+            if idx in self.claiming:
+                cell.cancel()
 
 
 async def run_walks(
@@ -828,6 +841,8 @@ async def run_walks(
 
     async def land() -> None:
         """Wait out every call already sent, starting none, so each one's cost is on the record."""
+        for walking in live():
+            walking.drop_claim_waits()
         if calls := outstanding():
             if gauge is not None:
                 gauge.touch()

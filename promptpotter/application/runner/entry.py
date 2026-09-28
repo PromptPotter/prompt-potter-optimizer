@@ -680,15 +680,9 @@ async def _run_single_cycle(
                 cycle, session, origin=origin_bench, cb=cb, spend=observers.dashboard.state.spend
             )
         except RUN_STOPS as stop:
-            bench_stop = run_stop_reason(stop)
-            # A pause mid-pass keeps the cycle resumable, and the resume takes the pass again.
-            if STOP_REASON_INFO[bench_stop].outcome is StopOutcome.PAUSED:
-                stop_reason, cycle_error = bench_stop, None
-            else:
-                logger.warning(
-                    "The bench pass stopped (%s), so this cycle reports no bench score.",
-                    bench_stop,
-                )
+            # Only a pause escapes the pass; it keeps the cycle resumable, and the resume takes
+            # the pass again.
+            stop_reason, cycle_error = run_stop_reason(stop), None
         except KeyboardInterrupt:
             stop_reason, cycle_error = StopReason.PAUSED, None
         except asyncio.CancelledError as exc:
@@ -935,6 +929,9 @@ def _finalize_run(
             CycleLayout(session.store.campaigns.cycle_dir(session.hop)).ledger,
             started_at=cycle_result.started_at,
             finished_at=cycle_result.finished_at,
+            optimizer_phases=frozenset(
+                p.phase for p in select_optimizer(config.optimization).runtime.phases
+            ),
         )
         final_block: dict[str, Any] = {
             "stop_reason": stop_reason,

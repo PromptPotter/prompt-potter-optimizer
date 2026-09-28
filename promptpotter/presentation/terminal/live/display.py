@@ -88,16 +88,16 @@ class LiveDisplay(Projection):
         self,
         *,
         origin_acc: float,
-        # Potter's escalation patience; `None` on an optimizer that keeps none, which prints no
-        # patience line at all.
-        l1_patience: int | None,
+        # The optimizer's patience (`OptimizerPacing.patience`); `None` on one that keeps none,
+        # which prints no patience line at all.
+        patience: int | None,
         pipeline_schema: PipelineSchema | None,
         scoring_formula: str | None = None,
         campaign_rounds: list[dict[str, Any]] | None = None,
         measured_unit: MeasuredUnit = "sample",
     ) -> None:
         self._core = LiveStateCore(origin_acc=origin_acc)
-        self.l1_patience = l1_patience
+        self.patience = patience
         self.pipeline_schema = pipeline_schema
         self.scoring_formula = scoring_formula
         # The terminal's half of the one noun (`Connector.measured_unit`).
@@ -140,9 +140,7 @@ class LiveDisplay(Projection):
 
         return cls(
             origin_acc=origin_acc,
-            l1_patience=select_optimizer(campaign_config.optimization).readout(
-                "escalation", "l1_patience"
-            ),
+            patience=select_optimizer(campaign_config.optimization).pacing.patience,
             pipeline_schema=session.pipeline_schema,
             scoring_formula=split_scoring_block(campaign_config.scoring).per_sample,
             measured_unit=session.backend_client.measured_unit,
@@ -198,7 +196,7 @@ class LiveDisplay(Projection):
                 ctx = payload.get("phase_ctx")
                 if isinstance(ctx, dict):
                     self._phase_ctx.update(ctx)
-                self.on_round_complete(round_result, int(payload.get("l1_stall_count") or 0))
+                self.on_round_complete(round_result, int(payload.get("stall") or 0))
             return
         self.on_phase(
             PhaseEvent(
@@ -602,7 +600,7 @@ class LiveDisplay(Projection):
         prior = self._round_best_label or "leader"
         return f"  {DIM}→ {label} {acc:.1%}  ({gap:.1%} from {prior}){RESET}"
 
-    def on_round_complete(self, round_result: RoundResult, l1_stall_count: int) -> None:
+    def on_round_complete(self, round_result: RoundResult, stall: int) -> None:
         self.sample_counter = 0
 
         self.campaign_rounds.append(
@@ -634,7 +632,8 @@ class LiveDisplay(Projection):
         self._round_started_at = None
         self._write("")
         self._write(_node_top(f"ROUND {rn} SUMMARY{elapsed_label}"))
-        for line in render_progress_table(self.campaign_rounds).split("\n"):
+        table = render_progress_table(self.campaign_rounds, stamps_theta=round_result.stamps_theta)
+        for line in table.split("\n"):
             self._write(line)
         if self._block_racing:
             for line in self._render_block_lines():
@@ -660,10 +659,13 @@ class LiveDisplay(Projection):
             for line in stats.split("\n"):
                 if line:
                     self._write(line)
-        if self.l1_patience is not None:
-            for line in render_patience_status(
-                round_result.improved, l1_stall_count, self.l1_patience
-            ).split("\n"):
+        # A note stays off the tape: it is prose the round file and `log.md` hold whole.
+        for fact in (f for f in round_result.optimizer_facts if f.kind == "stat"):
+            self._write(_node_line(f"{fact.label}: {fact.text}"))
+        if self.patience is not None:
+            for line in render_patience_status(round_result.improved, stall, self.patience).split(
+                "\n"
+            ):
                 self._write(line)
         self._write(_node_bottom())
 

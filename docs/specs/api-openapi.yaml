@@ -1568,9 +1568,12 @@ paths:
         manifest `member` and null before a reading; `catch_up_log[]` names the
         member too. `bench_score` (`BenchScore`) is the headline, folded from the
         `bench:scored` phase record and null until the bench pass grades the
-        selection. `run_limits` holds the bench's ceilings alone; a potter cycle's
-        patiences, ε and lives ceiling ride `run_limits.potter` (`PotterLimits`,
-        null on any other optimizer).
+        selection. `run_limits` holds the bench's ceilings, the lives bank's
+        `lives_cap`, and `optimizer[]` — the run-bounding knobs the selected
+        optimizer declares (`OptimizerLimit`), empty where it declares none.
+        `rounds[].optimizer_facts` are the optimizer's own words about each closed
+        round (`OptimizerFact`); `state: optimizer_step` names a phase the optimizer
+        declares for itself, its words in `optimizer_step`.
 
         DECLARED, not yet written: `stall` replaces the `patience` string.
       tags: [cycles]
@@ -1650,10 +1653,10 @@ paths:
         are finished on disk under a parent that a positional read cannot name. The ledger
         is the only witness independent of round close.
 
-        The round-CLOSE facts (`is_selected`, `theta`, `cumulative_theta`) come from
-        `dashboard.json::rounds[]`, the declared projection for them — the ledger genuinely
-        does not carry them. A round that never closed reports **no winner** rather than
-        promoting its lone candidate.
+        The round facts (`is_selected`, `theta`, `stamps_theta`) come off the same ledger:
+        the `ElectionRecord` stamps them at the election, and `round:complete` re-reads θ. A
+        round that never elected reports **no winner** rather than promoting its lone
+        candidate.
 
         ONE tree per campaign, and every consumer reads it. There is no `depth` dial:
         two clients choosing different depths for the same served object is how they
@@ -2913,7 +2916,7 @@ components:
           type: boolean
           description: |
             In this round's `selected_labels` — the individuals the next round derives
-            from. False throughout a round that never closed.
+            from. False throughout a round that has not elected.
         theta:
           type: [number, "null"]
           description: |
@@ -2933,14 +2936,13 @@ components:
           description: |
             Of `scored_samples`, how many were replayed from the MeasurementArchive rather
             than measured. Null on a course and on any candidate never measured.
-        cumulative_theta:
-          type: [number, "null"]
+        stamps_theta:
+          type: boolean
           description: |
-            Ability of the parent lineage on the cycle's fixed δ ruler — the
-            subset-invariant, cross-round-comparable series. Carried by the round's WINNER
-            only: it is a property of the advancing spine, and a losing sibling never
-            joined it. Its accuracy-space predecessor was a mean over rows measured by
-            DIFFERENT configurations and is gone; `accuracy` is what this node MEASURED.
+            Whether the optimizer fits θ per arm at all. Candidate: what its round's election
+            carried, false on a round that never elected. Course: the campaign-constant
+            declaration of the optimizer it runs, so a course row can say its rounds are won
+            on θ. False: θ is not a column here, and a surface hides it.
         lens_value:
           type: [number, "null"]
           description: |

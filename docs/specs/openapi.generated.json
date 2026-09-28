@@ -540,6 +540,7 @@
             "title": "Composite Fitness"
           },
           "n_scored": {
+            "description": "Bench rows that carry a verdict; an errored row never does.",
             "title": "N Scored",
             "type": "integer"
           },
@@ -567,7 +568,7 @@
                 "type": "null"
               }
             ],
-            "description": "Why the pass ended before its last bench row — a spend ceiling, a skip — or `None` when it scored every one.",
+            "description": "`skip` where the operator ended the pass before its last bench row, or `None` when it scored every one.",
             "title": "Stopped"
           }
         },
@@ -627,17 +628,46 @@
             ],
             "title": "Lift Ci Lo"
           },
+          "missing_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why a reading above is `None`: each pass that stopped short, with the stop and the error it stopped on. `None` when both passes read.",
+            "title": "Missing Reason"
+          },
           "origin": {
-            "$ref": "#/components/schemas/BenchReading"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BenchReading"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`None` where its pass stopped short; `missing_reason` says why."
           },
           "selected": {
-            "$ref": "#/components/schemas/BenchReading"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BenchReading"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The headline. `None` where its pass stopped short; `missing_reason` says why."
           }
         },
         "required": [
           "bench_size",
           "origin",
           "selected",
+          "missing_reason",
           "lift",
           "lift_ci_lo",
           "lift_ci_hi"
@@ -4186,7 +4216,7 @@
           },
           "stamps_theta": {
             "default": false,
-            "description": "Whether the optimizer that elected this candidate's round fits theta per arm at all (`RoundResult.stamps_theta`, carried on the election). False: theta is not a column of this node, so a surface hides it rather than drawing a cold ruler's blank. False on a course and on a round that never elected.",
+            "description": "Whether the optimizer fits theta per arm at all. Candidate: the declaration its round's election carried (`RoundResult.stamps_theta`), false on a round that never elected. Course: the campaign-constant declaration of the optimizer it runs (`LiveDashboardState.stamps_theta`), so a course says whether its rounds are won on theta. False: theta is not a column here, so a surface hides it rather than drawing a cold ruler's blank.",
             "title": "Stamps Theta",
             "type": "boolean"
           },

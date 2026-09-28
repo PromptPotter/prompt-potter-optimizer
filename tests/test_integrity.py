@@ -1356,14 +1356,21 @@ def test_concurrent_walks_on_one_run_buy_each_cell_once(tmp_path: Path, monkeypa
 
 def test_a_dead_claimers_cell_is_taken_over(tmp_path: Path, monkeypatch) -> None:
     """A claimer that dies mid-cell must not hold its cell forever, nor may a live one lose it to a
-    timeout: the walk waits exactly as long as the holder lives, then measures the cell itself."""
+    timeout: the walk waits exactly as long as the holder lives, then measures the cell itself.
+
+    Waiting is not a sent call. Where a sent call bills whether anyone waits, a stop waits it out;
+    one that waited on ANOTHER process's call too held a pause for a whole Harbor cell, and once the
+    holder dropped the cell it bought it here as well."""
     import json
+    import threading
     from collections import Counter
 
     from promptpotter.application.scoring import search_point_scorer
+    from promptpotter.domain.phases import StopLoop, StopReason
 
-    panel = [Sample(id=0, query="q0", ground_truth="a")]
+    panel = [Sample(id=0, query="q0", ground_truth="a"), Sample(id=1, query="q1", ground_truth="a")]
     session, sp = _persisting_walk(tmp_path, panel)
+    session.backend_client.cancel_stops_billing = False
     holder = subprocess.Popen(
         [
             sys.executable,
@@ -1391,31 +1398,85 @@ def test_a_dead_claimers_cell_is_taken_over(tmp_path: Path, monkeypatch) -> None
     monkeypatch.setattr(query_loop, "measure_sample", _measure)
     monkeypatch.setattr(search_point_scorer, "_CLAIM_POLL_S", 0.01)
 
-    async def _walk_past_a_crash() -> tuple[bool, Any]:
-        walk = asyncio.create_task(
-            search_point_scorer.score_search_point(
-                sp,
-                panel,
-                session,
-                label="bench",
-                measured=None,
-                on_sample_scored=None,
-                on_sample_starting=None,
-            )
+    def _score(cells: list[Sample]) -> Any:
+        return search_point_scorer.score_search_point(
+            sp,
+            cells,
+            session,
+            label="bench",
+            measured=None,
+            on_sample_scored=None,
+            on_sample_starting=None,
         )
+
+    async def _stopped(cells: list[Sample], stop: type[BaseException]) -> None:
+        try:
+            await _score(cells)
+        except stop:
+            return
+        raise AssertionError("the walk was not stopped")
+
+    async def _walk_past_a_crash() -> tuple[bool, Any]:
+        walk = asyncio.create_task(_score(panel[:1]))
         await asyncio.sleep(0.5)
-        waited = not walk.done() and not sends
+        waited = not walk.done() and not sends[panel[0].key]
         holder.kill()
         holder.wait()
         return waited, await asyncio.wait_for(walk, 30)
 
+    # A stop that waits on the holder sits out its whole cell, then buys it once the holder is gone.
+    watchdog = threading.Timer(60, holder.kill)
     try:
         assert holder.stdout is not None and holder.stdout.readline().strip() == "held"
+        watchdog.start()
+        paused = threading.Timer(0.3, lambda: setattr(session, "pause_check", lambda: True))
+        paused.start()
+        asyncio.run(_stopped(panel[:1], KeyboardInterrupt))
+        session.pause_check = None
+        # Two cells out, one waiting on the holder: the ceiling the other trips lands the SENT one.
+        session.backend_client.max_cells_in_flight = 2
+        session.sample_lookahead_check = lambda: 2
+        session.budget_tripped = lambda: StopReason.SPEND_BUDGET if sends else None
+        asyncio.run(_stopped(panel, StopLoop))
+        watchdog.cancel()
+        assert sends == Counter({panel[1].key: 1}), "a stop waited on another process's cell"
+        session.budget_tripped = session.sample_lookahead_check = None
         waited, scored = asyncio.run(_walk_past_a_crash())
     finally:
+        watchdog.cancel()
         holder.kill()
     assert waited, "the walk measured a cell a live claimer still held"
-    assert sends == Counter({panel[0].key: 1}) and not scored.results[0].get("cached")
+    assert sends == Counter({k.key: 1 for k in panel}) and not scored.results[0].get("cached")
+
+    # A catch-up back but never taken is dropped unwritten, so its cell must be freed with it: a
+    # row still shared there is one no run recorded, served to whoever waits on the cell next.
+    from factories import pobb_knobs
+
+    from promptpotter.application.optimizers.potter.pobb.checks import PoBBCheck
+    from promptpotter.application.runner.measurement import _catch_up
+
+    spare = Sample(id=2, query="q2", ground_truth="a")
+    feed = ReplayFeed(
+        session.store.archive, session.pipeline_schema.node_configs(sp.pipeline_params)
+    )
+    race = PoBBCheck(
+        pobb_knobs(),
+        n_min=6,
+        n_samples=1,
+        ruler=None,
+        backfill_fn=functools.partial(_catch_up, types.SimpleNamespace(session=session, axes=None)),
+    )
+    race.register_completed([], candidate_id="prior", sp=sp)
+
+    async def _discarded() -> bool:
+        (call,) = race.start_backfill(spare, 1)
+        await call
+        shared = feed.claimed_row(spare.key) is not None
+        race.discard_backfills()
+        return shared
+
+    assert asyncio.run(_discarded()), "the catch-up never shared its row"
+    assert feed.claimed_row(spare.key) is None, "a discarded catch-up kept its cell claimed"
 
 
 def test_unscoreable_cells_counts_holes_but_not_stops_or_deprecated_rows() -> None:
@@ -3422,10 +3483,6 @@ def test_an_illegal_inner_steer_is_rejected_and_a_real_steer_is_not() -> None:
     seeded = "Ground each candidate in the seed prompt's own wording before proposing a rewrite."
     assert steer({"l1_generate": {"instruction": seeded}}) is None
 
-    # Scoped to the inner OPTIMIZER nodes. The same words in a target-pipeline prompt steer a
-    # task, not a loop, and there is no round budget for them to reach.
-    assert steer({"llm_only": {"instruction": c21}}) is None
-
 
 def test_a_gutted_prompt_field_is_rejected_and_a_tightening_is_not() -> None:
     """An override REPLACES its field whole, so a short replacement for a long parent deletes
@@ -3494,10 +3551,12 @@ def test_the_l4_dataset_is_recognized_as_one() -> None:
     pooled verdict is wrong with no symptom.
     """
     from promptpotter.application.campaign_config import load_campaign_config
+    from promptpotter.application.optimizer_manifest import select_optimizer
     from promptpotter.application.runner.inner.tasks import (
         inner_instrument_config,
         load_inner_tasks,
         resolve_inner_task,
+        select_inner_optimizer,
     )
     from promptpotter.connectors import get
     from promptpotter.infrastructure.store.io import read_yaml
@@ -3523,6 +3582,21 @@ def test_the_l4_dataset_is_recognized_as_one() -> None:
             "units of 1/a while the rest of the panel is in logits, and the outer verdict "
             "pools them anyway"
         )
+
+    # The manifest the outer mutates against — its base templates, wire limits and identity — is
+    # the one a cell RUNS, the panel's overlays laid on the inner dataset's own.
+    inner_raw = read_yaml(d.parent / panel.inner_benchmark / "campaign.yaml")["campaign_config"]
+    cfg = panel.inner_benchmark_config
+    shown = select_inner_optimizer(inner_raw, cfg.inner_nodes, cfg.inner_depth_nodes)
+    cell = inner_instrument_config(
+        resolve_inner_task(ctx, panel.tasks[0].id),
+        load_campaign_config(inner_raw),
+        llm_node="llm_only",
+        n_scored=40,
+    )
+    ran = select_optimizer(cell.optimization)
+    assert shown.node_digests == ran.node_digests
+    assert shown.knobs("escalation") == ran.knobs("escalation")
 
 
 # 7. Money — what a call is billed, and against which price
@@ -3640,7 +3714,7 @@ async def _walk(
             committed.append(sample.id)
             return [call.result()]
 
-        return call, _commit
+        return call, _commit, call.cancel
 
     # A parent measured on none of the round's cells, so every cell owes it one catch-up call.
     priors = PoBBCheck(
@@ -4317,9 +4391,20 @@ def test_a_rounds_cost_reaches_the_markdown_digest_too() -> None:
     It also pins the prefix vocabulary across the boundary: the line prints ``prefix_reading``'s
     badge, so a bucket the provider reported nothing for says ``c?`` here exactly as it does on the
     sample tape — which is what the whole caching arc could not see."""
-    from promptpotter.application.views.render.markdown import _render_round_cost
+    from promptpotter.application.views.render.markdown import _render_round, _render_round_cost
     from promptpotter.application.views.view_models import RoundDigestView
+    from promptpotter.domain.results import OptimizerFact
     from promptpotter.domain.spend import SpendBucket, SpendRollup
+    from promptpotter.infrastructure.projections.live_dashboard.round_summary import (
+        build_round_summary,
+    )
+    from tests.factories import round_result
+
+    # The optimizer's own round facts ride the same two halves: the served row and the digest.
+    facts = (
+        OptimizerFact(key="population", label="Population", text="3 kept", value=3, kind="stat"),
+        OptimizerFact(key="critique", label="Critique", text="Fix: x", value=None, kind="note"),
+    )
 
     def digest(spend: SpendRollup | None) -> RoundDigestView:
         return RoundDigestView(
@@ -4330,16 +4415,16 @@ def test_a_rounds_cost_reaches_the_markdown_digest_too() -> None:
             total=20,
             composite_fitness=0.5,
             changes_description="",
-            l1_critique_text="",
-            l1_yield=1.0,
-            l1_n_no_op=0,
-            l1_n_duplicate=0,
-            l1_n_repeat=0,
-            candidates_scored=2,
+            facts=facts,
+            stamps_theta=True,
             evaluators={},
             spend=spend,
         )
 
+    served = round_result(3, optimizer_facts=list(facts))
+    assert build_round_summary(served, []).optimizer_facts == list(facts)
+    block = _render_round(digest(None), formula=None)
+    assert f"- {facts[0].label}: {facts[0].text}" in block and f"> {facts[1].text}" in block
     # A cycle with no dashboard on disk — a foreign fork sibling — says nothing rather than $0.
     assert _render_round_cost(digest(None)) == ""
 
@@ -4738,7 +4823,9 @@ def test_the_bench_pass_bills_and_clocks_under_its_own_name(built_stores, tmp_pa
     kinds = [r.kind for _, r in ledger.iter() if isinstance(r, TokenUsageRecord)]
     assert kinds == ["bench"] * 3 + ["diagnostic"], kinds
 
-    clock = scan_ledger_wall_clock(ledger.path, started_at=started, finished_at=utcnow_iso())
+    clock = scan_ledger_wall_clock(
+        ledger.path, started_at=started, finished_at=utcnow_iso(), optimizer_phases=frozenset()
+    )
     assert clock.phase_s["bench"] > 0 and set(clock.unbracketed_call_s) == {"diagnostic"}, clock
 
 
@@ -4888,8 +4975,8 @@ def test_a_backend_retry_is_served_with_the_reason_it_happened(tmp_path: Path) -
         state_path=None,
         hop=CycleHop(campaign_id="c", cycle_id="cy"),
         session_id="s",
-        l1_patience=3,
-        n_variants=2,
+        patience=3,
+        arms_per_round=2,
         sp_budget_round=20,
         headline_metric="composite",
     )
@@ -4933,8 +5020,8 @@ def test_the_parent_rescore_ticks_the_run_without_minting_a_candidate(tmp_path: 
         state_path=None,
         hop=CycleHop(campaign_id="c", cycle_id="cy"),
         session_id="s",
-        l1_patience=3,
-        n_variants=2,
+        patience=3,
+        arms_per_round=2,
         sp_budget_round=20,
         headline_metric="composite",
     )

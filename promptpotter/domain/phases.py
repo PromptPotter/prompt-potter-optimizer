@@ -15,8 +15,6 @@ __all__ = [
     "CampaignPhase",
     "DashboardState",
     "PhaseEvent",
-    "PotterDashboardState",
-    "PotterPhase",
     "RunPhase",
     "StopLoop",
     "StopOutcome",
@@ -27,7 +25,7 @@ __all__ = [
 
 
 class CampaignPhase(enum.StrEnum):
-    """The bench's phases. An optimizer's own ride its manifest-scoped enum (``PotterPhase``)."""
+    """The bench's phases. An optimizer's own are its runtime's (``OptimizerRuntime.phases``)."""
 
     INIT = "init"
     ORIGIN = "origin"
@@ -38,13 +36,6 @@ class CampaignPhase(enum.StrEnum):
     # The held-out pass grading the selection, bracketed once per pass with no round;
     # `bench:scored` carries its `BenchScore`.
     BENCH = "bench"
-
-
-class PotterPhase(enum.StrEnum):
-    """Potter's controller phases: L2 refines the strategy, L3 modifies the plan."""
-
-    REFINE_STRATEGY = "refine_strategy"
-    MODIFY_PLAN = "modify_plan"
 
 
 class StopReason(enum.StrEnum):
@@ -126,8 +117,8 @@ class RunPhase(enum.StrEnum):
 
 class DashboardState(enum.StrEnum):
     """The fine-grained ACTIVITY vocabulary (``dashboard.json::state``), orthogonal to
-    :class:`RunPhase`. Declared here because it is a vocabulary the webapp must agree on. An
-    optimizer's own activities ride its manifest-scoped enum (``PotterDashboardState``)."""
+    :class:`RunPhase`. Declared here because it is a vocabulary the webapp must agree on.
+    ``OPTIMIZER_STEP`` is any phase an optimizer declares for itself; its words ride beside it."""
 
     INIT = "init"
     ORIGIN = "origin"
@@ -135,12 +126,9 @@ class DashboardState(enum.StrEnum):
     SCORING = "scoring"
     BETWEEN_SAMPLES = "between_samples"
     BETWEEN_CANDIDATES = "between_candidates"
+    OPTIMIZER_STEP = "optimizer_step"
+    BENCH = "bench"
     STOPPED = "stopped"
-
-
-class PotterDashboardState(enum.StrEnum):
-    L2_REFINING = "l2_refining"
-    L3_REPLANNING = "l3_replanning"
 
 
 class StopOutcome(enum.StrEnum):

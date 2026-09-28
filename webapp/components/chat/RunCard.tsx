@@ -210,6 +210,7 @@ function ConfigBox({
           title="Copy this searchpoint"
         />
       </div>
+      <RoundFacts last={summary.lastRound} />
       {!cfg ? (
         <p className="run-box-note">
           {observe.loading ? "Loading the searchpoint…" : "Nothing measured yet."}
@@ -244,6 +245,33 @@ function ConfigBox({
         </details>
       )}
       <Flips origin={origin} shown={shown} shownRow={shownRow} target={target} />
+    </div>
+  );
+}
+
+// The optimizer's own facts about its last round, as its runtime worded them; a note is prose, so it hovers.
+function RoundFacts({ last }: { last: RunSummary["lastRound"] }) {
+  if (!last || last.facts.length === 0) return null;
+  return (
+    <div className="run-facts" aria-label={`Round ${last.round}, in the optimizer's words`}>
+      <span className="run-flip-ref">round {last.round}</span>
+      {last.facts.map((f) =>
+        f.kind === "stat" ? (
+          <span key={f.key}>
+            <span className="run-fact-label">{f.label}</span> {f.text}
+          </span>
+        ) : (
+          <HoverCard
+            key={f.key}
+            className="run-fact-card"
+            content={<p className="run-fact-note">{f.text}</p>}
+          >
+            <span className="run-fact-label" tabIndex={0}>
+              {f.label}
+            </span>
+          </HoverCard>
+        ),
+      )}
     </div>
   );
 }

@@ -370,8 +370,6 @@ def _optimizer_template_failures(
     layout channel. Checks the MERGED params — a child inherits token-less prose without re-proposing it."""
     failures: list[ValidationFailure] = []
     for node_name, cfg in node_config_items(pipeline_params):
-        if node_name not in inner.llm_nodes:
-            continue
         prose = {
             k: v for k, v in cfg.items() if k in PromptTemplate.model_fields and isinstance(v, str)
         }
@@ -517,14 +515,14 @@ def _check_l1_inner_steer_is_legal(
     The sibling of ``_check_l1_prompt_placeholders_intact``: that one forbids DELETING a channel,
     this one forbids writing prose no channel can carry. Reads the DELTA, never the merge — a child
     inheriting a parent's prose has proposed nothing, and checking the merge would convict it for
-    its ancestor. Scoped to the inner manifest's llm nodes, so it reaches only overrides that ARE
-    inner optimizer prompts: on an ordinary campaign the same words in a target prompt steer a task
-    rather than a loop, and mean nothing here."""
+    its ancestor. Scoped to the recursion, whose every prompt override IS an inner optimizer prompt
+    (the L4 identity refuses any other): on an ordinary campaign the same words in a target prompt
+    steer a task rather than a loop, and mean nothing here."""
     if not source_output or inner_optimizer is None:
         return None
     failures: list[ValidationFailure] = []
     for node_name, node_params in source_output.items():
-        if node_name not in inner_optimizer.llm_nodes or not isinstance(node_params, dict):
+        if not isinstance(node_params, dict):
             continue
         for field, value in node_params.items():
             if field not in PromptTemplate.model_fields or not isinstance(value, str):
@@ -594,13 +592,12 @@ def _check_l1_prompt_field_not_gutted(
     declares — the output shape, the forbidden moves, the evidence it must ground on — is ordinary
     prose, and deleting it raises nothing and reads as a bold edit.
 
-    Scoped to the inner manifest's llm nodes and to the DELTA for the same reasons as the steer
-    table above."""
+    Scoped to the recursion and to the DELTA for the same reasons as the steer table above."""
     if not source_output or inner_optimizer is None:
         return None
     failures: list[ValidationFailure] = []
     for node_name, node_params in source_output.items():
-        if node_name not in inner_optimizer.llm_nodes or not isinstance(node_params, dict):
+        if not isinstance(node_params, dict):
             continue
         for field, value in node_params.items():
             if field not in PromptTemplate.model_fields or not isinstance(value, str):

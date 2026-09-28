@@ -21,7 +21,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from promptpotter.domain.phases import CampaignPhase, PotterPhase, RunPhase
+from promptpotter.domain.phases import CampaignPhase, RunPhase
 from promptpotter.domain.results import ArmOutcome
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler
 from promptpotter.domain.run_records import (
@@ -232,14 +232,16 @@ _Span = tuple[float, float]
 _CallSpan = tuple[str, str, float, float]
 
 
-def _phase_spans(rows: list[dict[str, Any]]) -> list[tuple[str, float, float]]:
-    """Bracketed spans per phase, the bench's and potter's, paired on ``(phase, round)``.
+def _phase_spans(
+    rows: list[dict[str, Any]], optimizer_phases: frozenset[str]
+) -> list[tuple[str, float, float]]:
+    """Bracketed spans per phase, the bench's and the optimizer's, paired on ``(phase, round)``.
 
-    The roster is the ENUMS, never a hand-listed set: ``round`` is an open marker with no exit,
+    The roster is DECLARED, never a hand-listed set: ``round`` is an open marker with no exit,
     ``control`` is the run-phase channel and ``backend`` a warning channel, and each would read as
     a bracket that never closes. An unpaired enter contributes nothing — a phase the run died
     inside measured no span, and inventing one would close it at a moment nothing recorded."""
-    brackets = {p.value for p in (*CampaignPhase, *PotterPhase)}
+    brackets = {p.value for p in CampaignPhase} | optimizer_phases
     open_at: dict[tuple[str, object], float] = {}
     out: list[tuple[str, float, float]] = []
     for rec in rows:
@@ -381,8 +383,11 @@ def _unworked_seconds(rows: list[dict[str, Any]]) -> float | None:
     return total
 
 
-def scan_ledger_wall_clock(ledger_path: Path, *, started_at: str, finished_at: str) -> WallClock:
+def scan_ledger_wall_clock(
+    ledger_path: Path, *, started_at: str, finished_at: str, optimizer_phases: frozenset[str]
+) -> WallClock:
     """Where this cycle's wall clock went — ONE screened pass, banked by ``_finalize_run``.
+    ``optimizer_phases`` are the phases the cycle's optimizer declares for itself.
 
     Physical like its neighbours, so a fork answers for its OWN clock and not its parent's history.
     The endpoints are the RUNNER's, because the ledger's first record is already past
@@ -404,7 +409,7 @@ def scan_ledger_wall_clock(ledger_path: Path, *, started_at: str, finished_at: s
             if (at := epoch_seconds(r.get("timestamp"))) is not None and at >= opened
         ]
     elapsed = None if opened is None or closed is None else max(0.0, closed - opened)
-    phases = _phase_spans(rows)
+    phases = _phase_spans(rows, optimizer_phases)
     gates = _gate_spans(rows, until=closed)
     calls = _call_spans(rows, opened=opened)
     covered = _merged([(start, end) for _, start, end in phases] + gates)

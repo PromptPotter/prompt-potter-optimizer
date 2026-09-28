@@ -443,6 +443,10 @@
 .run-diff-verdict{font-size:var(--text-xs);line-height:1.4;color:var(--color-text-tertiary)}
 .run-diff[open]>summary{margin-bottom:6px}
 
+.run-facts{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 var(--space-4);font-size:var(--text-xs);line-height:1.6;color:var(--color-text-secondary)}
+.run-fact-label{color:var(--color-text-tertiary)}
+.run-fact-note{margin:0;white-space:pre-wrap}
+
 /* ONE wrapping row: the four segments are one partition, and stacked they read as four claims. */
 .run-flips{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 var(--space-4);font-size:var(--text-xs);line-height:1.6}
 .run-flip-ref,.run-flip-total,.run-flip-same,.run-flip-sep{color:var(--color-text-tertiary)}

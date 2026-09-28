@@ -189,18 +189,23 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
         # `x` off the instrument most rows share: its headline is listed, never paired.
         mark = {True: " ", False: "x", None: " "}[r.comparable]
         b = r.bench
+        sel, org = (None, None) if b is None else (b.selected, b.origin)
         spend = r.spend
         per_usd = r.lift_per_incurred_usd
         lines.append(
             f" {mark}{r.campaign_id[:24]:<24}  {r.optimizer[:9]:<9}  "
             + (
-                f"{b.selected.round:>3}  {_level(b.selected.composite_fitness):>8}  "
-                f"{fmt_ci(b.selected.ci_lo, b.selected.ci_hi, spec='{:.3f}'):>16}  "
-                f"{_level(b.origin.composite_fitness):>7}  "
-                f"{fmt_ci(b.origin.ci_lo, b.origin.ci_hi, spec='{:.3f}'):>16}  "
-                f"{'—' if b.lift is None else f'{b.lift:+.3f}':>7}  "
+                f"{sel.round:>3}  {_level(sel.composite_fitness):>8}  "
+                f"{fmt_ci(sel.ci_lo, sel.ci_hi, spec='{:.3f}'):>16}  "
+                + (
+                    f"{_level(org.composite_fitness):>7}  "
+                    f"{fmt_ci(org.ci_lo, org.ci_hi, spec='{:.3f}'):>16}  "
+                    if org is not None
+                    else f"{'—':>7}  {'—':>16}  "
+                )
+                + f"{'—' if b.lift is None else f'{b.lift:+.3f}':>7}  "
                 f"{fmt_ci(b.lift_ci_lo, b.lift_ci_hi, spec='{:+.3f}'):>18}  "
-                if b is not None
+                if b is not None and sel is not None
                 else f"{'no bench headline':<95}  "
             )
             + (
@@ -254,7 +259,7 @@ def _level(value: float | None) -> str:
 
 
 def _origin_text(bench: BenchScore | None) -> str:
-    if bench is None:
+    if bench is None or bench.origin is None:
         return "—"
     return f"{bench.origin.sp_hash[:8]} at {_level(bench.origin.composite_fitness)}"
 

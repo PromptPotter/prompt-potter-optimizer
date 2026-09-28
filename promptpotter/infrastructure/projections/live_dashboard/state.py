@@ -11,8 +11,8 @@ from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.dashboard_rows import LiveCandidate, RoundSummary
-from promptpotter.domain.phases import DashboardState, PotterDashboardState, RunPhase
+from promptpotter.domain.dashboard_rows import LiveCandidate, OptimizerLimit, RoundSummary
+from promptpotter.domain.phases import DashboardState, RunPhase
 from promptpotter.domain.results import HeadlineMetric, OverlapReading
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
@@ -25,7 +25,6 @@ __all__ = [
     "DashboardError",
     "LiveDashboardState",
     "LoopWarning",
-    "PotterLimits",
     "RacingBlock",
     "RunLimits",
     "warming_payload",
@@ -103,19 +102,6 @@ class DashboardError(StrictModel):
     stop_reason: str
 
 
-class PotterLimits(StrictModel):
-    """``run_limits.potter`` — a potter cycle's own ceilings: its stall ladder's patiences, PoBB's
-    ε and the lives bank's cap. Null on a cycle whose optimizer declares none of them."""
-
-    l1_patience: int
-    l2_patience: int | None = None
-    l3_patience: int | None = None
-    pobb_epsilon: float
-    # DENOMINATOR for the live ``hearts`` count — without it ``hearts: 3`` is scaleless, and
-    # in lives mode ``max_rounds`` is null. ``None`` when lives is off.
-    lives_cap: int | None = None
-
-
 class RunLimits(StrictModel):
     """``state.run_limits`` — the cycle's run-limit ceilings, stamped at WIRING off the effective
     ``campaign_config``, so a fork's reconcile dialog can default against them. It rode
@@ -131,7 +117,11 @@ class RunLimits(StrictModel):
     max_rounds: int | None = None
     spend_budget_usd: float | None = None
     token_budget: int | None = None
-    potter: PotterLimits | None = None
+    # DENOMINATOR for the live ``hearts`` count — without it ``hearts: 3`` is scaleless, and in
+    # lives mode ``max_rounds`` is null. ``None`` where the optimizer keeps no lives bank.
+    lives_cap: int | None = None
+    # The optimizer's own run-bounding knobs (`OptimizerPacing.limits`), in its own words.
+    optimizer: list[OptimizerLimit] = Field(default_factory=list)
 
 
 class RacingBlock(StrictModel):
@@ -190,7 +180,10 @@ class LiveDashboardState(StrictModel):
     # None when Langfuse is disabled.
     langfuse_trace_url: str | None = None
 
-    state: DashboardState | PotterDashboardState = DashboardState.INIT
+    state: DashboardState = DashboardState.INIT
+    # The running optimizer step's own words (`OptimizerPhase.activity`) while `state` is
+    # `optimizer_step`; null in every other state.
+    optimizer_step: str | None = None
     state_since: str
 
     # The runner's DECLARATION of the coarse lifecycle+control axis, made via control
@@ -294,8 +287,8 @@ class LiveDashboardState(StrictModel):
     # The scoring phase's calls in flight; how many its stop rules allow right now; and the most it
     # could ever hold — all counted over every candidate walking and the race catch-ups
     # (`scoring/query_loop.py::FlightGauge`). Between phases `lookahead_most` is the next round's
-    # (`n_variants` x `sp_budget_round`), so the operator can size a press before it starts —
-    # ``None`` there under a manifest that declares no `n_variants`.
+    # (`arms_per_round` x `sp_budget_round`), so the operator can size a press before it starts —
+    # ``None`` there under an optimizer that declares no `arms_per_round`.
     in_flight: int = 0
     lookahead_allowed: int = 0
     lookahead_most: int | None = 0
@@ -324,8 +317,8 @@ class LiveDashboardState(StrictModel):
     last_query_elapsed_s: float | None = None
     wallclock_serialized_at: str | None = None
 
-    # Potter's `l1_generate` knob; ``None`` under a manifest that declares no such node.
-    n_variants: int | None
+    # The most arms one round races (`OptimizerPacing.arms_per_round`); ``None`` where undeclared.
+    arms_per_round: int | None
     sp_budget_round: int
 
     # None until INIT:exit.
@@ -361,7 +354,7 @@ class LiveDashboardState(StrictModel):
     # over a run and is folded.
     WIRING_FIELDS: ClassVar[tuple[str, ...]] = (
         "session_id",
-        "n_variants",
+        "arms_per_round",
         "sp_budget_round",
         "headline_metric",
         "langfuse_trace_url",
@@ -377,8 +370,8 @@ class LiveDashboardState(StrictModel):
         *,
         hop: CycleHop,
         session_id: str,
-        l1_patience: int | None,
-        n_variants: int | None,
+        patience: int | None,
+        arms_per_round: int | None,
         sp_budget_round: int,
         langfuse_trace_url: str | None,
         headline_metric: HeadlineMetric,
@@ -391,9 +384,9 @@ class LiveDashboardState(StrictModel):
             "session_id": session_id,
             "langfuse_trace_url": langfuse_trace_url,
             "state_since": utcnow_iso(),
-            "n_variants": n_variants,
+            "arms_per_round": arms_per_round,
             "sp_budget_round": sp_budget_round,
-            "patience": f"0/{l1_patience}" if l1_patience is not None else "",
+            "patience": f"0/{patience}" if patience is not None else "",
             # Not carried from `prior` and not deferred to INIT:exit — round 0 runs before any
             # INIT event reaches the ledger, so waiting mis-headlines the whole origin pass.
             "headline_metric": headline_metric,

@@ -151,19 +151,18 @@ LEDGER_BASELINE = {
     # finds a preset's members by its subpackage, so the first member opens the package.
     # +2: `optimizers/capo/state.py` — CAPO's working state, the population, apart from `members.py`
     # for potter's reason; `optimizers/capo/operators.py` — what CAPO's llm nodes send and read
-    # back, apart because it is the code `CapoRuntime.source_digest` hashes and nothing else.
+    # back, the prompt text apart from the nodes that decide when to send it.
     # +4: `optimizers/levi/{__init__,members,state,operators}.py` — LEVI's preset, split as CAPO's
     # is and for CAPO's reasons: the registry finds members by subpackage, the working state is
-    # imported apart from them, and `operators.py` is what `LeviRuntime.source_digest` hashes.
+    # imported apart from them, and `operators.py` is the prompt text its members send.
     # +1: `optimizers/descriptors.py` — an arm's rows as a behaviour descriptor. The bench's rows,
     # read for any archive: no optimizer owns what a row reports, and a second archive-keeping
     # preset (GEPA's per-instance front) reads the same per-cell profile.
     # +1: `optimizers/paper_templates.py` — the template fill, the call and the `<prompt>` markers
-    # every paper preset shares, out of CAPO's `operators.py` so LEVI stops importing CAPO. Each
-    # preset's `source_digest` hashes it beside its own operators, which is why it is a module.
+    # every paper preset shares, out of CAPO's `operators.py` so LEVI stops importing CAPO. It also
+    # holds the one preset source digest, over itself and the preset's whole package.
     # +4: `optimizers/gepa/{__init__,members,state,operators}.py` — GEPA's preset, split as CAPO's
-    # and LEVI's are and for their reasons; `operators.py` is what `GepaRuntime.source_digest`
-    # hashes beside `paper_templates.py`.
+    # and LEVI's are and for their reasons; `operators.py` is the reflection's prompt text.
     # +1: `evidence/head_to_head.py` — the campaigns' bench headlines and the one-instrument guard
     # over them. It reads the finished cycle's bench files and archive runs, which `read.py`'s
     # round-0 walk never opens, and folds into `comparison.py` only by giving that pure module I/O.
@@ -172,7 +171,7 @@ LEDGER_BASELINE = {
     # `dispatch/llm_call/__init__.py` that went with `call.py` to `bench/llm_call.py`.
     # +1: `optimizers/fence.py` — the untrusted-content fence potter, GEPA and LEVI wrap dataset
     # text in. It sat in potter's `bundle.py`, so two peers imported potter; `paper_templates.py`
-    # is the paper presets' alone, and a fencing preset's `source_digest` must hash the fence.
+    # is the paper presets' alone, and every optimizer's source digest must hash the fence.
     "modules": 387,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
@@ -338,7 +337,12 @@ LEDGER_BASELINE = {
     # member the individual's 13 leaves and its per-cell scores), the parent the next round mutates
     # and the rounds without advance. The scores come from rows of the round each member was
     # admitted in, so no one round re-derives the front a resume must re-seat.
-    "cycle_result_fields": 309,
+    # +5: `RoundResult.optimizer_facts` — the selected optimizer's own words about the round, one
+    # `OptimizerFact` of 5 leaves. Stamped at the close because the dashboard fold cannot ask the
+    # runtime; it replaced potter's yield/critique fields on the log.md digest, which is no leaf here.
+    # +1: `BenchScore.missing_reason` — why a bench reading is `None`: a pass the gateway gave up
+    # on, or a stop, yields no reading, and the headline serves the stop and its error instead.
+    "cycle_result_fields": 315,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
@@ -432,7 +436,9 @@ LEDGER_BASELINE = {
     # until the build breaks say so at the import.
     # +1: the node-member registry's walk (`application/optimizers/__init__.py`), the third of the
     # registry walks above — each optimizer's members import when the table completes.
-    "deferred_imports": 11,
+    # +1: the preset digest's walk (`paper_templates.py::preset_source_digest`) — every module of a
+    # preset's package, walked as `renderer_modules` is: a hand-kept list left members unhashed.
+    "deferred_imports": 12,
     # +1: `judges/CLAUDE.md` — the per-layer contract for a new top-level package, indexed from
     # `promptpotter/CLAUDE.md` like every other. It earns a page rather than a section in
     # `connectors/CLAUDE.md` because its load-bearing rule is the OPPOSITE concern: a connector
@@ -648,7 +654,10 @@ LEDGER_BASELINE = {
     # +1: a terminal `--set optimizer=…` and the browser's pick-then-edit planning two different
     # check-in configs for one intent, or the switch keeping the old manifest's overlay, starts a
     # run on knobs nobody chose (test_integrity § 4).
-    "test_functions": 221,
+    # +1: an installed optimizer whose campaign ends without the bench pass leaves the head-to-head
+    # with no headline while every round renders; driven through `scripts/offline_run.py`, the one
+    # end-to-end run of every optimizer that spends nothing (test_numerics § 4).
+    "test_functions": 222,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -763,7 +772,9 @@ LEDGER_BASELINE = {
     # from the runtime registry so a webapp list cannot drift from what `optimizer:` accepts — and
     # `optimizer` on `CampaignPipelineResponse` and `CampaignRunsWith`: which manifest a course runs,
     # served once so no surface draws potter's graph, knobs or θ copy for a peer's campaign.
-    "served_fields": 729,
+    # +1: `BenchScore.missing_reason` — an aborted pass served a 0.0 read off its one errored row;
+    # it now yields no reading, and every surface reads the reason instead of composing one.
+    "served_fields": 730,
 }
 
 

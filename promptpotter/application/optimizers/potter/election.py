@@ -107,11 +107,12 @@ def elect_on_theta(
     cycle = ctx.cycle
     scores = list(measured.scores)
     cs_by_id = {cs.candidate_id: i for i, cs in enumerate(scores)}
+    electable = [ind.lineage.id for ind in measured.electable]
     # Persisted with the decision, as ``coverage_floor`` is: it derives from the ROUND HISTORY,
     # which a replay does not necessarily hold.
     parent_bias = parent_selection_bias(cycle.rounds)
     winner_id, abilities = elect_round_winner(
-        measured.electable,
+        electable,
         measured.rows,
         measured.parent_rows,
         measured.coverage_floor,
@@ -120,7 +121,7 @@ def elect_on_theta(
     )
     # The election's own fit, never a second one, and none on a cold ruler, where θ is
     # logit-accuracy on each arm's own subset; ``electable`` stays whole as the decision's input.
-    for cid in measured.electable if cycle.ruler is not None else ():
+    for cid in electable if cycle.ruler is not None else ():
         theta_c = abilities.theta.get(cid)
         if theta_c is None:
             continue
@@ -134,7 +135,7 @@ def elect_on_theta(
         cycle.pending_decisions,
         PotterCheckpointKind.ROUND_WINNER,
         {
-            "candidate_ids": measured.electable,
+            "candidate_ids": electable,
             "round_num": ctx.round_num,
             "coverage_floor": measured.coverage_floor,
             "parent_bias": parent_bias,
@@ -151,7 +152,7 @@ def elect_on_theta(
         scores=scores,
         verdict_reason=_verdict_reason(
             winner_id=winner_id,
-            electable=measured.electable,
+            electable=electable,
             abilities=abilities,
             parent_bias=parent_bias,
             labels={cs.candidate_id: cs.label for cs in scores},

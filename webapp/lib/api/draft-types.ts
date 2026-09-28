@@ -88,7 +88,7 @@ export interface DraftPatch {
   column_ground_truth?: string;
   // Replaces wholesale, not a sparse field patch.
   origin_prompt_fields?: Record<string, unknown>;
-  // Shallow-merged server-side, so a nested `mechanisms` replaces wholesale.
+  // Deep-merged server-side, except that naming another `optimizer` drops the held `nodes`.
   optimization_overrides?: Partial<OptimizationOverridesWire>;
 }
 export interface StartCheckinResponse {

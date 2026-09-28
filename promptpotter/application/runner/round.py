@@ -16,7 +16,7 @@ from promptpotter.application.bench.resume_and_fork.decisions import record_deci
 from promptpotter.application.bench.round_analysis import compute_round_diagnostics
 from promptpotter.application.diagnostics.verify import verify_on_saturation
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.optimizers.nodes import RoundContext
+from promptpotter.application.optimizers.nodes import RoundContext, RoundOpening
 from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.application.run_phase_control import declare_run_phase
 from promptpotter.application.runner.measurement import measure_population
@@ -40,7 +40,14 @@ from promptpotter.domain.phases import (
     emit_phase,
 )
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.results import RoundResult, is_leader_eligible, unscoreable_cells
+from promptpotter.domain.results import (
+    CandidateProposal,
+    RoundResult,
+    candidate_label,
+    is_leader_eligible,
+    proposal_collapses,
+    unscoreable_cells,
+)
 from promptpotter.domain.results_health import assemble_prior_healths, compute_round_health
 from promptpotter.domain.run_records import BenchCheckpointKind, ResumeCheckpointRecord
 from promptpotter.domain.scoring import is_unscored
@@ -73,12 +80,15 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "RoundPlan",
+    "announce_opening",
+    "announce_population",
     "close_round",
     "emit_origin_round",
     "execute_round",
     "flush_pending_decisions",
     "persist_round",
     "post_round",
+    "proposal_summaries",
     "round_plan",
 ]
 
@@ -200,7 +210,7 @@ def _round_result(
     best_label = parent.report.label
     best_scores: dict[str, float] = dict(parent.report.evaluators)
     if winner_id:
-        winner_ind = next(ind for ind in measured.scored if ind.lineage.id == winner_id)
+        winner_ind = next(ind for ind in measured.electable if ind.lineage.id == winner_id)
         winner_cs = cs_by_id[winner_id]
         best_acc, best_comp = winner_cs.accuracy, winner_cs.composite_fitness
         best_opt_sp = winner_ind
@@ -242,7 +252,9 @@ def _round_result(
         stamps_theta=stamps_theta,
         # Over the whole electable field, not the winner's own interval: the question is whether
         # THIS ROUND told the arms apart, and one arm's bracket cannot answer that.
-        separable=_separability(ctx.round_num, [cs_by_id[cid] for cid in measured.electable]),
+        separable=_separability(
+            ctx.round_num, [cs_by_id[ind.lineage.id] for ind in measured.electable]
+        ),
         prompt_fields=best_opt_sp.prompt_field_dict(),
         # Stripped, because the round's incoming params carry the PREVIOUS winner's render and
         # nothing re-renders at this write; every reader rebuilds the render from `prompt_fields`.
@@ -335,6 +347,62 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult) -> None:
     raise StopLoop(reason)
 
 
+def proposal_summaries(proposals: list[CandidateProposal], round_num: int) -> list[dict[str, Any]]:
+    """Each proposal as the ``propose:exit`` event and a replayed generation's call record name it."""
+    summaries = []
+    for i, cp in enumerate(proposals):
+        prompt_fields = cp.opt_sp.prompt_fields()
+        summary: dict[str, Any] = {
+            "idx": i,
+            "label": candidate_label(round_num, i),
+            "changes_description": cp.opt_sp.lineage.changes_description or "",
+        }
+        if cp.pipeline_overlay:
+            summary["pipeline_overlay"] = cp.pipeline_overlay
+        if prompt_fields:
+            summary["prompt_fields"] = prompt_fields
+        summaries.append(summary)
+    return summaries
+
+
+def announce_opening(ctx: RoundContext, node: str) -> RoundOpening:
+    """Open the round's proposing on the ledger, in the bench's words and the optimizer's own."""
+    cycle = ctx.cycle
+    assert cycle.tracking.current_sp is not None
+    opening = cycle.optimizer.runtime.opening(ctx)
+    emit_phase(
+        ctx.callbacks.on_phase,
+        CampaignPhase.PROPOSE,
+        "enter",
+        round=ctx.round_num,
+        node=node,
+        max_rounds=cycle.config.optimization.max_rounds,
+        current_accuracy=cycle.tracking.current_accuracy,
+        prompt_preview=cycle.opt_sp.render()[:120],
+        model=cycle.optimizer.model(),
+        opening=opening,
+        pipeline_params=cycle.tracking.current_sp.pipeline_params,
+        parent_prompt_fields={k: v for k, v in cycle.opt_sp.prompt_field_dict().items() if v},
+    )
+    return opening
+
+
+def announce_population(
+    ctx: RoundContext, opening: RoundOpening, proposals: list[CandidateProposal], n_cells: int
+) -> None:
+    """Close the round's proposing on the ledger: what was proposed, and what collapsed."""
+    emit_phase(
+        ctx.callbacks.on_phase,
+        CampaignPhase.PROPOSE,
+        "exit",
+        round=ctx.round_num,
+        opening=opening,
+        n_scoring_samples=n_cells,
+        candidates=proposal_summaries(proposals, ctx.round_num),
+        collapses=proposal_collapses(proposals),
+    )
+
+
 async def _adapt(ctx: RoundContext, plan: RoundPlan, round_result: RoundResult) -> None:
     if not plan.adapters:
         return
@@ -365,10 +433,12 @@ async def execute_round(
             obs.emit(RoundStart(campaign_id=session.state.tracing_campaign_id, round_num=round_num))
 
     panel = plan.sampler.draw(ctx, pool)
+    opening = announce_opening(ctx, plan.proposers[0].name)
     population: Population | None = None
     for proposer in plan.proposers:
         population = await proposer.propose(ctx, panel, population)
     assert population is not None and cycle.tracking.current_sp is not None
+    announce_population(ctx, opening, population.proposals, len(panel.cells))
 
     emit_phase(
         callbacks.on_phase,
@@ -592,6 +662,9 @@ async def close_round(
         is_origin=round_num == 0,
         not_attempted=round_result.not_attempted,
         unscored=round_result.unscored,
+    )
+    round_result.optimizer_facts = cycle.optimizer.runtime.round_facts(
+        cycle.optimizer, round_result
     )
     stall, hearts = cycle.working_state.standing()
     cb.on_round_complete(round_result, stall, hearts)

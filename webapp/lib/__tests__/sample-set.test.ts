@@ -21,6 +21,7 @@ const round = (r: number, selection: number[]): RoundSummary =>
     stamps_theta: true,
     overlap: null,
     panel_precision: null,
+    optimizer_facts: [],
     candidates: [],
     selection,
     health: null,

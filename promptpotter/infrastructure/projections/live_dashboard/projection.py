@@ -9,14 +9,7 @@ from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RoundSummary
-from promptpotter.domain.phases import (
-    CampaignPhase,
-    DashboardState,
-    PhaseEvent,
-    PotterDashboardState,
-    PotterPhase,
-    RunPhase,
-)
+from promptpotter.domain.phases import CampaignPhase, DashboardState, PhaseEvent, RunPhase
 from promptpotter.domain.results import (
     HeadlineMetric,
     best_round_on_shared_cells,
@@ -104,16 +97,13 @@ logger = logging.getLogger(__name__)
 _DASHBOARD_DEBOUNCE_S = 0.25
 
 
-# MEASURE absent: driven by sample_started / sample_scored.
-# The VALUES are the sole declaration of the `dashboard.json::state` vocabulary — keep them
-# typed, or the webapp mirrors bare strings against no source. The key stays `str` because
-# `PhaseEvent.phase` is wider than either phase enum.
-_PHASE_TO_STATE: dict[str, DashboardState | PotterDashboardState] = {
+# MEASURE absent: driven by sample_started / sample_scored. An optimizer's own phase is absent
+# too: its enter view names its node and activity (`OptimizerStepEnterView`), so it maps itself.
+_PHASE_TO_STATE: dict[str, DashboardState] = {
     CampaignPhase.INIT: DashboardState.INIT,
     CampaignPhase.ORIGIN: DashboardState.ORIGIN,
     CampaignPhase.PROPOSE: DashboardState.PROPOSING,
-    PotterPhase.REFINE_STRATEGY: PotterDashboardState.L2_REFINING,
-    PotterPhase.MODIFY_PLAN: PotterDashboardState.L3_REPLANNING,
+    CampaignPhase.BENCH: DashboardState.BENCH,
 }
 
 
@@ -190,8 +180,8 @@ class LiveDashboardProjection(Projection):
         state_path: Path | None,
         hop: CycleHop,
         session_id: str,
-        l1_patience: int | None,
-        n_variants: int | None,
+        patience: int | None,
+        arms_per_round: int | None,
         sp_budget_round: int,
         headline_metric: HeadlineMetric,
         langfuse_trace_url: str | None = None,
@@ -205,15 +195,15 @@ class LiveDashboardProjection(Projection):
         # Spelled by the caller rather than derived from `cycle_dir`, because both modes read
         # that same directory and only the write target tells them apart.
         self.state_path = state_path
-        self.patience_max = l1_patience
+        self.patience_max = patience
         # The schema IS the on-disk shape (`_persist` dumps this instance), so it also owns
         # which fields a resume inherits and which this process stamps fresh.
         self.state = LiveDashboardState.for_run(
             resume_from,
             hop=hop,
             session_id=session_id,
-            l1_patience=l1_patience,
-            n_variants=n_variants,
+            patience=patience,
+            arms_per_round=arms_per_round,
             sp_budget_round=sp_budget_round,
             langfuse_trace_url=langfuse_trace_url,
             headline_metric=headline_metric,
@@ -239,9 +229,10 @@ class LiveDashboardProjection(Projection):
         # thing it decides is which node ``_active_node`` lights. It was a served field for a
         # reader that never arrived.
         self._in_flight: tuple[str, str] | None = None
-        # The nodes the ledger named at `propose:enter` and `measure:enter`.
+        # The nodes the ledger named at `propose:enter`, `measure:enter` and an optimizer step's.
         self._proposer_node: str | None = None
         self._measurement_node: str | None = None
+        self._step_node: str | None = None
         self._core = LiveStateCore(
             round_num=self.state.round,
             # Origin anchor seeds from round 0 if it's already on disk (resume);
@@ -270,8 +261,8 @@ class LiveDashboardProjection(Projection):
         *,
         tenant_root: str,
         session_id: str,
-        l1_patience: int | None,
-        n_variants: int | None,
+        patience: int | None,
+        arms_per_round: int | None,
         sp_budget_round: int,
         headline_metric: HeadlineMetric,
         langfuse_trace_url: str | None = None,
@@ -306,8 +297,8 @@ class LiveDashboardProjection(Projection):
             state_path=CycleLayout(Path(cycle_dir)).dashboard,
             hop=hop,
             session_id=session_id,
-            l1_patience=l1_patience,
-            n_variants=n_variants,
+            patience=patience,
+            arms_per_round=arms_per_round,
             sp_budget_round=sp_budget_round,
             headline_metric=headline_metric,
             langfuse_trace_url=langfuse_trace_url,
@@ -364,8 +355,9 @@ class LiveDashboardProjection(Projection):
 
     # -- State transitions ----------------------------------------------------
 
-    def _set_state(self, name: DashboardState | PotterDashboardState) -> None:
+    def _set_state(self, name: DashboardState, *, step: str | None = None) -> None:
         self.state.state = name
+        self.state.optimizer_step = step
         self.state.state_since = utcnow_iso()
 
     # -- Write coalesce -------------------------------------------------------
@@ -487,14 +479,14 @@ class LiveDashboardProjection(Projection):
 
         if record.phase == "round" and record.event == "display":
             payload = record.payload
-            l1_stall = int(payload.get("l1_stall_count") or 0)
+            stall = int(payload.get("stall") or 0)
             hearts_raw = payload.get("hearts")
             hearts = None if hearts_raw is None else int(hearts_raw)
             # The headline scalars come off the PERSISTED lean form — the same numbers the full
             # result carries, so they fold whether or not a live producer is behind the record.
             accuracy = (payload.get("round_result") or {}).get("accuracy")
             if accuracy is not None:
-                self._absorb_round_complete(float(accuracy), l1_stall, hearts)
+                self._absorb_round_complete(float(accuracy), stall, hearts)
             # The trajectory row needs the WHOLE `RoundResult`. It rides the in-memory-only field
             # for a live producer and comes off `rounds/round_NNNN.json` for a fold with none —
             # one document, two carriers, resolved HERE so no caller has to know which it got.
@@ -615,7 +607,9 @@ class LiveDashboardProjection(Projection):
                     launched_at,
                 )
             self._refresh_open_sample_markers()
-            self._set_state(DashboardState.SCORING)
+            # The bench pass keeps its state through its cells, as no round's measurement runs it.
+            if self.state.state is not DashboardState.BENCH:
+                self._set_state(DashboardState.SCORING)
         elif ev == "sample_scored":
             result = payload.get("result") or {}
             # `is not None`, never `or`: sample_id 0 is falsy, and coercing it to a sentinel
@@ -702,15 +696,21 @@ class LiveDashboardProjection(Projection):
         s = self.state
         if event.round is not None:
             s.round = event.round
+        # `activity` is what only an optimizer step's enter view declares.
+        activity = view.get("activity") if event.event == "enter" else None
         if event.event == "enter" and s.state != DashboardState.STOPPED:
             mapped = _PHASE_TO_STATE.get(event.phase)
             if mapped is not None:
                 self._set_state(mapped)
+            elif activity is not None:
+                self._set_state(DashboardState.OPTIMIZER_STEP, step=str(activity))
         if event.event == "enter" and (node := view.get("node")):
             if event.phase == CampaignPhase.PROPOSE:
                 self._proposer_node = str(node)
             elif event.phase == CampaignPhase.MEASURE:
                 self._measurement_node = str(node)
+            elif activity is not None:
+                self._step_node = str(node)
 
         if event.phase == CampaignPhase.INIT and event.event == "enter" and view:
             # Everything INIT declares is stamped at ENTER, because origin scoring runs before
@@ -729,7 +729,8 @@ class LiveDashboardProjection(Projection):
             # constructor's copy — a replay off disk has only the ledger. The ceilings themselves
             # are WIRING (`run_limits`): they were declared at launch, and this record arrives
             # after the whole origin has already scored.
-            self.patience_max = int(view.get("patience") or 0)
+            patience = view.get("patience")
+            self.patience_max = None if patience is None else int(patience)
         elif event.phase == CampaignPhase.PROPOSE and event.event == "enter":
             s.degraded_count = 0
             # Rewind/fork-in-place clamp: drop rounds this run will overwrite. Sole clamp
@@ -779,11 +780,12 @@ class LiveDashboardProjection(Projection):
         # one lands, and blanking the panel would report "nothing in flight" mid-request.
         self._refresh_open_sample_markers()
         s.last_query_elapsed_s = None if query_time is None else round(query_time, 2)
-        self._set_state(
-            DashboardState.BETWEEN_CANDIDATES
-            if last_in_candidate
-            else DashboardState.BETWEEN_SAMPLES
-        )
+        if s.state is not DashboardState.BENCH:
+            self._set_state(
+                DashboardState.BETWEEN_CANDIDATES
+                if last_in_candidate
+                else DashboardState.BETWEEN_SAMPLES
+            )
 
     def _handle_token_usage(self, record: TokenUsageRecord) -> None:
         """EVERY call lands in ``incurred``; only one that reached the wire lands in the bill. A
@@ -864,7 +866,7 @@ class LiveDashboardProjection(Projection):
             self.state.current_acc = round(float(acc), 4)
 
     def _absorb_round_complete(
-        self, round_accuracy: float, l1_stall_count: int, hearts: int | None = None
+        self, round_accuracy: float, stall: int, hearts: int | None = None
     ) -> None:
         """Never settle to ``cumulative_accuracy`` — nothing rescores it, so that pooled series can
         exceed everything the cycle measured. The round's own ``total`` is the answer beside it."""
@@ -873,9 +875,7 @@ class LiveDashboardProjection(Projection):
         s.current_acc = acc
         if s.best is None or acc > s.best:
             s.best = acc
-        s.patience = (
-            f"{l1_stall_count}/{self.patience_max}" if self.patience_max is not None else ""
-        )
+        s.patience = f"{stall}/{self.patience_max}" if self.patience_max is not None else ""
         s.hearts = hearts
 
     # -- Round-state mutations (snapshot-record fan-out) ----------------------
@@ -907,12 +907,11 @@ class LiveDashboardProjection(Projection):
                 | DashboardState.BETWEEN_CANDIDATES
             ):
                 return self._measurement_node
-            case DashboardState.STOPPED:
+            case DashboardState.OPTIMIZER_STEP:
+                return self._step_node
+            # The held-out pass is the bench's own walk: no node of the optimizer's graph runs it.
+            case DashboardState.BENCH | DashboardState.STOPPED:
                 return None
-            case PotterDashboardState.L2_REFINING:
-                return "l2_context"
-            case PotterDashboardState.L3_REPLANNING:
-                return "l3_plan"
             case _:
                 assert_never(state)
 
@@ -997,7 +996,7 @@ class LiveDashboardProjection(Projection):
         else:
             s.in_flight = s.lookahead_allowed = 0
             s.lookahead_most = (
-                None if s.n_variants is None else (s.n_variants + 1) * s.sp_budget_round
+                None if s.arms_per_round is None else (s.arms_per_round + 1) * s.sp_budget_round
             )
         # Kept whatever the phase state: between rounds these still say what the ceiling would
         # afford the next one, which is when a press is sized.
@@ -1074,8 +1073,8 @@ def fold_at(cut: Cut) -> LiveDashboardState:
         hop=cut.hop,
         # The wiring, at the model's own defaults — `WIRING_FIELDS` names what the caller stamps.
         session_id="",
-        l1_patience=0,
-        n_variants=0,
+        patience=0,
+        arms_per_round=0,
         sp_budget_round=0,
         headline_metric="accuracy",
     )

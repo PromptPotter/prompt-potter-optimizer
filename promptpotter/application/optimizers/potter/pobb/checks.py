@@ -21,18 +21,12 @@ from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.statistics import discordant_counts
 
 if TYPE_CHECKING:
+    from promptpotter.application.optimizers.nodes import CatchUp, CatchUpFn
     from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
     from promptpotter.domain.ruler import DeltaRuler
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.domain.search_point import JobSearchPoint
-
-    # A catch-up is a call already started and the commit that takes it: the commit writes the
-    # prior's row and hands it back, and runs only when a walk takes the cell it pairs. The prior's
-    # id rides along so the call stamps WHOSE catch-up it is — inheriting the foreground candidate's
-    # identity once recorded the prior's measurement under it.
-    Backfill = tuple[asyncio.Future[Any], Callable[[], list[QueryMeasurement]]]
-    BackfillFn = Callable[[JobSearchPoint, Sample, str], Backfill]
 
 
 def _graded(rows: Iterable[QueryMeasurement]) -> dict[str, float]:
@@ -113,7 +107,7 @@ class PoBBCheck:
         n_min: int,
         n_samples: int,
         ruler: DeltaRuler | None,
-        backfill_fn: BackfillFn | None = None,
+        backfill_fn: CatchUpFn | None = None,
     ) -> None:
         # The cycle's FIXED δ ruler — the SAME scale the round-winner election reads, so
         # elimination θ and election θ agree (``None`` ⇒ flat, where the ruler is still cold).
@@ -141,7 +135,7 @@ class PoBBCheck:
         self._backfill_fn = backfill_fn
         # One measurement per (prior, cell) however many walks reach the cell: started in a free
         # slot, committed when a walk takes the cell, and dropped unwritten if none ever does.
-        self._pending: dict[tuple[str, int], Backfill] = {}
+        self._pending: dict[tuple[str, int], CatchUp] = {}
 
     def set_current(
         self,
@@ -197,11 +191,11 @@ class PoBBCheck:
         return len(self._unstarted(sample))
 
     def backfills_in_flight(self) -> list[asyncio.Future[Any]]:
-        return [call for call, _ in self._pending.values() if not call.done()]
+        return [call for call, *_ in self._pending.values() if not call.done()]
 
     def backfills_for(self, sample: Sample) -> list[asyncio.Future[Any]]:
         """The catch-up calls started for ``sample`` and not yet committed."""
-        return [call for (_, sid), (call, _) in self._pending.items() if sid == sample.id]
+        return [call for (_, sid), (call, *_) in self._pending.items() if sid == sample.id]
 
     def commit_backfills(self, sample: Sample) -> None:
         """Take every started catch-up on ``sample``, in prior order — the moment a serial round
@@ -222,7 +216,7 @@ class PoBBCheck:
         """Write, ungraded, the catch-ups back for *samples* — cells a stopped round's walks were
         sure to take, so the resumed round replays these rather than paying for them again."""
         wanted = {s.id for s in samples}
-        for key, (call, commit) in list(self._pending.items()):
+        for key, (call, commit, _) in list(self._pending.items()):
             landed = call.done() and not call.cancelled() and call.exception() is None
             if key[1] in wanted and landed:
                 del self._pending[key]
@@ -231,10 +225,8 @@ class PoBBCheck:
     def discard_backfills(self) -> None:
         """Drop every measurement no walk took — paid, and never written, as a serial round would
         never have made it — save what :meth:`bank_backfills` kept."""
-        for call, _ in self._pending.values():
-            call.cancel()
-            # Retrieved, so a discarded call's own failure is not reported as unhandled.
-            call.add_done_callback(lambda done: done.cancelled() or done.exception())
+        for _call, _commit, discard in self._pending.values():
+            discard()
         self._pending.clear()
 
     def snapshot_priors(self, sample_ids: Sequence[int | str]) -> dict[str, dict[str, float]]:

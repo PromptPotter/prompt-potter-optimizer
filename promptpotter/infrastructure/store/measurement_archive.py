@@ -135,6 +135,15 @@ def _cell_key(node_configs: list[tuple[str, dict[str, Any]]], sample_key: str) -
     return hashlib.blake2b(blob.encode(), digest_size=16).hexdigest()
 
 
+def _tail_from(st: os.stat_result, cursor: tuple[int, int] | None) -> int:
+    """Where a tail of the file *st* describes resumes: the cursor's ``(inode, offset)`` only while
+    it is still that file, else 0 — a compaction swaps the file, and ext4 reuses a freed inode."""
+    if cursor is None:
+        return 0
+    inode, offset = cursor
+    return offset if st.st_ino == inode and st.st_size >= offset else 0
+
+
 def _entry_dataset(entry: dict[str, Any]) -> str | None:
     val = entry.get("dataset_name")
     return val if isinstance(val, str) and val else None
@@ -163,7 +172,7 @@ class MeasurementArchive:
         self._base_dir = base_dir
         self._rows: dict[str, dict[str, Any]] | None = None
         self._stat: tuple[int, int] | None = None
-        self._offset = 0
+        self._cursor: tuple[int, int] | None = None
         # run_id -> the tick its entry last changed at, oldest first, so a `ReplayFeed` reads only
         # the runs banked since its own mark.
         self._ticks: dict[str, int] = {}
@@ -202,7 +211,7 @@ class MeasurementArchive:
     def _invalidate(self) -> None:
         self._rows = None
         self._stat = None
-        self._offset = 0
+        self._cursor = None
 
     def _live_rows(self) -> dict[str, dict[str, Any]]:
         """Tailed rather than re-folded, and every read STATS the file first — an L4 inner cycle runs
@@ -216,15 +225,15 @@ class MeasurementArchive:
         sig = (st.st_mtime_ns, st.st_size)
         if self._rows is not None and sig == self._stat:
             return self._rows
-        if self._rows is not None and st.st_size > self._offset:
-            fresh, self._offset = fold_jsonl_from(path, _INDEX_FOLD_KEY, self._offset)
+        start = 0 if self._rows is None else _tail_from(st, self._cursor)
+        # The fold returns the newline-aligned offset, so a crash-truncated trailing line stays
+        # pending instead of being skipped forever once the writer completes it.
+        fresh, offset = fold_jsonl_from(path, _INDEX_FOLD_KEY, start)
+        if start and self._rows is not None:
             self._rows.update(fresh)
         else:
-            # Fold from 0 through the same primitive: it returns the newline-aligned
-            # offset, so a crash-truncated trailing line stays pending instead of being
-            # skipped forever once the writer completes it.
-            self._rows, self._offset = fold_jsonl_from(path, _INDEX_FOLD_KEY, 0)
-            fresh = self._rows
+            self._rows = fresh
+        self._cursor = (st.st_ino, offset)
         for run_id in fresh:
             self._ticks.pop(run_id, None)
             self._clock += 1
@@ -560,7 +569,7 @@ class ReplayFeed:
         self._node_configs = node_configs
         self._is_fatal = is_fatal
         self._mark = 0
-        # run_id -> (file identity, bytes folded): a compaction swaps the file, so it is re-read whole.
+        # run_id -> (inode, bytes folded), the cursor `_tail_from` resumes a run's log at.
         self._read: dict[str, tuple[int, int]] = {}
         # sample_key -> whether the row already served is fatal, the one row an upgrade replaces.
         self._served: dict[str, bool] = {}
@@ -636,16 +645,15 @@ class ReplayFeed:
     def _banked_since(self, run_id: str) -> list[dict[str, Any]]:
         path = self._archive._detail_path(run_id)
         try:
-            identity = path.stat().st_ino
+            st = path.stat()
         except FileNotFoundError:
             return []
-        known, offset = self._read.get(run_id, (identity, 0))
-        start = offset if known == identity else 0
+        start = _tail_from(st, self._read.get(run_id))
         rows, offset = fold_jsonl_from(path, _FOLD_KEY, start)
         if start == 0 and _HEADER_KEY not in rows:
             # A log with no header yet is a walk that died before its first commit — not a run.
             return []
-        self._read[run_id] = (identity, offset)
+        self._read[run_id] = (st.st_ino, offset)
         return [
             {k: v for k, v in row.items() if k != _FOLD_KEY}
             for k, row in rows.items()

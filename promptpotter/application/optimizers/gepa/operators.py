@@ -1,5 +1,4 @@
-"""What GEPA's reflection sends and reads back (arXiv 2507.19457 App. C) — the code
-``GepaRuntime.source_digest`` hashes beside ``paper_templates``."""
+"""What GEPA's reflection sends and reads back (arXiv 2507.19457 App. C)."""
 
 from __future__ import annotations
 

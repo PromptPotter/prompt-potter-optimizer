@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import random
+import subprocess
+import sys
 import types
 from collections.abc import Callable
 from pathlib import Path
@@ -20,6 +23,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from promptpotter.application import optimizers
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.resume_and_fork.replayers import replay_all_mismatches
 from promptpotter.application.campaign_config import load_campaign_config
@@ -54,6 +58,7 @@ from promptpotter.application.optimizers.potter.pobb.checks import EliminationGa
 from promptpotter.application.optimizers.potter.validators.l1_invariants import (
     detect_invariants,
 )
+from promptpotter.application.runner import measurement as measurement_node
 from promptpotter.application.runner.bench import bench_selection, score_on_bench
 from promptpotter.application.runner.entry import _build_cycle_result
 from promptpotter.application.runner.measurement import measure_population
@@ -86,6 +91,7 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.export import build_prompt_export
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED, PARSE_FAILURE_TOOLING
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import (
     NodePromptInfo,
@@ -1699,8 +1705,10 @@ def test_a_capo_round_races_its_population_beside_the_offspring_and_keeps_the_be
     that population and re-derives both decisions. Silent if wrong: a population kept by the wrong
     rule, or parents drawn from outside it, still yields a round with a winner."""
     wordy = "Solve it GOOD-b. " + "Take care. " * 30
+    seeds: list[int] = []
 
-    async def _llm(messages: list[dict], **_kw: Any) -> Any:
+    async def _llm(messages: list[dict], **kw: Any) -> Any:
+        seeds.append(kw["seed"])
         prompt = messages[0]["content"]
         if "Create overall 15 prompts" in prompt:
             text = json.dumps(["Solve it GOOD-a.", wordy, "Solve it OK-c."])
@@ -1764,6 +1772,14 @@ def test_a_capo_round_races_its_population_beside_the_offspring_and_keeps_the_be
     resumed = CapoState()
     resumed.replay(first)
     assert [ind.lineage.id for ind in resumed.population] == [ind.lineage.id for ind in carried]
+
+    # Round 2 re-sent round 1's rephrasings word for word; each request carries its own seed, which
+    # the reuse cache keys on, so a repeat samples afresh. Its draws follow the campaign.
+    assert len(set(seeds)) == len(seeds), "a repeated request replayed an old reply"
+    drawn = paper_templates.walk_rng(cycle, 2, "capo_crossover").random()
+    session.campaign_id = "another campaign"
+    again = paper_templates.walk_rng(cycle, 2, "capo_crossover").random()
+    assert again != drawn, "two campaigns drew as one"
 
 
 def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composite_round(
@@ -1864,6 +1880,66 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
     ).measurement
     assert (m.reference_lift, m.reference_accuracy) == (0.25, 0.50)
 
+    # A provider refusing the first bench row aborts the pass. Its one errored row is no 0.0 over
+    # one row: the pass yields no reading, and the headline says why in its place.
+    from promptpotter.shared.errors import ErrorCategory
+
+    async def _refused(sample: Sample, _session: Any, *, pipeline_params: Any) -> dict:
+        return {
+            "sample_id": sample.id,
+            "sample_key": sample.key,
+            "query": sample.query,
+            "ground_truth": sample.ground_truth,
+            "predicted": "ERROR",
+            "error": "HTTP 403: Key limit exceeded (daily limit)",
+            "error_category": ErrorCategory.CLIENT,
+            "cached": False,
+            "pipeline_data": {},
+        }
+
+    answering = query_loop.measure_sample
+    monkeypatch.setattr(query_loop, "measure_sample", _refused)
+    read = {bench.selected.sp_hash, bench.origin.sp_hash}
+    unread = next(cs for cs in picked.candidate_scores if cs.sp_hash not in read)
+    refused = asyncio.run(
+        score_on_bench(
+            session,
+            cycle.searchpoint(unread.candidate_id),
+            round_num=1,
+            cb=_QUIET_CALLBACKS,  # type: ignore[arg-type]
+            spend=spend,
+        )
+    )
+    assert refused.reading is None and refused.rows == []
+    monkeypatch.setattr(query_loop, "measure_sample", answering)
+    cut = asyncio.run(
+        bench_selection(cycle, session, origin=refused, cb=_QUIET_CALLBACKS, spend=spend)  # type: ignore[arg-type]
+    )
+    assert (cut.origin, cut.lift, cut.selected) == (None, None, bench.selected)
+    assert cut.missing_reason is not None and "Key limit exceeded" in cut.missing_reason
+
+
+def test_every_installed_optimizer_closes_its_campaign_on_a_bench_headline(tmp_path) -> None:
+    """Each installed optimizer, run end to end offline, grades its declared pick against the
+    origin on the held-out bench — the one number a head-to-head compares. A campaign that skips
+    that pass leaves the comparison empty while every round still renders."""
+    home = tmp_path / "offline"
+    script = Path(__file__).resolve().parents[1] / "scripts" / "offline_run.py"
+    done = subprocess.run(
+        [sys.executable, str(script), "--rounds", "1", "--rows", "60"],
+        env={**os.environ, "PROMPTPOTTER_HOME": str(home)},
+        capture_output=True,
+        text=True,
+        timeout=900,
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    for name in optimizers.runtimes():
+        run = json.loads((home / name / "decisions.json").read_text(encoding="utf-8"))["run"]
+        bench = run["bench"]
+        assert bench["selected"]["n_scored"] == bench["origin"]["n_scored"] == bench["bench_size"]
+        gap = bench["selected"]["composite_fitness"] - bench["origin"]["composite_fitness"]
+        assert bench["lift"] == pytest.approx(gap, abs=1e-5), name
+
 
 def test_a_levi_run_calibrates_a_proxy_then_spends_one_large_call_per_period(
     built_stores, tmp_path, monkeypatch
@@ -1905,7 +1981,15 @@ def test_a_levi_run_calibrates_a_proxy_then_spends_one_large_call_per_period(
         )
 
     cycle = _peer_cycle(
-        built_stores, tmp_path, monkeypatch, "levi", nodes, solves, lift_reference="parents"
+        built_stores,
+        tmp_path,
+        monkeypatch,
+        "levi",
+        nodes,
+        solves,
+        lift_reference="parents",
+        # A draw whose round 2 refines an elite no round selected, and shows it its failures.
+        determinism={"seed": 5},
     )
     monkeypatch.setattr(paper_templates, "llm_call", _llm)
     session = cycle.session
@@ -2124,6 +2208,20 @@ def test_a_gepa_run_admits_a_child_only_past_the_minibatch_and_draws_parents_off
     assert pareto_frequencies(resumed.pool, resumed.pareto_set) == pareto_frequencies(
         held.pool, held.pareto_set
     ), "a resume re-seats the front"
+
+    # An arm the round cannot read (a BROKEN or SKIPPED walk) is no candidate, however its rows
+    # score: the selector is handed the electable arms alone, so ALPHA joins no pool.
+    monkeypatch.setattr(measurement_node, "is_leader_eligible", lambda _cs: False)
+    prompts.clear()
+    unread = _peer_cycle(built_stores, tmp_path / "unread", monkeypatch, "gepa", nodes, solves)
+    monkeypatch.setattr(paper_templates, "llm_call", _llm)
+    pool = list(unread.session.scoring.require_partition().search)
+    lone = asyncio.run(execute_round(unread, 1, pool, _QUIET_CALLBACKS))  # type: ignore[arg-type]
+    assert arm(lone).scored_samples == 3 + len(pareto), "it passed the minibatch"
+    assert not lone.selected_labels
+    assert [c.individual.lineage.id for c in lone.optimizer_state.payload.pool] == [
+        unread.opt_sp.lineage.id
+    ]
 
 
 # 5. Elimination — who is cut, and when
@@ -3139,7 +3237,6 @@ def test_parents_lift_reads_a_crossover_against_its_better_parent_on_its_own_cel
     best-so-far reuses that individual's panel re-score, re-measuring nothing. Silent if wrong: a
     reference read on the full panel, or the worse parent, still prints a lift and an interval."""
     from promptpotter.application.optimizers.nodes import Panel, Population, RoundContext
-    from promptpotter.application.runner import measurement as measurement_node
     from promptpotter.application.scoring.selection import matched_parent_lift
     from promptpotter.domain.results import ReferenceReading
 
@@ -3203,7 +3300,20 @@ def test_parents_lift_reads_a_crossover_against_its_better_parent_on_its_own_cel
     lift = matched_parent_lift(rows[child.lineage.id], reference_rows, grade="fitness")
     assert lift is not None and lift[0] == pytest.approx(0.2)
     assert read_against[mutant.lineage.id] == (best.lineage.id, bar_rows[:2])
-    assert set(banked) == {strong.lineage.id, best.lineage.id}
+    assert banked == {strong.lineage.id: banked[strong.lineage.id], best.lineage.id: bar_rows}
+
+    # Every child of the parent invalid, so each reads it on no cell: the parent's rows are banked
+    # whole even so — LEVI's archive keeps the parent itself, and its next round and a resume read
+    # them back. Banked on the children's cells, they were none, and LEVI's proxy replay raised.
+    # With no arm scored at all, none reads it, and it is banked the same.
+    seed = OptSearchPoint.derive([best], source="levi:levi_paradigm_shift", instruction="s")
+    for arm_rows, arms in (({seed.lineage.id: []}, [seed]), ({}, [])):
+        _, alone = asyncio.run(
+            measurement_node._lift_references(
+                ctx, population, Panel(cells, cells, 1), arm_rows, arms, bar
+            )
+        )
+        assert alone == {best.lineage.id: bar_rows}
 
 
 def test_paired_reading_matches_ttest_rel_and_brackets_the_same_evidence_it_tests() -> None:
@@ -3426,6 +3536,7 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench(built_stores) -> 
             bench_size=6,
             origin=readings[0],
             selected=readings[1],
+            missing_reason=None,
             lift=selected - origin - regraded,
             lift_ci_lo=None,
             lift_ci_hi=None,
@@ -3784,6 +3895,17 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
         [0.40], 0.30, [round_result(1, parse_failure="l1_provider_empty_response")]
     )
     assert compute_outer_proxies(tooling).mean_round_delta == -1.0
+
+    # A paper preset's round keeps its arms, so the same reading comes off them: every arm lost to
+    # an empty reply floors, while one malformed reply is the prompt's own verdict and scores.
+    def lost(reason: str) -> RoundResult:
+        arm = scored_candidate("x", invalid_reason=reason)
+        return round_result(1, candidates_scored=0, candidate_scores=[arm])
+
+    empty_arms = cycle_result([0.40], 0.30, [lost(PARSE_FAILURE_TOOLING)])
+    assert compute_outer_proxies(empty_arms).mean_round_delta == -1.0
+    malformed = cycle_result([0.40, 0.55], 0.30, [lost(PARSE_FAILURE_MALFORMED), round_result(2)])
+    assert compute_outer_proxies(malformed).mean_round_delta == pytest.approx(0.175)
 
     # ...and a cycle that DID produce evidence still scores, on the same predicate.
     ok = cycle_result([0.40, 0.55], 0.30, [round_result(1), round_result(2)])
@@ -4396,8 +4518,8 @@ def test_cached_calls_are_metered_but_not_billed(tmp_path: Path) -> None:
         state_path=CycleLayout(Path(cycle_dir)).dashboard,
         hop=CycleHop(campaign_id="c1", cycle_id="cyc1"),
         session_id="s1",
-        l1_patience=2,
-        n_variants=2,
+        patience=2,
+        arms_per_round=2,
         sp_budget_round=5,
         headline_metric="accuracy",
     )

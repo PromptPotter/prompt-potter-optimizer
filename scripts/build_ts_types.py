@@ -85,6 +85,7 @@ from promptpotter.domain.dashboard_rows import (
     DashboardCandidate,
     DashboardSample,
     LiveCandidate,
+    OptimizerLimit,
     RoundSummary,
     RoundSummaryCandidate,
 )
@@ -124,6 +125,7 @@ from promptpotter.domain.projection_envelope import ProjectionEnvelope
 from promptpotter.domain.results import (
     DegradationHealth,
     DiagnosticRunRecord,
+    OptimizerFact,
     OverlapMember,
     OverlapReading,
     RoundResult,
@@ -141,7 +143,6 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     DashboardError,
     LiveDashboardState,
     LoopWarning,
-    PotterLimits,
     RacingBlock,
     RunLimits,
 )
@@ -213,6 +214,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     PanelPrecision,
     OverlapMember,
     OverlapReading,
+    OptimizerFact,
     RoundSummary,
     DiagnosticRunRecord,
     # --- the round document (`rounds/round_NNNN.json` IS `RoundResult.model_dump()`,
@@ -245,7 +247,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     BackendWarning,
     LoopWarning,
     DashboardError,
-    PotterLimits,
+    OptimizerLimit,
     RunLimits,
     CatchUpLogEntry,
     RacingBlock,
@@ -755,7 +757,7 @@ _HEADER = """\
 
 
 def main() -> int:
-    from promptpotter.domain.phases import DashboardState, PotterDashboardState, RunPhase
+    from promptpotter.domain.phases import DashboardState, RunPhase
     from promptpotter.domain.results import ArmOutcome
 
     blocks = [_emit_interface(model) for model in EXPORTED_MODELS]
@@ -772,12 +774,6 @@ def main() -> int:
             DashboardState,
             "The fine-grained activity axis, `dashboard.json::state` "
             "(domain/phases.py::DashboardState).",
-        )
-    )
-    blocks.append(
-        _emit_enum_union(
-            PotterDashboardState,
-            "Potter's own activities on that axis (domain/phases.py::PotterDashboardState).",
         )
     )
     blocks.append(_emit_command_kinds())

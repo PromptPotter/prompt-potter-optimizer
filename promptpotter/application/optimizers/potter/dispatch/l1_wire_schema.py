@@ -191,14 +191,10 @@ def build_l1_response_schema(
                 param_props[param] = {"type": declared_type}
             else:
                 param_props[param] = {}
-            # Only on an inner optimizer node, whose `instruction` is the long-form artifact.
-            # Elsewhere the declaration is prompt text that never binds.
+            # Only on the recursion, whose every node is an inner optimizer prompt with a long-form
+            # `instruction`. Elsewhere the declaration is prompt text that never binds.
             ceiling = OPTIMIZER_PROMPT_FIELD_MAX_CHARS.get(param)
-            if (
-                ceiling is not None
-                and inner_optimizer is not None
-                and node.name in inner_optimizer.llm_nodes
-            ):
+            if ceiling is not None and inner_optimizer is not None:
                 param_props[param]["maxLength"] = ceiling
         # The field-NAME lever is the strongest and the only one that can break a parser,
         # so the campaign must unlock it: dropped from the emitted schema when locked, and

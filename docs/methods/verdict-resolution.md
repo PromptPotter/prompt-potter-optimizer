@@ -219,7 +219,7 @@ provisional, and say so rather than passing it on.
 
 - **The bar is a bare point estimate.** `selection.py::elect_round_winner` admits on a raw θ
   lift over the parent above zero — the earned `parent_selection_bias` credit only reorders
-  admitted arms — with no interval and no multiplicity correction — and `winner.py` sets `improved = bool(winner_id)`. With three arms,
+  admitted arms — with no interval and no multiplicity correction — and `runner/round.py::_round_result` sets `improved = bool(winner_id)`. With three arms,
   P(at least one positive | every arm identical to the parent) is **0.875 per round**.
 - **Almost nothing separates.** `separable=True` in 6 of 508 banked rounds; `round_not_separable`
   fired 362 times. `separable` gates the L1 patience reset and is the clock a result quotes

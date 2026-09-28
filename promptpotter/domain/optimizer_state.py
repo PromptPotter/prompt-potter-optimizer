@@ -5,7 +5,7 @@ fork, and reads nothing inside ``payload`` beyond what :class:`_RoundPayload` as
 
 from __future__ import annotations
 
-from typing import Any, Literal, Self, TypedDict, cast
+from typing import Annotated, Any, Literal, Self, TypedDict, cast
 
 from pydantic import Field, model_validator
 
@@ -43,11 +43,11 @@ __all__ = [
 PotterManifest = Literal["potter"]
 POTTER_MANIFEST: PotterManifest = "potter"
 CapoManifest = Literal["capo"]
-CAPO_MANIFEST: CapoManifest = "capo"
+CAPO_MANIFEST: Annotated[CapoManifest, shapes_optimizer_prompt] = "capo"
 LeviManifest = Literal["levi"]
-LEVI_MANIFEST: LeviManifest = "levi"
+LEVI_MANIFEST: Annotated[LeviManifest, shapes_optimizer_prompt] = "levi"
 GepaManifest = Literal["gepa"]
-GEPA_MANIFEST: GepaManifest = "gepa"
+GEPA_MANIFEST: Annotated[GepaManifest, shapes_optimizer_prompt] = "gepa"
 
 # The reasons `PotterRoundState.l1_parse_failure` can carry. Opposite kinds of evidence, so no
 # reader may treat the field as a bool:
@@ -56,9 +56,9 @@ GEPA_MANIFEST: GepaManifest = "gepa"
 #                for, not the transport. Charged like MALFORMED.
 #   TOOLING    — empty/truncated content. Missing data, not a verdict: charging it scores
 #                provider flakiness as a bad mutation, so the round must be EXCLUDED.
-PARSE_FAILURE_MALFORMED = "optimizer_prompt_parse_failure"
+PARSE_FAILURE_MALFORMED: Annotated[str, shapes_optimizer_prompt] = "optimizer_prompt_parse_failure"
 PARSE_FAILURE_WRONG_TYPE = "optimizer_prompt_unexpected_type"
-PARSE_FAILURE_TOOLING = "l1_provider_empty_response"
+PARSE_FAILURE_TOOLING: Annotated[str, shapes_optimizer_prompt] = "l1_provider_empty_response"
 # The reasons a CHARGING reader may hold against the optimizer prompt. Asked as this predicate,
 # never as `is not None` — that is the bool the block above forbids, and it reads TOOLING as a
 # verdict the round never reached. A ROUTING reader is a different question and may ask either.
@@ -149,17 +149,15 @@ class L2L3Memory(StrictModel):
 
 
 class _RoundPayload(StrictModel):
-    """The three questions a harness reader asks of any optimizer's payload; an optimizer that
+    """The two questions a harness reader asks of any optimizer's payload; an optimizer that
     keeps no such readout answers with absence."""
 
     def feedback(self) -> CritiqueReadout | None:
         return None
 
-    def proposal_yield(self) -> float | None:
-        return None
-
     def lost_to_empty_response(self) -> bool:
-        """Every candidate lost to an empty optimizer response: missing data, never a verdict."""
+        """A round that proposed no arm at all: whether its generation came back empty. A round
+        with arms answers off them instead (``domain/l4/proxies.py::_is_evidential``)."""
         return False
 
 
@@ -177,9 +175,6 @@ class PotterRoundState(_RoundPayload):
 
     def feedback(self) -> CritiqueReadout | None:
         return self.critique
-
-    def proposal_yield(self) -> float:
-        return self.l1_yield
 
     def lost_to_empty_response(self) -> bool:
         return self.l1_parse_failure == PARSE_FAILURE_TOOLING

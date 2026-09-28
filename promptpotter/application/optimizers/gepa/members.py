@@ -3,9 +3,6 @@ manifest uses, and its runtime, registered under the manifest's."""
 
 from __future__ import annotations
 
-import ast
-import hashlib
-import inspect
 import random
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, cast
@@ -17,7 +14,7 @@ from promptpotter.application.bench.resume_and_fork.decisions import (
     record_decision,
 )
 from promptpotter.application.campaign_config import Estimand, Knob, Scope
-from promptpotter.application.optimizers import fence, nodes, paper_templates
+from promptpotter.application.optimizers import nodes, paper_templates
 from promptpotter.application.optimizers.descriptors import cell_objectives
 from promptpotter.application.optimizers.gepa import operators
 from promptpotter.application.optimizers.gepa.state import (
@@ -27,11 +24,15 @@ from promptpotter.application.optimizers.gepa.state import (
 )
 from promptpotter.application.optimizers.paper_templates import ask, unmarked, walk_rng
 from promptpotter.application.runner.measurement import measure_as_parent
-from promptpotter.application.scoring import row_diagnostics
 from promptpotter.domain.opt_search_point import OptSearchPoint, node_source
 from promptpotter.domain.optimizer_state import GEPA_MANIFEST, GepaCandidate
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.results import ArmOutcome, CandidateProposal, candidate_label
+from promptpotter.domain.results import (
+    ArmOutcome,
+    CandidateProposal,
+    OptimizerFact,
+    candidate_label,
+)
 from promptpotter.domain.run_records import CandidateMintedRecord, GepaCheckpointKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import StopSignal
@@ -427,16 +428,16 @@ class Pareto:
                     scores={key: graded[key] for key in pareto_set if key in graded},
                 )
             )
-        by_id = {ind.lineage.id: ind for ind in population.individuals}
+        cut = {cs.candidate_id for cs in measured.scores if cs.outcome is ArmOutcome.ELIMINATED}
         admitted: list[str] = []
-        for cs in measured.scores:
-            graded = cell_objectives(measured.rows[cs.candidate_id])
-            if cs.outcome is ArmOutcome.ELIMINATED or any(k not in graded for k in pareto_set):
+        for ind in measured.electable:
+            graded = cell_objectives(measured.rows[ind.lineage.id])
+            if ind.lineage.id in cut or any(k not in graded for k in pareto_set):
                 continue
-            admitted.append(cs.candidate_id)
+            admitted.append(ind.lineage.id)
             pool.append(
                 GepaCandidate(
-                    individual=by_id[cs.candidate_id].model_copy(deep=True),
+                    individual=ind.model_copy(deep=True),
                     scores={key: graded[key] for key in pareto_set},
                 )
             )
@@ -488,6 +489,7 @@ class GepaRuntime:
 
     name: ClassVar[str] = GEPA_MANIFEST
     own_axes: ClassVar[dict[str, set[str]]] = {}
+    phases: ClassVar[tuple[nodes.OptimizerPhase, ...]] = ()
 
     def start(
         self, session: Session, config: CampaignConfig, origin_results: list[dict[str, Any]]
@@ -501,12 +503,7 @@ class GepaRuntime:
         return None
 
     def source_digest(self, *covered: ModuleType) -> str:
-        # AST-normalized, so a comment or a reflow does not move it.
-        shaping = [
-            m for m in (fence, paper_templates, row_diagnostics, operators) if m not in covered
-        ]
-        tree = "".join(ast.dump(ast.parse(inspect.getsource(m))) for m in shaping)
-        return hashlib.sha256(tree.encode("utf-8")).hexdigest()[:16]
+        return paper_templates.preset_source_digest(__name__, *covered)
 
     def override_levers(self, node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
         return {}
@@ -543,6 +540,41 @@ class GepaRuntime:
         origin_composite_fitness: float | None,
     ) -> ReviewReading | None:
         return None
+
+    def pacing(self, selected: SelectedOptimizer) -> nodes.OptimizerPacing:
+        # One reflective child a round (`GepaReflect`).
+        return nodes.OptimizerPacing(patience=None, lives=None, arms_per_round=1, limits=())
+
+    def opening(self, ctx: RoundContext) -> nodes.RoundOpening:
+        return nodes.standing_opening(ctx)
+
+    def round_facts(
+        self, selected: SelectedOptimizer, round_result: RoundResult
+    ) -> list[OptimizerFact]:
+        state = gepa_round_state(round_result.optimizer_state)
+        # The origin's document seats no pool: round 1 does.
+        if not state.pool:
+            return []
+        arms = round_result.candidate_scores
+        accepted = sum(1 for cs in arms if cs.outcome is ArmOutcome.MEASURED)
+        rejected = sum(1 for cs in arms if cs.outcome is ArmOutcome.ELIMINATED)
+        front = len(pareto_frequencies(state.pool, state.pareto_set))
+        return [
+            OptimizerFact(
+                key="minibatch",
+                label="Minibatch",
+                text=f"{accepted} accepted · {rejected} rejected",
+                value=accepted,
+                kind="stat",
+            ),
+            OptimizerFact(
+                key="pareto_front",
+                label="Pareto front",
+                text=f"{front} of {len(state.pool)} in the pool",
+                value=front,
+                kind="stat",
+            ),
+        ]
 
 
 MEMBERS = (Minibatch(), GepaReflect(), MinibatchGate(), Pareto())

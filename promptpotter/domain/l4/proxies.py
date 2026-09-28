@@ -5,8 +5,9 @@ from typing import Any
 
 from pydantic import ConfigDict, Field
 
+from promptpotter.domain.optimizer_state import PARSE_FAILURE_TOOLING
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
-from promptpotter.domain.results import CycleResult, RoundResult
+from promptpotter.domain.results import ArmOutcome, CycleResult, RoundResult
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import CellUnscoreableError
 from promptpotter.shared.statistics import sample_sd
@@ -132,8 +133,15 @@ def mean_parent_level_se(result: CycleResult) -> float | None:
 
 def _is_evidential(rnd: RoundResult) -> bool:
     """A round that lost its candidates to an empty optimizer response is missing data, not a bad
-    mutation. Scoring it dirty grades provider flakiness."""
-    return not rnd.optimizer_state.payload.lost_to_empty_response()
+    mutation. Scoring it dirty grades provider flakiness. Read off the arms, whatever optimizer
+    proposed them; only a round that proposed none asks its optimizer why."""
+    if not rnd.candidate_scores:
+        return not rnd.optimizer_state.payload.lost_to_empty_response()
+    return not all(
+        cs.outcome is ArmOutcome.INVALID
+        and any(vf.reason == PARSE_FAILURE_TOOLING for vf in cs.validation_failures)
+        for cs in rnd.candidate_scores
+    )
 
 
 def no_evidence_reason(result: CycleResult) -> str | None:

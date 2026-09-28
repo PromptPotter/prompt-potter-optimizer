@@ -147,6 +147,12 @@ incumbent. Where the bench runs CAPO differently from the paper:
 - **The 5M-input-token budget** (§5) is the campaign's `token_budget`, which counts output tokens
   too.
 - **A reply without `<prompt>` markers** makes an invalid arm that costs no cell.
+- **A repeated request samples afresh**, as the paper's T = 1.0 draw does, though the optimizer
+  reuse cache keys on the request: each call carries a seed drawn by round, node and call off the
+  run's seed — the determinism clamp's where one pins it, else the campaign's id — so only a resume
+  or a fork re-running a round replays a reply, and two unseeded campaigns draw their parents,
+  shots and minibatches apart. A clamped seed pins every call to itself, so a repeat within that
+  campaign replays, as the clamp asks.
 
 ## LEVI mapping and deviations
 
@@ -193,8 +199,8 @@ Where the bench runs LEVI differently from the paper:
 - **f** is the mean of the campaign's per-cell objective on the proxy — the task's scoring
   function, which LEVI takes as given. The paper re-evaluates on the full set for late-stage
   selection (§4.2); the bench scores its selection on the bench set instead.
-- **A repeated prompt replays its reply** from the optimizer reuse cache where the paper resamples;
-  the duplicate lands in an occupied cell, the redundancy §3.2 calls harmless.
+- **A repeated prompt samples afresh**, as the paper's does, its call seeded as § CAPO's population
+  and operators states for CAPO.
 
 ## GEPA mapping and deviations
 
@@ -240,6 +246,8 @@ Where the bench runs GEPA differently from the paper:
 - **A reply without a fenced block** makes an invalid arm that costs no cell; the reference
   implementation takes the whole reply. Top-k 20 (App. E.2) is not carried, an llm node's call
   config having none, and the context window stands in for the output cap.
+- **A repeated reflection samples afresh** at 0.6, as the paper's does — the same parent on the
+  same minibatch included — its call seeded as § CAPO's population and operators states for CAPO.
 - **One model for reflection and target** is the campaign's choice, as it is CAPO's: matching
   `gepa_reflect`'s model to the target's is an overlay.
 - **The draw moves to the close.** Alg. 2 runs at an iteration's start; the bench draws the next

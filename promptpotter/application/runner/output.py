@@ -14,9 +14,6 @@ from promptpotter.application.intelligence.hard_sample_sorter import (
 )
 from promptpotter.application.runner.review_md import render_review_md
 from promptpotter.application.views.render.markdown import to_markdown
-from promptpotter.application.views.render.optimizer_prompt_text import (
-    format_l1_critique_for_prompt,
-)
 from promptpotter.application.views.view_models import (
     DigestStatusView,
     FinalWinnerView,
@@ -26,7 +23,7 @@ from promptpotter.application.views.view_models import (
     RoundDigestView,
 )
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.results import HardSampleOrder, RoundResult, invariant_collapses
+from promptpotter.domain.results import HardSampleOrder, RoundResult
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
 from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
@@ -169,6 +166,7 @@ def from_disk_log(
     status = DigestStatusView(
         campaign_id=str(index.get("cycle_id") or ""),
         parent_session_id=index.get("parent_session_id"),
+        optimizer=next((t.optimizer_state.manifest for t in rounds), None),
         status=str(index.get("status", "active")),
         stop_reason=str(final.get("stop_reason") or index.get("stop_reason") or "(running)"),
         origin_accuracy=origin_accuracy_of(index),
@@ -184,9 +182,7 @@ def from_disk_log(
     for t in rounds:
         traj, _ = _load_p_best_trajectory(streams_dir, t.round)
         lineage = t.opt_sp.lineage if t.opt_sp else None
-        collapses = invariant_collapses(t.candidate_scores)
         selected = next(iter(t.selected_scores), None)
-        payload = t.optimizer_state.payload
         round_views.append(
             RoundDigestView(
                 round=t.round,
@@ -196,12 +192,8 @@ def from_disk_log(
                 total=t.total,
                 composite_fitness=t.composite_fitness,
                 changes_description=(lineage.changes_description if lineage else "").strip(),
-                l1_critique_text=format_l1_critique_for_prompt(payload.feedback()),
-                l1_yield=payload.proposal_yield(),
-                l1_n_no_op=collapses.get("no_op_variant", 0),
-                l1_n_duplicate=collapses.get("duplicate_variant", 0),
-                l1_n_repeat=collapses.get("repeat_variant", 0),
-                candidates_scored=t.candidates_scored,
+                facts=tuple(t.optimizer_facts),
+                stamps_theta=t.stamps_theta,
                 evaluators=dict(t.evaluators),
                 reference_composite=selected.reference_composite if selected else None,
                 ability=t.ability,

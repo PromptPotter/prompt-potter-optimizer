@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Any
 
 from promptpotter.application.optimizer_manifest import select_optimizer
+from promptpotter.application.optimizers.nodes import RoundOpening
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.views.view_models import (
     AnyView,
@@ -13,11 +14,9 @@ from promptpotter.application.views.view_models import (
     CandidatesGeneratedView,
     InitEnterView,
     InitExitView,
-    L2RefineEnterView,
-    L2RefineExitView,
     MeasureEnterView,
-    PlanEnterView,
-    PlanExitView,
+    OptimizerStepEnterView,
+    OptimizerStepExitView,
     RoundCompleteView,
     RoundStartView,
     ScoreEntry,
@@ -26,7 +25,7 @@ from promptpotter.application.views.view_models import (
     WarningEntry,
 )
 from promptpotter.domain.candidate_diff import build_candidate_flat, flatten_sp_summary
-from promptpotter.domain.phases import CampaignPhase, PhaseEvent, PotterPhase
+from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.results import ArmOutcome, ScoredCandidate
 from promptpotter.domain.ruler import is_flat_ruler_id
 from promptpotter.shared import truncate
@@ -46,18 +45,16 @@ def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
     schema = session.pipeline_schema
     opt = config.optimization
     selected = select_optimizer(opt)
-    lives = selected.readout("escalation", "lives")
+    pacing = selected.pacing
     sample = config.sp_budget_round
 
     ctx.max_rounds = opt.max_rounds or 0
-    ctx.patience = selected.readout("escalation", "l1_patience")
+    ctx.patience = pacing.patience
     origin_pp = session.pipeline_params or schema.to_pipeline_params()
     ctx.original_sp_flat = flatten_sp_summary(origin_pp)
     ctx.node_param_keys = {s: sorted(k) for s, k in schema.node_param_keys().items()}
     ctx.round_num = 0
-    ctx.l1_stall_count = 0
-    ctx.hearts = lives.start if lives is not None else None
-    ctx.hearts_cap = lives.cap if lives is not None else None
+    ctx.hearts, ctx.hearts_cap = pacing.lives or (None, None)
     ctx.parent_accuracy = 0.0
 
     # Resolve the per-round composite formula at INIT.enter so the live
@@ -73,7 +70,6 @@ def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
         ),
         max_rounds=ctx.max_rounds,
         patience=ctx.patience,
-        n_variants=selected.readout("l1_generate", "n_variants"),
         sp_budget_round=sample,
         dataset_size=len(dataset),
         model=selected.model(),
@@ -87,10 +83,6 @@ def _init_exit(d: dict[str, Any], ctx: ViewContext) -> InitExitView:
     session = d["env"]
     ctx.parent_accuracy = cycle.tracking.current_accuracy
     ctx.parent_composite_fitness = cycle.tracking.current_composite_fitness
-    # The optimizer's state owns this count and has just been rebuilt from the ledger;
-    # `_init_enter` could only invent a 0. Advanced after this by `on_round_complete`, so reading
-    # it any earlier reports a resumed cycle as further from escalation than it is.
-    ctx.l1_stall_count = cycle.working_state.standing()[0]
     schema = session.pipeline_schema
     full, short = resolve_cell_formula(session.scoring.scorer_cell_formula, schema)
     ctx.composite_fitness_formula = full
@@ -118,9 +110,10 @@ def _init_exit(d: dict[str, Any], ctx: ViewContext) -> InitExitView:
     )
 
 
-def _l1_generate_enter(d: dict[str, Any], ctx: ViewContext) -> RoundStartView:
+def _propose_enter(d: dict[str, Any], ctx: ViewContext) -> RoundStartView:
     # Header renders before candidates exist — describes parent SP, not the
     # round's mutation mode (sp_diff table emits that next render).
+    opening: RoundOpening = d["opening"]
     preview = (d.get("prompt_preview") or "").replace("\n", " ").strip()
     preview = "(empty)" if not preview else truncate(preview, 50, "...")
 
@@ -136,19 +129,19 @@ def _l1_generate_enter(d: dict[str, Any], ctx: ViewContext) -> RoundStartView:
         node=str(d["node"]),
         round=ctx.round_num,
         max_rounds=ctx.max_rounds,
-        l1_stall_count=ctx.l1_stall_count,
-        patience=ctx.patience,
+        standing=opening.standing,
         current_acc=d.get("current_accuracy", 0.0),
         prompt_preview=preview,
-        n_variants=d.get("n_variants", 0),
+        arms=opening.arms,
+        note=opening.note,
         model=d.get("model") or "(default)",
-        has_l1_critique=bool(d.get("has_l1_critique")),
         hearts=ctx.hearts,
         hearts_cap=ctx.hearts_cap,
     )
 
 
-def _l1_generate_exit(d: dict[str, Any], ctx: ViewContext) -> CandidatesGeneratedView:
+def _propose_exit(d: dict[str, Any], ctx: ViewContext) -> CandidatesGeneratedView:
+    opening: RoundOpening = d["opening"]
     candidates_meta = d["candidates"]
     parent = ctx.current_sp_flat
     columns: list[tuple[str, dict[str, str]]] = [
@@ -163,28 +156,18 @@ def _l1_generate_exit(d: dict[str, Any], ctx: ViewContext) -> CandidatesGenerate
             clone_labels.append(label)
         columns.append((label, flat))
 
-    l1_yield = float(d["l1_yield"])
-    n_no_op = int(d["l1_n_no_op"])
-    n_dup = int(d["l1_n_duplicate"])
-    n_rep = int(d.get("l1_n_repeat", 0))
     sp_diff = SpDiffView(
         columns=tuple(columns),
         node_param_keys=ctx.node_param_keys,
         round_num=ctx.round_num,
         clone_labels=tuple(clone_labels),
-        l1_yield=l1_yield,
-        l1_n_no_op=n_no_op,
-        l1_n_duplicate=n_dup,
-        l1_n_repeat=n_rep,
+        collapses=dict(d["collapses"]),
+        proposer=opening.proposer,
     )
     return CandidatesGeneratedView(
-        n_candidates=d["n_candidates"],
-        source="disk" if d["loaded_from_disk"] else "llm",
+        n_candidates=len(candidates_meta),
+        source="disk" if opening.replayed else "llm",
         n_scoring_samples=d["n_scoring_samples"],
-        l1_yield=l1_yield,
-        l1_n_no_op=n_no_op,
-        l1_n_duplicate=n_dup,
-        l1_n_repeat=n_rep,
         clone_labels=tuple(clone_labels),
         sp_diff=sp_diff,
     )
@@ -269,63 +252,14 @@ def _select_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
     )
 
 
-def _refine_enter(d: dict[str, Any], ctx: ViewContext) -> L2RefineEnterView:
-    params = d.get("l1_overrides") or {}
-    return L2RefineEnterView(
-        l2_round=d.get("l2_round", "?"),
-        l1_stall_count=d.get("l1_stall_count", "?"),
-        current_acc=d.get("current_accuracy", 0.0),
-        best_acc=d.get("best_accuracy", 0.0),
-        l1_overrides={k: str(v) for k, v in params.items()},
-    )
-
-
-def _refine_exit(d: dict[str, Any], ctx: ViewContext) -> L2RefineExitView:
-    l2_theta = d.get("l2_best_theta_at_entry")
-    return L2RefineExitView(
-        param_changes_count=d.get("param_changes_count", 0),
-        l1_layout_changed=bool(d.get("l1_layout_changed", False)),
-        axis_targeted=d.get("axis_targeted", ""),
-        changes_description=d.get("changes_description", ""),
-        l2_round=int(d["l2_round"]),
-        l2_stall_count=int(d["l2_stall_count"]),
-        l2_best_composite_fitness_at_entry=float(d["l2_best_composite_fitness_at_entry"]),
-        l2_best_theta_at_entry=None if l2_theta is None else float(l2_theta),
-    )
-
-
-def _plan_enter(d: dict[str, Any], ctx: ViewContext) -> PlanEnterView:
-    return PlanEnterView(
-        l3_round=d.get("l3_round", "?"),
-        l2_stall_count=d.get("l2_stall_count", "?"),
-        current_plan_preview=truncate(d.get("current_plan_preview", "") or "", 55, "..."),
-    )
-
-
-def _plan_exit(d: dict[str, Any], ctx: ViewContext) -> PlanExitView:
-    l3_theta = d.get("l3_best_theta_at_entry")
-    return PlanExitView(
-        new_plan_preview=truncate(d.get("new_plan_preview", "") or "", 55, "..."),
-        changes_description=d.get("changes_description", ""),
-        l3_round=int(d["l3_round"]),
-        l3_stall_count=int(d["l3_stall_count"]),
-        l3_best_composite_fitness_at_entry=float(d["l3_best_composite_fitness_at_entry"]),
-        l3_best_theta_at_entry=None if l3_theta is None else float(l3_theta),
-    )
-
-
 _BUILDERS: dict[str, Any] = {
     f"{CampaignPhase.INIT}:enter": _init_enter,
     f"{CampaignPhase.INIT}:exit": _init_exit,
-    f"{CampaignPhase.PROPOSE}:enter": _l1_generate_enter,
-    f"{CampaignPhase.PROPOSE}:exit": _l1_generate_exit,
+    f"{CampaignPhase.PROPOSE}:enter": _propose_enter,
+    f"{CampaignPhase.PROPOSE}:exit": _propose_exit,
     f"{CampaignPhase.MEASURE}:enter": _measure_enter,
     f"{CampaignPhase.SELECT}:exit": _select_exit,
     f"{CampaignPhase.BENCH}:scored": _bench_scored,
-    f"{PotterPhase.REFINE_STRATEGY}:enter": _refine_enter,
-    f"{PotterPhase.REFINE_STRATEGY}:exit": _refine_exit,
-    f"{PotterPhase.MODIFY_PLAN}:enter": _plan_enter,
-    f"{PotterPhase.MODIFY_PLAN}:exit": _plan_exit,
 }
 
 
@@ -333,10 +267,16 @@ _BUILDERS: dict[str, Any] = {
 
 
 def from_phase_event(event: PhaseEvent, ctx: ViewContext) -> AnyView | None:
+    """A bench phase is built here; an optimizer's own phase arrives with its view as ``step``,
+    composed by the member that ran it, since only it knows what its step did."""
     if event.round is not None:
         ctx.round_num = event.round
     builder = _BUILDERS.get(f"{event.phase}:{event.event}")
-    return builder(event.data, ctx) if builder is not None else None
+    if builder is not None:
+        view: AnyView = builder(event.data, ctx)
+        return view
+    step = event.data.get("step")
+    return step if isinstance(step, OptimizerStepEnterView | OptimizerStepExitView) else None
 
 
 # --- score-entry helpers ---
