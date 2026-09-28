@@ -225,7 +225,7 @@ export function campaignCard(
 
   const cap = runsWith ? runsWith.max_rounds : null;
   const stats: RowStat[] = [
-    ...(answering.bench_score ? [benchStat(answering.bench_score)] : []),
+    ...(campaign.bench ? [benchStat(campaign.bench)] : []),
     {
       label: "Spend",
       value: `${spendFloor(campaign)}${fmtUsd(campaign.spend_used_usd)}`,

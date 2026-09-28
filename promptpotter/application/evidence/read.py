@@ -151,8 +151,8 @@ class Evidence(StrictModel):
     # row, so nothing downstream joins two lists on `key`.
     subjects: list[SubjectReading]
     comparability: Comparability
-    # The HEADLINE, read off each unmasked campaign subject's finished root cycle — the held-out
-    # bench set, not the search rows everything below pools. `None` with no campaign subject.
+    # The HEADLINE, read off each unmasked campaign subject's result — the held-out bench set, not
+    # the search rows everything below pools. `None` with no campaign subject.
     head_to_head: HeadToHead | None = None
     # WHICH number everything below is about — the picker's vocabulary, the merged per-subject
     # intervals and every pairwise test, all under one selection. Non-optional: the default always
@@ -363,7 +363,7 @@ def subject_evidence(
         comparability=comparability(rows),
         head_to_head=head_to_head(
             [
-                HeadToHeadEntry(r, leaves[r.key], heads[r.key].cycle_dir)
+                HeadToHeadEntry(r, leaves[r.key])
                 for r in rows
                 if r.kind == "campaign" and r.mask is None
             ]

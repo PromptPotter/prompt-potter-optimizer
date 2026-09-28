@@ -16,6 +16,7 @@ during an admissibility check.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -32,9 +33,10 @@ from promptpotter.domain.run_records import (
     LedgerCandidate,
     LedgerRoundClose,
     RunLimitsRecord,
+    TokenUsageRecord,
     WallClock,
 )
-from promptpotter.domain.spend import TOKEN_KIND_BUCKET
+from promptpotter.domain.spend import TOKEN_KIND_BUCKET, SpendRollup
 from promptpotter.infrastructure.store.read_model import iter_jsonl
 from promptpotter.shared.clock import epoch_seconds
 
@@ -394,10 +396,32 @@ def _unworked_seconds(rows: list[dict[str, Any]]) -> float | None:
     return total
 
 
+def scan_ledger_spend(ledger_paths: Iterable[Path]) -> tuple[SpendRollup, int]:
+    """The spend these ledgers' own rows record, folded as a cycle's dashboard folds its own, and
+    how many of those calls reached a provider. Physical, so a fork never re-counts its parent."""
+    spend = SpendRollup()
+    calls = 0
+    for ledger_path in ledger_paths:
+        for rec in iter_jsonl(ledger_path, record_types=frozenset({"token_usage"})):
+            if rec.get("record_type") != "token_usage":
+                continue
+            try:
+                usage = TokenUsageRecord.model_validate(rec)
+            except ValidationError:
+                continue
+            spend.bank(usage)
+            calls += not usage.cached
+    return spend, calls
+
+
 def scan_ledger_wall_clock(
-    ledger_path: Path, *, started_at: str, finished_at: str, optimizer_phases: frozenset[str]
+    ledger_paths: Sequence[Path],
+    *,
+    started_at: str,
+    finished_at: str,
+    optimizer_phases: frozenset[str],
 ) -> WallClock:
-    """Where this cycle's wall clock went — ONE screened pass, banked by ``_finalize_run``.
+    """Where one launch's wall clock went across the ledgers it wrote — ONE screened pass per file.
     ``optimizer_phases`` are the phases the cycle's optimizer declares for itself.
 
     Physical like its neighbours, so a fork answers for its OWN clock and not its parent's history.
@@ -406,19 +430,25 @@ def scan_ledger_wall_clock(
 
     ``sample_scored`` is an event and not a record type, but the screen is a raw-line substring
     probe, so naming it there is what keeps the per-cell rows in and every other snapshot out."""
-    rows = iter_jsonl(
-        ledger_path, record_types=frozenset({"phase", "token_usage", "sample_scored"})
-    )
+    rows = [
+        row
+        for ledger_path in ledger_paths
+        for row in iter_jsonl(
+            ledger_path, record_types=frozenset({"phase", "token_usage", "sample_scored"})
+        )
+    ]
     opened, closed = epoch_seconds(started_at), epoch_seconds(finished_at)
     # A resumed cycle's ledger holds every earlier launch, while both endpoints are THIS launch's —
     # so the folds read this launch alone, and a round an earlier one closed reports no clock
-    # rather than an instant one.
+    # rather than an instant one. The cycles one launch ran write one after another, so time
+    # order is the order each fold pairs its brackets in.
     if opened is not None:
-        rows = [
-            r
+        dated = [
+            (at, r)
             for r in rows
             if (at := epoch_seconds(r.get("timestamp"))) is not None and at >= opened
         ]
+        rows = [r for _, r in sorted(dated, key=lambda pair: pair[0])]
     elapsed = None if opened is None or closed is None else max(0.0, closed - opened)
     phases = _phase_spans(rows, optimizer_phases)
     gates = _gate_spans(rows, until=closed)
@@ -453,5 +483,6 @@ __all__ = [
     "scan_ledger_elections",
     "scan_ledger_round_closes",
     "scan_ledger_run_standing",
+    "scan_ledger_spend",
     "scan_ledger_wall_clock",
 ]

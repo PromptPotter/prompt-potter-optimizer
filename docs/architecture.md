@@ -116,6 +116,12 @@ makes by comparing rounds read on different rows.
 Why the two must be different rows: [`research/benchmarks.md`](research/benchmarks.md) § The
 winner's own number is biased upward.
 
+**The graded result is the CAMPAIGN's, never a cycle's.** `domain/campaign.py::CampaignResult`
+(`campaigns/{id}/result.json`) holds it as facts — the bench passes and the cost of the campaign's
+LINE, every cycle and launch on it — and only the cycle holding the line writes it: the root, or
+where supersede cuts handed it on. An offshoot runs beside the line, so it grades nothing. A
+resume or a rebase reuses the origin's pass the line banked rather than sending it again.
+
 #### Three identities — what was measured, what ran, what graded it
 
 Each is one value from one function, and none folds into another.
@@ -592,7 +598,9 @@ tenant, `campaigns/{campaign_id}/` is the Campaign directory:
 `campaign.json` (manifest — `dataset_name, label, created_at,
 root_cycle_id, root_content_hash, treatment, backend_id, config`; identity + config
 + lifecycle intent only — run state is owned per-cycle by
-`index.json::status` and derived on read for campaign surfaces), `log.md`
+`index.json::status` and derived on read for campaign surfaces), `result.json` (the campaign's
+result as facts, rewritten by the cycle holding its line — § The bench score is not an
+optimizer's selection), `log.md`
 (campaign digest — covers every session, its forks, and its rounds),
 `hard_samples.json` (campaign-scope heatmap), and `cycles/{cycle_id}/`
 holding **every** cycle — all N session roots and every fork and diag —
@@ -977,11 +985,12 @@ the PR description.
     round-level views of a round whose selector stamps it (`stamps_theta`). **A reading is over
     the population that was sent** (`domain/scoring.py::is_graded`): a row the prompt failed is
     its miss, and a pass cut short or past its split's `tolerance` reads nothing, never a number
-    over fewer rows. **The passes bank facts and ONE function reads them**
-    (`runner/bench.py::read_bench`, under a named scorer): the run reads its headline off the
-    archive through it for the ledger, dashboard, index and export alike, and the head-to-head
-    reads every arm through it. A stored `BenchScore` is a cache stamped with its `scorer_id`,
-    never read as a fact — a reader under another grader reads the passes again.
+    over fewer rows. **The passes bank facts, in the campaign's result, and ONE function reads
+    them** (`runner/bench.py::read_bench`, under a named scorer): the run reads its headline off
+    the archive through it for the ledger, dashboard and export, the campaign list reads it for
+    each campaign, and the head-to-head reads every arm through it. A stored `BenchScore` is a
+    cache stamped with its `scorer_id`, never read as a fact — a reader under another grader reads
+    the passes again.
   - **A cycle's "best" deliberately has two bases** — the optimizer's objective (its declared
     pick, `Cycle.selection`; potter's L2/L3 stall comparator alone keeps the high-water of each
     round's own `composite_fitness`) and the bench's headline on the bench set. The shared-cells

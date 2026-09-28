@@ -47,8 +47,8 @@ from promptpotter.application.runner.bench import (
     graded,
     headline,
     nothing_held_out,
-    score_on_bench,
 )
+from promptpotter.application.runner.campaign_result import bank_campaign_result, bench_origin
 from promptpotter.application.runner.inner.ruler import refresh_inner_rulers
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.runner.loop import run_round_loop, set_round_cap
@@ -59,7 +59,7 @@ from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.application.scoring.query_loop import FlightGauge
 from promptpotter.config.settings import APP_VERSION
-from promptpotter.domain.bench import BenchPass, BenchPasses, BenchScore, partition_bank
+from promptpotter.domain.bench import BenchPasses, BenchScore, partition_bank
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import PromptExport, build_prompt_export
 from promptpotter.domain.launch_limits import HeldLimits
@@ -472,14 +472,25 @@ def _close_cycle(
     config: CampaignConfig,
     diag: bool,
     bench: BenchScore | None,
-    bench_passes: BenchPasses | None,
+    banked: BenchPasses | None,
 ) -> CycleResult:
-    """The one terminal path, for a stop raised in the round loop and one raised in run init."""
+    """The one terminal path, for a stop raised in the round loop and one raised in run init.
+    *bench* is the reading of *banked*, the passes the campaign's result holds from here on."""
     finished_at = utcnow_iso()
     # Before the result is built: a decision made after the last round closed has no next
     # `persist_round` to carry it, and every stop reason lands here.
     if cycle is not None:
         flush_pending_decisions(cycle, session)
+    if session.state.cycle_id:
+        # A pause included: the next launch's clock is summed beside this one's.
+        bank_campaign_result(
+            session.store,
+            session.hop,
+            started_at=started_at,
+            finished_at=finished_at,
+            optimizer_phases=frozenset(p.phase for p in bound_optimizer().runtime.phases),
+            bench=banked,
+        )
     cycle_result = _build_cycle_result(
         cycle,
         origin,
@@ -500,7 +511,6 @@ def _close_cycle(
         config=config,
         cycle=cycle,
         diag=diag,
-        bench_passes=bench_passes,
     )
     if langfuse_trace_id is not None:
         cycle_result = cycle_result.model_copy(update={"langfuse_trace_id": langfuse_trace_id})
@@ -546,7 +556,7 @@ async def _run_single_cycle(
     cycle: Cycle | None = None
     cancel_exc: asyncio.CancelledError | None = None
     budget_gate: BudgetGate | None = None
-    origin_pass: BenchPass | None = None
+    banked: BenchPasses | None = None
     unheld: BenchScore | None = None
     try:
         cycle = await init_optimization_loop(
@@ -592,12 +602,9 @@ async def _run_single_cycle(
         # rebuild cannot leave it on a stale ref.
         budget_gate = _arm_run_controls(session, observers, campaign_config)
         if session.scoring.require_partition().bench and origin.resolved_origin is not None:
-            # The reference, read before any search; its price — priced cold, replayed rows at
-            # what they would have cost — is set aside, so the pass that grades the selection
-            # still fits under the ceiling the search spends against.
-            spend = observers.dashboard.state.spend
-            usd_before, tokens_before = spend.total_incurred_usd, spend.total_tokens_used
-            origin_pass = await score_on_bench(
+            # The reference, sent once per line however many launches resume it; its price is set
+            # aside so the selection's pass still fits under the ceiling the search spends against.
+            banked = await bench_origin(
                 session,
                 origin.resolved_origin.to_job_search_point(
                     base_pipeline_params=session.pipeline_params or None,
@@ -605,14 +612,15 @@ async def _run_single_cycle(
                     framing=cycle.framing,
                     demo=session.scoring.require_partition().demo,
                 ),
-                round_num=0,
+                started_at=started_at,
+                optimizer_phases=frozenset(p.phase for p in bound_optimizer().runtime.phases),
+                spend=observers.dashboard.state.spend,
                 cb=cb,
             )
-            budget_gate.book.set_aside(
-                spend.total_incurred_usd - usd_before, spend.total_tokens_used - tokens_before
-            )
-            if campaign_config.bench_each_round:
-                graded(cb, session, origin_pass)
+            if banked is not None:
+                budget_gate.book.set_aside(banked.reserve_usd, banked.reserve_tokens)
+                if campaign_config.bench_each_round:
+                    graded(cb, session, banked.origin)
         elif not session.scoring.require_partition().bench:
             unheld = nothing_held_out(cb, scorer_id=session.scoring.scorer_id)
         stop_reason, cycle_error = await run_round_loop(
@@ -665,17 +673,16 @@ async def _run_single_cycle(
         )
 
     bench: BenchScore | None = unheld
-    bench_passes: BenchPasses | None = None
     if (
         cycle is not None
         and budget_gate is not None
-        and origin_pass is not None
+        and banked is not None
         and _bench_grades(stop_reason)
     ):
         budget_gate.book.set_aside(0.0, 0)
         try:
-            bench_passes = await bench_selection(cycle, session, origin=origin_pass, cb=cb)
-            bench = headline(cb, session, bench_passes)
+            banked = await bench_selection(cycle, session, banked=banked, cb=cb)
+            bench = headline(cb, session, banked)
         except RUN_STOPS as stop:
             # Only a pause escapes the pass; it keeps the cycle resumable, and the resume takes
             # the pass again.
@@ -697,7 +704,7 @@ async def _run_single_cycle(
         config=campaign_config,
         diag=mode.diag,
         bench=bench,
-        bench_passes=bench_passes,
+        banked=banked,
     )
     # A fork that never completed a round leaves an empty dir. Ahead of the re-raise below,
     # because a cancellation is one of the interrupts that produces one.
@@ -827,7 +834,7 @@ async def run_optimization(
             config=campaign_config,
             diag=mode.diag,
             bench=None,
-            bench_passes=None,
+            banked=None,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         # Prep is the only phase outside `_run_single_cycle`'s try, and the longest. An
@@ -885,7 +892,6 @@ def _finalize_run(
     config: CampaignConfig,
     cycle: Cycle | None,
     diag: bool,
-    bench_passes: BenchPasses | None,
 ) -> str | None:
     """Returns the Langfuse trace id from the terminal ``end_campaign`` emit (``None`` when
     no tracing bridge is active) so the caller can stamp it onto the returned ``CycleResult``.
@@ -925,7 +931,7 @@ def _finalize_run(
         # The run's own two endpoints, which `output.py::from_disk_log` reads off THIS block to
         # build the digest's status view — the campaign index carries no other copy of `started_at`.
         wall_clock = scan_ledger_wall_clock(
-            CycleLayout(session.store.campaigns.cycle_dir(session.hop)).ledger,
+            [CycleLayout(session.store.campaigns.cycle_dir(session.hop)).ledger],
             started_at=cycle_result.started_at,
             finished_at=cycle_result.finished_at,
             optimizer_phases=frozenset(
@@ -952,7 +958,7 @@ def _finalize_run(
             # dashboard makes: one resolution, now four readers — the export names it too, since
             # a fitness handed to another program without its formula is a number, not a result.
             "scorer_cell_formula": round_formula,
-            # The grader every `objective` above, the bench's included, was scored under.
+            # The grader every `objective` above was scored under.
             "scorer_id": session.scoring.scorer_id,
             "mode": "diag" if diag else "full",
             # Basis: the pick the optimizer DECLARED (`Cycle.selection`), which may name a different
@@ -961,12 +967,6 @@ def _finalize_run(
             "result_round": cycle_result.result_round,
             "result_prompt_fields": cycle_result.result_prompt_fields,
             "result_pipeline_params": cycle_result.result_pipeline_params,
-            # The HEADLINE, on rows no optimizer node read; every basis above is the optimizer's.
-            # A cache of reading `bench_passes` under `scorer_id` — the passes are the facts.
-            "bench": (
-                None if cycle_result.bench is None else cycle_result.bench.model_dump(mode="json")
-            ),
-            "bench_passes": None if bench_passes is None else bench_passes.model_dump(mode="json"),
         }
         session.store.campaigns.mark_finished(
             session.hop,
@@ -979,8 +979,8 @@ def _finalize_run(
             export=_export_artifact(session, cycle_result, cycle, formula=round_formula),
         )
         write_log_md(session, config)
-        # Re-rendered off the `final` just banked: the round-close render could not carry the
-        # bench score, which is taken after the last round closes.
+        # Re-rendered once `final` is banked: the round-close render could not carry the bench
+        # score, which is taken after the last round closes.
         if cycle is not None:
             write_review_md(session, cycle)
     # Declared BEFORE the drain, so dashboard.json's stopped state is in place before the audit

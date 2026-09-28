@@ -251,7 +251,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     # --- active router ---
     ActiveSessionResponse,
     SpawnedBy,  # nested in CycleListEntry — the emitter does not recurse, so register it
-    BenchReading,  # nested in BenchScore, which nests in CycleListEntry
+    BenchReading,  # nested in BenchScore, which nests in CampaignSummary
     BenchScore,
     CycleListEntry,
     CyclesResponse,

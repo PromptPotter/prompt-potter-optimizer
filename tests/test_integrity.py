@@ -5071,7 +5071,7 @@ def test_the_bench_pass_bills_and_clocks_under_its_own_name(built_stores, tmp_pa
     assert kinds == ["bench"] * 3 + ["diagnostic"], kinds
 
     clock = scan_ledger_wall_clock(
-        ledger.path, started_at=started, finished_at=utcnow_iso(), optimizer_phases=frozenset()
+        [ledger.path], started_at=started, finished_at=utcnow_iso(), optimizer_phases=frozenset()
     )
     assert clock.phase_s["bench"] > 0 and set(clock.unbracketed_call_s) == {"diagnostic"}, clock
 

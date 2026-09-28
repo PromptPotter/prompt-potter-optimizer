@@ -27,6 +27,8 @@ from promptpotter.application.pipeline_resolve import (
     resolve_pipeline_for_campaign,
     resolve_root_config,
 )
+from promptpotter.application.runner.campaign_result import read_campaign_bench
+from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.pipeline_overlay import (
     permitted_models_for_campaign,
@@ -105,6 +107,15 @@ class CampaignSummary(StrictModel):
             "`QuotaStatus.spend_unreported_usd`."
         )
     )
+    bench: BenchScore | None = Field(
+        description=(
+            "The headline (`architecture.md` § The bench score is not an optimizer's selection), "
+            "read off the campaign's result (`result.json`) under the formula its line runs — "
+            "whichever cycle rebases handed the line to. `selected` is null until the line grades "
+            "its pick. Null until the line first banks one, and where the split holds nothing out "
+            "it says so in `missing_reason`."
+        )
+    )
     runs_with: CampaignRunsWith | None = Field(
         description=(
             "What the ROOT course runs with — a second transport of the answer "
@@ -144,6 +155,7 @@ def _campaign_summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
         spend_used_usd=round(spent.used_usd, 6),
         spend_unpriced_tokens=spent.unpriced_tokens,
         spend_unreported_usd=round(spent.unreported_usd, 6),
+        bench=read_campaign_bench(stores, campaign),
         runs_with=campaign_runs_with(stores, campaign),
     )
 

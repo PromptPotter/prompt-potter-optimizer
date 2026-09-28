@@ -50,6 +50,7 @@ from promptpotter.application.runner.entry import RunMode
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
 from promptpotter.config.settings import Settings
 from promptpotter.connectors.promptpotter import measurement_modules
+from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import SpendRollup
@@ -583,7 +584,7 @@ async def run_one(optimizer: str, workspace: Path, *, rounds: int, rows: int) ->
     dashboard = json.loads((cycle / "dashboard.json").read_text(encoding="utf-8"))
     if billed := SpendRollup.model_validate(dashboard["spend"]).total_used_usd:
         raise SystemExit(f"offline run billed ${billed}: a fake answered with a cost")
-    decisions = extract(cycle)
+    decisions = extract(cycle, result.bench)
     decisions["harness"] = {
         "stop_reason": str(result.stop_reason),
         "unrouted": sorted(router.unrouted),
@@ -789,7 +790,7 @@ def _jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
-def extract(cycle: Path) -> dict[str, Any]:
+def extract(cycle: Path, bench: BenchScore | None) -> dict[str, Any]:
     rounds = [
         json.loads(p.read_text(encoding="utf-8")) for p in sorted((cycle / "rounds").glob("*.json"))
     ]
@@ -805,9 +806,11 @@ def extract(cycle: Path) -> dict[str, Any]:
             for k in (
                 "rounds_to_separable", "rounds_to_improved", "rounds_to_ceiling",
                 "origin_composite_fitness", "mode", "result_prompt_fields",
-                "result_pipeline_params", "bench",
+                "result_pipeline_params",
             )
         },
+        # The headline the run returned, read off the passes its campaign's result banks.
+        "bench": None if bench is None else bench.model_dump(mode="json"),
         "round_index": index.get("rounds"),
     }  # fmt: skip
     return {

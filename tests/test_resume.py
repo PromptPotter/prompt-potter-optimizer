@@ -1219,7 +1219,7 @@ def test_a_resumed_cycle_clocks_only_its_own_launch(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     clock = scan_ledger_wall_clock(
-        ledger,
+        [ledger],
         started_at="2026-09-02T09:59:00Z",
         finished_at="2026-09-02T10:30:00Z",
         # An optimizer's own phase brackets only where its runtime declares it.
@@ -1229,6 +1229,88 @@ def test_a_resumed_cycle_clocks_only_its_own_launch(tmp_path: Path) -> None:
     assert clock.elapsed_s is not None and sum(clock.phase_s.values()) <= clock.elapsed_s
     assert "1" not in clock.round_ended_s, "a round an earlier launch closed read as instant"
     assert clock.round_ended_s["2"] == pytest.approx(21 * 60 + 1)
+
+
+def test_a_resumed_campaign_clocks_every_launch_and_sends_its_origin_pass_once(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A campaign's clock and its reference are its LINE's. Clocked off the finishing launch alone,
+    a paused-and-resumed campaign read as fast as its tail, with the operator's wait at the origin
+    gate counted as work; and each launch re-sent the origin's bench pass, metering the reference
+    again as spend a head-to-head charges to the optimizer."""
+    import asyncio
+    import json
+    from types import SimpleNamespace
+
+    from promptpotter.application.runner import campaign_result
+    from promptpotter.domain.bench import BenchPass, DatasetSplit, partition_bank
+    from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.sample import Sample
+    from promptpotter.domain.search_point import JobSearchPoint
+    from promptpotter.domain.spend import SpendRollup
+    from promptpotter.infrastructure.store.layout import CycleLayout
+
+    stores = built_stores
+    root = CycleHop(campaign_id=_CAMPAIGN, cycle_id="cycle_r0")
+    stores.campaigns.create_campaign(
+        Campaign(campaign_id=_CAMPAIGN, dataset_name="ds", created_at="", root_cycle_id="cycle_r0")
+    )
+    stores.campaigns.create(root, {})
+    ledger = CycleLayout(stores.campaigns.cycle_dir(root)).ledger
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    bank = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(6)]
+    partition = partition_bank(bank, DatasetSplit(bench=2))
+    schema, origin_sp = PipelineSchema(name="s", nodes=[]), JobSearchPoint()
+    scoring = SimpleNamespace(require_partition=lambda: partition, scorer_id="grader")
+    session = SimpleNamespace(store=stores, hop=root, pipeline_schema=schema, scoring=scoring)
+    sent: list[str] = []
+
+    async def score_on_bench(*_: Any, **__: Any) -> BenchPass:
+        sent.append("origin")
+        ids = [s.id for s in partition.bench]
+        sp_hash = origin_sp.sp_hash(schema)
+        return BenchPass(
+            round=0, sp_hash=sp_hash, run_id="r", sample_ids=ids, stopped=None, scorer_id="grader"
+        )
+
+    monkeypatch.setattr(campaign_result, "score_on_bench", score_on_bench)
+
+    def launch(day: str, opened: str, running: str, closed: str) -> Any:
+        """One launch that held at the origin gate until `running`, then ran until `closed`."""
+        with ledger.open("a", encoding="utf-8") as fh:
+            for at, event in ((opened, "gate"), (running, "running")):
+                row = {"record_type": "phase", "phase": "control", "event": event}
+                fh.write(json.dumps({**row, "timestamp": f"2026-09-{day}T{at}Z"}) + "\n")
+        started = f"2026-09-{day}T{opened}Z"
+        banked = asyncio.run(
+            campaign_result.bench_origin(
+                session,  # type: ignore[arg-type]
+                origin_sp,
+                started_at=started,
+                optimizer_phases=frozenset(),
+                spend=SpendRollup(),
+                cb=None,  # type: ignore[arg-type]
+            )
+        )
+        campaign_result.bank_campaign_result(
+            stores,
+            root,
+            started_at=started,
+            finished_at=f"2026-09-{day}T{closed}Z",
+            optimizer_phases=frozenset(),
+            bench=None,
+        )
+        return banked
+
+    paused = launch("01", "10:00:00", "10:10:00", "11:00:00")
+    finished = launch("02", "12:00:00", "12:05:00", "12:30:00")
+    assert sent == ["origin"], "a resume re-sent the origin's bench pass"
+    assert finished == paused and finished.selected is None
+    result = stores.campaigns.load_result(_CAMPAIGN)
+    assert result is not None and result.bench == paused
+    assert len(result.cost.launches) == 2
+    assert result.cost.worked_s == pytest.approx((60 - 10) * 60 + (30 - 5) * 60)
 
 
 def test_a_resume_before_round_one_regates_the_origin_it_measured(

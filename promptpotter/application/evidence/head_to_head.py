@@ -4,7 +4,6 @@ The held-out set IS the comparability guard: `docs/architecture.md` § The bench
 from __future__ import annotations
 
 from collections.abc import Callable
-from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.datasets.authored import config_cell_scorer
@@ -12,16 +11,10 @@ from promptpotter.application.evidence.subjects import SubjectReading
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.runner.bench import read_bench, read_pass
 from promptpotter.application.scoring.selection import paired_fitness
-from promptpotter.domain.bench import (
-    BenchPass,
-    BenchPasses,
-    BenchReading,
-    BenchScore,
-    DatasetSplit,
-)
+from promptpotter.domain.bench import BenchPass, BenchReading, BenchScore, DatasetSplit
 from promptpotter.domain.campaign import Campaign, Instrument, bench_instrument
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.run_records import WallClock
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.archive_queries import bench_reads
@@ -42,20 +35,25 @@ class HeadToHeadRow(StrictModel):
     subject: str
     campaign_id: str
     optimizer: str
-    # `None` = no headline: nothing held out, or the cycle stopped before its selection was graded.
+    # `None` where the line banked no origin's pass: nothing held out, or none sent yet. Its
+    # `selected` is `None` until the line grades its selection.
     bench: BenchScore | None
     bench_set: Instrument | None
     # Against the row most others share an instrument with; `None` for a row with no headline.
     comparable: bool | None
+    # The campaign's line, every cycle and launch on it (`CampaignResult.cost`); `None` for a
+    # campaign whose line has banked no result yet.
     spend: SpendRollup | None
-    wall_clock_s: float | None
+    calls: int | None
+    # Each launch's clock less its origin gate and its cells' unworked time, summed.
+    worked_s: float | None
     rounds: int
     # Each over `HeadToHead.ratio_reference`'s, `None` where either lacks it. INCURRED, never the
     # bill: an arm replaying a sibling's cells is billed nothing for them.
     incurred_usd_ratio: float | None
     # The `loop` bucket alone — the optimizer's own calls, the spend arms differ on by manifest.
     loop_incurred_usd_ratio: float | None
-    wall_clock_ratio: float | None
+    worked_ratio: float | None
     # Bench lift per USD the SEARCH incurred (`BenchScore.lift_per_usd`); `None` without a lift,
     # or where the search carries tokens no rate priced.
     lift_per_incurred_usd: float | None
@@ -96,17 +94,16 @@ class HeadToHead(StrictModel):
     differs_on: list[str]
     # Only campaigns on ONE instrument pair (`_one_instrument`); any other pair is refused.
     pairs: list[SelectionPair]
-    # The oldest row carrying a spend and a wall clock, which every row's `*_ratio` divides by.
+    # The oldest row carrying a spend and a worked clock, which every row's `*_ratio` divides by.
     ratio_reference: str | None
     note: str
 
 
 class HeadToHeadEntry(NamedTuple):
-    """One campaign subject, with the tree it lives in and its root cycle."""
+    """One campaign subject, with the tree it lives in."""
 
     reading: SubjectReading
     stores: Stores
-    cycle_dir: Path
 
 
 class _Graded(NamedTuple):
@@ -114,8 +111,8 @@ class _Graded(NamedTuple):
     # Each pass's graded rows; `None` where the pass read nothing.
     origin_rows: list[QueryMeasurement] | None
     selected_rows: list[QueryMeasurement] | None
-    # The cycle's own start and finish, epoch seconds; `None` before it finished.
-    window: tuple[float, float] | None
+    # Each launch's start and finish, epoch seconds.
+    windows: list[tuple[float, float]]
 
 
 _ORIGIN_READING = "origin_reading"
@@ -136,7 +133,7 @@ def head_to_head(entries: list[HeadToHeadEntry]) -> HeadToHead | None:
         for e, c, config in zip(entries, campaigns, configs, strict=True)
     ]
     base = next(
-        (g.row for g in read if g.row.spend is not None and g.row.wall_clock_s is not None), None
+        (g.row for g in read if g.row.spend is not None and g.row.worked_s is not None), None
     )
     graded = [g for g in read if g.row.bench is not None and g.row.bench_set is not None]
     # The row most others share an instrument with; ties go to the oldest.
@@ -197,14 +194,12 @@ def _ratios(row: HeadToHeadRow, base: HeadToHeadRow | None) -> dict[str, float |
         "loop_incurred_usd_ratio": over(
             lambda r: None if r.spend is None else r.spend.loop.incurred_usd
         ),
-        "wall_clock_ratio": over(lambda r: r.wall_clock_s),
+        "worked_ratio": over(lambda r: r.worked_s),
     }
 
 
 def _overlapped(a: _Graded, b: _Graded) -> bool:
-    if a.window is None or b.window is None:
-        return False
-    return a.window[0] < b.window[1] and b.window[0] < a.window[1]
+    return any(sa < eb and sb < ea for sa, ea in a.windows for sb, eb in b.windows)
 
 
 def _origin(g: _Graded) -> BenchReading | None:
@@ -248,16 +243,17 @@ def _read(
     scorer: CellScorer,
     scorer_id: str,
 ) -> _Graded:
-    """A cross-campaign survey, so every document is read tolerant: a campaign still running has no
-    ``final`` block, and one that never finished has no headline rather than failing the read."""
-    reading, stores, cycle_dir = entry
-    layout = CycleLayout(cycle_dir)
-    final = read_json_tolerant(layout.manifest, {}).get("final") or {}
-    # The FACTS, read again under the one scorer — never the `bench` cached beside them, which is
-    # this campaign's own reading under its own formula.
-    passes = (
-        BenchPasses.model_validate(final["bench_passes"]) if final.get("bench_passes") else None
+    """Everything but the instrument's inputs is the campaign's result: its passes read under the
+    one scorer, and the cost of its whole line, whichever cycle the line ended on."""
+    reading, stores = entry
+    result = stores.campaigns.load_result(campaign.campaign_id)
+    hop = (
+        campaign.root_hop
+        if result is None
+        else CycleHop(campaign_id=campaign.campaign_id, cycle_id=result.cycle_id)
     )
+    layout = CycleLayout(stores.campaigns.cycle_dir(hop))
+    passes = None if result is None else result.bench
     bench = None if passes is None else read_bench(stores, passes, scorer, scorer_id=scorer_id)
 
     def rows_of(bench_pass: BenchPass, tolerance: int) -> list[QueryMeasurement] | None:
@@ -283,10 +279,14 @@ def _read(
         if partition and bench is not None and bench.selected is not None
         else None
     )
-    spend_doc = read_json_tolerant(layout.dashboard, {}).get("spend")
-    spend = SpendRollup.model_validate(spend_doc) if spend_doc else None
-    clock = final.get("wall_clock")
-    start, end = epoch_seconds(final.get("started_at")), epoch_seconds(final.get("finished_at"))
+    cost = None if result is None else result.cost
+    spend = None if cost is None else cost.spend
+    windows = [
+        (start, end)
+        for run in ([] if cost is None else cost.launches)
+        if (start := epoch_seconds(run.started_at)) is not None
+        and (end := epoch_seconds(run.finished_at)) is not None
+    ]
     return _Graded(
         row=HeadToHeadRow(
             subject=reading.key,
@@ -296,11 +296,12 @@ def _read(
             bench_set=bench_set,
             comparable=None,
             spend=spend,
-            wall_clock_s=WallClock.model_validate(clock).elapsed_s if clock else None,
+            calls=None if cost is None else cost.calls,
+            worked_s=None if cost is None else cost.worked_s,
             rounds=reading.cycle_rounds_scored,
             incurred_usd_ratio=None,
             loop_incurred_usd_ratio=None,
-            wall_clock_ratio=None,
+            worked_ratio=None,
             lift_per_incurred_usd=None
             if bench is None or spend is None
             else bench.lift_per_usd(spend),
@@ -310,8 +311,10 @@ def _read(
             else bench_reads(stores, dataset_name=campaign.dataset_name, sample_ids=bench_ids),
         ),
         origin_rows=None if passes is None else rows_of(passes.origin, passes.tolerance),
-        selected_rows=None if passes is None else rows_of(passes.selected, passes.tolerance),
-        window=None if start is None or end is None else (start, end),
+        selected_rows=None
+        if passes is None or passes.selected is None
+        else rows_of(passes.selected, passes.tolerance),
+        windows=windows,
     )
 
 
@@ -352,14 +355,14 @@ def _note(
 ) -> str:
     tail = (
         f" {n_rows - n_graded} campaign(s) carry no bench headline — nothing held out, or the "
-        "cycle stopped before its selection was graded — and sit outside the verdict."
+        "line has not graded its selection — and sit outside the verdict."
         if n_rows > n_graded
         else ""
     ) + (
         f" {', '.join(concurrent)} ran concurrently on one content-addressed cache: the first to "
-        "reach a cell paid and the rest replayed it, so the bill and the wall clock split by "
+        "reach a cell paid and the rest replayed it, so the bill and the clock split by "
         "arrival. The USD ratios price INCURRED spend, which counts a replay as paid; the "
-        "wall-clock ratio stays confounded."
+        "worked-seconds ratio stays confounded."
         if concurrent
         else ""
     )

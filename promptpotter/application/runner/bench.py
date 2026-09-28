@@ -41,6 +41,7 @@ __all__ = [
     "read_bench",
     "read_pass",
     "score_on_bench",
+    "unheld_bench",
 ]
 
 
@@ -99,11 +100,12 @@ def read_bench(
     """The headline, derived from the passes' archived facts under *scorer* — for the run that
     graded them and every later reader alike, so a copy of it is only ever a cache."""
     origin = read_pass(stores, passes.origin, scorer, tolerance=passes.tolerance)
-    selected = (
-        origin
-        if passes.selected == passes.origin
-        else read_pass(stores, passes.selected, scorer, tolerance=passes.tolerance)
-    )
+    if passes.selected is None:
+        selected = PassReading(None, "not graded until the line's run ends", [])
+    elif passes.selected == passes.origin:
+        selected = origin
+    else:
+        selected = read_pass(stores, passes.selected, scorer, tolerance=passes.tolerance)
     paired = matched_parent_lift(selected.rows, origin.rows, grade="objective")
     reads = (("origin", origin), ("selected", selected))
     missing = "; ".join(f"{name}: {r.missing}" for name, r in reads if r.missing is not None)
@@ -162,9 +164,9 @@ async def score_on_bench(
     )
 
 
-def nothing_held_out(cb: RunCallbacks, *, scorer_id: str) -> BenchScore:
-    """A split holding no bench row never grades, so its headline is final at run start."""
-    score = BenchScore(
+def unheld_bench(scorer_id: str) -> BenchScore:
+    """The headline of a split holding no bench row: it never grades, so this is final at start."""
+    return BenchScore(
         bench_size=0,
         scorer_id=scorer_id,
         origin=None,
@@ -174,6 +176,10 @@ def nothing_held_out(cb: RunCallbacks, *, scorer_id: str) -> BenchScore:
         lift_ci_lo=None,
         lift_ci_hi=None,
     )
+
+
+def nothing_held_out(cb: RunCallbacks, *, scorer_id: str) -> BenchScore:
+    score = unheld_bench(scorer_id)
     emit_phase(cb.on_phase, CampaignPhase.BENCH, "scored", bench=score)
     return score
 
@@ -215,11 +221,12 @@ async def grade_round_selection(
 
 
 async def bench_selection(
-    cycle: Cycle, session: Session, *, origin: BenchPass, cb: RunCallbacks
+    cycle: Cycle, session: Session, *, banked: BenchPasses, cb: RunCallbacks
 ) -> BenchPasses:
     """The selection is the pick the optimizer declared (``Cycle.selection``), sent here over rows
-    it never read. Sent once where it is the origin itself. Only a pause escapes the pass: any
-    other stop ends it short, and the headline says so."""
+    it never read, beside the origin's pass *banked* holds. Sent once where it is the origin
+    itself. Only a pause escapes the pass: any other stop ends it short, and the headline says so."""
+    origin = banked.origin
     picked, selected_sp = cycle.selection, cycle.selected_sp
     selected_hash = selected_sp.sp_hash(session.pipeline_schema)
     if selected_hash == origin.sp_hash:
@@ -239,7 +246,7 @@ async def bench_selection(
                 stopped=reason.value,
                 scorer_id=session.scoring.scorer_id,
             )
-    return BenchPasses(tolerance=_tolerance(session), origin=origin, selected=selected)
+    return banked.model_copy(update={"selected": selected})
 
 
 def headline(cb: RunCallbacks, session: Session, passes: BenchPasses) -> BenchScore:

@@ -181,14 +181,15 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
     lines += [
         "",
         f"  /ref divides by {h2h.ratio_reference or '—'}, the oldest run carrying a spend and a "
-        "wall clock: total and optimizer-only (`loop`) INCURRED USD, then elapsed seconds. "
-        "lift/$ is the bench lift per USD the SEARCH incurred, the bench's own pass excluded; USD "
-        "is the bill. reads counts the individuals ever graded on those held-out rows: each one "
-        "chosen off a headline spends the holdout.",
+        "worked clock: total and optimizer-only (`loop`) INCURRED USD, then worked seconds — "
+        "every launch of the campaign's line, less its origin gate and unworked time. lift/$ is "
+        "the bench lift per USD the SEARCH incurred, the bench's own pass excluded; USD is the "
+        "bill. reads counts the individuals ever graded on those held-out rows: each one chosen "
+        "off a headline spends the holdout.",
         f"  {'campaign':<24}  {'optimizer':<9}  {'sel':>3}  {'selected':>8}  {'95% CI':>16}  "
         f"{'origin':>7}  {'95% CI':>16}  {'lift':>7}  {'95% CI':>18}  {'USD':>8}  "
-        f"{'tokens':>8}  {'wall s':>7}  {'rounds':>6}  {'USD/ref':>8}  {'loop/ref':>8}  "
-        f"{'wall/ref':>8}  {'lift/$':>7}  {'reads':>5}",
+        f"{'tokens':>8}  {'calls':>6}  {'work s':>7}  {'rounds':>6}  {'USD/ref':>8}  "
+        f"{'loop/ref':>8}  {'work/ref':>8}  {'lift/$':>7}  {'reads':>5}",
     ]
     for r in h2h.rows:
         # `x` off the instrument most rows share: its headline is listed, never paired.
@@ -218,10 +219,11 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
                 if spend is not None
                 else f"{'—':>8}  {'—':>8}  "
             )
-            + f"{'—' if r.wall_clock_s is None else f'{r.wall_clock_s:.0f}':>7}  {r.rounds:>6}  "
+            + f"{'—' if r.calls is None else r.calls:>6}  "
+            + f"{'—' if r.worked_s is None else f'{r.worked_s:.0f}':>7}  {r.rounds:>6}  "
             + "  ".join(
                 f"{'—' if x is None else f'{x:.2f}':>8}"
-                for x in (r.incurred_usd_ratio, r.loop_incurred_usd_ratio, r.wall_clock_ratio)
+                for x in (r.incurred_usd_ratio, r.loop_incurred_usd_ratio, r.worked_ratio)
             )
             + f"  {'—' if per_usd is None else f'{per_usd:+.2f}':>7}"
             + f"  {'—' if r.bench_reads is None else r.bench_reads:>5}"

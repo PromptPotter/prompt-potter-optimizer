@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.bench import BankPartition
-from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.campaign import Campaign, CampaignResult
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.export import PromptExport, parse_prompt_export
 from promptpotter.domain.launch_limits import RoundsCap
@@ -55,6 +55,7 @@ from promptpotter.infrastructure.store.io import (
     write_yaml,
 )
 from promptpotter.infrastructure.store.layout import (
+    CAMPAIGN_RESULT,
     ROUND_GLOB,
     CycleLayout,
     campaign_cycles_dir,
@@ -309,6 +310,16 @@ class CampaignStore:
         path = self._manifest_path(campaign.campaign_id)
         write_json(path, campaign.model_dump(mode="json"))
         return path
+
+    def load_result(self, campaign_id: str) -> CampaignResult | None:
+        """``None`` until the campaign's line first banks one — no launch has reached its origin."""
+        data = read_json_optional(self.campaign_root_dir(campaign_id) / CAMPAIGN_RESULT)
+        return None if data is None else CampaignResult.model_validate(data)
+
+    def write_result(self, campaign_id: str, result: CampaignResult) -> None:
+        write_json(
+            self.campaign_root_dir(campaign_id) / CAMPAIGN_RESULT, result.model_dump(mode="json")
+        )
 
     def update_campaign(self, campaign_id: str, updates: dict[str, Any]) -> None:
         path = self._manifest_path(campaign_id)
@@ -739,11 +750,17 @@ class CampaignStore:
             self.update(hop, {"superseded_by": successor_cycle_id})
         self._stamp_terminal(hop, StopReason.REBASED)
 
-    def line_holder(self, hop: CycleHop) -> CycleHop:
-        """The cycle answering for *hop*'s line now — itself unless a supersede cut moved it."""
+    def line(self, hop: CycleHop) -> list[CycleHop]:
+        """*hop* and every cycle a supersede cut handed its line to since, oldest first."""
+        out = [hop]
         while (data := self.load(hop)) is not None and (successor := data.get("superseded_by")):
             hop = CycleHop(campaign_id=hop.campaign_id, cycle_id=successor)
-        return hop
+            out.append(hop)
+        return out
+
+    def line_holder(self, hop: CycleHop) -> CycleHop:
+        """The cycle answering for *hop*'s line now — itself unless a supersede cut moved it."""
+        return self.line(hop)[-1]
 
     def _stamp_terminal(self, hop: CycleHop, reason: StopReason) -> bool:
         data = read_json_optional(self._index_path(hop))
@@ -816,7 +833,6 @@ class CampaignStore:
             "updated_at": data.get("updated_at", ""),
             "human_intervened": bool(data.get("human_intervened", False)),
             "spawned_by": data.get("spawned_by"),
-            "bench_score": (data.get("final") or {}).get("bench"),
         }
 
     def enumerate_cycles(self) -> list[dict[str, Any]]:

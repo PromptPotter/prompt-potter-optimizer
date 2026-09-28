@@ -58,7 +58,7 @@ def campaigns_root_dir_for(tenant_root: WorkspaceDir) -> Path:
 
 
 def campaign_root_dir_for(tenant_root: WorkspaceDir, campaign_id: str) -> Path:
-    """Campaign dir — ``campaign.json`` + ``log.md`` + ``hard_samples.json`` + ``cycles/``. Per-session telemetry binds one level down."""
+    """Campaign dir — ``campaign.json`` + ``result.json`` + ``log.md`` + ``hard_samples.json`` + ``cycles/``. Per-session telemetry binds one level down."""
     return campaigns_root_dir_for(tenant_root) / validate_path_component(campaign_id)
 
 
@@ -324,9 +324,13 @@ def _cycle_report_names() -> frozenset[str]:
     )
 
 
-# Readable-output files (anywhere in a campaign tree) → the ``reports`` keepsake. ``campaign.json``
-# is the campaign-root manifest, one level ABOVE any cycle, so no `CycleLayout` property finds it.
-_REPORT_NAMES = _cycle_report_names() | {"campaign.json"}
+# The campaign's result (`domain/campaign.py::CampaignResult`), beside its manifest.
+CAMPAIGN_RESULT = "result.json"
+
+# Readable-output files (anywhere in a campaign tree) → the ``reports`` keepsake. The manifest and
+# the result sit at the campaign root, one level ABOVE any cycle, so no `CycleLayout` property finds
+# them.
+_REPORT_NAMES = _cycle_report_names() | {"campaign.json", CAMPAIGN_RESULT}
 
 
 class FileKind(Enum):
@@ -386,6 +390,7 @@ def course_validator_ns(cycle_dir: Path) -> int | None:
 
 
 __all__ = [
+    "CAMPAIGN_RESULT",
     "JUDGE_REUSE_DIR",
     "MEASUREMENTS_DIR",
     "OPTIMIZER_REUSE_DIR",

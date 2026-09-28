@@ -727,6 +727,17 @@
             "title": "Backend Type",
             "type": "string"
           },
+          "bench": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BenchScore"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The headline (`architecture.md` § The bench score is not an optimizer's selection), read off the campaign's result (`result.json`) under the formula its line runs — whichever cycle rebases handed the line to. `selected` is null until the line grades its pick. Null until the line first banks one, and where the split holds nothing out it says so in `missing_reason`."
+          },
           "campaign_id": {
             "description": "Campaign id ({dataset}__{rand6}) — one RUN of an origin",
             "title": "Campaign Id",
@@ -824,6 +835,7 @@
           "spend_used_usd",
           "spend_unpriced_tokens",
           "spend_unreported_usd",
+          "bench",
           "runs_with",
           "config"
         ],
@@ -1092,6 +1104,17 @@
             "title": "Backend Type",
             "type": "string"
           },
+          "bench": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BenchScore"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The headline (`architecture.md` § The bench score is not an optimizer's selection), read off the campaign's result (`result.json`) under the formula its line runs — whichever cycle rebases handed the line to. `selected` is null until the line grades its pick. Null until the line first banks one, and where the split holds nothing out it says so in `missing_reason`."
+          },
           "campaign_id": {
             "description": "Campaign id ({dataset}__{rand6}) — one RUN of an origin",
             "title": "Campaign Id",
@@ -1177,6 +1200,7 @@
           "spend_used_usd",
           "spend_unpriced_tokens",
           "spend_unreported_usd",
+          "bench",
           "runs_with"
         ],
         "title": "CampaignSummary",
@@ -2027,17 +2051,6 @@
             "title": "Backend Id",
             "type": "string"
           },
-          "bench_score": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/BenchScore"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The headline: the selected result and the origin scored on the held-out bench set under the campaign's formula. Null until the cycle ends, and on a campaign whose `dataset_split` holds nothing out."
-          },
           "best_accuracy": {
             "anyOf": [
               {
@@ -2047,7 +2060,7 @@
                 "type": "null"
               }
             ],
-            "description": "The optimizer's own selection score — what it KEPT, read on the rows that chose it. Never the headline; `bench_score` is.",
+            "description": "The optimizer's own selection score — what it KEPT, read on the rows that chose it. Never the headline; the campaign's `CampaignSummary.bench` is.",
             "title": "Best Accuracy"
           },
           "campaign_id": {
@@ -3616,6 +3629,17 @@
               }
             ]
           },
+          "calls": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calls"
+          },
           "campaign_id": {
             "title": "Campaign Id",
             "type": "string"
@@ -3693,7 +3717,7 @@
             "title": "Subject",
             "type": "string"
           },
-          "wall_clock_ratio": {
+          "worked_ratio": {
             "anyOf": [
               {
                 "type": "number"
@@ -3702,9 +3726,9 @@
                 "type": "null"
               }
             ],
-            "title": "Wall Clock Ratio"
+            "title": "Worked Ratio"
           },
-          "wall_clock_s": {
+          "worked_s": {
             "anyOf": [
               {
                 "type": "number"
@@ -3713,7 +3737,7 @@
                 "type": "null"
               }
             ],
-            "title": "Wall Clock S"
+            "title": "Worked S"
           }
         },
         "required": [
@@ -3724,11 +3748,12 @@
           "bench_set",
           "comparable",
           "spend",
-          "wall_clock_s",
+          "calls",
+          "worked_s",
           "rounds",
           "incurred_usd_ratio",
           "loop_incurred_usd_ratio",
-          "wall_clock_ratio",
+          "worked_ratio",
           "lift_per_incurred_usd",
           "concurrent_with",
           "bench_reads"
@@ -6146,7 +6171,7 @@
       },
       "SpendBucket": {
         "additionalProperties": false,
-        "description": "One spend sub-bucket (backend, optimizer-loop, or judge). Mutated only by\n``_handle_token_usage``. ``used_usd`` is the BILL; ``incurred_usd`` prices cache hits too.",
+        "description": "One spend sub-bucket (backend, optimizer-loop, or judge). Mutated only by\n``SpendRollup.bank``. ``used_usd`` is the BILL; ``incurred_usd`` prices cache hits too.",
         "properties": {
           "cache_read_tokens": {
             "default": 0,

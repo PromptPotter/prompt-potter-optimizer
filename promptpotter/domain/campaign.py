@@ -9,9 +9,11 @@ from typing import Any, Literal
 
 from pydantic import ConfigDict, Field
 
-from promptpotter.domain.bench import DatasetSplit
+from promptpotter.domain.bench import BenchPasses, DatasetSplit
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_schema import stable_hash
+from promptpotter.domain.run_records import WallClock
+from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 
 
@@ -72,9 +74,55 @@ def bench_instrument(
     )
 
 
+class Launch(StrictModel):
+    """One launch of the campaign's line, and where its wall clock went across every cycle it ran."""
+
+    model_config = ConfigDict(frozen=True)
+
+    started_at: str
+    finished_at: str
+    clock: WallClock
+
+
+class ArmCost(StrictModel):
+    """What the campaign's line spent reaching its result: every cycle on it, every launch."""
+
+    model_config = ConfigDict(frozen=True)
+
+    # The line's own ledgers folded as a dashboard folds one: each call once, whichever cycle sent it.
+    spend: SpendRollup
+    # Calls that reached a provider; a replay reached no wire.
+    calls: int
+    launches: list[Launch]
+
+    @property
+    def worked_s(self) -> float | None:
+        """Each launch's clock less its origin gate, a human's, and the time its cells were not
+        allowed to spend; ``None`` where no launch has both endpoints."""
+        worked = [
+            max(0.0, run.clock.elapsed_s - run.clock.gate_s - (run.clock.unworked_s or 0.0))
+            for run in self.launches
+            if run.clock.elapsed_s is not None
+        ]
+        return sum(worked) if worked else None
+
+
+class CampaignResult(StrictModel):
+    """``campaigns/{id}/result.json``: the campaign's result as FACTS, rewritten by the cycle
+    answering for its line at every launch end. The bench score is read off them, never stored."""
+
+    model_config = ConfigDict(frozen=True)
+
+    # The cycle answering for the line when this was written — the root, or where rebases led.
+    cycle_id: str
+    # `None` where nothing is held out, or before the origin's pass.
+    bench: BenchPasses | None
+    cost: ArmCost
+
+
 class Campaign(StrictModel):
-    """Frozen manifest — identity, config and operator VISIBILITY INTENT only, never run state: that is per-cycle,
-    and a stored campaign status was overwritten by whichever cycle finalized last."""
+    """Frozen manifest — identity, config and operator VISIBILITY INTENT only, never run state: that
+    is per-cycle, or the line's :class:`CampaignResult`."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -105,4 +153,12 @@ class Campaign(StrictModel):
         return CycleHop(campaign_id=self.campaign_id, cycle_id=self.root_cycle_id)
 
 
-__all__ = ["Campaign", "Instrument", "Treatment", "bench_instrument"]
+__all__ = [
+    "ArmCost",
+    "Campaign",
+    "CampaignResult",
+    "Instrument",
+    "Launch",
+    "Treatment",
+    "bench_instrument",
+]

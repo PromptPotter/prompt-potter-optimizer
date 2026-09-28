@@ -10,12 +10,16 @@ from __future__ import annotations
 import operator
 from collections.abc import Iterable, Mapping
 from functools import reduce
-from typing import Literal, NamedTuple, NotRequired, TypedDict, get_args
+from typing import TYPE_CHECKING, Literal, NamedTuple, NotRequired, TypedDict, get_args
 
 from pydantic import ConfigDict, Field, ValidationError
 
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.instrument import MeasurementRole
+
+if TYPE_CHECKING:
+    # Type-only: the record's module imports this one for `TokenUsageKind`.
+    from promptpotter.domain.run_records import TokenUsageRecord
 
 __all__ = [
     "ROLE_SPEND_KIND",
@@ -132,7 +136,7 @@ class TokenAccount(StrictModel):
 
         REPLAYED rows are excluded: their counts are the banked call's, so folding them in reports
         a prefix discount this run never bought. Same exclusion the spend buckets fold under
-        (``live_dashboard/projection.py::_bank_call``). ``None`` where no measured row carried one."""
+        (:meth:`SpendRollup.bank`). ``None`` where no measured row carried one."""
         accounts = [
             a
             for r in rows
@@ -212,7 +216,7 @@ def declare_ceiling(base: SpendCeilings, *layers: BudgetChange) -> SpendCeilings
 
 class SpendBucket(StrictModel):
     """One spend sub-bucket (backend, optimizer-loop, or judge). Mutated only by
-    ``_handle_token_usage``. ``used_usd`` is the BILL; ``incurred_usd`` prices cache hits too."""
+    ``SpendRollup.bank``. ``used_usd`` is the BILL; ``incurred_usd`` prices cache hits too."""
 
     used_usd: float = 0.0
     input_tokens: int = 0
@@ -257,10 +261,50 @@ class SpendRollup(StrictModel):
     # Billed tokens with no resolvable USD rate. >0 means ``total_used_usd`` UNDERSTATES real spend
     # — it is a floor, not the total.
     unpriced_tokens: int = 0
-    # Both are FOLDED beside the USD totals (`live_dashboard/projection.py::_handle_token_usage`), never
-    # derived on read: a `@computed_field` serializes but does not round-trip, and a resume
-    # re-folds this whole state off the ledger (`resolve_resume_state`) before carrying it.
-    # Serving them is also what keeps the gauge and the halt gate one computation.
+    # Both are FOLDED beside the USD totals (`bank`), never derived on read: a `@computed_field`
+    # serializes but does not round-trip, and a resume re-folds this whole state off the ledger
+    # (`resolve_resume_state`) before carrying it. Serving them is also what keeps the gauge and
+    # the halt gate one computation.
+
+    def bank(self, record: TokenUsageRecord) -> None:
+        """One call, at the price it carries, into its bucket and the totals — the ONE fold, so a
+        cycle's live rollup and a ledger re-read of it cannot disagree."""
+        # Through the declared mapping, never a branch here: a two-way `if kind == "optimizer"`
+        # does not fail when a third kind appears, it files it under `backend` in silence.
+        bucket: SpendBucket = getattr(self, TOKEN_KIND_BUCKET[record.kind])
+        usd = record.cost_usd
+        in_tok = int(record.input_tokens)
+        out_tok = int(record.output_tokens)
+        if record.model and not bucket.model:
+            bucket.model = record.model
+
+        if usd is not None:
+            bucket.incurred_usd = round(bucket.incurred_usd + usd, 6)
+        elif in_tok or out_tok:
+            bucket.incurred_unpriced_tokens += in_tok + out_tok
+
+        if not record.cached:
+            bucket.input_tokens += in_tok
+            bucket.output_tokens += out_tok
+            bucket.reasoning_tokens += int(record.reasoning_tokens)
+            # Only the billed side: a reuse-cache hit reached no provider, so counting its
+            # replayed cache tokens would report a prefix holding on calls never made.
+            bucket.cache_read_tokens += int(record.cache_read_tokens)
+            bucket.cache_write_tokens += int(record.cache_write_tokens)
+            if usd is not None:
+                bucket.used_usd = round(bucket.used_usd + usd, 6)
+                bucket.rate_known = True
+            elif in_tok or out_tok:
+                # Billed but with no resolvable cost, so the USD cap cannot see this spend.
+                # Tracked so the dashboard flags the cap as inactive.
+                bucket.unpriced_tokens += in_tok + out_tok
+
+        # Over `buckets`, never a hand-named pair: the budget gate reads `total_used_usd`, so a
+        # bucket left out of this fold is spend the cap cannot see.
+        self.total_used_usd = round(sum(b.used_usd for b in self.buckets), 6)
+        self.total_incurred_usd = round(sum(b.incurred_usd for b in self.buckets), 6)
+        self.total_tokens_used = sum(b.input_tokens + b.output_tokens for b in self.buckets)
+        self.unpriced_tokens = sum(b.unpriced_tokens for b in self.buckets)
 
     @property
     def buckets(self) -> tuple[SpendBucket, ...]:

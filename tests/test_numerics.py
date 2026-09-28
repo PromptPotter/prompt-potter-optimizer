@@ -65,6 +65,7 @@ from promptpotter.application.runner.bench import (
     read_bench,
     score_on_bench,
 )
+from promptpotter.application.runner.campaign_result import bank_campaign_result
 from promptpotter.application.runner.entry import _build_cycle_result
 from promptpotter.application.runner.measurement import measure_population
 from promptpotter.application.runner.round import execute_round, round_plan
@@ -122,11 +123,10 @@ from promptpotter.domain.ruler import (
     is_flat_ruler_id,
     theta_caveat,
 )
-from promptpotter.domain.run_records import CandidateMintedRecord, WallClock
+from promptpotter.domain.run_records import CandidateMintedRecord, TokenUsageRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import extract_item_label, is_graded
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
-from promptpotter.domain.spend import SpendBucket, SpendRollup
 from promptpotter.domain.wounds import ValidationFailure
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -1810,8 +1810,14 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
             cb=_QUIET_CALLBACKS,  # type: ignore[arg-type]
         )
     )
+
+    def banked(origin_pass: BenchPass) -> BenchPasses:
+        return BenchPasses(
+            tolerance=0, origin=origin_pass, reserve_usd=0.0, reserve_tokens=0, selected=None
+        )
+
     passes = asyncio.run(
-        bench_selection(cycle, session, origin=origin_pass, cb=_QUIET_CALLBACKS)  # type: ignore[arg-type]
+        bench_selection(cycle, session, banked=banked(origin_pass), cb=_QUIET_CALLBACKS)  # type: ignore[arg-type]
     )
     bench = headline(_QUIET_CALLBACKS, session, passes)  # type: ignore[arg-type]
     assert (bench.selected.round, bench.selected.sp_hash) == (1, picked.selected_scores[0].sp_hash)
@@ -1896,7 +1902,7 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
         _QUIET_CALLBACKS,  # type: ignore[arg-type]
         session,
         asyncio.run(
-            bench_selection(cycle, session, origin=refused, cb=_QUIET_CALLBACKS)  # type: ignore[arg-type]
+            bench_selection(cycle, session, banked=banked(refused), cb=_QUIET_CALLBACKS)  # type: ignore[arg-type]
         ),
     )
     assert (cut.origin, cut.lift, cut.selected) == (None, None, bench.selected)
@@ -1926,6 +1932,8 @@ def test_bench_passes_read_under_a_second_formula_read_as_a_fresh_pass_under_it(
     points = (origin, good)
     passes = BenchPasses(
         tolerance=0,
+        reserve_usd=0.0,
+        reserve_tokens=0,
         **{
             role: asyncio.run(score_on_bench(session, sp, round_num=r, cb=_QUIET_CALLBACKS))  # type: ignore[arg-type]
             for r, (role, sp) in enumerate(zip(("origin", "selected"), points, strict=True))
@@ -3558,7 +3566,11 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench_under_one_grader(
     every arm's banked passes. A campaign whose rows another seed drew sat a different exam; one
     whose shared origin reads apart on its own rows under that grader met another backend; one kept
     under its own formula is another function's number. A paired difference across any of them
-    still prints an interval and names a winning optimizer. Silent: every number renders."""
+    still prints an interval and names a winning optimizer. Silent: every number renders.
+
+    Each arm is read off its campaign's result, so an arm whose line a rebase handed to a fork is
+    graded and priced as ONE line; read off the root it retired, it had no headline and half a
+    bill."""
     stores = built_stores
     bank = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(12)]
     formula = "env_reward"
@@ -3573,19 +3585,19 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench_under_one_grader(
         scoring: str = formula,
         at: int | None = None,
         incurred: float = 0.2,
-        billed: float | None = None,
         loop: float = 0.05,
-        wall: float = 100.0,
+        wall: int = 100,
+        rebased: bool = False,
     ) -> Any:
         split = DatasetSplit(bench=6, seed=seed)
         partition = partition_bank(bank, split)
-        hop = CycleHop(campaign_id=cid, cycle_id=f"cycle_{cid}")
+        root = CycleHop(campaign_id=cid, cycle_id=f"cycle_{cid}")
         stores.campaigns.create_campaign(
             Campaign(
                 campaign_id=cid,
                 dataset_name="ds",
                 created_at=f"2026-09-26T00:00:{n:02d}Z",
-                root_cycle_id=hop.cycle_id,
+                root_cycle_id=root.cycle_id,
                 config={
                     "optimization": {
                         "optimizer": cid.split("_")[0],
@@ -3596,12 +3608,17 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench_under_one_grader(
                 },
             )
         )
-        stores.campaigns.create(hop, {})
+        hop = CycleHop(campaign_id=cid, cycle_id=f"{root.cycle_id}_fork_r1") if rebased else root
         panel = [measurement(s.id, 0.5, query=s.query) for s in partition.search[:4]]
-        stores.campaigns.save_round_file(
-            hop, round_result(0, candidates_scored=1, all_candidate_results={"c0": panel})
-        )
-        stores.campaigns.write_bank_partition(hop, partition)
+        # A rebase fork lifts its parent's origin round and redraws the one partition.
+        for cycle in {root, hop}:
+            stores.campaigns.create(cycle, {})
+            stores.campaigns.save_round_file(
+                cycle, round_result(0, candidates_scored=1, all_candidate_results={"c0": panel})
+            )
+            stores.campaigns.write_bank_partition(cycle, partition)
+        if rebased:
+            stores.campaigns.mark_superseded(root, hop.cycle_id)
         passes = {}
         for role, level in (("origin", origin), ("selected", selected)):
             # The origin is ONE individual every campaign sends, filed under one content-addressed
@@ -3632,28 +3649,39 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench_under_one_grader(
                 scorer_id=scoring,
             )
         hour = n if at is None else at
-        final = {
-            "bench_passes": BenchPasses(tolerance=0, **passes).model_dump(mode="json"),
-            "started_at": f"2026-09-26T{hour:02d}:00:00Z",
-            "finished_at": f"2026-09-26T{hour:02d}:30:00Z",
-            "wall_clock": WallClock(elapsed_s=wall).model_dump(),
-        }
-        stores.campaigns.update(hop, {"final": final})
-        spend = SpendRollup(
-            loop=SpendBucket(used_usd=loop, incurred_usd=loop),
-            backend=SpendBucket(incurred_usd=incurred - loop - 0.05),
-            bench=SpendBucket(incurred_usd=0.05),
-            total_used_usd=incurred if billed is None else billed,
-            total_incurred_usd=incurred,
-        )
-        dashboard = CycleLayout(stores.campaigns.cycle_dir(hop)).dashboard
-        dashboard.write_text(json.dumps({"spend": spend.model_dump()}), encoding="utf-8")
+        started = f"2026-09-26T{hour:02d}:00:00Z"
+        # The optimizer billed on the root; the fork a rebase handed the line to replayed its
+        # cells and graded the pick, which the chain's cost counts once, on whichever cycle paid.
+        calls = [("optimizer", loop, False), ("backend", incurred - loop - 0.05, True)]
+        for kind, usd, cached in [*calls, ("bench", 0.05, True)]:
+            ledger = root if kind == "optimizer" else hop
+            CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(ledger))).append(
+                TokenUsageRecord(
+                    kind=kind,
+                    node=kind,
+                    input_tokens=10,
+                    output_tokens=5,
+                    cost_usd=usd,
+                    cached=cached,
+                    timestamp=started,
+                )
+            )
+        # A cycle the line has moved past banks nothing — its result is the successor's.
+        for holder in (hop, root) if rebased else (hop,):
+            bank_campaign_result(
+                stores,
+                holder,
+                started_at=started,
+                finished_at=f"2026-09-26T{hour:02d}:{wall // 60:02d}:{wall % 60:02d}Z",
+                optimizer_phases=frozenset(),
+                bench=BenchPasses(tolerance=0, reserve_usd=0.05, reserve_tokens=0, **passes),
+            )
+        banked = stores.campaigns.load_result(cid)
+        assert banked is not None and banked.cycle_id == hop.cycle_id
         return SubjectSpec("campaign", cid)
 
-    potter = campaign("potter_a", 1, seed=0, selected=0.5)
-    capo = campaign(
-        "capo_b", 2, seed=0, selected=0.7, incurred=0.3, billed=0.1, loop=0.15, wall=50.0
-    )
+    potter = campaign("potter_a", 1, seed=0, selected=0.5, rebased=True)
+    capo = campaign("capo_b", 2, seed=0, selected=0.7, incurred=0.3, loop=0.15, wall=50)
     h2h = subject_evidence(stores, [potter, capo]).head_to_head
     assert h2h is not None and h2h.verdict is True
     assert h2h.scorer_id == auto_scorer_id(formula, None, judge_instrument=None)
@@ -3661,10 +3689,11 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench_under_one_grader(
     assert (pair.campaign_a, pair.campaign_b, pair.n_rows) == ("potter_a", "capo_b", 6)
     assert pair.shift == pytest.approx(0.2) and pair.ci_lo is not None and pair.ci_lo > 0.0
     # Priced against the oldest run on INCURRED spend: capo replayed cells potter paid for, so its
-    # bill, a third of what its search consumed, prices arriving second rather than its optimizer.
+    # bill, half of what its campaign consumed, prices arriving second rather than its optimizer.
     assert h2h.ratio_reference == "potter_a"
-    row = h2h.rows[1]
-    assert (row.incurred_usd_ratio, row.loop_incurred_usd_ratio, row.wall_clock_ratio) == (
+    potter_row, row = h2h.rows
+    assert potter_row.spend is not None and potter_row.spend.total_incurred_usd == 0.2
+    assert (row.incurred_usd_ratio, row.loop_incurred_usd_ratio, row.worked_ratio) == (
         pytest.approx(1.5),
         pytest.approx(3.0),
         pytest.approx(0.5),
@@ -4590,7 +4619,7 @@ def test_cached_calls_are_metered_but_not_billed(tmp_path: Path) -> None:
     from promptpotter.infrastructure.projections.live_dashboard.projection import (
         LiveDashboardProjection,
     )
-    from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
+    from promptpotter.infrastructure.store.layout import cycle_dir_for
 
     cycle_dir = CycleDir(cycle_dir_for(tmp_path, CycleHop(campaign_id="c1", cycle_id="cyc1")))
     view = LiveDashboardProjection(

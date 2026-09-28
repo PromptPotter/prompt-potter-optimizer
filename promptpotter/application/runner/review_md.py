@@ -38,7 +38,9 @@ def render_review_md(
     context_object: list[str] | None = None,
     accuracy_ceiling: float | None,
     optimizer: SelectedOptimizer,
+    bench: BenchScore | None,
 ) -> str:
+    """*bench* is the campaign's headline where this cycle answers for its result."""
     audits = list(round_audits or [None] * len(rounds))
     if len(audits) < len(rounds):
         audits.extend([None] * (len(rounds) - len(audits)))
@@ -65,7 +67,7 @@ def render_review_md(
     halt = _halt_info(index, rounds)
     parts: list[str] = []
     parts += _render_header(index, final, stats, halt)
-    parts += _render_bench(final)
+    parts += _render_bench(final, bench)
     # Counted here and not read off `final`: this renders at every round close, long before
     # finalize banks a `final` block. Only the minutes need the banked clock.
     clocks = round_clocks(rounds, accuracy_ceiling=accuracy_ceiling)
@@ -212,19 +214,19 @@ def _bench_line(name: str, reading: BenchReading | None, bench: BenchScore) -> s
     )
 
 
-def _render_bench(final: dict[str, Any]) -> list[str]:
+def _render_bench(final: dict[str, Any], bench: BenchScore | None) -> list[str]:
     """The headline, above everything the optimizer measured on the rows that chose its winner.
     Silent while the cycle runs; once it ends, an absent score is said rather than left blank."""
     if not final:
         return []
-    if final.get("bench") is None:
+    if bench is None:
         return [
             "## Bench score — the headline",
             "",
-            "None: the cycle stopped before its selection could be graded.",
+            "None: the cycle stopped before its selection was graded, or it ran beside the "
+            "campaign's line, whose result is the one graded.",
             "",
         ]
-    bench = BenchScore.model_validate(final["bench"])
     lift = (
         "—"
         if bench.lift is None

@@ -1045,12 +1045,8 @@ export interface CycleListEntry {
    * 'terminal' pairs with `status` for the reason label. */
   run_phase: 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
   /** The optimizer's own selection score — what it KEPT, read on the rows that
-   * chose it. Never the headline; `bench_score` is. */
+   * chose it. Never the headline; the campaign's `CampaignSummary.bench` is. */
   best_accuracy: number | null;
-  /** The headline: the selected result and the origin scored on the held-out bench
-   * set under the campaign's formula. Null until the cycle ends, and on a
-   * campaign whose `dataset_split` holds nothing out. */
-  bench_score: BenchScore | null;
   /** Round 0's accuracy — the origin's measurement, derived from rounds[] (no
    * stored copy). Null until round 0 lands. */
   origin_accuracy: number | null;
@@ -1160,6 +1156,13 @@ export interface CampaignSummary {
    * the bounds they were admitted on — unknown, never spent. Its share of
    * `QuotaStatus.spend_unreported_usd`. */
   spend_unreported_usd: number;
+  /** The headline (`architecture.md` § The bench score is not an optimizer's
+   * selection), read off the campaign's result (`result.json`) under the
+   * formula its line runs — whichever cycle rebases handed the line to.
+   * `selected` is null until the line grades its pick. Null until the line
+   * first banks one, and where the split holds nothing out it says so in
+   * `missing_reason`. */
+  bench: BenchScore | null;
   /** What the ROOT course runs with — a second transport of the answer `GET
    * /campaigns/{id}/pipeline` gives at the root, never a second source. Null
    * when the root pipeline did not resolve. `max_rounds` is the DECLARED
@@ -1471,11 +1474,12 @@ export interface HeadToHeadRow {
   bench_set: Instrument | null;
   comparable: boolean | null;
   spend: SpendRollup | null;
-  wall_clock_s: number | null;
+  calls: number | null;
+  worked_s: number | null;
   rounds: number;
   incurred_usd_ratio: number | null;
   loop_incurred_usd_ratio: number | null;
-  wall_clock_ratio: number | null;
+  worked_ratio: number | null;
   lift_per_incurred_usd: number | null;
   concurrent_with: string[];
   bench_reads: number | null;
@@ -2126,6 +2130,13 @@ export interface CampaignDetailResponse {
    * the bounds they were admitted on — unknown, never spent. Its share of
    * `QuotaStatus.spend_unreported_usd`. */
   spend_unreported_usd: number;
+  /** The headline (`architecture.md` § The bench score is not an optimizer's
+   * selection), read off the campaign's result (`result.json`) under the
+   * formula its line runs — whichever cycle rebases handed the line to.
+   * `selected` is null until the line grades its pick. Null until the line
+   * first banks one, and where the split holds nothing out it says so in
+   * `missing_reason`. */
+  bench: BenchScore | null;
   /** What the ROOT course runs with — a second transport of the answer `GET
    * /campaigns/{id}/pipeline` gives at the root, never a second source. Null
    * when the root pipeline did not resolve. `max_rounds` is the DECLARED

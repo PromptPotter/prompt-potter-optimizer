@@ -19,7 +19,6 @@ from promptpotter.application.optimizer_manifest import (
     resolve_optimizer,
 )
 from promptpotter.config.settings import settings
-from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_schema import (
     ModelCapability,
@@ -145,13 +144,7 @@ class CycleListEntry(StrictModel):
     best_accuracy: float | None = Field(
         default=None,
         description="The optimizer's own selection score — what it KEPT, read on the rows that "
-        "chose it. Never the headline; `bench_score` is.",
-    )
-    bench_score: BenchScore | None = Field(
-        default=None,
-        description="The headline: the selected result and the origin scored on the held-out "
-        "bench set under the campaign's formula. Null until the cycle ends, and on a campaign "
-        "whose `dataset_split` holds nothing out.",
+        "chose it. Never the headline; the campaign's `CampaignSummary.bench` is.",
     )
     origin_accuracy: float | None = Field(
         default=None,

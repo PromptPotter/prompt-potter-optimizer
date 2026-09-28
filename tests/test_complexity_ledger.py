@@ -175,7 +175,10 @@ LEDGER_BASELINE = {
     # +1: `optimizers/potter/records.py` — potter's payload models and decision kinds, out of
     # `domain/`, which enumerated every optimizer's. Apart from `state.py`, which imports the
     # dispatch layout that imports `L1Layout`.
-    "modules": 388,
+    # +1: `runner/campaign_result.py` — the campaign's result, which only the cycle holding its
+    # line writes, and the readings off it. Not `bench.py`'s: a pass and its reading are that
+    # module's subject, while the result also folds the line's cost off every ledger on it.
+    "modules": 389,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     # +2: `application/optimizers/__init__.py` (the member registry) and its `potter/`, empty.
@@ -694,7 +697,9 @@ LEDGER_BASELINE = {
     # and rows banked under one formula read under another unlike a fresh run (test_integrity § 1).
     # +1: bench passes read under a second formula unlike passes taken fresh under it — a headline
     # kept from the first, read in its place, is paired as the second's (test_numerics § 4).
-    "test_functions": 227,
+    # +1: a resumed campaign clocked off its last launch with the origin gate counted as work, and
+    # its origin's bench pass re-sent per launch — both priced into a head-to-head (test_resume).
+    "test_functions": 228,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -829,8 +834,12 @@ LEDGER_BASELINE = {
     # +1: `BenchScore.scorer_id` and `HeadToHead.scorer_id` NET of `BenchReading.run_id`. A served
     # headline is a cache of one reading of the passes' facts, so it names the grader it was read
     # under, and the head-to-head names the ONE grader every arm was read under. The run id is a
-    # fact, and moved to the pass (`index.json::final.bench_passes`), which no browser reads.
-    "served_fields": 741,
+    # fact, and moved to the banked `BenchPass`, which no browser reads.
+    # +2: `CampaignSummary.bench` (and its `CampaignDetailResponse` twin) and `HeadToHeadRow.calls`,
+    # NET of `CycleListEntry.bench_score`. The headline is the CAMPAIGN's, read off `result.json`,
+    # so a line a rebase ended on a fork keeps it; a per-cycle copy served the retired root's none.
+    # `wall_clock_*` became `worked_*`: the line's launches less gate and unworked time.
+    "served_fields": 743,
 }
 
 

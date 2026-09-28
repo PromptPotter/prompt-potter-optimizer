@@ -12,6 +12,7 @@ from promptpotter.application.intelligence.hard_sample_sorter import (
     build_hard_samples_artifact,
     build_hard_samples_artifact_from_observations,
 )
+from promptpotter.application.runner.campaign_result import read_cycle_bench
 from promptpotter.application.runner.review_md import render_review_md
 from promptpotter.application.views.render.markdown import to_markdown
 from promptpotter.application.views.view_models import (
@@ -394,5 +395,7 @@ def write_review_md(session: Session, cycle: Cycle) -> None:
             context_object=context_object,
             accuracy_ceiling=cycle.config.accuracy_ceiling,
             optimizer=cycle.optimizer,
+            # Read only once the cycle has ended: nothing renders the headline before then.
+            bench=read_cycle_bench(session.store, session.hop) if "final" in index else None,
         )
         write_text(CycleLayout(cycle_dir).review_md, content)
