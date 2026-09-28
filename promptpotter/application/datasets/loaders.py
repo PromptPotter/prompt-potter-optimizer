@@ -287,7 +287,6 @@ def build_dataset_run_data(
     name: str,
     content_hash: str,
     search_point: JobSearchPoint,
-    scores: dict[str, Any],
     results: list[Any],
     *,
     dataset_name: str | None,
@@ -295,8 +294,8 @@ def build_dataset_run_data(
     pipeline_schema: PipelineSchema,
     human_intervened: bool = False,
 ) -> dict[str, Any]:
-    """Measurement-batch dict for ``Stores.archive.save()``. ``pipeline_schema`` is REQUIRED: it picks the
-    ``sp_hash`` algorithm and supplies ``node_configs``, so a batch without one gets a second identity."""
+    """Measurement-batch dict for ``Stores.archive.save()``, scoreless. ``pipeline_schema`` is REQUIRED: it
+    picks the ``sp_hash`` algorithm and supplies ``node_configs``, so a batch without one gets a second identity."""
 
     rendered_prompt = search_point.render()
     sp_h = search_point.sp_hash(pipeline_schema)
@@ -311,8 +310,7 @@ def build_dataset_run_data(
         "rendered_prompt_hash": hashlib.sha256(
             rendered_prompt.encode(),
         ).hexdigest()[:HASH_TRUNCATE],
-        "item_count": scores["total"],
-        "scores": scores,
+        "item_count": len(measurements),
         "source": source,
         "provenance": provenance.as_dict(),
         "created_at": utcnow_iso(),

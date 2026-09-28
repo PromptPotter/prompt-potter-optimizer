@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -195,14 +193,6 @@ class Session:
     spend_used: Callable[[], float] | None = None
 
 
-def _manifest_hashes(config: CampaignConfig) -> dict[str, str]:
-    """An audit JOIN KEY, not the drift gate: drift is asked per ROUND, where the answer can name the
-    round and fork at it. Not part of ``campaign_id``, which is random per ``new``."""
-    selected = select_optimizer(config.optimization)
-    blob = json.dumps(selected.prompt_hashes(), sort_keys=True)
-    return {selected.name: hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]}
-
-
 def new_session_state(
     *,
     init_params: dict[str, Any],
@@ -284,7 +274,7 @@ def auto_mint_session(
             created_at=now,
             root_cycle_id=root_cycle,
             root_content_hash=target_hash,
-            optimizer_manifest_hashes=_manifest_hashes(campaign_config),
+            treatment=select_optimizer(campaign_config.optimization).treatment(),
             backend_id=session.backend_id,
             backend_type=backend_type_of_dataset(session.store, dataset_name),
             owner_user_id=str(session.identity.user_id),
@@ -406,7 +396,9 @@ def finalize_checkin_to_active(
         hop.campaign_id,
         {
             "root_content_hash": target_hash,
-            "optimizer_manifest_hashes": _manifest_hashes(campaign_config),
+            "treatment": select_optimizer(campaign_config.optimization)
+            .treatment()
+            .model_dump(mode="json"),
             "backend_id": session.backend_id,
             # Re-read rather than trusted from the skeleton: the check-in wrote the slug's
             # `pipeline.yaml` between the two, and the operator may have picked a different

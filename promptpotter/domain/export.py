@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.bench import BenchScore
+from promptpotter.domain.campaign import Treatment
 from promptpotter.domain.opt_search_point import FEW_SHOT_BLOCK, PromptTemplate
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.results import RoundResult
@@ -15,7 +16,7 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.strict_model import StrictModel
 
-EXPORT_ARTIFACT_VERSION = 2
+EXPORT_ARTIFACT_VERSION = 3
 """Bumped when a reader written against the old shape would MISREAD the new one — not when a
 field is added. :func:`parse_prompt_export` refuses anything else."""
 
@@ -86,8 +87,8 @@ class PromptExport(StrictModel):
     # The rows, order-independent (``shared/hashing.py::dataset_hash``). An exported fitness is
     # only as trustworthy as the identity of what it was measured on.
     dataset_hash: str
-    # The optimizer manifests that produced this prompt — a different one is a different search.
-    optimizer_manifest_hashes: dict[str, str]
+    # The optimizer that produced this prompt — a different one is a different search.
+    treatment: Treatment | None
     stop_reason: str
     finished_at: str
     # Named fields, restored by ``template()`` — the round document's dict, NOT
@@ -141,7 +142,7 @@ def build_prompt_export(
     cycle_id: str,
     dataset_name: str,
     dataset_hash: str,
-    optimizer_manifest_hashes: dict[str, str],
+    treatment: Treatment | None,
     stop_reason: str,
     finished_at: str,
     formula: str | None,
@@ -173,7 +174,7 @@ def build_prompt_export(
         cycle_id=cycle_id,
         dataset_name=dataset_name,
         dataset_hash=dataset_hash,
-        optimizer_manifest_hashes=optimizer_manifest_hashes,
+        treatment=treatment,
         stop_reason=stop_reason,
         finished_at=finished_at,
         prompt_fields=fields,

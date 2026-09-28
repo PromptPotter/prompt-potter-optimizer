@@ -15,13 +15,12 @@ from typing import TYPE_CHECKING, Any, cast
 from promptpotter.application.datasets.loaders import build_dataset_run_data
 from promptpotter.application.run_phase_control import pause_requested
 from promptpotter.application.scoring.classification import is_deprecated
-from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.query_loop import QueryLoopState, Walk, run_walks
 from promptpotter.application.scoring.selection import mean_fitness_ci
 from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE, grade_run, meets_grade
 from promptpotter.domain.results import ArmOutcome
-from promptpotter.domain.scoring import CellScorer, QueryMeasurement
+from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.spend import ROLE_SPEND_KIND
 from promptpotter.domain.validators import StopRule, StopSignal
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
@@ -55,10 +54,10 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "SCORING_ERROR_ABORT",
     "ScoredWalk",
+    "archivable_priors",
     "close_walk",
     "merge_with_unprocessed_priors",
     "open_walk",
-    "rescored_prior_tail",
     "score_search_point",
 ]
 
@@ -78,24 +77,18 @@ class ScoredWalk:
     run_id: str
 
 
-def rescored_prior_tail(
+def archivable_priors(
     *,
     cached_sample_results: dict[int, QueryMeasurement],
     dataset_sample_ids: set[int],
     deprecated_samples: dict[int, QueryMeasurement],
-    scorer: CellScorer | None,
 ) -> dict[int, QueryMeasurement]:
-    """The cache priors this run may archive without re-measuring, rescored ONCE. The active scorer
-    is fixed for one call, so rescoring per prior per sample was O(samples²) for the same answers."""
-    tail: dict[int, QueryMeasurement] = {}
-    for sid, prior in cached_sample_results.items():
-        if sid not in dataset_sample_ids or sid in deprecated_samples:
-            continue
-        entry = cast(QueryMeasurement, dict(prior))
-        if scorer is not None:
-            rescore_results([cast("dict[str, Any]", entry)], scorer)
-        tail[sid] = entry
-    return tail
+    """The cache priors this run may archive without re-measuring."""
+    return {
+        sid: cast(QueryMeasurement, dict(prior))
+        for sid, prior in cached_sample_results.items()
+        if sid in dataset_sample_ids and sid not in deprecated_samples
+    }
 
 
 def merge_with_unprocessed_priors(
@@ -398,11 +391,10 @@ def open_walk(
         )
         return meets_grade(graded.grade, REUSABLE_MIN_GRADE)
 
-    prior_tail = rescored_prior_tail(
+    prior_tail = archivable_priors(
         cached_sample_results=cached_sample_results,
         dataset_sample_ids=dataset_sample_ids,
         deprecated_samples=deprecated_samples,
-        scorer=session.scoring.scorer,
     )
 
     # Whether the run's log is open, how many of ``results`` are already appended to it, and
@@ -420,11 +412,7 @@ def open_walk(
         ci_lo, ci_hi = mean_fitness_ci(rows, grade="fitness")
         return {**scores, "mean_fitness_ci_lo": ci_lo, "mean_fitness_ci_hi": ci_hi}
 
-    def _save_run(
-        results: list[QueryMeasurement],
-        scores: dict[str, Any],
-        banked: Sequence[QueryMeasurement] = (),
-    ) -> None:
+    def _save_run(results: list[QueryMeasurement], banked: Sequence[QueryMeasurement] = ()) -> None:
         nonlocal opened, appended, priors_appended
         if not (store and backend_id):
             return
@@ -443,7 +431,6 @@ def open_walk(
             run_label,
             content_hash,
             search_point,
-            scores,
             merged,
             dataset_name=session.dataset_name,
             source=source,
@@ -451,7 +438,7 @@ def open_walk(
             human_intervened=session.human_intervened,
         )
         # The cursor is over ``results``, not "the last row": a cache hit appends a
-        # MATERIALIZED row (rescored, recovered — which can cost real backend calls) without
+        # MATERIALIZED row (graded, recovered — which can cost real backend calls) without
         # persisting, so a save has to sweep up everything the walk has produced since the
         # last one. The priors go down once — ``merged[len(results):]`` is exactly the ones
         # the walk has not reached; a sample walked later supersedes its own prior by
@@ -471,14 +458,10 @@ def open_walk(
         )
 
     def _persist_fresh(results: list[QueryMeasurement]) -> dict[str, Any]:
-        """Persist the walk's new rows; return the candidate's running fitness. The ARCHIVED score is
-        the merged fold, the running one is over ``results`` alone — the candidate's own, what PoBB reads."""
-        running = _composite(results)
-        if not (store and backend_id):
-            return running
-        merged = merge_with_unprocessed_priors(results, prior_tail)
-        _save_run(results, running if merged is results else _composite(merged))
-        return running
+        """Persist the walk's new rows; return the candidate's running fitness over ``results``
+        alone — the candidate's own, what PoBB reads."""
+        _save_run(results)
+        return _composite(results)
 
     def _bank(results: list[QueryMeasurement], rows: list[QueryMeasurement]) -> None:
         """Rows back and not yet taken, kept as priors of this run: the walk resumed from a stop
@@ -487,10 +470,10 @@ def open_walk(
             return
         for row in rows:
             prior_tail[row["sample_id"]] = row
-        _save_run(results, _composite(merge_with_unprocessed_priors(results, prior_tail)), rows)
+        _save_run(results, rows)
 
     def _record_run(results: list[QueryMeasurement], scores: dict[str, Any]) -> None:
-        _save_run(results, scores)
+        _save_run(results)
         if store:
             archive_queries.compact_measurement_run(store, run_id)
         _emit_dataset_run(
@@ -543,8 +526,8 @@ def close_walk(walk: Walk) -> ScoredWalk:
     results = outcome.results
     scores = walk.ctx.running_scores(results)
     if outcome.stop_reason == "skip":
-        # Mark the partial as an operator early-abort so the candidate report and
-        # measurement record carry the provenance (the cycle is babysat).
+        # Mark the partial as an operator early-abort so the candidate report carries the
+        # provenance (the cycle is babysat).
         scores["partial_reason"] = "skip"
     walk.ctx.record_run(results, scores)
     stopped = None if len(results) == walk.n else outcome.stop_reason

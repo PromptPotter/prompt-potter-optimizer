@@ -426,7 +426,7 @@ def build_bundle(
 def fingerprinted_modules() -> tuple[ModuleType, ...]:
     """The dispatch modules whose source shapes an optimizer prompt, in digest order; outside them
     a definition says so itself (``shapes_optimizer_prompt``). The panels' text is code, so it sits
-    outside ``_identity_config``'s manifest revision; its estimator-side twin is
+    outside the manifest half of potter's ``Treatment``; its estimator-side twin is
     ``connectors/promptpotter.py::measurement_modules``.
 
     ``compose`` is hashed beside the renderers because it decides which panels a prompt receives AT

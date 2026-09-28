@@ -1,15 +1,16 @@
-"""Every CELL a scope holds — the store walks behind `GET /datasets/{name}/cells`.
+"""Every CELL a cycle or campaign holds — the store walks behind `GET /datasets/{name}/cells`.
 
-Three scopes, three sources, one shape (`domain/cells.py`):
+Two scopes, one source each, one shape (`domain/cells.py`):
 
 - **cycle** — the round files (`rounds/round_*.json::all_candidate_results`, named by each round's
   `candidate_scores`), plus the round still being measured off `dashboard.json`, whose round file
   lands only at its close. Merged HERE and nowhere else, so the live round is counted once.
 - **campaign** — every cycle of one campaign, pooled.
-- **dataset** — the archive runs filed under the dataset, whatever campaign paid for them.
 
-Candidates come back in chronological order and cells in candidate order; the router lays the
-sample ranking over that. A read model — it decides nothing."""
+The DATASET scope reads the archive, which banks no grade, so it grades there first — it lives
+with the grading, in `application/scoring/cells.py`. Candidates come back in chronological order
+and cells in candidate order; the router lays the sample ranking over that. A read model — it
+decides nothing."""
 
 from __future__ import annotations
 
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
 
     from promptpotter.infrastructure.store.stores import Stores
 
-__all__ = ["ScopeCells", "campaign_cells", "cycle_cells", "dataset_cells"]
+__all__ = ["ScopeCells", "campaign_cells", "cycle_cells", "row_cell"]
 
 _PREDICTED_CHARS = 120
 
@@ -40,8 +41,8 @@ def _trim(text: object) -> str:
     return t if len(t) <= _PREDICTED_CHARS else t[: _PREDICTED_CHARS - 1] + "…"
 
 
-def _row_cell(item: dict[str, Any], *, run_id: str, key: str) -> CellRow | None:
-    """A banked measurement row as a cell — the shape both the round files and the archive hold."""
+def row_cell(item: dict[str, Any], *, run_id: str, key: str) -> CellRow | None:
+    """A GRADED measurement row as a cell — a round file's, or an archive row its reader graded."""
     sid = item.get("sample_id")
     if not isinstance(sid, int):
         return None
@@ -159,7 +160,7 @@ def cycle_cells(stores: Stores, hop: CycleHop, wanted: set[int] | None = None) -
                     continue
                 if wanted is not None and item.get("sample_id") not in wanted:
                     continue
-                cell = _row_cell(item, run_id=run_id, key=key)
+                cell = row_cell(item, run_id=run_id, key=key)
                 if cell is not None:
                     cells.append(cell)
     live_candidates, live_cells = _live_cells(cycle_dir, hop.cycle_id, closed, wanted)
@@ -178,38 +179,4 @@ def campaign_cells(stores: Stores, campaign_id: str, wanted: set[int] | None = N
         )
         candidates.extend(cands)
         cells.extend(rows)
-    return candidates, cells
-
-
-def dataset_cells(
-    stores: Stores, *, dataset_name: str, wanted: set[int] | None = None
-) -> ScopeCells:
-    """Every archive run filed under *dataset_name*, oldest first. *dataset_name* is REQUIRED: a
-    ``sample_id`` names a sample only within one dataset."""
-    runs: list[tuple[str, str, dict[str, Any]]] = []
-    for entry in stores.archive.list_all(dataset_name=dataset_name):
-        run_id = entry["run_id"]
-        detail = stores.archive.load_by_id(run_id)
-        if detail is not None:
-            runs.append((str(detail.get("created_at", "")), run_id, detail))
-    runs.sort(key=lambda r: (r[0], r[1]))
-    candidates: list[CellCandidate] = []
-    cells: list[CellRow] = []
-    for created_at, run_id, detail in runs:
-        candidates.append(
-            CellCandidate(
-                key=run_id,
-                label=str(detail.get("name") or run_id[:12]),
-                run_id=run_id,
-                created_at=created_at or None,
-            )
-        )
-        for item in detail.get("measurements", []):
-            if not isinstance(item, dict):
-                continue
-            if wanted is not None and item.get("sample_id") not in wanted:
-                continue
-            cell = _row_cell(item, run_id=run_id, key=run_id)
-            if cell is not None:
-                cells.append(cell)
     return candidates, cells

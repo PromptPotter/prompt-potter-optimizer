@@ -366,7 +366,8 @@ components:
       description: |
         `PhaseRecord.payload.view` of `phase: bench`, `event: scored` — the
         bench pass graded the selection. `bench` is the `BenchScore` the
-        OpenAPI file declares; the dashboard serves it as `bench_score`.
+        OpenAPI file declares, the run's reading of its passes stamped with its
+        `scorer_id`; the dashboard serves it as `bench_score`.
       required: [bench]
       properties:
         bench: { type: object, additionalProperties: true }

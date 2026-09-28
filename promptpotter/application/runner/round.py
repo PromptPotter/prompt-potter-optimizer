@@ -677,7 +677,7 @@ async def close_round(
     if cycle.axes and session.store:
         cycle.axes.refresh(
             session.store,
-            scorer=session.scoring.scorer,
+            scorer=session.scoring.require_scorer(),
             scorer_id=session.scoring.scorer_id,
             dataset_name=session.dataset_name,
         )

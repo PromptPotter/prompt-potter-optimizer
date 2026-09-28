@@ -168,7 +168,7 @@ Four things that follow:
   un-believe it.
 - **Do not reach the same place by declaring the node a `RANKER`.** That switches on
   `candidate_recall`, which walks a ranking for a ground truth the backend does not have and
-  banks the resulting `0.0` into `rounds/round_NNNN.json` and `index.jsonl::scores`.
+  banks the resulting `0.0` into `rounds/round_NNNN.json`.
 - **A label-comparing formula is refused at compile** (`formula/compiler.py`), because
   `label_match` strips both sides and scores an empty answer against an empty label as a PERFECT
   `1.0` — and that is the launcher's own default formula shape.

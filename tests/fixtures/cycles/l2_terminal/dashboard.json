@@ -805,6 +805,7 @@
   "current_acc": 0.75,
   "bench_score": {
     "bench_size": 10,
+    "scorer_id": "auto_5d0c7a19e2",
     "origin": {
       "round": 0,
       "sp_hash": "c274cdc71db2012c",
@@ -812,9 +813,7 @@
       "composite_fitness": 0.3729087568891611,
       "ci_lo": 0.16991794712615302,
       "ci_hi": 0.5758995666521691,
-      "n_scored": 10,
-      "run_id": "bench_33104ad69f08cf1b9be05c6a",
-      "stopped": null
+      "n_scored": 10
     },
     "selected": {
       "round": 4,
@@ -823,9 +822,7 @@
       "composite_fitness": 0.9301075268817204,
       "ci_lo": 0.881108427268219,
       "ci_hi": 0.9791066264952217,
-      "n_scored": 10,
-      "run_id": "bench_2fce101d6ae1d2a463e35b2a",
-      "stopped": null
+      "n_scored": 10
     },
     "missing_reason": null,
     "lift": 0.5571987699925594,

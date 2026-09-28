@@ -276,19 +276,14 @@ class OptimizerRuntime(Protocol):
         self, session: Session, config: CampaignConfig, origin_results: list[dict[str, Any]]
     ) -> WorkingState: ...
 
-    def prompt_hashes(self, selected: SelectedOptimizer) -> dict[str, str]:
-        """Per llm node of ``selected``: what decides the text it sends. A round banks these, and a
-        resume diverges at the first round whose stamp the optimizer loaded now does not match."""
-        ...
-
     def complete(self) -> None:
         """Build the tables its members read, raising on a half-wired one — run where the bench
         completes every registry (``wiring.py::complete_registries``), never at import."""
         ...
 
     def source_digest(self, *covered: ModuleType) -> str:
-        """The code that decides what its prompts SAY, digested; ``covered`` are modules another
-        digest already hashes. An L4 inner cell's identity folds it in."""
+        """The code that decides what its prompts SAY, digested — ``Treatment.source``;
+        ``covered`` are modules another digest already hashes."""
         ...
 
     def override_param_types(self, node: str) -> dict[str, str]:
@@ -299,7 +294,7 @@ class OptimizerRuntime(Protocol):
     def override_levers(self, node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
         """The levers of one node's L4 override this optimizer resolves itself — beyond the prompt
         fields, schema renames and model the bench resolves — as they RESOLVE, for the inner cell's
-        identity. ``{}`` for a node its manifest does not declare, or where none is set."""
+        identity and each round's stamp. ``{}`` for a node its manifest does not declare, or unset."""
         ...
 
     @property

@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "compute_composite_fitness",
+    "fold_cells",
     "matched_parent_stats",
     "value_with_mask_applied",
 ]
@@ -77,6 +78,36 @@ def _channel_means(scoreable: list[QueryMeasurement]) -> dict[str, float]:
 # ---------------------------------------------------------------------------
 
 
+def _composite_of(scoreable: list[QueryMeasurement]) -> float:
+    if not scoreable:
+        # No measurement — an operator skip at query 0/N, a round whose every sample was excluded,
+        # or one that errored throughout — has no fitness. Record the 0.0 floor (``total`` is
+        # already 0, the no-evidence marker election reads). The floor is the COMPOSITE's alone:
+        # `accuracy` stays whatever `compute_accuracy` answered, which is `None` where nothing was
+        # measured, so the elected quantity keeps its floor while the reported rate never claims a
+        # 0% nobody read.
+        return 0.0
+    # The SAME denominator ``accuracy`` is read against, so the two cannot describe different
+    # populations. An unstamped row is an absence, never a zero: it halts.
+    unstamped = sum(1 for r in scoreable if r.get("objective") is None)
+    if unstamped:
+        raise ScoringTermMissingError(
+            f"{unstamped} of {len(scoreable)} scoreable rows carry no 'objective' — they never "
+            "passed through `rescore_results`, so what they were worth was never computed. "
+            "That is missing data, not a fitness of zero."
+        )
+    return sum(float(r["objective"]) for r in scoreable) / len(scoreable)
+
+
+def fold_cells(results: list[QueryMeasurement]) -> dict[str, Any]:
+    """The schema-free half of :func:`compute_composite_fitness` — the evidence counts,
+    ``accuracy`` and ``composite_fitness`` — for a reader holding graded rows and no schema."""
+    return {
+        **_compute_accuracy(results),
+        "composite_fitness": _composite_of(scoreable_rows(results)),
+    }
+
+
 def compute_composite_fitness(
     results: list[QueryMeasurement],
     pipeline_schema: PipelineSchema,
@@ -92,32 +123,11 @@ def compute_composite_fitness(
     # rather than a second spelling of it. That makes the mask the PROJECTION of the elected
     # formula, exact only where it is linear (`operations/mask-projection.md`).
     evaluator_values.update(_channel_means(scoreable))
-
-    if not scoreable:
-        # No measurement — an operator skip at query 0/N, a round whose every sample was excluded,
-        # or one that errored throughout — has no fitness. Record the 0.0 floor (``total`` is
-        # already 0, the no-evidence marker election reads). The floor is the COMPOSITE's alone:
-        # `accuracy` stays whatever `compute_accuracy` answered, which is `None` where nothing was
-        # measured, so the elected quantity keeps its floor while the reported rate never claims a
-        # 0% nobody read.
-        composite_fitness = 0.0
-    else:
-        # The SAME denominator ``accuracy`` is read against, so the two cannot describe different
-        # populations. An unstamped row is an absence, never a zero: it halts.
-        unstamped = sum(1 for r in scoreable if r.get("objective") is None)
-        if unstamped:
-            raise ScoringTermMissingError(
-                f"{unstamped} of {len(scoreable)} scoreable rows carry no 'objective' — they never "
-                "passed through `rescore_results`, so what they were worth was never computed. "
-                "That is missing data, not a fitness of zero."
-            )
-        composite_fitness = sum(float(r["objective"]) for r in scoreable) / len(scoreable)
-
     return {
         **base,
         **evaluator_values,
         "evaluators": dict(evaluator_values),
-        "composite_fitness": composite_fitness,
+        "composite_fitness": _composite_of(scoreable),
         "degraded_samples": count_degraded_samples(results),
     }
 

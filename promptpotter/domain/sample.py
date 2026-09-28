@@ -91,17 +91,14 @@ def sample_key(
 
 @dataclass(frozen=True, slots=True)
 class Measurement:
-    """One ``(sample × config → outcome)`` archive row, denormalized."""
+    """One ``(sample × config → outcome)`` archive row beside the run that banked it. ``row`` is
+    the banked facts WHOLE — a reader grades it as it stands, error channel included."""
 
     run_id: str
     content_hash: str
     sample_id: int
-    query: str
-    ground_truth: str
-    predicted: str
-    fitness: float | None
     node_configs: list[tuple[str, dict[str, Any]]]
-    pipeline_data: dict[str, Any]
+    row: dict[str, Any]
     created_at: str
 
 

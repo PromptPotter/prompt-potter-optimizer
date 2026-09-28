@@ -836,9 +836,6 @@ class CapoRuntime:
             )
         return CapoState()
 
-    def prompt_hashes(self, selected: SelectedOptimizer) -> dict[str, str]:
-        return selected.running_digests()
-
     def complete(self) -> None:
         return None
 

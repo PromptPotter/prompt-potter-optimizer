@@ -43,7 +43,7 @@ from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results import DiagnosticRunRecord, RoundResult
 from promptpotter.domain.run_records import CycleRecord
-from promptpotter.domain.scoring import ledger_sample_view
+from promptpotter.domain.scoring import GRADE_KEYS, ledger_sample_view
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.campaign_store.store import reproject_round_index
 from promptpotter.infrastructure.store.io import (
@@ -524,7 +524,7 @@ def reproject_cycle_indexes(*, apply: bool) -> dict[str, int]:
     return {"cycle_indexes": len(by_cycle), "cycle_indexes_reprojected": touched}
 
 
-# --- (5) the run-level pipeline config re-stored on every measurement row --------------------
+# --- (5) what an archived row no longer keeps: grades, and the run-level pipeline config --------
 
 
 def _iter_measurement_runs() -> list[pathlib.Path]:
@@ -553,12 +553,20 @@ def _shrink_one(path: pathlib.Path, *, apply: bool) -> tuple[int, int, int]:
                 lines.append(line)
                 after += len(line)
                 continue
-            pd = row.get("pipeline_data") if isinstance(row, dict) else None
-            if not isinstance(pd, dict) or "pipeline_params" not in pd:
+            if not isinstance(row, dict):
                 lines.append(line)
                 after += len(line)
                 continue
-            del pd["pipeline_params"]
+            pd = row.get("pipeline_data")
+            dropped = [k for k in (*GRADE_KEYS, "scores") if k in row]
+            if not dropped and not (isinstance(pd, dict) and "pipeline_params" in pd):
+                lines.append(line)
+                after += len(line)
+                continue
+            for key in dropped:
+                del row[key]
+            if isinstance(pd, dict):
+                pd.pop("pipeline_params", None)
             rewritten += 1
             new_line = json.dumps(row, separators=(",", ":"), default=str) + "\n"
             lines.append(new_line)
@@ -571,9 +579,10 @@ def _shrink_one(path: pathlib.Path, *, apply: bool) -> tuple[int, int, int]:
 
 
 def shrink_measurement_runs(*, apply: bool) -> dict[str, int]:
-    """Drop ``pipeline_data.pipeline_params`` from archived measurement rows.
+    """Drop from archived rows what the archive does not keep: a grade (``GRADE_KEYS`` on a row,
+    ``scores`` on a header — a reader grades under its own formula) and ``pipeline_params``.
 
-    It is constant across a run, and the archive already keeps it twice at run level — on the
+    The last is constant across a run, and the archive already keeps it twice at run level — on the
     detail log's own header row and on the index entry (``measurement_archive.py::_summary``),
     which is where its one reader takes it from (``intelligence/indexes/axis.py``). Per sample it
     was the same ~3 KB blob on every row.

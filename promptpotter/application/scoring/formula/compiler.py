@@ -301,10 +301,8 @@ def cell_namespace(result: dict[str, Any]) -> dict[str, Any]:
     truth was not in the ranking, which is what ``rr`` scores as a miss."""
     pd = result.get("pipeline_data") or {}
 
-    # No ``hit`` here: it is written by ``rescore_results`` AFTER this scorer runs, so a
-    # formula naming it read 0 on every fresh row and the PREVIOUS scorer's value on a
-    # rescore — order-dependent, and silently so. Ask the matchers instead; they are the
-    # arm that decides a label.
+    # No ``hit`` and no grade here: a formula reads the cell's facts, never another formula's
+    # reading of them. Ask the matchers instead; they are the arm that decides a label.
     ns: dict[str, Any] = {
         "ground_truth_rank": result.get("ground_truth_rank"),
         "error": result.get("error"),

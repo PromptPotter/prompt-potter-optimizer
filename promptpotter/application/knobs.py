@@ -137,10 +137,11 @@ def _table(config: CampaignConfig) -> dict[tuple[str, ...], KnobDecl]:
 
 class DiffScope(StrEnum):
     """Resume-time diff classification, the union of the diffed leaves' scopes. ``POLICY_ONLY`` keeps
-    past measurements valid; ``DATA_AFFECTING`` (or any unclassified path) sends resume to divergence."""
+    past measurements valid; ``TREATMENT``, ``DATA_AFFECTING`` or an unclassified path diverge."""
 
     NONE = "none"
     POLICY_ONLY = "policy_only"
+    TREATMENT = "treatment"
     DATA_AFFECTING = "data_affecting"
 
 
@@ -176,11 +177,15 @@ def classify_config_diff(
     diffs = _diff_paths(table, active, frozen)
     if not diffs:
         return DiffScope.NONE, []
-    has_data = False
+    has_data = has_treatment = False
     diff_strs: list[str] = []
     for path in diffs:
         decl = table.get(path)
-        if decl is None:
+        if decl is None and path[: len(_NODES_PATH)] == _NODES_PATH:
+            # A node leaf no member declares is an llm node's call config
+            # (`optimizer_manifest.py::_refuse_unknown_llm_keys`), or another optimizer's knob.
+            has_treatment = True
+        elif decl is None:
             logger.warning(
                 "classify_config_diff: unclassified config path %r — treating as "
                 "DATA_AFFECTING. This campaign's snapshot names a knob the engine no "
@@ -190,9 +195,13 @@ def classify_config_diff(
             has_data = True
         elif decl.knob.scope is Scope.DATA:
             has_data = True
+        elif decl.knob.scope is Scope.IDENTITY:
+            has_treatment = True
         diff_strs.append(".".join(path))
     if has_data:
         return DiffScope.DATA_AFFECTING, diff_strs
+    if has_treatment:
+        return DiffScope.TREATMENT, diff_strs
     return DiffScope.POLICY_ONLY, diff_strs
 
 

@@ -185,9 +185,8 @@ class QueryMeasurement(TypedDict):
     error_category: NotRequired[ErrorCategory | None]
     # The measurement LANDED and the active formula cannot grade it — a third state beside scored
     # and errored, carrying the missing term's own message. Presence IS the state; ``fitness`` and
-    # ``objective`` are then absent, which is what keeps a stale archived verdict from reading as
-    # this formula's. Never an error: the backend answered and the row is worth keeping, so it must
-    # not reach the walk's abort classifier (`query_loop.py::Walk._abort_reason`).
+    # ``objective`` are then absent. Never an error: the backend answered and the row is worth
+    # keeping, so it must not reach the walk's abort classifier (`query_loop.py::Walk._abort_reason`).
     unscored: NotRequired[str]
     pipeline_data: PipelineData | None
     # ---- Stamped after measurement, by the scorer and the walk -------------------
@@ -233,6 +232,16 @@ _PIPELINE_KEYS: frozenset[str] = frozenset(
 )
 
 
+GRADE_KEYS: frozenset[str] = frozenset({"fitness", "objective", "unscored"})
+"""What ``rescore_results`` stamps: one formula's reading of a row, never a fact about it. An
+in-memory row carries them for the round's own use; ``MeasurementArchive`` persists none."""
+
+
+def measured_facts(row: Mapping[str, object]) -> dict[str, object]:
+    """*row* without its grades — the only shape the archive writes."""
+    return {k: v for k, v in row.items() if k not in GRADE_KEYS}
+
+
 # -- what an archive row may lose ---------------------------------------------
 #
 # `application/maintenance/archive_maintenance.py` moves these into the cold store; they live HERE
@@ -248,12 +257,6 @@ _PIPELINE_KEYS: frozenset[str] = frozenset(
 # "this backend does not say" about a fact the row is carrying one level down. `input_tokens` /
 # `output_tokens` sat here exactly that way, read by four surfaces. A row's counts come from
 # `domain/spend.py::TokenAccount.from_step_tokens`; declare no twin beside `step_tokens`.
-
-UNREAD_ROW_KEYS: frozenset[str] = frozenset({"objective"})
-"""Declared, written, and read by nothing.
-
-Archive rows are RE-GRADED by the reading campaign's scorer (`intelligence/hard_sample_archive.py`
-builds its observations through `CellScorer.objective`), so a STORED verdict is never consulted."""
 
 ABANDONED_ROW_KEYS: frozenset[str] = frozenset({"hit", "scored"})
 """On disk in quantity, declared by nothing, and written by no code path in this tree.
@@ -279,11 +282,10 @@ a total after the fact, and re-measuring an agent episode to get one costs what 
 
 **A ranking may not be moved.** The `candidate_recall` / `source_recall` evaluators walk
 `final_ranking` / `candidate_ranking` for GT membership, and a row cannot tell a MOVED key from a
-ranker that legitimately returned nothing — so a compacted row scores a real miss, the denominator
-(`terminal_node` / `step_timings`) survives compaction intact, and the fabricated rate is banked as
-`index.jsonl::scores` and re-read by any `score:` lens."""
+ranker that legitimately returned nothing — so a compacted row grades as a real miss on every
+read, while the denominator (`terminal_node` / `step_timings`) survives compaction intact."""
 
-assert UNREAD_ROW_KEYS <= _ROW_KEYS, "an unread key must be one QueryMeasurement declares"
+assert GRADE_KEYS <= _ROW_KEYS, "a grade key must be one QueryMeasurement declares"
 assert not (ABANDONED_ROW_KEYS & _ROW_KEYS), "an abandoned key that got declared is no longer one"
 assert UNREAD_PIPELINE_KEYS <= _PIPELINE_KEYS, "an unread key must be one PipelineData declares"
 
@@ -352,11 +354,8 @@ def is_unscored(result: Mapping[str, object]) -> bool:
     """Whether the active formula could not grade a measurement that LANDED — the sibling of
     :func:`~promptpotter.shared.errors.is_error_result`, where the backend never answered.
 
-    **The one place that fact is asked**, on the ``unscored`` channel that
-    ``rescore_results`` owns. Ask this, never ``"fitness" not in row``: a row arrives at the
-    scorer carrying an archived verdict from whatever formula was active when it was banked
-    (``query_loop.py::_materialize_cached`` copies the row whole), so the key's presence answers
-    a question about some earlier campaign."""
+    **The one place that fact is asked**, on the ``unscored`` channel that ``rescore_results``
+    owns. Ask this, never ``"fitness" not in row``: an ungraded row lacks the key too."""
     return bool(result.get("unscored"))
 
 
@@ -579,9 +578,9 @@ def is_answer_collapsed(rows: Sequence[Mapping[str, Any]]) -> bool:
 __all__ = [
     "ABANDONED_ROW_KEYS",
     "DEFAULT_SCORER_ID",
+    "GRADE_KEYS",
     "HIT_THRESHOLD",
     "UNREAD_PIPELINE_KEYS",
-    "UNREAD_ROW_KEYS",
     "CellGrade",
     "CellScorer",
     "PipelineData",
@@ -597,5 +596,6 @@ __all__ = [
     "is_unscored",
     "is_verifier_graded",
     "ledger_sample_view",
+    "measured_facts",
     "modal_answer_share",
 ]

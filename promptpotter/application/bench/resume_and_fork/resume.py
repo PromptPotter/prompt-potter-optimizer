@@ -179,10 +179,9 @@ async def resume_with_divergence_check(
                     hop.cycle_id,
                 )
             return None
-        if scope is DiffScope.DATA_AFFECTING and diffed:
+        if scope in (DiffScope.DATA_AFFECTING, DiffScope.TREATMENT) and diffed:
             logger.info(
-                "Resume: data-affecting config diff (%s); running divergence check",
-                ", ".join(diffed),
+                "Resume: %s config diff (%s); running divergence check", scope, ", ".join(diffed)
             )
 
         def _branch_or_halt(

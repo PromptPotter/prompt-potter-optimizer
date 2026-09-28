@@ -39,7 +39,6 @@ from promptpotter.application.evidence.grid import (
     FactorReading,
 )
 from promptpotter.application.evidence.head_to_head import (
-    BenchSet,
     HeadToHead,
     HeadToHeadRow,
     SelectionPair,
@@ -72,6 +71,7 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.bench import BenchReading, BenchScore, DatasetSplit
+from promptpotter.domain.campaign import Instrument
 from promptpotter.domain.cells import (
     Cell,
     CellCandidate,
@@ -289,8 +289,8 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     SubjectReading,
     PairwiseComparison,
     MetricReading,
-    DatasetSplit,  # nested in BenchSet
-    BenchSet,
+    DatasetSplit,  # nested in Instrument
+    Instrument,
     HeadToHeadRow,
     SelectionPair,
     HeadToHead,

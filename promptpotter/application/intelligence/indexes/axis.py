@@ -4,13 +4,14 @@ import logging
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from itertools import combinations, pairwise
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, cast
 
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.scoring.formula import rescore_results
+from promptpotter.application.scoring.metrics import fold_cells
 from promptpotter.domain.measurement_provenance import entry_grade
 from promptpotter.domain.results import resolved_fitness
-from promptpotter.domain.scoring import CellScorer, is_unscored
+from promptpotter.domain.scoring import CellScorer, QueryMeasurement, is_unscored
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 from promptpotter.infrastructure.store import archive_queries
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -104,6 +105,17 @@ class AxisImpact:
     sample_count: int = 0
 
 
+def _graded_reading(
+    detail: dict[str, Any], scorer: CellScorer
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Grade *detail*'s rows IN PLACE — the sample index reads them next — and fold them; ``None``
+    and the reason where one row cannot be graded under *scorer*."""
+    rows = rescore_results(detail.get("measurements") or [], scorer)
+    if unscored := next((r for r in rows if is_unscored(r)), None):
+        return None, unscored.get("unscored")
+    return fold_cells(cast("list[QueryMeasurement]", rows)), None
+
+
 @dataclass
 class RunRecord:
     run_id: str
@@ -131,6 +143,9 @@ class AxisIndex:
         # Archived runs this formula cannot score (they predate a term it names). Bound once,
         # read by BOTH halves of `refresh` — the per-sample ingest and the axis fold.
         self._unscoreable_runs: set[str] = set()
+        # run_id -> (the detail signature it was read at, ``fold_cells`` over the run's rows graded
+        # under the refreshing scorer) — what the axis fold and the leaderboard read.
+        self._readings: dict[str, tuple[list[int], dict[str, Any]]] = {}
         self._axis_failure_group_deltas: dict[str, dict[str, float]] = {}
         self._top_runs: list[RunRecord] = []
         # Whether the persisted per-run fold was replayed instead of re-derived. Decides
@@ -354,6 +369,7 @@ class AxisIndex:
                 self._unscoreable_runs.add(run_id)
             else:
                 self.sample_index.replay_row(row)
+                self._readings[run_id] = (row["sig"], row["reading"])
             self.sample_index.mark_seen(run_id)
         logger.debug("AxisIndex seeded %d run(s) from the persisted fold", len(rows))
         return True
@@ -361,9 +377,9 @@ class AxisIndex:
     def refresh(
         self,
         stores: Stores,
-        scorer: CellScorer | None = None,
-        scorer_id: str = "none",
         *,
+        scorer: CellScorer,
+        scorer_id: str,
         dataset_name: str | None,
     ) -> None:
         """Incremental archive refresh, dataset-scoped. A row this formula cannot score is SKIPPED, counted
@@ -385,27 +401,40 @@ class AxisIndex:
         for run_id, detail in archive_queries.runs_since(
             stores, self.sample_index._seen_runs, dataset_name=dataset_name
         ):
-            stamp = {"fk": scorer_id, "sig": list(signatures.get(run_id) or ())}
-            if scorer is not None:
-                rows = rescore_results(detail.get("measurements") or [], scorer)
-                # The WHOLE run goes, on the first row that could not be graded. A per-row skip
-                # would fold a partial run under a `scorer_id` claiming it scored entire, and the
-                # digest cannot tell one from the other afterwards.
-                if unscored := next((r for r in rows if is_unscored(r)), None):
-                    skipped.append(run_id)
-                    self._unscoreable_runs.add(run_id)
-                    self.sample_index.mark_seen(run_id)
-                    folded.append({"run_id": run_id, "unscoreable": True, **stamp})
-                    logger.warning(
-                        "axis refresh: archived run %r is unscoreable under the active formula "
-                        "— skipping it (it predates the current observation vocabulary). %s",
-                        run_id,
-                        unscored.get("unscored"),
-                    )
-                    continue
-            folded.append({**self.sample_index.ingest_run(detail), **stamp})
+            sig = list(signatures.get(run_id) or ())
+            stamp = {"fk": scorer_id, "sig": sig}
+            reading, unscored = _graded_reading(detail, scorer)
+            # The WHOLE run goes, on the first row that could not be graded. A per-row skip
+            # would fold a partial run under a `scorer_id` claiming it scored entire, and the
+            # digest cannot tell one from the other afterwards.
+            if reading is None:
+                skipped.append(run_id)
+                self._unscoreable_runs.add(run_id)
+                self.sample_index.mark_seen(run_id)
+                folded.append({"run_id": run_id, "unscoreable": True, **stamp})
+                logger.warning(
+                    "axis refresh: archived run %r is unscoreable under the active formula "
+                    "— skipping it (it predates the current observation vocabulary). %s",
+                    run_id,
+                    unscored,
+                )
+                continue
+            self._readings[run_id] = (sig, reading)
+            folded.append({**self.sample_index.ingest_run(detail), "reading": reading, **stamp})
             self.sample_index.mark_seen(run_id)
             added += 1
+
+        # A run seen earlier that has GROWN since is read again for the leaderboard, which ranks
+        # every run on what it holds now; the sample index and the axis fold keep first sight.
+        for run_id, (sig, _) in list(self._readings.items()):
+            if sig == (now := list(signatures.get(run_id) or ())):
+                continue
+            grown = archive_queries.load_run(stores, run_id)
+            regraded = None if grown is None else _graded_reading(grown, scorer)[0]
+            if regraded is None:
+                del self._readings[run_id]
+            else:
+                self._readings[run_id] = (now, regraded)
 
         # Replace rather than append whenever the seed was rejected: what this process just
         # derived IS the whole fold, and appending would leave the rejected rows in front of it.
@@ -428,19 +457,20 @@ class AxisIndex:
         # datapoints, not whichever connector replayed most. Unscoreable runs are dropped for the
         # same reason: a fitness from a dead vocabulary is not comparable to one from this run's.
         # A bench pass goes whole: its accuracy is a reading on rows no optimizer may learn from.
-        all_entries: list[dict[str, Any]] = []
+        all_entries: list[tuple[dict[str, Any], dict[str, Any]]] = []
         for entry in archive_queries.list_runs(stores, dataset_name=dataset_name):
             run_id = entry.get("run_id", "")
             if (
                 entry_grade(entry) == "C"
-                or run_id in self._unscoreable_runs
+                or run_id not in self._readings
                 or entry.get("name") == MeasurementRole.BENCH
             ):
                 continue
-            all_entries.append(entry)
-            if not run_id or run_id in self._axis_seen_runs:
+            reading = self._readings[run_id][1]
+            all_entries.append((entry, reading))
+            if run_id in self._axis_seen_runs:
                 continue
-            self._fold_entry(self._axis_values, entry)
+            self._fold_entry(self._axis_values, entry, reading)
             self._axis_seen_runs.add(run_id)
         self._recompute_failure_group_correlations()
         self._refresh_top_runs(all_entries)
@@ -452,18 +482,14 @@ class AxisIndex:
                 len(self.sample_index._seen_runs),
             )
 
-    def _refresh_top_runs(self, entries: list[dict[str, Any]], k: int = 10) -> None:
+    def _refresh_top_runs(
+        self, entries: list[tuple[dict[str, Any], dict[str, Any]]], k: int = 10
+    ) -> None:
         """Top-K by (composite_fitness, accuracy) desc. Only the modal ``total`` count is kept: an 8/20
         composite is not comparable with a 20/20 one, and mixing them inflates the leaderboard. A
         one-cell run reads that cell, not a configuration, and backfills mint enough of them to
         become the mode, so they are excluded."""
-        from collections import Counter
-
-        all_totals = [
-            (entry.get("scores") or {}).get("total", 0)
-            for entry in entries
-            if (entry.get("scores") or {}).get("total", 0) > 1
-        ]
+        all_totals = [scores["total"] for _, scores in entries if scores["total"] > 1]
         if not all_totals:
             self._top_runs = []
             return
@@ -473,9 +499,8 @@ class AxisIndex:
         # collapse to the best record per run_id so the leaderboard never lists the
         # same run twice (wasted bytes + a misleading panel for L1/L2).
         best_by_run: dict[str, RunRecord] = {}
-        for entry in entries:
-            scores = entry.get("scores") or {}
-            total = scores.get("total") or 0
+        for entry, scores in entries:
+            total = scores["total"]
             if total != modal_total:
                 continue
             # An absence is not a measurement: a row that recorded no accuracy must not
@@ -488,7 +513,7 @@ class AxisIndex:
                 run_id=run_id,
                 name=entry.get("name", ""),
                 accuracy=accuracy,
-                composite=resolved_fitness(scores.get("composite_fitness"), accuracy),
+                composite=resolved_fitness(scores["composite_fitness"], accuracy),
                 total=total,
             )
             prev = best_by_run.get(run_id)
@@ -518,9 +543,9 @@ class AxisIndex:
     def ensure_for(
         cls,
         stores: Stores | None,
-        scorer: CellScorer | None = None,
-        scorer_id: str = "none",
         *,
+        scorer: CellScorer,
+        scorer_id: str,
         dataset_name: str | None,
         sample_ids: frozenset[int] | None,
     ) -> AxisIndex | None:
@@ -541,17 +566,11 @@ class AxisIndex:
     def _fold_entry(
         axis_values: dict[str, dict[str, list[float]]],
         entry: dict[str, Any],
+        scores: dict[str, Any],
     ) -> None:
-        """Fold one entry into ``axis_values``. An entry with no accuracy is skipped, never folded as 0.0 —
-        a fabricated arm manufactures ``effect_size`` against every real arm on the same axis.
-
-        "No accuracy" is a statement about the VALUE, and testing the key alone was not the same
-        thing: a row carrying ``accuracy: null`` passed the guard and died in ``float(None)``,
-        taking the whole run down at init with a TypeError and no mention of the axis index. An
-        outer L4 cell is exactly that row — its measurand is ``mean_round_delta`` and it has no
-        accuracy to record — so the recursion could not enter its round loop at all."""
-        scores = entry.get("scores") or {}
-        recorded = scores.get("accuracy")
+        """An entry with no accuracy — an outer L4 cell, whose measurand is ``mean_round_delta`` — is
+        skipped, never folded as 0.0, which manufactures ``effect_size`` against every real arm."""
+        recorded = scores["accuracy"]
         if recorded is None:
             return
         accuracy = float(recorded)

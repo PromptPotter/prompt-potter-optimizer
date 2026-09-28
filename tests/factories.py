@@ -49,10 +49,9 @@ def measurement(
     ``objective=fitness`` where a test MEANS them equal. Stamping both also keeps rows readable by
     ``graded_response``, which RAISES on a row carrying neither rather than reading 0.0.
 
-    ``fitness=None`` builds the other row shape: a real error row (``_error_result``) carries no
-    grade at all, and the coverage floor and the θ fit are both about that ABSENCE rather than
-    about a low score. Eight local copies of these two shapes drifted apart here once already —
-    adding ``objective`` to the loop had to find every one of them.
+    ``fitness=None`` builds the other row shape, one carrying no grade at all: a cell's facts as
+    the archive banks them, or with an ``error_category`` a real error row (``_error_result``) —
+    the coverage floor and the θ fit are both about that ABSENCE rather than about a low score.
     """
     if fitness is None:
         return {"sample_id": sample_id, **extra}

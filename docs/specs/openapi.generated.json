@@ -491,7 +491,7 @@
       },
       "BenchReading": {
         "additionalProperties": false,
-        "description": "One individual scored on the whole bench set under the campaign's formula.",
+        "description": "One individual's bench pass, read under a named scorer.",
         "properties": {
           "accuracy": {
             "anyOf": [
@@ -536,7 +536,7 @@
                 "type": "null"
               }
             ],
-            "description": "Under the campaign's formula — the number the headline reads.",
+            "description": "Under the reading scorer's formula — the number the headline reads.",
             "title": "Composite Fitness"
           },
           "n_scored": {
@@ -548,11 +548,6 @@
             "description": "The round whose selection this is; 0 is the origin.",
             "title": "Round",
             "type": "integer"
-          },
-          "run_id": {
-            "description": "The archive run its bench rows were filed under.",
-            "title": "Run Id",
-            "type": "string"
           },
           "sp_hash": {
             "description": "The searchpoint scored — the archive's `prompt_fields_id`.",
@@ -567,8 +562,7 @@
           "composite_fitness",
           "ci_lo",
           "ci_hi",
-          "n_scored",
-          "run_id"
+          "n_scored"
         ],
         "title": "BenchReading",
         "type": "object"
@@ -638,6 +632,11 @@
             ],
             "description": "`None` where its pass read nothing; `missing_reason` says why."
           },
+          "scorer_id": {
+            "description": "The grader every number here was read under. A stored copy is a cache of that reading: a reader under another grader reads the passes again, never this.",
+            "title": "Scorer Id",
+            "type": "string"
+          },
           "selected": {
             "anyOf": [
               {
@@ -652,6 +651,7 @@
         },
         "required": [
           "bench_size",
+          "scorer_id",
           "origin",
           "selected",
           "missing_reason",
@@ -660,62 +660,6 @@
           "lift_ci_hi"
         ],
         "title": "BenchScore",
-        "type": "object"
-      },
-      "BenchSet": {
-        "additionalProperties": false,
-        "description": "What one campaign's held-out set IS; two headlines are one quantity only if all of it agrees.\nA differing field is named in ``HeadToHead.differs_on``.",
-        "properties": {
-          "bench_rows": {
-            "title": "Bench Rows",
-            "type": "string"
-          },
-          "dataset_hash": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dataset Hash"
-          },
-          "dataset_name": {
-            "title": "Dataset Name",
-            "type": "string"
-          },
-          "models": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Models",
-            "type": "object"
-          },
-          "scorer_id": {
-            "title": "Scorer Id",
-            "type": "string"
-          },
-          "split": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/DatasetSplit"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "dataset_name",
-          "dataset_hash",
-          "split",
-          "bench_rows",
-          "scorer_id",
-          "models"
-        ],
-        "title": "BenchSet",
         "type": "object"
       },
       "Body_ingest_dataset_api_v1_datasets_ingest_post": {
@@ -3609,6 +3553,10 @@
             "title": "Rows",
             "type": "array"
           },
+          "scorer_id": {
+            "title": "Scorer Id",
+            "type": "string"
+          },
           "verdict": {
             "anyOf": [
               {
@@ -3623,6 +3571,7 @@
         },
         "required": [
           "rows",
+          "scorer_id",
           "verdict",
           "differs_on",
           "pairs",
@@ -3660,7 +3609,7 @@
           "bench_set": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/BenchSet"
+                "$ref": "#/components/schemas/Instrument"
               },
               {
                 "type": "null"
@@ -3785,6 +3734,62 @@
           "bench_reads"
         ],
         "title": "HeadToHeadRow",
+        "type": "object"
+      },
+      "Instrument": {
+        "additionalProperties": false,
+        "description": "What graded a bench headline: two are one quantity only where every field agrees.",
+        "properties": {
+          "bench_rows": {
+            "title": "Bench Rows",
+            "type": "string"
+          },
+          "dataset_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Hash"
+          },
+          "dataset_name": {
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "models": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "object"
+          },
+          "scorer_id": {
+            "title": "Scorer Id",
+            "type": "string"
+          },
+          "split": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DatasetSplit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "dataset_name",
+          "dataset_hash",
+          "split",
+          "bench_rows",
+          "scorer_id",
+          "models"
+        ],
+        "title": "Instrument",
         "type": "object"
       },
       "KnobRow": {

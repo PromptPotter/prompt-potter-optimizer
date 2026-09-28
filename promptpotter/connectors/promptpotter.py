@@ -6,7 +6,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application import optimizers
 from promptpotter.application.intelligence import exploration
 from promptpotter.application.runner.inner import ruler
 from promptpotter.application.runner.inner.spawn import inner_cell_envelope_s, run_inner_cycle
@@ -64,11 +63,6 @@ def _measurement_source_digest() -> str:
     return module_source_digest(*measurement_modules())
 
 
-def _check_prompt_closure() -> None:
-    for runtime in optimizers.runtimes().values():
-        runtime.source_digest(*measurement_modules())
-
-
 def _inner_cells(stores: Stores, experiment: Mapping[str, Any] | None) -> InnerCells:
     if experiment is None:
         raise PayloadInvalidError(
@@ -86,15 +80,12 @@ def _pipeline_declaration(stores: Stores, experiment: Mapping[str, Any] | None) 
 def _identity_config(
     stores: Stores, _dataset_dir: Path, experiment: Mapping[str, Any] | None
 ) -> dict[str, dict[str, Any]]:
-    """The inner optimizer's effective-revision fingerprint: which manifest the inner cells run and
-    every node's resolved config, the source deciding what its prompts say, the estimator source,
-    and every inner dataset's own config. In the recursion the optimizer IS the
-    instrument, so two optimizers' inner cells must never pool under one key. Not the task list —
-    each task is its own sample's ``source_pin`` (:func:`_extract_experiment`), so adding one to
-    ``inner_tasks.yaml`` voids none of the cells already banked. Carried on the first node of the
-    outer chain."""
+    """The outer target's content: the inner cells' treatment — the optimizer an outer arm edits,
+    so two treatments' cells never pool under one key — the estimator source, and every inner
+    dataset's own config. Not the task list — each task is its own sample's ``source_pin``
+    (:func:`_extract_experiment`), so adding one to ``inner_tasks.yaml`` voids none of the cells
+    already banked. Carried on the first node of the outer chain."""
     cells = _inner_cells(stores, experiment)
-    inner = cells.optimizer
     # `config` only, deliberately. `available_models` is a permission list and
     # `optimizer.param_allowed_values` bounds what L1 may PROPOSE — neither changes what the
     # origin does, so widening either must not void a panel that cost an hour to measure.
@@ -112,12 +103,7 @@ def _identity_config(
         "config": (experiment or {}).get("inner_benchmark_config") or {},
         "datasets": datasets,
     }
-    # What the inner optimizer's prompts SAY, and which of its panels fill each one: both are
-    # code, so the parsed manifest's digest (`InnerCells.identity`) cannot reach them.
-    panel_text = inner.runtime.source_digest(*measurement_modules())
-    fingerprint = stable_hash(
-        [cells.identity, panel_text, _measurement_source_digest(), inner_spec]
-    )[:12]
+    fingerprint = stable_hash([cells.treatment, _measurement_source_digest(), inner_spec])[:12]
     return {cells.chain[0]: {INNER_ORIGIN_KEY: fingerprint}}
 
 
@@ -235,7 +221,6 @@ CONNECTOR = Connector(
     # The outer's graph IS the inner optimizer's, so it is served here, never mirrored in a file.
     pipeline_declaration=_pipeline_declaration,
     identity_config=_identity_config,
-    completion_check=_check_prompt_closure,
 )
 
 

@@ -59,7 +59,12 @@ from promptpotter.application.optimizers.potter.validators.l1_invariants import 
     detect_invariants,
 )
 from promptpotter.application.runner import measurement as measurement_node
-from promptpotter.application.runner.bench import bench_selection, score_on_bench
+from promptpotter.application.runner.bench import (
+    bench_selection,
+    headline,
+    read_bench,
+    score_on_bench,
+)
 from promptpotter.application.runner.entry import _build_cycle_result
 from promptpotter.application.runner.measurement import measure_population
 from promptpotter.application.runner.round import execute_round, round_plan
@@ -72,6 +77,7 @@ from promptpotter.application.scoring.classification import DegradationCheck, te
 from promptpotter.application.scoring.evaluators import DEFAULT_CELL_FORMULA
 from promptpotter.application.scoring.formula import (
     ScoringFormulaError,
+    auto_scorer_id,
     compile_scorer,
 )
 from promptpotter.application.scoring.formula.matchers import (
@@ -85,7 +91,8 @@ from promptpotter.application.scoring.metrics import (
     matched_parent_stats,
 )
 from promptpotter.application.scoring.sample_measurement import measure_sample
-from promptpotter.domain.bench import BenchReading, BenchScore, DatasetSplit, partition_bank
+from promptpotter.application.scoring.search_point_scorer import score_search_point
+from promptpotter.domain.bench import BenchPass, BenchPasses, DatasetSplit, partition_bank
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.export import build_prompt_export
@@ -492,8 +499,8 @@ def test_a_labelless_round_reports_absence_not_zero() -> None:
     Every reading here walks a ranking for the ground truth. With none it is in nothing, so
     ``candidate_recall`` records "the ranker never retrieved it on any sample", every rank lands
     in ``not_found`` and every top-k is 0.0. All three persist: the evaluator map into
-    ``rounds/round_NNNN.json`` and ``index.jsonl::scores``, where any ``score:`` lens re-reads
-    it; the rank statistics into ``RoundResult.diagnostics``. Measured on a Harbor origin that
+    ``rounds/round_NNNN.json``, where any ``score:`` lens re-reads it; the rank statistics into
+    ``RoundResult.diagnostics``. Measured on a Harbor origin that
     solved EIGHT of ten, the round file carried ``not_found: 10`` and ``top-1: 0.0``.
 
     Silent by construction — the numbers are well-formed and in range, and the panel that
@@ -795,7 +802,7 @@ async def test_a_prompt_length_term_prices_the_template_not_the_sample() -> None
         assert [r["pipeline_data"]["target_prompt_chars"] for r in rows] == [
             len(sp.render_target(TaskDecomposition(), demo=demo))
         ] * len(rows)
-        return [r["objective"] for r in rows]
+        return [r["objective"] for r in rescore_results(rows, session.scoring.scorer)]  # type: ignore[arg-type]
 
     with spending_under(unbounded_spend_book()):
         assert await _objectives(origin, ["2+2"]) == [pytest.approx(0.95)]
@@ -805,60 +812,6 @@ async def test_a_prompt_length_term_prices_the_template_not_the_sample() -> None
     ratio = len(candidate.render_target(TaskDecomposition(), demo=demo)) / longest_initial
     assert ratio > 1.5, "guard: the shots are inside the length"
     assert scored == [pytest.approx(1.0 - 0.05 * ratio)] * 2
-
-
-def test_an_archive_row_is_graded_by_the_reading_scorer_not_its_stamp(monkeypatch) -> None:
-    """The δ ruler grades archive rows with the CAMPAIGN's scorer, never a stamp on the row.
-
-    ``objective`` is written by ``rescore_results`` under whatever formula was active when the row
-    was banked, so reading it back pools one scale out of several — and a row banked before the
-    field existed carries none at all. Read with ``.get("objective", 0.0)`` that absence is not a
-    hole, it is a WRONG ANSWER: measured on `justlogic-d234`, 49,221 of 49,501 observations graded
-    0.0, the fit collapsed δ to sd 0.243 across 600 cells, θ became logit-accuracy plus a constant,
-    and the acquisition — which ranks on δ ≈ θ — bought progressively EASIER panels while the
-    headline climbed 50.0% → 85.7% and `overlap` stayed flat.
-
-    Silent harm: every number renders, the ruler reports 600 cells and a warm id, and the campaign
-    reads as a clean climb.
-    """
-    import types
-
-    from promptpotter.application.intelligence.hard_sample_archive import (
-        build_archive_observations,
-    )
-    from promptpotter.domain.scoring import CellScorer
-    from promptpotter.infrastructure.store import archive_queries
-
-    # Two cells the arm got RIGHT, banked before ``objective`` existed — and one stamped by a
-    # formula that is not the reading campaign's, which must lose to the scorer just the same.
-    rows = [
-        {"sample_id": 1, "fitness": 1.0},
-        {"sample_id": 2, "fitness": 1.0, "objective": 0.0},
-    ]
-    monkeypatch.setattr(
-        archive_queries,
-        "list_runs",
-        lambda *_a, **_k: [
-            {"run_id": "r1", "prompt_fields_id": "cand-a", "provenance": {"grade": "A"}}
-        ],
-    )
-    monkeypatch.setattr(archive_queries, "run_signatures", lambda *_a, **_k: {"r1": (1, 1)})
-    monkeypatch.setattr(archive_queries, "load_run", lambda *_a, **_k: {"measurements": rows})
-
-    stores = types.SimpleNamespace(
-        archive=types.SimpleNamespace(base_dir="/nowhere-unique-to-this-test")
-    )
-    obs = build_archive_observations(
-        stores,
-        dataset_name="d",
-        scorer=CellScorer(fitness=lambda r: r["fitness"], objective=lambda r: r["fitness"]),
-        scorer_id="under-test",
-        sample_ids=None,
-    )
-
-    assert [o.response for o in obs] == [1.0, 1.0], (
-        "an archive row was graded from its stamp, not from the reading campaign's scorer"
-    )
 
 
 def test_the_mean_interval_is_clipped_to_the_support_the_metric_actually_has() -> None:
@@ -1847,6 +1800,8 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
 
     origin = cycle.origin_round.opt_sp
     assert origin is not None
+    # The headline is read off the archive, so the passes file theirs.
+    session.backend_id = "capo-e2e"
     origin_pass = asyncio.run(
         score_on_bench(
             session,
@@ -1855,9 +1810,10 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
             cb=_QUIET_CALLBACKS,  # type: ignore[arg-type]
         )
     )
-    bench = asyncio.run(
+    passes = asyncio.run(
         bench_selection(cycle, session, origin=origin_pass, cb=_QUIET_CALLBACKS)  # type: ignore[arg-type]
     )
+    bench = headline(_QUIET_CALLBACKS, session, passes)  # type: ignore[arg-type]
     assert (bench.selected.round, bench.selected.sp_hash) == (1, picked.selected_scores[0].sp_hash)
     assert (bench.selected.accuracy, bench.origin.accuracy) == (1.0, 0.0), "GOOD solves them all"
     # Point, band and lift read ONE per-row series, the composite, whose misses keep a cost share:
@@ -1894,7 +1850,7 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
         round_result(1).model_copy(update={"candidate_scores": [won], "selected_labels": ["C1.1"]}),
         **dict.fromkeys(("tool_version", "campaign_id", "cycle_id", "dataset_name"), ""),
         **dict.fromkeys(("dataset_hash", "stop_reason", "finished_at"), ""),
-        optimizer_manifest_hashes={},
+        treatment=None,
         formula=None,
         origin_accuracy=None,
         origin_composite_fitness=None,
@@ -1934,13 +1890,82 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
             cb=_QUIET_CALLBACKS,  # type: ignore[arg-type]
         )
     )
-    assert refused.reading is None and refused.rows == []
+    assert refused.stopped is not None
     monkeypatch.setattr(query_loop, "measure_sample", answering)
-    cut = asyncio.run(
-        bench_selection(cycle, session, origin=refused, cb=_QUIET_CALLBACKS)  # type: ignore[arg-type]
+    cut = headline(
+        _QUIET_CALLBACKS,  # type: ignore[arg-type]
+        session,
+        asyncio.run(
+            bench_selection(cycle, session, origin=refused, cb=_QUIET_CALLBACKS)  # type: ignore[arg-type]
+        ),
     )
     assert (cut.origin, cut.lift, cut.selected) == (None, None, bench.selected)
     assert cut.missing_reason is not None and "Key limit exceeded" in cut.missing_reason
+
+
+def test_bench_passes_read_under_a_second_formula_read_as_a_fresh_pass_under_it(
+    built_stores, tmp_path, monkeypatch
+) -> None:
+    """A bench pass banks facts, and every reading of them names its grader. Read under a second
+    formula, the passes one run banked must read exactly as passes taken fresh under it; a headline
+    kept from the first formula and read in its place is another function's number, and a
+    head-to-head pairs it as the second's. Silent: every number renders."""
+    solves = lambda prompt, s: "GOOD" in prompt or s.id % 3 == 0  # noqa: E731
+    cycle = _peer_cycle(built_stores, tmp_path, monkeypatch, "capo", {}, solves, bench=6)
+    session = cycle.session
+    session.backend_id, session.scoring.scorer_id = "capo-e2e", "length_rewarded"
+    partition = session.scoring.require_partition()
+    assert cycle.origin_round.opt_sp is not None
+    origin = cycle.searchpoint(cycle.origin_round.opt_sp.lineage.id)
+    good = OptSearchPoint(instruction="Solve it GOOD.").to_job_search_point(
+        base_pipeline_params=origin.pipeline_params,
+        schema=session.pipeline_schema,
+        framing=cycle.framing,
+        demo=partition.demo,
+    )
+    points = (origin, good)
+    passes = BenchPasses(
+        tolerance=0,
+        **{
+            role: asyncio.run(score_on_bench(session, sp, round_num=r, cb=_QUIET_CALLBACKS))  # type: ignore[arg-type]
+            for r, (role, sp) in enumerate(zip(("origin", "selected"), points, strict=True))
+        },
+    )
+    banked = read_bench(
+        session.store, passes, session.scoring.require_scorer(), scorer_id="length_rewarded"
+    )
+    plain = compile_scorer("label_match(predicted, ground_truth)", None, verifier_graded=False)
+    read = read_bench(session.store, passes, plain, scorer_id="plain")
+    assert (passes.origin.scorer_id, banked.scorer_id, read.scorer_id) == (
+        "length_rewarded",
+        "length_rewarded",
+        "plain",
+    )
+
+    # Fresh under the second formula: nothing replayed, nothing filed, graded as measured.
+    session.backend_id, session.scoring.scorer = "", plain
+    fresh = [
+        asyncio.run(
+            score_search_point(
+                sp,
+                list(partition.bench),
+                session,
+                label="verify",
+                measured=None,
+                on_sample_scored=None,
+                on_sample_starting=None,
+            )
+        ).scores
+        for sp in points
+    ]
+    for reading, scores in zip((read.origin, read.selected), fresh, strict=True):
+        assert reading is not None
+        assert (reading.accuracy, reading.n_scored) == (scores["accuracy"], scores["total"])
+        assert reading.composite_fitness == pytest.approx(scores["composite_fitness"])
+    gap = fresh[1]["composite_fitness"] - fresh[0]["composite_fitness"]
+    assert read.lift == pytest.approx(gap) and gap > 0.0
+    assert banked.selected is not None and read.selected is not None
+    assert banked.selected.composite_fitness != pytest.approx(read.selected.composite_fitness)
 
 
 def test_every_installed_optimizer_closes_its_campaign_on_a_bench_headline(tmp_path) -> None:
@@ -3526,13 +3551,17 @@ def test_a_human_authored_arm_never_pools_with_the_loop_that_proposed_one() -> N
     assert authorship_of("fork_seed", "") == authorship_of("campaign_origin", "")
 
 
-def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench(built_stores) -> None:
-    """The held-out bench IS an optimizer head-to-head's comparability guard. A campaign whose rows
-    another seed drew sat a different exam, and one reading the shared origin apart on the same rows
-    was graded by another function; a paired difference across either still prints an interval and
-    names a winning optimizer. Silent: every number renders."""
+def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench_under_one_grader(
+    built_stores,
+) -> None:
+    """The held-out bench IS an optimizer head-to-head's comparability guard, and ONE grader reads
+    every arm's banked passes. A campaign whose rows another seed drew sat a different exam; one
+    whose shared origin reads apart on its own rows under that grader met another backend; one kept
+    under its own formula is another function's number. A paired difference across any of them
+    still prints an interval and names a winning optimizer. Silent: every number renders."""
     stores = built_stores
     bank = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(12)]
+    formula = "env_reward"
 
     def campaign(
         cid: str,
@@ -3541,9 +3570,7 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench(built_stores) -> 
         seed: int,
         selected: float,
         origin: float = 0.4,
-        regraded: float = 0.0,
-        scorer: str = "auto_charged",
-        band: float | None = None,
+        scoring: str = formula,
         at: int | None = None,
         incurred: float = 0.2,
         billed: float | None = None,
@@ -3565,6 +3592,7 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench(built_stores) -> 
                         "degradation_threshold": 0.0,
                     },
                     "dataset_split": split.model_dump(),
+                    "scoring": scoring,
                 },
             )
         )
@@ -3574,50 +3602,38 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench(built_stores) -> 
             hop, round_result(0, candidates_scored=1, all_candidate_results={"c0": panel})
         )
         stores.campaigns.write_bank_partition(hop, partition)
-        readings = []
+        passes = {}
         for role, level in (("origin", origin), ("selected", selected)):
-            run_id = f"bench_{cid}_{role}"
+            # The origin is ONE individual every campaign sends, filed under one content-addressed
+            # run while the backend reads it alike; each pick is its own.
+            graded = role if role == "origin" else f"{cid}:{role}"
+            run_id = f"bench_{graded}_{seed}_{level}"
+            # Facts only, as the archive banks them: the read grades each under one formula.
             rows = [
-                measurement(s.id, level, objective=level + 0.1 * (s.id % 2), query=s.query)
+                measurement(
+                    s.id,
+                    None,
+                    query=s.query,
+                    pipeline_data={"env_reward": level + 0.1 * (s.id % 2)},
+                )
                 for s in partition.bench
             ]
-            # The origin is ONE individual every campaign grades; each pick is its own.
-            graded = role if role == "origin" else f"{cid}:{role}"
             header = {"run_id": run_id, "prompt_fields_id": graded, "item_count": len(rows)}
             header |= {"name": "bench", "dataset_name": "ds"}
             record_measurement_run(
-                stores,
-                run_id,
-                {**header, "scores": {}, "content_hash": run_id, "created_at": ""},
-                rows,
+                stores, run_id, {**header, "content_hash": run_id, "created_at": ""}, rows
             )
-            composite = level + 0.05 + (regraded if role == "origin" else 0.0)
-            wide = band if role == "origin" else None
-            readings.append(
-                BenchReading(
-                    round=int(role == "selected"),
-                    sp_hash=role,
-                    accuracy=level,
-                    composite_fitness=composite,
-                    ci_lo=None if wide is None else composite - wide,
-                    ci_hi=None if wide is None else composite + wide,
-                    n_scored=len(rows),
-                    run_id=run_id,
-                )
+            passes[role] = BenchPass(
+                round=int(role == "selected"),
+                sp_hash=role,
+                run_id=run_id,
+                sample_ids=[s.id for s in partition.bench],
+                stopped=None,
+                scorer_id=scoring,
             )
-        bench = BenchScore(
-            bench_size=6,
-            origin=readings[0],
-            selected=readings[1],
-            missing_reason=None,
-            lift=selected - origin - regraded,
-            lift_ci_lo=None,
-            lift_ci_hi=None,
-        )
         hour = n if at is None else at
         final = {
-            "bench": bench.model_dump(mode="json"),
-            "scorer_id": scorer,
+            "bench_passes": BenchPasses(tolerance=0, **passes).model_dump(mode="json"),
             "started_at": f"2026-09-26T{hour:02d}:00:00Z",
             "finished_at": f"2026-09-26T{hour:02d}:30:00Z",
             "wall_clock": WallClock(elapsed_s=wall).model_dump(),
@@ -3640,6 +3656,7 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench(built_stores) -> 
     )
     h2h = subject_evidence(stores, [potter, capo]).head_to_head
     assert h2h is not None and h2h.verdict is True
+    assert h2h.scorer_id == auto_scorer_id(formula, None, judge_instrument=None)
     (pair,) = h2h.pairs
     assert (pair.campaign_a, pair.campaign_b, pair.n_rows) == ("potter_a", "capo_b", 6)
     assert pair.shift == pytest.approx(0.2) and pair.ci_lo is not None and pair.ci_lo > 0.0
@@ -3666,41 +3683,26 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench(built_stores) -> 
     assert [(p.campaign_a, p.campaign_b) for p in h2h.pairs] == [("potter_a", "capo_b")]
     assert [r.comparable for r in h2h.rows] == [True, True, False]
 
-    # One bench set, but the shared origin reads 0.2 apart on the same rows: another grader.
-    # A replayed origin row keeps its old grade, so there only the headline moves.
-    for drifted in (
-        campaign("capo_d", 4, seed=0, selected=0.7, origin=0.6),
-        campaign("capo_e", 5, seed=0, selected=0.7, regraded=0.3),
-    ):
-        h2h = subject_evidence(stores, [potter, capo, drifted]).head_to_head
-        assert h2h is not None and h2h.differs_on == ["origin_reading"], drifted.key
-        assert [(p.campaign_a, p.campaign_b) for p in h2h.pairs] == [("potter_a", "capo_b")]
-
-    # One snapshot, one bench, one origin reading, but the run graded under another scorer: the
-    # dataset file supplied a `per_cell` the snapshot never names, so only the run's stamp tells.
-    regraded = campaign("capo_f", 6, seed=0, selected=0.7, scorer="auto_plain")
-    h2h = subject_evidence(stores, [potter, capo, regraded]).head_to_head
-    assert h2h is not None and h2h.differs_on == ["scorer_id"]
+    # One bench set, but the shared origin reads 0.2 apart on its own rows under the one formula:
+    # the backend or a judge moved between the two runs.
+    drifted = campaign("capo_d", 4, seed=0, selected=0.7, origin=0.6)
+    h2h = subject_evidence(stores, [potter, capo, drifted]).head_to_head
+    assert h2h is not None and h2h.differs_on == ["origin_reading"]
     assert [(p.campaign_a, p.campaign_b) for p in h2h.pairs] == [("potter_a", "capo_b")]
-
-    # Arms running at once each read the shared origin LIVE, and the archive keeps one row per
-    # cell: a gap inside both readings' own bands is backend noise, one beyond them a grader.
-    lead = campaign("potter_g", 7, seed=0, selected=0.5, band=0.2, at=7)
-    twin = campaign("capo_h", 8, seed=0, selected=0.7, band=0.2, at=7, regraded=0.15)
-    h2h = subject_evidence(stores, [lead, twin]).head_to_head
-    assert h2h is not None and h2h.verdict is True
-    assert [r.concurrent_with for r in h2h.rows] == [["capo_h"], ["potter_g"]]
-    far = campaign("capo_i", 9, seed=0, selected=0.7, band=0.2, at=7, regraded=0.6)
-    h2h = subject_evidence(stores, [lead, twin, far]).head_to_head
-    assert h2h is not None and h2h.differs_on == ["origin_reading"]
     assert [r.comparable for r in h2h.rows] == [True, True, False]
-    # A later run replays the archive, so it answers to a raced headline within the bands, and
-    # to a run nobody raced exactly as before: the same gap to `potter_a` is another grader.
-    late = campaign("potter_j", 10, seed=0, selected=0.5, band=0.2, regraded=0.15)
-    h2h = subject_evidence(stores, [lead, twin, late]).head_to_head
+
+    # A campaign run under another formula is read under the oldest one's, never its own: its
+    # passes grade as capo's do, so it pairs with both, and the formula is served once.
+    halved = campaign("capo_f", 6, seed=0, selected=0.7, scoring="0.5 * env_reward", at=1)
+    h2h = subject_evidence(stores, [potter, capo, halved]).head_to_head
     assert h2h is not None and h2h.verdict is True
-    h2h = subject_evidence(stores, [potter, capo, late]).head_to_head
-    assert h2h is not None and h2h.differs_on == ["origin_reading"]
+    assert h2h.scorer_id == auto_scorer_id(formula, None, judge_instrument=None)
+    capo_row, halved_row = h2h.rows[1], h2h.rows[2]
+    assert capo_row.bench is not None and halved_row.bench is not None
+    assert halved_row.bench.selected == capo_row.bench.selected
+    assert len(h2h.pairs) == 3
+    # Their runs overlapped potter's: a shared cache split the bill by arrival.
+    assert [r.concurrent_with for r in h2h.rows] == [["capo_f"], [], ["potter_a"]]
 
 
 # 8. The L4 outer proxy — what one finished inner cycle says

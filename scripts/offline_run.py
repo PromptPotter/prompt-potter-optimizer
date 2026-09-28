@@ -40,7 +40,11 @@ from promptpotter.application.datasets.authored import (
 )
 from promptpotter.application.embedded_run import open_session, run_campaign
 from promptpotter.application.initialization.wiring import complete_registries
-from promptpotter.application.optimizer_manifest import running_prompt, select_optimizer
+from promptpotter.application.optimizer_manifest import (
+    resolve_optimizer,
+    running_prompt,
+    select_optimizer,
+)
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.runner.entry import RunMode
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
@@ -819,11 +823,11 @@ def extract(cycle: Path) -> dict[str, Any]:
 
 
 def digests() -> dict[str, str]:
-    """The L4 identity digests: the estimator's source, and each optimizer's prompt source."""
+    """The L4 identity digests: the estimator's source, and each optimizer's treatment."""
     complete_registries()
     out = {"estimator": module_source_digest(*measurement_modules())}
-    for name, runtime in sorted(optimizers.runtimes().items()):
-        out[f"prompt:{name}"] = runtime.source_digest(*measurement_modules())
+    for name in sorted(optimizers.runtimes()):
+        out[f"treatment:{name}"] = resolve_optimizer(name, {}).treatment().digest
     return out
 
 

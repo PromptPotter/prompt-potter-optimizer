@@ -15,6 +15,8 @@ from promptpotter.domain.strict_model import StrictModel
 
 __all__ = [
     "BankPartition",
+    "BenchPass",
+    "BenchPasses",
     "BenchReading",
     "BenchScore",
     "DatasetSplit",
@@ -93,8 +95,35 @@ def partition_bank(bank: Sequence[Sample], split: DatasetSplit | None) -> BankPa
     )
 
 
+class BenchPass(StrictModel):
+    """One individual's pass over the bench set, as the facts it banked — never a grade of them."""
+
+    model_config = ConfigDict(frozen=True)
+
+    round: int
+    sp_hash: str
+    # `None` where the pass stopped before the gateway filed a run.
+    run_id: str | None
+    sample_ids: list[int]
+    # Why it ended before its last row; `None` once it sent every one.
+    stopped: str | None
+    # The grader it ran under, which stamped its live reading — a reader re-grades under its own.
+    scorer_id: str
+
+
+class BenchPasses(StrictModel):
+    """What a campaign's headline is read off: the origin's pass, the selection's, and how many rows
+    either may end with no verdict. ``runner/bench.py::read_bench`` is the one reading of them."""
+
+    model_config = ConfigDict(frozen=True)
+
+    tolerance: int
+    origin: BenchPass
+    selected: BenchPass
+
+
 class BenchReading(StrictModel):
-    """One individual scored on the whole bench set under the campaign's formula."""
+    """One individual's bench pass, read under a named scorer."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -102,7 +131,7 @@ class BenchReading(StrictModel):
     sp_hash: str = Field(description="The searchpoint scored — the archive's `prompt_fields_id`.")
     accuracy: float | None
     composite_fitness: float | None = Field(
-        description="Under the campaign's formula — the number the headline reads."
+        description="Under the reading scorer's formula — the number the headline reads."
     )
     ci_lo: float | None = Field(
         description="The 95% band on `composite_fitness`, drawn from the same per-row values."
@@ -112,7 +141,6 @@ class BenchReading(StrictModel):
         description="Bench rows carrying a verdict — a miss the prompt caused included — never "
         "fewer than the bench set less its split's `tolerance`."
     )
-    run_id: str = Field(description="The archive run its bench rows were filed under.")
 
 
 class BenchScore(StrictModel):
@@ -121,6 +149,10 @@ class BenchScore(StrictModel):
     model_config = ConfigDict(frozen=True)
 
     bench_size: int
+    scorer_id: str = Field(
+        description="The grader every number here was read under. A stored copy is a cache of that "
+        "reading: a reader under another grader reads the passes again, never this."
+    )
     origin: BenchReading | None = Field(
         description="`None` where its pass read nothing; `missing_reason` says why."
     )

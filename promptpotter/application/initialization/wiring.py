@@ -20,6 +20,7 @@ from promptpotter.application.datasets.loaders import (
     samples_from_dicts,
 )
 from promptpotter.application.initialization.session import Session
+from promptpotter.application.optimizer_manifest import resolve_optimizer
 from promptpotter.application.pipeline_resolve import (
     dataset_pipeline_declaration,
     overlay_dataset_pipeline,
@@ -329,6 +330,9 @@ def complete_registries() -> None:
     for runtime in optimizers.runtimes().values():
         round_payload_type(runtime.name)
         runtime.complete()
+        # Every campaign's mint reads it, and its source digest raises on a prompt-shaping helper
+        # nothing hashes — so a half-hashed optimizer stops the server at boot.
+        resolve_optimizer(runtime.name, {}).treatment()
     # Every decision kind gated once, and a replayer for exactly the REPLAYED ones.
     replayers()
     for connector in table.values():

@@ -14,9 +14,6 @@ from promptpotter.application.intelligence.earned_blocks import (
 )
 from promptpotter.application.intelligence.sibling_wounds import gather_sibling_runtime_failures
 from promptpotter.application.optimizers.potter.dispatch.layout import default_l1_layout
-from promptpotter.application.optimizers.potter.dispatch.prompts import (
-    compute_optimizer_prompt_hashes,
-)
 from promptpotter.application.optimizers.potter.escalation.state import EscalationFSM
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
 from promptpotter.application.optimizers.potter.records import (
@@ -96,7 +93,7 @@ class PotterState:
         return self.snapshot(
             l1_yield=1.0,
             l1_parse_failure=None,
-            prompt_hashes=compute_optimizer_prompt_hashes(selected),
+            prompt_hashes=selected.prompt_hashes(),
             axis_memory_peaked=[],
         )
 

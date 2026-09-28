@@ -92,10 +92,8 @@ def build_archive_observations(
     """Measurement store → ``Observation`` triples. **The candidate is the SEARCHPOINT, not the run** — keying on
     ``content_hash`` turns one prompt re-scored on N subsets into N candidates. Grade A only, by construction.
 
-    **The archive stores MEASUREMENTS; the grade is the READING campaign's** — *scorer* is required
-    for the same reason ``ab_replay`` rescores its origin rows. Pooling each row's stamped-at-write
-    worth builds one scale out of several formulas, so arm B is measured against arm A's δ, and a
-    stored grade cannot answer a ``per_cell`` declared after the row was banked.
+    **The archive stores MEASUREMENTS; the grade is the READING campaign's** — *scorer* grades every
+    row, so one ruler is one formula, and a cell that formula cannot grade reaches no δ.
 
     *sample_ids* is the reading campaign's search pool: the archive is filed by dataset, so a row of
     that campaign's bench set sits here too and must reach no ruler it selects on. ``None`` reads all."""

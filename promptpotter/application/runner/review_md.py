@@ -238,9 +238,9 @@ def _render_bench(final: dict[str, Any]) -> list[str]:
     return [
         "## Bench score — the headline",
         "",
-        f"On {bench.bench_size} held-out rows no optimizer node read, under the campaign's "
-        "formula. Every number below this section is the optimizer's own, read on the rows that "
-        "chose its winner.",
+        f"On {bench.bench_size} held-out rows no optimizer node read, graded by "
+        f"`{bench.scorer_id}`. Every number below this section is the optimizer's own, read on the "
+        "rows that chose its winner.",
         "",
         _bench_line("selected", bench.selected, bench),
         _bench_line("origin", bench.origin, bench),

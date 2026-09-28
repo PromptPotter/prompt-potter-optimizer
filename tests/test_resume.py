@@ -29,8 +29,8 @@ from promptpotter.application.scoring.formula import (
     rescore_results,
 )
 from promptpotter.application.scoring.search_point_scorer import (
+    archivable_priors,
     merge_with_unprocessed_priors,
-    rescored_prior_tail,
 )
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import RoundResult
@@ -331,15 +331,13 @@ def test_merge_with_unprocessed_priors_preserves_full_archive_on_partial_run() -
 
     Aborted runs must not shrink an already-fuller archive — without this a Ctrl+C would
     record the run as having measured only what the walk reached, and the run's derived
-    fields (scores, provenance, item_count) would be computed off that short set.
+    fields (provenance, item_count) would be computed off that short set.
     """
     dataset_sample_ids = set(range(20))
-    formula = "label_match(predicted, ground_truth)"
-    prior_tail = rescored_prior_tail(
+    prior_tail = archivable_priors(
         cached_sample_results={i: _prior(i) for i in dataset_sample_ids},
         dataset_sample_ids=dataset_sample_ids,
         deprecated_samples={},
-        scorer=compile_scorer(formula, verifier_graded=False),
     )
     # Simulate a partial run: 6 cache hits + 1 fresh measurement.
     merged = merge_with_unprocessed_priors([_prior(i) for i in range(7)], prior_tail)
@@ -737,7 +735,6 @@ def _archive_run(
             "content_hash": content_hash,
             "prompt_fields_id": "pf",
             "item_count": len(items),
-            "scores": {"accuracy": 1.0, "total": len(items)},
             "node_configs": [("llm_only", {"model": "X"})],
             "created_at": f"2026-05-19T00:00:{run_id[-2:]}Z",
             "measurements": items,
@@ -833,7 +830,6 @@ def test_partial_walk_log_folds_to_the_full_record(built_stores: Stores) -> None
             "content_hash": "h",
             "prompt_fields_id": "pf",
             "item_count": 1,
-            "scores": {"accuracy": 1.0, "total": 1},
             "node_configs": [("llm_only", {"model": "X"})],
             "provenance": {"grade": "A", "deliberate_source": True},
             "created_at": "2026-05-19T00:00:00Z",

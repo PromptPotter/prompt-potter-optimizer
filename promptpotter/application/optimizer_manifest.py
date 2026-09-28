@@ -27,6 +27,8 @@ from promptpotter.config.paths import (
     checkin_manifest_path,
     optimizer_manifest_path,
 )
+from promptpotter.domain.campaign import Treatment
+from promptpotter.domain.l4 import proxies
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate, PromptTemplate
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
@@ -188,7 +190,11 @@ class SelectedOptimizer:
         return self.runtime.pacing(self)
 
     def prompt_hashes(self) -> dict[str, str]:
-        return self.runtime.prompt_hashes(self)
+        """Per llm node, what shapes the call it sends under the bound L4 edit. A round banks these,
+        and a resume diverges at the first round whose stamp the optimizer loaded now does not match."""
+        return {
+            node: self._node_digest(node, declared_node_override(node)) for node in self.llm_nodes
+        }
 
     @property
     def member_nodes(self) -> tuple[str, ...]:
@@ -208,38 +214,33 @@ class SelectedOptimizer:
     def model(self, node: str | None = None) -> str:
         return str(self.node_config(node or self.proposer)["model"])
 
-    def _node_digest(self, node: str, prompt_fields: Mapping[str, Any]) -> str:
+    def _node_digest(self, node: str, declared: Mapping[str, Any]) -> str:
         cfg = self.call_config(node)
         body = _prompt_body(self.document, cfg)
+        fields, renames = _resolved_prompt_parts(dict(declared))
         schema_key = _resolved_key(cfg.get("schema_family"), cfg.get("schema_version"))
         return _digest(
             [
-                {**body, **prompt_fields} if body is not None and prompt_fields else body,
+                {**body, **fields} if body is not None and fields else body,
+                renames,
+                self.runtime.override_levers(node, declared),
                 self.resolved_schemas.get(schema_key) if schema_key else None,
                 cfg,
             ]
         )
 
-    @functools.cached_property
-    def config_digest(self) -> str:
-        """What decides this optimizer's behaviour, off the manifest alone: each llm node's prompt,
-        output schema and call config, and every member's validated knobs."""
-        return _digest(
-            [
-                self.name,
-                self.version,
-                {node: self._node_digest(node, {}) for node in self.llm_nodes},
-                {node: self.knobs(node).model_dump(mode="json") for node in self.member_nodes},
-            ]
+    def treatment(self) -> Treatment:
+        """Off the manifest, its overlay and its code — never the L4 edit an inner cell runs it
+        under, which that cell's identity hashes beside it."""
+        return Treatment(
+            optimizer=self.name,
+            version=self.version,
+            prompt_hashes={node: self._node_digest(node, {}) for node in self.llm_nodes},
+            knobs={node: self.knobs(node).model_dump(mode="json") for node in self.member_nodes},
+            # The L4 law is covered, not hashed: prompt code reads it only on the recursion, whose
+            # fingerprint hashes it with the estimator (`connectors/promptpotter.py`).
+            source=self.runtime.source_digest(proxies),
         )
-
-    def running_digests(self) -> dict[str, str]:
-        """Per llm node: its prompt under the edit an L4 inner cell runs it with, its output schema
-        and its call config."""
-        return {
-            node: self._node_digest(node, resolve_node_override(node).prompt_fields)
-            for node in self.llm_nodes
-        }
 
 
 def _resolved_key(family: object, version: object) -> str | None:

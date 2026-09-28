@@ -6,7 +6,8 @@ a page holds and in what order are decided here, once, so every entry point read
 Scores are served, never recomputed — the Rasch artifact is read off disk and paged; the ordering
 it carries is the backend's answer (`webapp/CLAUDE.md` § Scoring authority).
 
-`open_cell` assembles an archive row into its trace. The spans are READ-TIME assembly over what
+An archive row banks no grade, so both reads grade it under the dataset's own scorer first.
+`open_cell` assembles the graded row into its trace. The spans are READ-TIME assembly over what
 the row already banked, never a second record of it. A node's input is re-rendered from the run's
 own node config over the sample fields a row keeps (`query`, `ground_truth`, `question`), so a
 template reading any other `Sample` field renders it blank; outputs are attributed through the
@@ -31,6 +32,7 @@ from promptpotter.application.pipeline_resolve import (
     dataset_pipeline_declaration,
     experiment_outside_run,
 )
+from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.sample_measurement import interpolate_prompt
 from promptpotter.domain.cells import (
     Cell,
@@ -46,12 +48,16 @@ from promptpotter.domain.dashboard_rows import SampleStatus, sample_status
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.results import HardSampleOrder
 from promptpotter.domain.scoring import is_hit, recorded_cost_s
-from promptpotter.infrastructure.store.archive_queries import load_run, read_cold_payload
+from promptpotter.infrastructure.store.archive_queries import (
+    list_runs,
+    load_run,
+    read_cold_payload,
+)
 from promptpotter.infrastructure.store.cell_queries import (
     ScopeCells,
     campaign_cells,
     cycle_cells,
-    dataset_cells,
+    row_cell,
 )
 from promptpotter.infrastructure.store.dataset_access import (
     dataset_panel_rows,
@@ -187,7 +193,8 @@ def open_cell(stores: Stores, name: str, run_id: str, sample_id: int) -> Cell:
         stores, dataset_dir, experiment_outside_run(dataset_dir)
     )
     schema = parse_pipeline_response(declared) if declared is not None else None
-    return assemble_cell(detail, row, schema, run_id=run_id)
+    (graded,) = rescore_results([row], dataset_cell_scorer(dataset_dir)[0])
+    return assemble_cell(detail, graded, schema, run_id=run_id)
 
 
 def _load_dataset_rows(
@@ -421,7 +428,36 @@ def _page_cells(
     if scope == "campaign":
         assert campaign is not None  # checked in resolver
         return campaign_cells(art_store, campaign, set(page))
-    return dataset_cells(art_store, dataset_name=name, wanted=set(page))
+    return _dataset_cells(art_store, name, set(page))
+
+
+def _dataset_cells(stores: Stores, name: str, wanted: set[int]) -> ScopeCells:
+    """Every archive run filed under *name*, oldest first, graded under the dataset's own scorer —
+    the one the dataset-scope heatmap grades with. A ``sample_id`` names a sample in one dataset."""
+    scorer, _ = dataset_cell_scorer(readable_dataset_dir(stores, name))
+    runs: list[tuple[str, str, dict[str, Any]]] = []
+    for entry in list_runs(stores, dataset_name=name):
+        run_id = entry["run_id"]
+        detail = load_run(stores, run_id)
+        if detail is not None:
+            runs.append((str(detail.get("created_at", "")), run_id, detail))
+    runs.sort(key=lambda r: (r[0], r[1]))
+    candidates: list[CellCandidate] = []
+    cells: list[CellRow] = []
+    for created_at, run_id, detail in runs:
+        candidates.append(
+            CellCandidate(
+                key=run_id,
+                label=str(detail.get("name") or run_id[:12]),
+                run_id=run_id,
+                created_at=created_at or None,
+            )
+        )
+        kept = [r for r in detail["measurements"] if r.get("sample_id") in wanted]
+        for item in rescore_results(kept, scorer):
+            if (cell := row_cell(item, run_id=run_id, key=run_id)) is not None:
+                cells.append(cell)
+    return candidates, cells
 
 
 def _dataset_hard_sample_order(stores: Stores, name: str) -> HardSampleOrder:

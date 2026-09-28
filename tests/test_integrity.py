@@ -212,9 +212,6 @@ def test_an_l4_override_moves_the_prompt_and_hash_of_every_preset() -> None:
         set_optimizer_prompt_overrides,
     )
     from promptpotter.application.optimizers import paper_templates
-    from promptpotter.application.optimizers.potter.dispatch.prompts import (
-        compute_optimizer_prompt_hashes,
-    )
     from promptpotter.application.runner.inner.spawn import inner_campaign_id
     from promptpotter.application.runner.inner.tasks import InnerTaskSpec
 
@@ -241,21 +238,21 @@ def test_an_l4_override_moves_the_prompt_and_hash_of_every_preset() -> None:
     finally:
         set_optimizer_prompt_overrides(None)
     spec = InnerTaskSpec(
-        inner_dataset="justlogic-d234", optimizer_identity="o", seed=3, n_samples=28, n_rounds=4
+        inner_dataset="justlogic-d234", optimizer_treatment="o", seed=3, n_samples=28, n_rounds=4
     )
     assert inner_campaign_id(spec, mutated) != inner_campaign_id(spec, {})
 
     potter = resolve_optimizer("potter", {})
     try:
         set_optimizer_prompt_overrides(None)
-        baseline = compute_optimizer_prompt_hashes(potter)
-        assert compute_optimizer_prompt_hashes(potter) == baseline
+        baseline = potter.prompt_hashes()
+        assert potter.prompt_hashes() == baseline
 
         # Valid layout edit (`diagnostics` stays placed) on one node.
         set_optimizer_prompt_overrides(
             {"l1_critique": {"layout": {"axis_memory": "thinking_style"}}}
         )
-        edited = compute_optimizer_prompt_hashes(potter)
+        edited = potter.prompt_hashes()
         assert edited["l1_critique"] != baseline["l1_critique"], (
             "layout-only override left the node hash unchanged — audits would pool "
             "layout-differing cycles"
@@ -355,7 +352,7 @@ def test_inner_campaign_id_separates_two_candidates_and_is_stable() -> None:
     from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 
     spec = InnerTaskSpec(
-        inner_dataset="justlogic-d234", optimizer_identity="o", seed=3, n_samples=28, n_rounds=4
+        inner_dataset="justlogic-d234", optimizer_treatment="o", seed=3, n_samples=28, n_rounds=4
     )
     c1 = {"l1_generate": {"instruction": "widen the axes"}}
     c2 = {"l1_generate": {"instruction": "narrow the axes"}}
@@ -373,10 +370,10 @@ def test_inner_campaign_id_separates_two_candidates_and_is_stable() -> None:
     # inner optimizer runs another knob — an eliminator's as much as an llm node's.
     assert inner_campaign_id(spec.model_copy(update={"seed": 6}), c1) != inner_campaign_id(spec, c1)
     cut = {"pobb": ManifestNodeOverlay.model_validate({"config": {"epsilon": 0.3}})}
-    as_run, as_cut = (resolve_optimizer("potter", n).config_digest for n in ({}, cut))
+    as_run, as_cut = (resolve_optimizer("potter", n).treatment().digest for n in ({}, cut))
     assert inner_campaign_id(
-        spec.model_copy(update={"optimizer_identity": as_run}), c1
-    ) != inner_campaign_id(spec.model_copy(update={"optimizer_identity": as_cut}), c1)
+        spec.model_copy(update={"optimizer_treatment": as_run}), c1
+    ) != inner_campaign_id(spec.model_copy(update={"optimizer_treatment": as_cut}), c1)
     # Recomputation is stable, and key order in the override dict is not part of the identity.
     assert inner_campaign_id(spec, c1) == inner_campaign_id(spec, dict(c1))
     assert inner_campaign_id(spec, {"a": {"x": "1"}, "b": {"y": "2"}}) == inner_campaign_id(
@@ -389,7 +386,7 @@ def test_inner_campaign_id_separates_two_candidates_and_is_stable() -> None:
             "-c",
             "from promptpotter.application.runner.inner.spawn import inner_campaign_id;"
             "from promptpotter.application.runner.inner.tasks import InnerTaskSpec;"
-            "s=InnerTaskSpec(inner_dataset='justlogic-d234',optimizer_identity='o',seed=3,"
+            "s=InnerTaskSpec(inner_dataset='justlogic-d234',optimizer_treatment='o',seed=3,"
             "n_samples=28,n_rounds=4);"
             "print(inner_campaign_id(s,{'l1_generate':{'instruction':'widen the axes'}}))",
         ],
@@ -401,6 +398,38 @@ def test_inner_campaign_id_separates_two_candidates_and_is_stable() -> None:
         "the campaign key is not stable across processes — every retry would re-mint "
         "instead of continuing, and the banked rounds would be orphaned in silence"
     )
+
+
+def test_a_knob_edit_is_a_new_treatment_that_resume_continues() -> None:
+    """A potter knob edit moves the treatment and leaves every call digest where it was.
+
+    Folded into the call digests, a knob edit forks every resume at round 0 and re-buys the trace
+    for a policy change. Left out of the treatment, two campaigns differing only in a knob read as
+    one arm, and an inner cell continues rounds another knob banked. Swapping the optimizer is
+    never a policy edit, though the measurement key it leaves untouched cannot say so."""
+    from promptpotter.application.campaign_config import (
+        CampaignConfig,
+        OptimizationConfig,
+        freeze_campaign_config,
+    )
+    from promptpotter.application.knobs import DiffScope, classify_config_diff
+    from promptpotter.application.optimizer_manifest import select_optimizer
+    from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
+
+    ran = CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05))
+    cut = {"pobb": ManifestNodeOverlay.model_validate({"config": {"epsilon": 0.3}})}
+    edited = ran.model_copy(
+        update={"optimization": ran.optimization.model_copy(update={"nodes": cut})}
+    )
+    before, after = (select_optimizer(c.optimization) for c in (ran, edited))
+    assert after.treatment().digest != before.treatment().digest
+    assert after.prompt_hashes() == before.prompt_hashes()
+    frozen = freeze_campaign_config(ran)
+    assert classify_config_diff(edited, frozen)[0] is DiffScope.POLICY_ONLY
+    swapped = ran.model_copy(
+        update={"optimization": ran.optimization.model_copy(update={"optimizer": "capo"})}
+    )
+    assert classify_config_diff(swapped, frozen)[0] is DiffScope.TREATMENT
 
 
 def test_judge_identity_moves_the_searchpoint_hash() -> None:
@@ -1016,7 +1045,6 @@ def _seed_run(archive: MeasurementArchive, *, run_id: str, dataset_name: str, hi
             "content_hash": f"hash_{run_id}",
             "prompt_fields_id": "pf_x",
             "item_count": 1,
-            "scores": {"accuracy": 1.0 if hit else 0.0, "total": 1},
             "node_configs": [("llm_only", {"model": "X"})],
             "pipeline_params": {"llm_only": {"model": "X"}},
             "created_at": "2026-05-19T00:00:00Z",
@@ -1062,7 +1090,6 @@ def _seed_graded(
             "content_hash": f"hash_{run_id}",
             "prompt_fields_id": "pf_x",
             "item_count": 1,
-            "scores": {"accuracy": 1.0, "total": 1},
             "node_configs": [("llm_only", {"model": "X"})],
             "pipeline_params": {"llm_only": {"model": "X"}},
             "provenance": provenance,
@@ -1157,7 +1184,6 @@ def test_full_chain_rows_never_replay_on_prefix_match(tmp_path: Path) -> None:
                 "content_hash": f"hash_{run_id}",
                 "prompt_fields_id": "pf_x",
                 "item_count": 1,
-                "scores": {"accuracy": 1.0, "total": 1},
                 "node_configs": [(n, {}) for n in chain],
                 "pipeline_params": {},
                 "created_at": "2026-07-03T00:00:00Z",
@@ -1287,10 +1313,9 @@ def _persisting_walk(root: Path, panel: list[Sample]) -> tuple[Any, JobSearchPoi
     return session, sp
 
 
-def _drawn_row(sample: Sample, session: Any, predicted: str) -> dict[str, Any]:
-    from promptpotter.application.scoring.formula.rescore import rescore_results
-
-    row = {
+def _drawn_row(sample: Sample, predicted: str) -> dict[str, Any]:
+    """What ``measure_sample`` returns: the cell's facts, ungraded."""
+    return {
         "sample_id": sample.id,
         "sample_key": sample.key,
         "query": sample.query,
@@ -1298,7 +1323,87 @@ def _drawn_row(sample: Sample, session: Any, predicted: str) -> dict[str, Any]:
         "predicted": predicted,
         "error": None,
     }
-    return rescore_results([row], session.scoring.scorer)[0]
+
+
+def _walk_panel(root: Path, panel: list[Sample], per_sample: str, per_cell: str | None) -> Any:
+    """One persisting walk of ``panel`` under the formula pair, answering "a" on even ids."""
+    from promptpotter.application.scoring import search_point_scorer
+    from promptpotter.application.scoring.formula import compile_scorer
+
+    session, sp = _persisting_walk(root, panel)
+    session.scoring.scorer = compile_scorer(per_sample, per_cell, verifier_graded=False)
+
+    async def _measure(sample: Sample, _session: Any, *, pipeline_params: Any) -> dict:
+        return _drawn_row(sample, "b" if sample.id % 2 else "a")
+
+    with mock.patch.object(query_loop, "measure_sample", _measure):
+        walked = asyncio.run(
+            search_point_scorer.score_search_point(
+                sp,
+                panel,
+                session,
+                label="panel",
+                measured=None,
+                on_sample_scored=None,
+                on_sample_starting=None,
+            )
+        )
+    return session, walked
+
+
+def test_the_archive_banks_a_cells_facts_and_never_its_grade(tmp_path: Path) -> None:
+    """A grade is ONE formula's reading of a cell. Banked beside the facts, it reaches every later
+    reader as if it were that reader's own — a replay, the δ ruler, a bench pairing — and each
+    still renders a number. The walk grades its rows; the archive keeps what was measured."""
+    from promptpotter.domain.scoring import GRADE_KEYS
+    from promptpotter.infrastructure.store import archive_queries
+
+    panel = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(4)]
+    session, walked = _walk_panel(tmp_path, panel, "label_match(predicted, ground_truth)", None)
+
+    assert all(GRADE_KEYS & r.keys() for r in walked.results), "guard: the walk's rows are graded"
+    banked = archive_queries.load_run(session.store, walked.run_id)["measurements"]
+    assert len(banked) == len(panel)
+    assert not [sorted(GRADE_KEYS & r.keys()) for r in banked if GRADE_KEYS & r.keys()]
+
+
+def test_rows_banked_under_one_formula_read_under_another_as_a_fresh_run_would(
+    tmp_path: Path,
+) -> None:
+    """A campaign whose formula differs from the one its archive rows were measured under must read
+    them exactly as a fresh run under ITS formula would — cell by cell, through the ``per_cell``
+    composite and its miss-cost share. Graded off a stored ``fitness``, the composite silently
+    mixes the writer's correctness with the reader's price: the ruler and the replayed walk both
+    render, on the wrong numbers."""
+    from promptpotter.application.intelligence.hard_sample_archive import (
+        build_archive_observations,
+    )
+    from promptpotter.application.scoring.formula import compile_scorer
+
+    def fresh_scorer(per_sample: str, per_cell: str | None) -> Any:
+        return compile_scorer(per_sample, per_cell, verifier_graded=False)
+
+    panel = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(6)]
+    banked_under = ("label_match(predicted, ground_truth)", None)
+    read_under = ("0.5 * label_match(predicted, ground_truth)", "0.5 * fitness + 0.25")
+
+    shared, _ = _walk_panel(tmp_path / "shared", panel, *banked_under)
+    _, fresh = _walk_panel(tmp_path / "fresh", panel, *read_under)
+    worth = {r["sample_id"]: r["objective"] for r in fresh.results}
+    assert len(set(worth.values())) == 2, "guard: hits and misses are worth different amounts"
+
+    ruler = build_archive_observations(
+        shared.store,
+        dataset_name="claims",
+        scorer=fresh_scorer(*read_under),
+        scorer_id="read_under",
+        sample_ids=None,
+    )
+    assert {o.sample_id: o.response for o in ruler} == pytest.approx(worth)
+    _, replayed = _walk_panel(tmp_path / "shared", panel, *read_under)
+    assert all(r.get("cached") for r in replayed.results), "guard: the second read bought nothing"
+    assert {r["sample_id"]: r["objective"] for r in replayed.results} == worth
+    assert replayed.scores["composite_fitness"] == pytest.approx(fresh.scores["composite_fitness"])
 
 
 def test_concurrent_walks_on_one_run_buy_each_cell_once(tmp_path: Path, monkeypatch) -> None:
@@ -1324,7 +1429,7 @@ def test_concurrent_walks_on_one_run_buy_each_cell_once(tmp_path: Path, monkeypa
             draw = sum(sends.values())
         await asyncio.sleep(0.05)
         # Every send draws a different answer, as a backend at T=0 still does.
-        return _drawn_row(sample, session, "a" if draw % 2 else f"b{draw}")
+        return _drawn_row(sample, "a" if draw % 2 else f"b{draw}")
 
     monkeypatch.setattr(query_loop, "measure_sample", _measure)
     monkeypatch.setattr(search_point_scorer, "_CLAIM_POLL_S", 0.01)
@@ -1406,7 +1511,7 @@ def test_a_dead_claimers_cell_is_taken_over(tmp_path: Path, monkeypatch) -> None
 
     async def _measure(sample: Sample, session: Any, *, pipeline_params: Any) -> dict:
         sends[sample.key] += 1
-        return _drawn_row(sample, session, "a")
+        return _drawn_row(sample, "a")
 
     monkeypatch.setattr(query_loop, "measure_sample", _measure)
     monkeypatch.setattr(search_point_scorer, "_CLAIM_POLL_S", 0.01)
@@ -3732,7 +3837,7 @@ def test_the_l4_dataset_is_recognized_as_one(tmp_path: Path) -> None:
             n_scored=40,
         )
         ran = select_optimizer(cell.optimization)
-        assert shown.config_digest == ran.config_digest
+        assert shown.treatment() == ran.treatment()
         assert shown.knobs("escalation") == ran.knobs("escalation")
         assert {n.name for n in graph.config_nodes if n.tunes_llm} == set(ran.llm_nodes)
 

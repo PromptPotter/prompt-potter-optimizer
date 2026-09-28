@@ -39,11 +39,12 @@ __all__ = [
 
 
 class Scope(StrEnum):
-    """What a knob shapes — ``POLICY`` leaves past measurements valid and governs unevaluated
-    rounds; ``DATA`` shapes the trace itself, so resume runs divergence detection."""
+    """What a knob shapes — ``POLICY`` governs unevaluated rounds only; ``DATA`` shapes the trace, and
+    ``IDENTITY`` names what runs (a new treatment), so resume runs divergence detection on both."""
 
     POLICY = "policy"
     DATA = "data"
+    IDENTITY = "identity"
 
 
 class Estimand(StrEnum):
@@ -143,7 +144,7 @@ class OptimizationConfig(StrictModel):
     """The bench's own loop config, plus which optimizer runs and its overlay. An optimizer's knobs
     are its nodes' ``config`` in its manifest, never fields here."""
 
-    optimizer: Annotated[str, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+    optimizer: Annotated[str, Knob(Scope.IDENTITY, Estimand.SEARCH)] = Field(
         "potter",
         min_length=1,
         description=(

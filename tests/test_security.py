@@ -341,7 +341,7 @@ async def test_cell_envelope_cancels_the_inner_campaign(tmp_path: Path, monkeypa
             asking_cycle_id="cycle_deadbeef0000",
             # No inner dataset resolved: the stubbed inner run never reads one.
             cells=InnerCells(
-                panel=load_inner_tasks(tmp_path / "inner_tasks.yaml"), by_dataset={}, identity="o"
+                panel=load_inner_tasks(tmp_path / "inner_tasks.yaml"), by_dataset={}, treatment="o"
             ),
         )
     )

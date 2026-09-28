@@ -43,9 +43,9 @@ from promptpotter.application.run_observers import (
 )
 from promptpotter.application.run_phase_control import declare_run_phase
 from promptpotter.application.runner.bench import (
-    BenchPass,
     bench_selection,
     graded,
+    headline,
     nothing_held_out,
     score_on_bench,
 )
@@ -59,7 +59,7 @@ from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.application.scoring.query_loop import FlightGauge
 from promptpotter.config.settings import APP_VERSION
-from promptpotter.domain.bench import BenchScore, partition_bank
+from promptpotter.domain.bench import BenchPass, BenchPasses, BenchScore, partition_bank
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import PromptExport, build_prompt_export
 from promptpotter.domain.launch_limits import HeldLimits
@@ -448,7 +448,7 @@ def _export_artifact(
         cycle_id=session.state.cycle_id,
         dataset_name=campaign.dataset_name if campaign else (session.dataset_name or ""),
         dataset_hash=dataset_hash(session.samples),
-        optimizer_manifest_hashes=campaign.optimizer_manifest_hashes if campaign else {},
+        treatment=campaign.treatment if campaign else None,
         stop_reason=str(cycle_result.stop_reason),
         finished_at=cycle_result.finished_at,
         formula=formula,
@@ -472,6 +472,7 @@ def _close_cycle(
     config: CampaignConfig,
     diag: bool,
     bench: BenchScore | None,
+    bench_passes: BenchPasses | None,
 ) -> CycleResult:
     """The one terminal path, for a stop raised in the round loop and one raised in run init."""
     finished_at = utcnow_iso()
@@ -499,6 +500,7 @@ def _close_cycle(
         config=config,
         cycle=cycle,
         diag=diag,
+        bench_passes=bench_passes,
     )
     if langfuse_trace_id is not None:
         cycle_result = cycle_result.model_copy(update={"langfuse_trace_id": langfuse_trace_id})
@@ -544,7 +546,7 @@ async def _run_single_cycle(
     cycle: Cycle | None = None
     cancel_exc: asyncio.CancelledError | None = None
     budget_gate: BudgetGate | None = None
-    origin_bench: BenchPass | None = None
+    origin_pass: BenchPass | None = None
     unheld: BenchScore | None = None
     try:
         cycle = await init_optimization_loop(
@@ -595,7 +597,7 @@ async def _run_single_cycle(
             # still fits under the ceiling the search spends against.
             spend = observers.dashboard.state.spend
             usd_before, tokens_before = spend.total_incurred_usd, spend.total_tokens_used
-            origin_bench = await score_on_bench(
+            origin_pass = await score_on_bench(
                 session,
                 origin.resolved_origin.to_job_search_point(
                     base_pipeline_params=session.pipeline_params or None,
@@ -610,9 +612,9 @@ async def _run_single_cycle(
                 spend.total_incurred_usd - usd_before, spend.total_tokens_used - tokens_before
             )
             if campaign_config.bench_each_round:
-                graded(cb, origin_bench)
+                graded(cb, session, origin_pass)
         elif not session.scoring.require_partition().bench:
-            unheld = nothing_held_out(cb)
+            unheld = nothing_held_out(cb, scorer_id=session.scoring.scorer_id)
         stop_reason, cycle_error = await run_round_loop(
             cycle,
             dataset,
@@ -663,15 +665,17 @@ async def _run_single_cycle(
         )
 
     bench: BenchScore | None = unheld
+    bench_passes: BenchPasses | None = None
     if (
         cycle is not None
         and budget_gate is not None
-        and origin_bench is not None
+        and origin_pass is not None
         and _bench_grades(stop_reason)
     ):
         budget_gate.book.set_aside(0.0, 0)
         try:
-            bench = await bench_selection(cycle, session, origin=origin_bench, cb=cb)
+            bench_passes = await bench_selection(cycle, session, origin=origin_pass, cb=cb)
+            bench = headline(cb, session, bench_passes)
         except RUN_STOPS as stop:
             # Only a pause escapes the pass; it keeps the cycle resumable, and the resume takes
             # the pass again.
@@ -693,6 +697,7 @@ async def _run_single_cycle(
         config=campaign_config,
         diag=mode.diag,
         bench=bench,
+        bench_passes=bench_passes,
     )
     # A fork that never completed a round leaves an empty dir. Ahead of the re-raise below,
     # because a cancellation is one of the interrupts that produces one.
@@ -822,6 +827,7 @@ async def run_optimization(
             config=campaign_config,
             diag=mode.diag,
             bench=None,
+            bench_passes=None,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         # Prep is the only phase outside `_run_single_cycle`'s try, and the longest. An
@@ -879,6 +885,7 @@ def _finalize_run(
     config: CampaignConfig,
     cycle: Cycle | None,
     diag: bool,
+    bench_passes: BenchPasses | None,
 ) -> str | None:
     """Returns the Langfuse trace id from the terminal ``end_campaign`` emit (``None`` when
     no tracing bridge is active) so the caller can stamp it onto the returned ``CycleResult``.
@@ -955,9 +962,11 @@ def _finalize_run(
             "result_prompt_fields": cycle_result.result_prompt_fields,
             "result_pipeline_params": cycle_result.result_pipeline_params,
             # The HEADLINE, on rows no optimizer node read; every basis above is the optimizer's.
+            # A cache of reading `bench_passes` under `scorer_id` — the passes are the facts.
             "bench": (
                 None if cycle_result.bench is None else cycle_result.bench.model_dump(mode="json")
             ),
+            "bench_passes": None if bench_passes is None else bench_passes.model_dump(mode="json"),
         }
         session.store.campaigns.mark_finished(
             session.hop,

@@ -225,8 +225,8 @@ class InnerTaskSpec(StrictModel):
     model_config = ConfigDict(frozen=True)
 
     inner_dataset: str
-    # `InnerCells.identity`: the optimizer the cell runs, overlays and manifest alike.
-    optimizer_identity: str
+    # `InnerCells.treatment`: the optimizer the cell runs, overlays, manifest and code alike.
+    optimizer_treatment: str
     seed: int
     n_samples: int
     n_samples_origin: int | None = None
@@ -334,9 +334,9 @@ class InnerCells:
 
     panel: InnerTasks
     by_dataset: Mapping[str, InnerCell]
-    # The cells' `config_digest` without the panel's depth: what their optimizer IS, never how far
-    # a cell runs, so a deepened cell continues its campaign.
-    identity: str
+    # The cells' `Treatment.digest` without the panel's depth: what their optimizer IS, never how
+    # far a cell runs, so a deepened cell continues its campaign.
+    treatment: str
 
     @property
     def optimizer(self) -> SelectedOptimizer:
@@ -410,7 +410,7 @@ def resolve_inner_cells(stores: Stores, panel: InnerTasks) -> InnerCells:
             ),
         )
         identity = _select_inner_optimizer(campaign, cfg.inner_nodes, {}, n_samples=None)
-        runs[name] = identity.config_digest
+        runs[name] = identity.treatment().digest
     if any(run != runs[min(runs)] for run in runs.values()):
         named = {name: c.optimizer.name for name, c in by_dataset.items()}
         raise ValueError(
@@ -418,7 +418,7 @@ def resolve_inner_cells(stores: Stores, panel: InnerTasks) -> InnerCells:
             "measures one optimizer configuration: give its cells datasets whose optimization "
             "agrees, or split the panel."
         )
-    return InnerCells(panel=panel, by_dataset=by_dataset, identity=runs[min(runs)])
+    return InnerCells(panel=panel, by_dataset=by_dataset, treatment=runs[min(runs)])
 
 
 def resolve_inner_task(ctx: InnerSpawnContext, query: str) -> InnerTaskSpec:
@@ -443,7 +443,7 @@ def resolve_inner_task(ctx: InnerSpawnContext, query: str) -> InnerTaskSpec:
         )
     return InnerTaskSpec(
         inner_dataset=panel.dataset_for(cell),
-        optimizer_identity=ctx.cells.identity,
+        optimizer_treatment=ctx.cells.treatment,
         seed=cell.inner_dataset_seed,
         n_samples=cfg.n_samples_per_inner_round,
         n_samples_origin=cfg.n_samples_origin,

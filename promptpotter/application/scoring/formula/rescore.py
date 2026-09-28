@@ -1,5 +1,8 @@
-"""Sole writer of top-level ``fitness``, ``objective`` and ``unscored``, and idempotent. There is deliberately no ``hit``
-beside them — that stores a threshold's output."""
+"""Sole writer of top-level ``fitness``, ``objective`` and ``unscored``, and idempotent. There is
+deliberately no ``hit`` beside them — that stores a threshold's output.
+
+**The one derivation from facts to graded cells**: the archive keeps none of the three
+(``GRADE_KEYS``), so every reader of a row — the walk, a replay, an archive read — grades it here."""
 
 from __future__ import annotations
 
@@ -22,9 +25,8 @@ def rescore_results(results: list[dict[str, Any]], scorer: CellScorer) -> list[d
     (``domain/scoring.py``): an error the configuration caused is its miss, a provider's is nothing.
 
     **UNSCORED** — the backend answered and this formula cannot grade the answer. Both keys are
-    REMOVED and ``unscored`` carries the missing term's own message. Removed rather than left alone
-    because a replayed row arrives holding the verdict of whatever formula was active when it was
-    banked, so leaving it serves one campaign's grade as another's.
+    REMOVED and ``unscored`` carries the missing term's own message, so a row graded again under a
+    second formula keeps no verdict of the first.
 
     Only ``ScoringTermMissingError`` resolves that way, never its parent: that one is a contract bug
     every cell fails, so it keeps halting loud. Halting on a missing TERM instead discards an

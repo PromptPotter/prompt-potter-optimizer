@@ -1568,8 +1568,8 @@ paths:
         `current_round.racing` is the eliminator's live standing, named by its
         manifest `member` and null before a reading; `catch_up_log[]` names the
         member too. `bench_score` (`BenchScore`) is the headline, folded from the
-        `bench:scored` phase record and null until the bench pass grades the
-        selection. `run_limits` holds the bench's ceilings and `optimizer[]` — the
+        `bench:scored` phase record — the run's own reading, stamped with its
+        `scorer_id` — and null until the bench pass grades the selection. `run_limits` holds the bench's ceilings and `optimizer[]` — the
         run-bounding knobs the selected optimizer declares (`OptimizerLimit`), empty
         where it declares none. `run_standing` (`RunStanding`) is where the optimizer
         stands after the last closed round — rounds without advance, and the stalls
@@ -3278,8 +3278,8 @@ components:
     BenchReading:
       type: object
       additionalProperties: false
-      required: [round, sp_hash, accuracy, composite_fitness, ci_lo, ci_hi, n_scored, run_id]
-      description: One individual scored on the whole bench set under the campaign's formula.
+      required: [round, sp_hash, accuracy, composite_fitness, ci_lo, ci_hi, n_scored]
+      description: One individual's bench pass, read under a named scorer.
       properties:
         round: { type: integer, description: The round whose selection this is; 0 is the origin. }
         sp_hash: { type: string, description: "The searchpoint scored — the archive's `prompt_fields_id`." }
@@ -3292,14 +3292,21 @@ components:
           description: |
             Bench rows carrying a verdict, a miss the prompt caused included; never fewer than
             the bench set less its split's `tolerance` — a pass past it is no reading.
-        run_id: { type: string, description: The archive run its bench rows were filed under. }
 
     BenchScore:
       type: object
       additionalProperties: false
-      required: [bench_size, origin, selected, missing_reason, lift, lift_ci_lo, lift_ci_hi]
+      required:
+        [bench_size, scorer_id, origin, selected, missing_reason, lift, lift_ci_lo, lift_ci_hi]
+      description: |
+        A reading of the passes' archived facts (`index.json::final.bench_passes`) under
+        `scorer_id`. Every served copy is a cache of that reading: a reader under another
+        grader reads the passes again, never this.
       properties:
         bench_size: { type: integer }
+        scorer_id:
+          type: string
+          description: The grader every number here was read under.
         origin:
           oneOf:
             - $ref: '#/components/schemas/BenchReading'

@@ -99,18 +99,19 @@ def load_dataset_campaign_config(
         raise StoredConfigInvalidError(path=str(path), reason=reason) from exc
 
 
-def dataset_cell_scorer(dataset_dir: Path) -> tuple[CellScorer, str]:
-    """The scorer a DATASET declares, for a reader that has no campaign of its own to ask.
-
-    Two callers, both grading archive rows outside any one campaign: the shared inner δ scale
-    (``runner/inner/ruler.py`` — the outer session's scorer names a measurand the inner rows do
-    not carry) and the dataset-scope heatmap. A campaign that HAS a scorer uses its own; this is
-    not a fallback for one that forgot to compile."""
-    config = load_dataset_campaign_config(dataset_campaign_path(dataset_dir))
+def config_cell_scorer(config: CampaignConfig) -> tuple[CellScorer, str]:
+    """The scorer *config* declares, and its id, for a reader grading archive rows with no session.
+    A campaign that HAS a session scorer uses it; this is not a fallback for one that forgot."""
     spec = split_scoring_block(config.scoring, judge_instrument=judge_instrument(config.judges))
     # No bank here to read the shape off, and none is needed: this compiles a formula a campaign's
     # own init already refused-or-accepted against its samples.
     return compile_scorer(spec.per_sample, spec.per_cell, verifier_graded=False), spec.scorer_id
+
+
+def dataset_cell_scorer(dataset_dir: Path) -> tuple[CellScorer, str]:
+    """The scorer a DATASET declares, for a reader with no campaign to ask — the shared inner δ
+    scale (the outer scorer names a measurand inner rows lack) and the dataset-scope cell reads."""
+    return config_cell_scorer(load_dataset_campaign_config(dataset_campaign_path(dataset_dir)))
 
 
 def read_authored_dataset(dataset_dir: Path) -> AuthoredDataset:
@@ -136,6 +137,7 @@ def read_authored_dataset(dataset_dir: Path) -> AuthoredDataset:
 
 
 __all__ = [
+    "config_cell_scorer",
     "dataset_cell_scorer",
     "load_dataset_campaign_config",
     "read_authored_dataset",

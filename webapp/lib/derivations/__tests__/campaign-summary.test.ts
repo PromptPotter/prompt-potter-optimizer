@@ -166,6 +166,7 @@ describe("benchReading", () => {
   it("tells nothing held out apart from a pass not taken", () => {
     const unheld: BenchScore = {
       bench_size: 0,
+      scorer_id: "default_hit",
       origin: null,
       selected: null,
       missing_reason: "nothing held out: the campaign's dataset_split declares no bench rows",
@@ -186,10 +187,10 @@ describe("benchReading", () => {
       ci_lo: null,
       ci_hi: null,
       n_scored: 10,
-      run_id: "bench_s",
     };
     const graded: BenchScore = {
       bench_size: 10,
+      scorer_id: "default_hit",
       origin: { ...reading, round: 0, accuracy: 0.0, composite_fitness: 0.2 },
       selected: { ...reading, round: 3, accuracy: 0.5, composite_fitness: 0.62 },
       missing_reason: null,

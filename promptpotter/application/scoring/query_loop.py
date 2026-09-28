@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import logging
-import re
 import sys
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -35,7 +34,7 @@ from promptpotter.domain.phases import (
     StopLoop,
     StopReason,
 )
-from promptpotter.domain.scoring import CellScorer, QueryMeasurement, is_hit
+from promptpotter.domain.scoring import CellScorer, QueryMeasurement
 from promptpotter.domain.spend import StepTokenUsage
 from promptpotter.domain.validators import StopRule, StopSignal
 from promptpotter.infrastructure.llm.spend_book import SendBound, bound_spend_book
@@ -192,9 +191,6 @@ class QueryLoopResult:
     stop_signal: StopSignal | None = None
 
 
-_BOLD_MARKER_RE = re.compile(r"\*\*[^*]+\*\*")
-
-
 def _with_running(
     result: QueryMeasurement, running: dict[str, Any], run_id: str
 ) -> QueryMeasurement:
@@ -207,30 +203,20 @@ def _with_running(
     return cast(QueryMeasurement, out)
 
 
-def _materialize_cached(item: QueryMeasurement, scorer: CellScorer) -> QueryMeasurement:
-    """Mark prior as cached + rescored; warn on hit/no-hit drift unless explained by bold-strip."""
-    # Deliberately BINARY, on the archived vs rescored verdict rather than the graded fitness:
-    # a float comparison fires per sample on every formula tweak, and this warning is calibrated
-    # for one known-benign cause. ``fitness is None`` is never-scored, distinct from a 0.0.
-    archived_fitness = item.get("fitness")
+def _materialize_cached(item: QueryMeasurement) -> QueryMeasurement:
+    """A banked row as a replay: flagged cached, and its elapsed clock zeroed — nothing was spent."""
     r: dict[str, Any] = {**item, "cached": True}
     pd = r.get("pipeline_data")
     if isinstance(pd, dict):
         r["pipeline_data"] = {**pd, "total_time": 0.0}
-    rescore_results([r], scorer)
-    archived_hit = is_hit(archived_fitness)
-    rescored_hit = is_hit(r.get("fitness"))
-    if archived_fitness is not None and archived_hit != rescored_hit:
-        predicted = r.get("predicted") or ""
-        if not _BOLD_MARKER_RE.search(predicted):
-            logger.warning(
-                "Cache rescore drift on %r: archived hit=%s → rescored hit=%s. "
-                "Policy divergence — not explained by bold-wrapper strip.",
-                (r.get("query") or "")[:60],
-                archived_hit,
-                rescored_hit,
-            )
     return cast(QueryMeasurement, r)
+
+
+def _graded(row: QueryMeasurement, scorer: CellScorer) -> QueryMeasurement:
+    """Every row the walk holds, fresh or replayed, is graded HERE under the run's own scorer. A
+    ``ScoringFormulaError`` is a formula contract bug and halts the run; it never becomes a row."""
+    rescore_results([cast("dict[str, Any]", row)], scorer)
+    return row
 
 
 def _emit_cached_step_tokens(row: QueryMeasurement) -> None:
@@ -365,15 +351,14 @@ async def _acquire(sample: Sample, idx: int, ctx: QueryLoopState, claiming: set[
         finally:
             claiming.discard(idx)
     if cached is not None:
-        cached_r = _materialize_cached(cached, ctx.scorer)
         # Can re-measure for real, so a hit gets a slot like anything else.
-        cached_r = await _maybe_recover_degraded(cached_r, sample, ctx)
-        return _Acquired(sample=sample, idx=idx, result=cached_r, fresh=False)
+        cached_r = await _maybe_recover_degraded(_materialize_cached(cached), sample, ctx)
+        return _Acquired(sample=sample, idx=idx, result=_graded(cached_r, ctx.scorer), fresh=False)
 
     deprecated_display: QueryMeasurement | None = None
     if (cached_deprecated := ctx.deprecated_samples.get(sample.id)) is not None:
-        # Rescored here, rendered at the take: a display call from a cell prints out of walk order.
-        deprecated_display = _materialize_cached(cached_deprecated, ctx.scorer)
+        # Graded here, rendered at the take: a display call from a cell prints out of walk order.
+        deprecated_display = _graded(_materialize_cached(cached_deprecated), ctx.scorer)
 
     try:
         result = await measure_sample(
@@ -386,6 +371,7 @@ async def _acquire(sample: Sample, idx: int, ctx: QueryLoopState, claiming: set[
             cast(dict[str, Any], result)["retry_of_deprecated_cache"] = True
         if claim is not None:
             claim.publish(cast(dict[str, Any], result))
+        result = _graded(result, ctx.scorer)
     except BaseException:
         if claim is not None:
             claim.release()

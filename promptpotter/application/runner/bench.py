@@ -1,21 +1,25 @@
-"""The bench's pass: one individual scored on the held-out bench set under the campaign's formula.
-Run-level archive views skip ``MeasurementRole.BENCH``; row-level ones admit only ``admitted_ids``."""
+"""The bench's pass: one individual sent over the held-out bench set, banked as facts, and
+``read_bench``, the one reading of those facts under a named scorer. Run-level archive views skip
+``MeasurementRole.BENCH``; row-level ones admit only ``admitted_ids``."""
 
 from __future__ import annotations
 
 from functools import partial
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 from promptpotter.application.runner.termination import RUN_STOPS, run_stop_reason
 from promptpotter.application.scoring.classification import scoreable_rows
+from promptpotter.application.scoring.formula import rescore_results
+from promptpotter.application.scoring.metrics import fold_cells
 from promptpotter.application.scoring.search_point_scorer import (
     SCORING_ERROR_ABORT,
     score_search_point,
 )
 from promptpotter.application.scoring.selection import matched_parent_lift, mean_fitness_ci
-from promptpotter.domain.bench import BenchReading, BenchScore
+from promptpotter.domain.bench import BenchPass, BenchPasses, BenchReading, BenchScore
 from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopOutcome, emit_phase
 from promptpotter.domain.results import resolved_fitness
+from promptpotter.infrastructure.store.archive_queries import load_run
 from promptpotter.shared.instrument import NO_ROUND_SLOT, MeasurementRole
 
 if TYPE_CHECKING:
@@ -23,25 +27,96 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.domain.results import RoundResult
-    from promptpotter.domain.scoring import QueryMeasurement
+    from promptpotter.domain.scoring import CellScorer, QueryMeasurement
     from promptpotter.domain.search_point import JobSearchPoint
+    from promptpotter.infrastructure.store.stores import Stores
 
 __all__ = [
-    "BenchPass",
+    "PassReading",
     "bench_selection",
     "grade_round_selection",
     "graded",
+    "headline",
     "nothing_held_out",
+    "read_bench",
+    "read_pass",
     "score_on_bench",
 ]
 
 
-class BenchPass(NamedTuple):
-    sp_hash: str
-    # `None` where the pass stopped short, and `missing` then says why.
+class PassReading(NamedTuple):
+    # `None` where the pass read nothing, and `missing` then says why.
     reading: BenchReading | None
     missing: str | None
+    # The graded population the reading is over; empty where it read nothing.
     rows: list[QueryMeasurement]
+
+
+def read_pass(
+    stores: Stores, bench_pass: BenchPass, scorer: CellScorer, *, tolerance: int
+) -> PassReading:
+    """The pass's archived rows graded under *scorer*: a pass that stopped short, or ended past
+    *tolerance* rows with no verdict, reads nothing rather than a number over fewer rows."""
+    if bench_pass.stopped is not None:
+        return PassReading(None, bench_pass.stopped, [])
+    run = None if bench_pass.run_id is None else load_run(stores, bench_pass.run_id)
+    if run is None:
+        return PassReading(None, f"its run {bench_pass.run_id} is not in the archive", [])
+    sent = set(bench_pass.sample_ids)
+    rows = cast(
+        "list[QueryMeasurement]",
+        rescore_results([{**r} for r in run["measurements"] if r.get("sample_id") in sent], scorer),
+    )
+    graded_rows = scoreable_rows(rows)
+    if (short := len(sent) - len(graded_rows)) > tolerance:
+        missing = (
+            f"{short} of {len(sent)} rows carry no verdict — a provider fault, or a cell the "
+            f"formula cannot grade — past the split's tolerance of {tolerance}"
+        )
+        return PassReading(None, missing, [])
+    folded = fold_cells(rows)
+    accuracy = folded["accuracy"]
+    # The walk's served band is accuracy's; the headline is the composite, so its band is too.
+    ci_lo, ci_hi = mean_fitness_ci(graded_rows, grade="objective")
+    reading = BenchReading(
+        round=bench_pass.round,
+        sp_hash=bench_pass.sp_hash,
+        accuracy=accuracy,
+        # The composite floors at 0.0 over no scoreable row; a headline over none has no value.
+        composite_fitness=(
+            None if accuracy is None else resolved_fitness(folded["composite_fitness"], accuracy)
+        ),
+        ci_lo=ci_lo,
+        ci_hi=ci_hi,
+        n_scored=len(graded_rows),
+    )
+    return PassReading(reading, None, graded_rows)
+
+
+def read_bench(
+    stores: Stores, passes: BenchPasses, scorer: CellScorer, *, scorer_id: str
+) -> BenchScore:
+    """The headline, derived from the passes' archived facts under *scorer* — for the run that
+    graded them and every later reader alike, so a copy of it is only ever a cache."""
+    origin = read_pass(stores, passes.origin, scorer, tolerance=passes.tolerance)
+    selected = (
+        origin
+        if passes.selected == passes.origin
+        else read_pass(stores, passes.selected, scorer, tolerance=passes.tolerance)
+    )
+    paired = matched_parent_lift(selected.rows, origin.rows, grade="objective")
+    reads = (("origin", origin), ("selected", selected))
+    missing = "; ".join(f"{name}: {r.missing}" for name, r in reads if r.missing is not None)
+    return BenchScore(
+        bench_size=len(passes.origin.sample_ids),
+        scorer_id=scorer_id,
+        origin=origin.reading,
+        selected=selected.reading,
+        missing_reason=missing or None,
+        lift=None if paired is None else paired[0],
+        lift_ci_lo=None if paired is None else paired[1],
+        lift_ci_hi=None if paired is None else paired[2],
+    )
 
 
 async def score_on_bench(
@@ -52,8 +127,7 @@ async def score_on_bench(
     cb: RunCallbacks,
 ) -> BenchPass:
     sp_hash = search_point.sp_hash(session.pipeline_schema)
-    partition = session.scoring.require_partition()
-    bench = list(partition.bench)
+    bench = list(session.scoring.require_partition().bench)
     # Bracketed without a round: the pass scores after the loop, and a round here would move the
     # dashboard's round back to the one being graded.
     emit_phase(cb.on_phase, CampaignPhase.BENCH, "enter")
@@ -69,6 +143,7 @@ async def score_on_bench(
         )
     finally:
         emit_phase(cb.on_phase, CampaignPhase.BENCH, "exit")
+    stopped: str | None = None
     if scored.stopped is not None:
         signal = scored.signal
         cause = (
@@ -76,40 +151,22 @@ async def score_on_bench(
             if signal is not None and signal.check_name == SCORING_ERROR_ABORT
             else ""
         )
-        missing = f"{scored.stopped} after {len(scored.results)} of {len(bench)} rows{cause}"
-        return BenchPass(sp_hash, None, missing, [])
-    rows = scoreable_rows(scored.results)
-    tolerance = partition.split.tolerance if partition.split is not None else 0
-    if (short := len(bench) - len(rows)) > tolerance:
-        missing = (
-            f"{short} of {len(bench)} rows carry no verdict — a provider fault, or a cell the "
-            f"formula cannot grade — past the split's tolerance of {tolerance}"
-        )
-        return BenchPass(sp_hash, None, missing, [])
-    scores = scored.scores
-    accuracy = scores["accuracy"]
-    # The walk's served band is accuracy's; the headline is the composite, so its band is too.
-    ci_lo, ci_hi = mean_fitness_ci(rows, grade="objective")
-    reading = BenchReading(
+        stopped = f"{scored.stopped} after {len(scored.results)} of {len(bench)} rows{cause}"
+    return BenchPass(
         round=round_num,
         sp_hash=sp_hash,
-        accuracy=accuracy,
-        # The composite floors at 0.0 over no scoreable row; a headline over none has no value.
-        composite_fitness=(
-            None if accuracy is None else resolved_fitness(scores["composite_fitness"], accuracy)
-        ),
-        ci_lo=ci_lo,
-        ci_hi=ci_hi,
-        n_scored=len(rows),
         run_id=scored.run_id,
+        sample_ids=[s.id for s in bench],
+        stopped=stopped,
+        scorer_id=session.scoring.scorer_id,
     )
-    return BenchPass(sp_hash, reading, None, rows)
 
 
-def nothing_held_out(cb: RunCallbacks) -> BenchScore:
+def nothing_held_out(cb: RunCallbacks, *, scorer_id: str) -> BenchScore:
     """A split holding no bench row never grades, so its headline is final at run start."""
     score = BenchScore(
         bench_size=0,
+        scorer_id=scorer_id,
         origin=None,
         selected=None,
         missing_reason="nothing held out: the campaign's dataset_split declares no bench rows",
@@ -121,14 +178,21 @@ def nothing_held_out(cb: RunCallbacks) -> BenchScore:
     return score
 
 
-def graded(cb: RunCallbacks, bench_pass: BenchPass) -> None:
+def _tolerance(session: Session) -> int:
+    split = session.scoring.require_partition().split
+    return split.tolerance if split is not None else 0
+
+
+def graded(cb: RunCallbacks, session: Session, bench_pass: BenchPass) -> None:
     """One pass on the ledger as the trend's per-round bench series reads it."""
+    read = read_pass(
+        session.store,
+        bench_pass,
+        session.scoring.require_scorer(),
+        tolerance=_tolerance(session),
+    )
     emit_phase(
-        cb.on_phase,
-        CampaignPhase.BENCH,
-        "graded",
-        reading=bench_pass.reading,
-        missing=bench_pass.missing,
+        cb.on_phase, CampaignPhase.BENCH, "graded", reading=read.reading, missing=read.missing
     )
 
 
@@ -144,15 +208,17 @@ async def grade_round_selection(
     ):
         return
     graded(
-        cb, await score_on_bench(session, cycle.selected_sp, round_num=round_result.round, cb=cb)
+        cb,
+        session,
+        await score_on_bench(session, cycle.selected_sp, round_num=round_result.round, cb=cb),
     )
 
 
 async def bench_selection(
     cycle: Cycle, session: Session, *, origin: BenchPass, cb: RunCallbacks
-) -> BenchScore:
-    """The selection is the pick the optimizer declared (``Cycle.selection``), graded here on rows
-    it never read. Scored once where it is the origin itself. Only a pause escapes the pass: any
+) -> BenchPasses:
+    """The selection is the pick the optimizer declared (``Cycle.selection``), sent here over rows
+    it never read. Sent once where it is the origin itself. Only a pause escapes the pass: any
     other stop ends it short, and the headline says so."""
     picked, selected_sp = cycle.selection, cycle.selected_sp
     selected_hash = selected_sp.sp_hash(session.pipeline_schema)
@@ -165,18 +231,24 @@ async def bench_selection(
             reason = run_stop_reason(stop)
             if STOP_REASON_INFO[reason].outcome is StopOutcome.PAUSED:
                 raise
-            selected = BenchPass(selected_hash, None, reason.value, [])
-    paired = matched_parent_lift(selected.rows, origin.rows, grade="objective")
-    passes = (("origin", origin), ("selected", selected))
-    missing = "; ".join(f"{name}: {p.missing}" for name, p in passes if p.missing is not None)
-    score = BenchScore(
-        bench_size=len(session.scoring.require_partition().bench),
-        origin=origin.reading,
-        selected=selected.reading,
-        missing_reason=missing or None,
-        lift=None if paired is None else paired[0],
-        lift_ci_lo=None if paired is None else paired[1],
-        lift_ci_hi=None if paired is None else paired[2],
+            selected = BenchPass(
+                round=picked.round,
+                sp_hash=selected_hash,
+                run_id=None,
+                sample_ids=origin.sample_ids,
+                stopped=reason.value,
+                scorer_id=session.scoring.scorer_id,
+            )
+    return BenchPasses(tolerance=_tolerance(session), origin=origin, selected=selected)
+
+
+def headline(cb: RunCallbacks, session: Session, passes: BenchPasses) -> BenchScore:
+    """The passes read under the run's own scorer, on the ledger as the dashboard folds it."""
+    score = read_bench(
+        session.store,
+        passes,
+        session.scoring.require_scorer(),
+        scorer_id=session.scoring.scorer_id,
     )
     emit_phase(cb.on_phase, CampaignPhase.BENCH, "scored", bench=score)
     return score

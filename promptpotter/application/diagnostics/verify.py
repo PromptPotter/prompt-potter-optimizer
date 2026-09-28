@@ -43,7 +43,6 @@ from promptpotter.shared.errors import ConflictError
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
-    from promptpotter.domain.sample import Measurement
     from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.infrastructure.store.stores import Stores
     from promptpotter.shared.identity import IdentityContext
@@ -137,21 +136,6 @@ def _resolve_origin_searchpoint(
     )
     # C0's overlay is the seed's, read where the runner reads it; an L1 proposal carries its own.
     return opt_sp, dict(seed.pipeline_overlay) if seed is not None else {}
-
-
-def _archive_measurement_to_qm(m: Measurement) -> QueryMeasurement:
-    return cast(
-        "QueryMeasurement",
-        {
-            "sample_id": m.sample_id,
-            "query": m.query,
-            "ground_truth": m.ground_truth,
-            "predicted": m.predicted,
-            "fitness": m.fitness,
-            "error": None,
-            "pipeline_data": m.pipeline_data,
-        },
-    )
 
 
 async def verify_candidate(
@@ -290,13 +274,11 @@ async def verify_candidate(
         predicate=predicate,
         dataset_name=campaign.dataset_name,
     )
-    by_sample: dict[int, QueryMeasurement] = {}
-    for m in workspace_measurements:
-        by_sample[m.sample_id] = _archive_measurement_to_qm(m)
-    workspace_qms = list(by_sample.values())
-
-    if session.scoring.scorer is not None:
-        rescore_results(cast("list[dict[str, Any]]", workspace_qms), session.scoring.scorer)
+    by_sample = {m.sample_id: dict(m.row) for m in workspace_measurements}
+    workspace_qms = cast(
+        "list[QueryMeasurement]",
+        rescore_results(list(by_sample.values()), session.scoring.require_scorer()),
+    )
     workspace_scores = compute_composite_fitness(workspace_qms, schema)
 
     workspace_n = len(workspace_qms)

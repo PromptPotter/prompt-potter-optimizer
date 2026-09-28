@@ -8,6 +8,7 @@ describe("runSummary", () => {
     stop_reason: "lives_exhausted",
     bench_score: {
       bench_size: 10,
+      scorer_id: "default_hit",
       origin: null,
       selected: null,
       missing_reason: null,

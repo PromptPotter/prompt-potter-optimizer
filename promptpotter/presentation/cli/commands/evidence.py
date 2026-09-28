@@ -7,7 +7,6 @@ import argparse
 import logging
 from typing import get_args
 
-from promptpotter.application.evidence.head_to_head import BenchSet
 from promptpotter.application.evidence.metric_catalogue import MEASURAND, MetricUnit
 from promptpotter.application.evidence.read import (
     Evidence,
@@ -18,6 +17,7 @@ from promptpotter.application.evidence.subjects import SubjectSpec, parse_subjec
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.bench import BenchScore, DatasetSplit
+from promptpotter.domain.campaign import Instrument
 from promptpotter.domain.spend import TOKEN_KIND_BUCKET
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
@@ -137,7 +137,7 @@ def _roster_lines(ev: Evidence) -> list[str]:
     return lines
 
 
-def _bench_set_text(bench_set: BenchSet | None, field: str) -> str:
+def _bench_set_text(bench_set: Instrument | None, field: str) -> str:
     if bench_set is None:
         return "—"
     value = getattr(bench_set, field)
@@ -153,13 +153,16 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
     roster below reads the search rows, which each optimizer chose among."""
     if (h2h := ev.head_to_head) is None:
         return []
-    lines = [f"Head-to-head on the held-out bench, oldest first. {h2h.note}"]
+    lines = [
+        f"Head-to-head on the held-out bench, oldest first, every row graded by "
+        f"`{h2h.scorer_id}`. {h2h.note}"
+    ]
     shared = next((r.bench_set for r in h2h.rows if r.comparable), None)
-    if shared is not None and not set(h2h.differs_on) & set(BenchSet.model_fields):
+    if shared is not None and not set(h2h.differs_on) & set(Instrument.model_fields):
         lines.append(
             "  bench set: "
             + " · ".join(
-                f"{field} {_bench_set_text(shared, field)}" for field in BenchSet.model_fields
+                f"{field} {_bench_set_text(shared, field)}" for field in Instrument.model_fields
             )
         )
     for field in h2h.differs_on:
@@ -169,7 +172,7 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
                 f"{r.campaign_id[:22]}="
                 + (
                     _bench_set_text(r.bench_set, field)
-                    if field in BenchSet.model_fields
+                    if field in Instrument.model_fields
                     else _origin_text(r.bench)
                 )
                 for r in h2h.rows

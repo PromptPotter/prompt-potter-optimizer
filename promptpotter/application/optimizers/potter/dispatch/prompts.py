@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 from collections.abc import Mapping
 from typing import Any
@@ -32,7 +30,6 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "base_optimizer_template",
-    "compute_optimizer_prompt_hashes",
     "effective_optimizer_prompts",
     "load_optimizer_prompt",
     "node_layout",
@@ -99,22 +96,3 @@ def node_layout(node: str, memory: L2L3Memory) -> L1Layout:
     if NODE_LAYOUTS[node].editor == "l2":
         return memory.l1_layout
     return resolve_node_layout(node)
-
-
-def compute_optimizer_prompt_hashes(selected: SelectedOptimizer) -> dict[str, str]:
-    """Per llm node of *selected*: three parts — the template, the resolved layout, the resolved
-    call config — because all three decide what the node produces, a repointed MODEL included."""
-    out: dict[str, str] = {}
-    for name in selected.llm_nodes:
-        template = _running_template(name, selected.node_config(name), selected.document)
-        blob = template.model_dump_json()
-        if (spec := NODE_LAYOUTS.get(name)) is not None:
-            # Only an `editor == "l4"` node can have its layout moved by the override channel
-            # this hash exists to notice. `l1_generate` is edited by L2, in-campaign, through
-            # `PotterState.memory.l1_layout` — per-cycle state that has no business in a manifest
-            # hash — so it contributes its floor, which is exactly what an L4 edit leaves it at.
-            layout = resolve_node_layout(name) if spec.editor == "l4" else spec.floor
-            blob += layout.model_dump_json()
-        blob += json.dumps(selected.call_config(name), sort_keys=True, default=str)
-        out[name] = hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
-    return out

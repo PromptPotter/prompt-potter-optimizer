@@ -116,6 +116,27 @@ makes by comparing rounds read on different rows.
 Why the two must be different rows: [`research/benchmarks.md`](research/benchmarks.md) § The
 winner's own number is biased upward.
 
+#### Three identities — what was measured, what ran, what graded it
+
+Each is one value from one function, and none folds into another.
+
+- **Measurement** — the target's content hash (`JobSearchPoint.content_hash`, the archive key):
+  the prompt, the node configs, and what the connector and the judges contribute
+  (`pipeline_resolve.py::_identity_contributions`). No optimizer is in it, so an arm two
+  optimizers both propose replays free. On L4 the target IS an optimizer, whose treatment enters
+  as that target's content through the `promptpotter` connector — the rule never flips by site.
+- **Treatment** — which optimizer ran: `SelectedOptimizer.treatment()`, a
+  `domain/campaign.py::Treatment` — the manifest's name and version, each llm node's call digest,
+  every member's knobs and the code its prompts are written by. Minted onto `campaign.json`; an
+  L4 cell's campaign id and the outer fingerprint read its digest. A resume diverges on the call
+  digests every round stamps: `classify_config_diff` reads a knob edit as policy and a swapped
+  `optimizer` or llm-node call config as `TREATMENT` (`Scope.IDENTITY`), never policy.
+- **Instrument** — what graded the headline: `domain/campaign.py::bench_instrument` — the bank's
+  rows (`dataset_hash`), the held-out ids, the `scorer_id` the passes were read under (never
+  re-hashed here) and the target's node models. Two headlines are one quantity only where it
+  agrees; the evidence head-to-head reads every arm's passes under ONE scorer, so its bench sets
+  can differ on the rows and the target but never on the grader.
+
 ### Central loop
 
 One round = the selected manifest's `default` pipeline. Potter's is generate → score → critique:
@@ -311,8 +332,8 @@ world is a strict containment hierarchy:
   produces a distinct campaign regardless of declaration. The
   declaration is recorded as *properties* on `campaign.json`, never as
   the id: `root_content_hash` (resume's config-drift check) and
-  `optimizer_manifest_hashes`, one digest per optimizer manifest (an audit join key — optimizer
-  drift is asked per ROUND, where it can name one and fork at it).
+  `treatment`, the optimizer it was minted to run (§ Three identities — optimizer drift is still
+  asked per ROUND, where it can name one and fork at it).
   The dataset is embedded so "campaigns for dataset X" is a prefix scan.
 - **Cycle** — one node in a campaign's lineage tree: root | fork | diag.
   The operator-facing name is **Unit** — one continuous-parameter
@@ -569,7 +590,7 @@ writes land through the running loop.
 The on-disk layout makes the four-entity model literal. Under each
 tenant, `campaigns/{campaign_id}/` is the Campaign directory:
 `campaign.json` (manifest — `dataset_name, label, created_at,
-root_cycle_id, root_content_hash, backend_id, config`; identity + config
+root_cycle_id, root_content_hash, treatment, backend_id, config`; identity + config
 + lifecycle intent only — run state is owned per-cycle by
 `index.json::status` and derived on read for campaign surfaces), `log.md`
 (campaign digest — covers every session, its forks, and its rounds),
@@ -624,7 +645,9 @@ content-addressed by `JobSearchPoint.content_hash`, indexed by
 `measurements/index.jsonl`.
 **No key depends on which optimizer proposed a configuration**, so an arm two optimizers
 both propose replays free — which is what makes an N-way head-to-head affordable.
-Each row is `(sample × config → outcome)`, stamped with the
+Each row is `(sample × config → outcome)` — the outcome's FACTS, never a grade, which every reader
+derives under its own formula ([`concepts/scoring-and-memory.md`](concepts/scoring-and-memory.md)
+§ Rescore-on-load) — stamped with the
 `dataset_name` it measured and never with a campaign, so its scopes are
 **dataset** and **workspace** only — owned by
 [`../promptpotter/infrastructure/CLAUDE.md`](../promptpotter/infrastructure/CLAUDE.md)
@@ -807,7 +830,8 @@ the PR description.
   recent arc that earned its keep. Cross-round AxisIndex digest.
 
 - **`injection_source_digest` inside `_identity_config`**
-  (`dispatch/facade.py` → potter's `OptimizerRuntime.source_digest` → `connectors/promptpotter.py`) —
+  (`dispatch/facade.py` → potter's `OptimizerRuntime.source_digest` → `Treatment.source` →
+  `connectors/promptpotter.py`) —
   what a node is HANDED is L4 measurement identity, so everything
   deciding it is hashed: the renderers, `bundle` (how much of a panel
   arrives) and `compose` (which arrive at all). AST-normalized — a
@@ -953,7 +977,11 @@ the PR description.
     round-level views of a round whose selector stamps it (`stamps_theta`). **A reading is over
     the population that was sent** (`domain/scoring.py::is_graded`): a row the prompt failed is
     its miss, and a pass cut short or past its split's `tolerance` reads nothing, never a number
-    over fewer rows.
+    over fewer rows. **The passes bank facts and ONE function reads them**
+    (`runner/bench.py::read_bench`, under a named scorer): the run reads its headline off the
+    archive through it for the ledger, dashboard, index and export alike, and the head-to-head
+    reads every arm through it. A stored `BenchScore` is a cache stamped with its `scorer_id`,
+    never read as a fact — a reader under another grader reads the passes again.
   - **A cycle's "best" deliberately has two bases** — the optimizer's objective (its declared
     pick, `Cycle.selection`; potter's L2/L3 stall comparator alone keeps the high-water of each
     round's own `composite_fitness`) and the bench's headline on the bench set. The shared-cells

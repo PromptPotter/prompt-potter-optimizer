@@ -31,7 +31,7 @@ from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.scoring import (
     ABANDONED_ROW_KEYS,
     UNREAD_PIPELINE_KEYS,
-    UNREAD_ROW_KEYS,
+    measured_facts,
 )
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
@@ -124,7 +124,7 @@ def archive_writers(root: pathlib.Path) -> int:
 
 # WHICH keys are unread is `domain/scoring.py`'s to say — it declares the two types the answer is
 # about, and asserts each set against them at import. This module owns only the ACT of moving them.
-_MOVABLE_ROW_FIELDS: frozenset[str] = UNREAD_ROW_KEYS | ABANDONED_ROW_KEYS
+_MOVABLE_ROW_FIELDS: frozenset[str] = ABANDONED_ROW_KEYS
 
 _ELIGIBLE_LABEL = MeasurementRole.PANEL
 """Only a candidate's own walk compacts.
@@ -512,7 +512,7 @@ def _plan_restore(lines: list[str], cold: list[dict[str, Any]]) -> tuple[list[st
             return None
         moved_row = entry.get("row")
         if isinstance(moved_row, dict):
-            row.update(moved_row)
+            row.update(measured_facts(moved_row))
         moved_pd = entry.get("pd")
         if isinstance(moved_pd, dict):
             pd = row.get("pipeline_data")

@@ -79,8 +79,7 @@ def graded_response(result: Mapping[str, Any]) -> float:
 
     A row with no ``objective`` RAISES rather than defaulting — absence means the row never went
     through ``rescore_results``, and a default reads that as a cell the arm got WRONG, which is
-    what fits a ruler on an all-zeros matrix. Archive rows are graded by the READING campaign's
-    scorer instead (``hard_sample_archive.py::build_archive_observations``)."""
+    what fits a ruler on an all-zeros matrix."""
     if "objective" not in result:
         raise KeyError(
             "graded_response: row carries no 'objective'. Only rows stamped by "

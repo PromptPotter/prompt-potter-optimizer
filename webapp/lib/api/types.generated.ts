@@ -979,14 +979,14 @@ export interface SpawnedBy {
   task: string;
 }
 
-/** One individual scored on the whole bench set under the campaign's formula. */
+/** One individual's bench pass, read under a named scorer. */
 export interface BenchReading {
   /** The round whose selection this is; 0 is the origin. */
   round: number;
   /** The searchpoint scored — the archive's `prompt_fields_id`. */
   sp_hash: string;
   accuracy: number | null;
-  /** Under the campaign's formula — the number the headline reads. */
+  /** Under the reading scorer's formula — the number the headline reads. */
   composite_fitness: number | null;
   /** The 95% band on `composite_fitness`, drawn from the same per-row values. */
   ci_lo: number | null;
@@ -994,13 +994,15 @@ export interface BenchReading {
   /** Bench rows carrying a verdict — a miss the prompt caused included — never
    * fewer than the bench set less its split's `tolerance`. */
   n_scored: number;
-  /** The archive run its bench rows were filed under. */
-  run_id: string;
 }
 
 /** The headline: the selection and the origin, scored on a bench set no optimizer node read. */
 export interface BenchScore {
   bench_size: number;
+  /** The grader every number here was read under. A stored copy is a cache of that
+   * reading: a reader under another grader reads the passes again, never
+   * this. */
+  scorer_id: string;
   /** `None` where its pass read nothing; `missing_reason` says why. */
   origin: BenchReading | null;
   /** The headline. `None` where its pass read nothing; `missing_reason` says why. */
@@ -1450,8 +1452,8 @@ export interface DatasetSplit {
   tolerance: number;
 }
 
-/** What one campaign's held-out set IS; two headlines are one quantity only if all of it agrees. */
-export interface BenchSet {
+/** What graded a bench headline: two are one quantity only where every field agrees. */
+export interface Instrument {
   dataset_name: string;
   dataset_hash: string | null;
   split: DatasetSplit | null;
@@ -1466,7 +1468,7 @@ export interface HeadToHeadRow {
   campaign_id: string;
   optimizer: string;
   bench: BenchScore | null;
-  bench_set: BenchSet | null;
+  bench_set: Instrument | null;
   comparable: boolean | null;
   spend: SpendRollup | null;
   wall_clock_s: number | null;
@@ -1494,6 +1496,7 @@ export interface SelectionPair {
 /** The campaigns' bench headlines side by side, and whether one instrument graded them all. */
 export interface HeadToHead {
   rows: HeadToHeadRow[];
+  scorer_id: string;
   verdict: boolean | null;
   differs_on: string[];
   pairs: SelectionPair[];

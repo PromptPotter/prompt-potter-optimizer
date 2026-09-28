@@ -357,7 +357,9 @@ LEDGER_BASELINE = {
     # neutral round document names no optimizer's index reading.
     # -2: `BenchReading.stopped` — a pass that stopped short is no reading, so no reading can
     # carry a stop.
-    "cycle_result_fields": 233,
+    # -1: `BenchReading.run_id` (-2, one per reading) is a FACT and moves to the pass, and
+    # `BenchScore.scorer_id` (+1) stamps the reading with the grader it was read under.
+    "cycle_result_fields": 232,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
@@ -665,9 +667,9 @@ LEDGER_BASELINE = {
     # number renders (test_numerics § 4).
     # +1: a GEPA child admitted on a minibatch tie, or a parent drawn off the best aggregate rather
     # than in proportion to the cells each survivor leads, still selects a winner (test_numerics § 4).
-    # +1: a head-to-head pairing two optimizers' selections across bench sets another seed drew, or
-    # across a grader that moved under one shared origin, still prints an interval and a winner
-    # (test_numerics § 7).
+    # +1: a head-to-head pairing two optimizers' selections across bench sets another seed drew,
+    # across a backend that moved under one shared origin, or off a headline one arm kept under its
+    # own formula, still prints an interval and a winner (test_numerics § 7).
     # +2: walks of one configuration in separate processes each buying the cells the others
     # measured, and a dead claimer's cell held forever, still score every arm (test_integrity § 2).
     # +1: a terminal `--set optimizer=…` and the browser's pick-then-edit planning two different
@@ -685,7 +687,14 @@ LEDGER_BASELINE = {
     # exactly where it could not answer, and every rate renders (test_numerics § 2).
     # +1: a held-out row in the check-in model's preview is the bench read by the one authoring
     # the origin — every number renders, only higher, and no rerun unreads it (test_security).
-    "test_functions": 224,
+    # +1: a knob edit folded into the call digests forks every resume for a policy change, and one
+    # left out of the treatment pools two knob settings as one arm; both run on (test_integrity § 1).
+    # +1: grades leave the archive. -1 the stamped-archive-row ruler case (no row can carry a
+    # stamp now), +2 its replacements: a banked grade served to a reader under another formula,
+    # and rows banked under one formula read under another unlike a fresh run (test_integrity § 1).
+    # +1: bench passes read under a second formula unlike passes taken fresh under it — a headline
+    # kept from the first, read in its place, is paired as the second's (test_numerics § 4).
+    "test_functions": 227,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -817,7 +826,11 @@ LEDGER_BASELINE = {
     # calling every paperless one "PromptPotter's own".
     # +1: `HeadToHeadRow.bench_reads` — how many individuals were ever graded on a held-out set;
     # a holdout is spent by reuse, and no other field can say when a fresh split is due.
-    "served_fields": 740,
+    # +1: `BenchScore.scorer_id` and `HeadToHead.scorer_id` NET of `BenchReading.run_id`. A served
+    # headline is a cache of one reading of the passes' facts, so it names the grader it was read
+    # under, and the head-to-head names the ONE grader every arm was read under. The run id is a
+    # fact, and moved to the pass (`index.json::final.bench_passes`), which no browser reads.
+    "served_fields": 741,
 }
 
 

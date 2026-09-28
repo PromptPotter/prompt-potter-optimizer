@@ -19,9 +19,6 @@ from promptpotter.application.optimizers.potter import couplings
 from promptpotter.application.optimizers.potter.dispatch.facade import injection_source_digest
 from promptpotter.application.optimizers.potter.dispatch.injections.registry import injection_table
 from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS, layout_levers
-from promptpotter.application.optimizers.potter.dispatch.prompts import (
-    compute_optimizer_prompt_hashes,
-)
 from promptpotter.application.optimizers.potter.dispatch.schemas import (
     L2_NODE_AXES,
     OPTIMIZER_RESPONSE_MODELS,
@@ -222,7 +219,7 @@ class L1Generate:
                 l1_parse_failure=yield_stats.l1_parse_failure,
                 # Stamped with the round rather than at save time: a re-save (a repair, a rescore)
                 # must not restamp a round with the optimizer running NOW.
-                prompt_hashes=compute_optimizer_prompt_hashes(cycle.optimizer),
+                prompt_hashes=cycle.optimizer.prompt_hashes(),
                 axis_memory_peaked=sorted(cycle.axes.peaked_axes()) if cycle.axes else [],
             ),
         )
@@ -381,9 +378,6 @@ class PotterRuntime:
         self, session: Session, config: CampaignConfig, origin_results: list[dict[str, Any]]
     ) -> PotterState:
         return PotterState.start(session, config, origin_results)
-
-    def prompt_hashes(self, selected: SelectedOptimizer) -> dict[str, str]:
-        return compute_optimizer_prompt_hashes(selected)
 
     def complete(self) -> None:
         injection_table()

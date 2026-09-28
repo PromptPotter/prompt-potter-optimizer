@@ -58,8 +58,8 @@ diff base/<optimizer>/decisions.json after/<optimizer>/decisions.json
 Requests differing while decisions match is a rendering change; decisions differing is a
 behaviour change, and the first differing record says where. Two runs of one tree are byte
 identical in both, so any diff is the change's. `--digests` prints the L4 identity digests — the
-estimator's source digest and each optimizer's prompt source digest — which a change that should
-not re-key an inner cell leaves equal.
+estimator's source digest and each optimizer's treatment digest — which a change that should not
+re-key an inner cell leaves equal.
 
 ## What is faked, and how
 

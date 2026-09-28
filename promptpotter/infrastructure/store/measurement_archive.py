@@ -1,5 +1,8 @@
 """Measurement archive — DB core. **Nothing whole, in either direction**: a save appends only what
-is new (the scoring walk re-saves per sample), and a read tails only the bytes since the last one."""
+is new (the scoring walk re-saves per sample), and a read tails only the bytes since the last one.
+
+**It holds FACTS, never a grade.** Every row it writes passes ``measured_facts``, so no formula's
+reading of a cell (``GRADE_KEYS``) reaches disk, and a reader grades under its own ``CellScorer``."""
 
 from __future__ import annotations
 
@@ -21,6 +24,7 @@ from promptpotter.domain.measurement_provenance import (
     meets_grade,
 )
 from promptpotter.domain.sample import Measurement
+from promptpotter.domain.scoring import measured_facts
 from promptpotter.infrastructure.store.io import (
     read_bytes_optional,
     read_json_optional,
@@ -37,6 +41,7 @@ from promptpotter.infrastructure.store.read_model import (
     fold_jsonl,
     fold_jsonl_from,
 )
+from promptpotter.shared.errors import is_error_result
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +82,6 @@ def _summary(data: dict[str, Any]) -> dict[str, Any]:
         "dataset_name": data.get("dataset_name"),
         "prompt_fields_id": data["prompt_fields_id"],
         "item_count": data["item_count"],
-        "scores": data["scores"],
         "content_hash": data["content_hash"],
         "rendered_prompt_hash": data.get("rendered_prompt_hash", ""),
         "node_configs": data.get("node_configs"),
@@ -260,7 +264,7 @@ class MeasurementArchive:
         sample is O(samples²). Measurements land before the header, so the header is the commit marker."""
         detail_path = self._detail_path(run_id)
         for item in new_measurements:
-            append_row(detail_path, {_FOLD_KEY: _measurement_key(item), **item})
+            append_row(detail_path, {_FOLD_KEY: _measurement_key(item), **measured_facts(item)})
         header = {_FOLD_KEY: _HEADER_KEY, **{k: v for k, v in data.items() if k != "measurements"}}
         append_row(detail_path, header)
 
@@ -539,7 +543,7 @@ class CellClaim:
         # Windows refuses the replace while a waiter reads a row a past holder left there — the same
         # cell, already shareable, so the waiters keep it and this walk keeps its own.
         with contextlib.suppress(PermissionError):
-            write_json(self.row_path, row)
+            write_json(self.row_path, measured_facts(row))
 
     def release(self) -> None:
         """Idempotent. The row goes first: one standing with the lock free is no live holder's."""
@@ -602,7 +606,7 @@ class ReplayFeed:
             is_full_match = match_length >= chain_len
             trusted_nodes = {name for name, _ in self._node_configs[:match_length]}
             for item in self._banked_since(entry["run_id"]):
-                if item.get("predicted") == "ERROR":
+                if is_error_result(item):
                     continue
                 if not is_full_match:
                     terminal_node = (item.get("pipeline_data") or {}).get("terminal_node", "")
@@ -694,17 +698,12 @@ def _to_measurement(
         for pair in raw_configs
         if isinstance(pair, list | tuple) and len(pair) == 2 and isinstance(pair[1], dict)
     ]
-    fitness = item.get("fitness")
     return Measurement(
         run_id=run_id,
         content_hash=detail.get("content_hash", ""),
         sample_id=int(item.get("sample_id", -1)),
-        query=item.get("query", ""),
-        ground_truth=item.get("ground_truth", ""),
-        predicted=item.get("predicted", ""),
-        fitness=float(fitness) if fitness is not None else None,
         node_configs=node_configs,
-        pipeline_data=item.get("pipeline_data") or {},
+        row=item,
         created_at=detail.get("created_at", ""),
     )
 

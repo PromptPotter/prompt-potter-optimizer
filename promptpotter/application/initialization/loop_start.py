@@ -439,7 +439,7 @@ def _finalize_loop_state(
 
     cycle.axes = AxisIndex.ensure_for(
         session.store,
-        scorer=session.scoring.scorer,
+        scorer=session.scoring.require_scorer(),
         scorer_id=session.scoring.scorer_id,
         dataset_name=session.dataset_name,
         sample_ids=session.scoring.require_partition().admitted_ids,
