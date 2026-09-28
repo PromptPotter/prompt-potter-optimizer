@@ -655,6 +655,11 @@ async def close_round(
     """Round-completion bookkeeping, and the SINGLE degradation-verdict compute site (origin and
     every later round funnel here): ``health`` is stamped BEFORE the dashboard emit and the
     round-file write."""
+    if cycle.origin_restamped:
+        # A ruler that warmed this round gave round 0 the θ it could not have had at its own
+        # close; unsaved, every non-live reader shows a θ-less C0 beside candidates that have one.
+        cycle.origin_restamped = False
+        persist_round(cycle, cycle.origin_round, session, cb)
     round_result.health = compute_round_health(
         results=round_result.results,
         prior_healths=assemble_prior_healths(cycle.rounds, round_num),
@@ -674,8 +679,8 @@ async def close_round(
     )
     cb.on_round_complete(round_result, standing)
     persist_round(cycle, round_result, session, cb)
-    if cycle.axes and session.store:
-        cycle.axes.refresh(
+    if cycle.sample_index is not None and session.store:
+        cycle.sample_index.refresh(
             session.store,
             scorer=session.scoring.require_scorer(),
             scorer_id=session.scoring.scorer_id,

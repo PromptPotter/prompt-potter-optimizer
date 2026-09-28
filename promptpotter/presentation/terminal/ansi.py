@@ -155,13 +155,13 @@ def _render_round_complete(v: RoundCompleteView) -> str:
         else ""
     )
 
-    # The campaign says WHICH number headlines this line. `ability` is what a resubset campaign
-    # sets (`knobs.py::headline_subset_relative_under_resubset`), because the panel is re-picked
+    # The campaign says WHICH number leads this line. `ability` is what a resubset campaign
+    # sets (`couplings.py::display_subset_relative_under_resubset`), because the panel is re-picked
     # each round, so accuracy is subset-relative and a parent that did nothing still moves with it.
     # Accuracy does not disappear; it moves into the parenthetical, so declaring the other loses
     # no reading.
     acc_txt = fmt_pct(v.winner_accuracy)
-    ability = v.stamps_theta and v.headline_metric == "ability" and v.ability_theta is not None
+    ability = v.stamps_theta and v.display_metric == "ability" and v.ability_theta is not None
     headline = f"θ {v.ability_theta:+.3f}" if ability else acc_txt
     detail = [acc_txt] if ability else []
 

@@ -61,7 +61,7 @@ campaign_config:
   scoring:
     per_sample: max(0.0, min(1.0, (mean_round_delta + 1.0) / 3.0))
     per_cell: max(0.0, min(1.0, fitness * 500.0 / max(1.0, latency)))
-  headline_metric: ability
+  display_metric: ability
   exclude_nodes: []
   pipeline_overlay: {}
   optimization:

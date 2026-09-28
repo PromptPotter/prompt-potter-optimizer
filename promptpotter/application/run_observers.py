@@ -94,7 +94,7 @@ def build_campaign_emitter(
         session_id=session.session_id,
         arms_per_round=selected.pacing.arms_per_round,
         sp_budget_round=selected.round_cells(len(session.samples)),
-        headline_metric=campaign_config.headline_metric,
+        display_metric=campaign_config.display_metric,
         langfuse_trace_url=langfuse_trace_url,
         resumed_from_round=resumed_from_round,
         seed_from_cycle_id=seed_from_cycle_id,
@@ -215,9 +215,9 @@ class RunCallbacks:
     def on_round_close(self, round_result: RoundResult) -> int | None:
         """The CLOSE — what the round knows and no candidate could: the frontier it advanced and
         the ability fit behind it. Every term here is RE-READ on each close, which is what lets
-        round 0's second one (``runner/loop.py``, once the ruler warms) deliver a θ its own close
-        could not have had. The crown is deliberately absent: it never moves, so it lands once, at
-        ``on_election``.
+        round 0's second one (``round.py::close_round``, once the ruler warms) deliver a θ its own
+        close could not have had. The crown is deliberately absent: it never moves, so it lands
+        once, at ``on_election``.
 
         Returns the offset this close landed at — the round document's address on the ledger."""
         return self._emit(

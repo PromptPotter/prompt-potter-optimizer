@@ -219,7 +219,7 @@ async def measure_as_parent(
         cells,
         ctx.cycle.session,
         label=MeasurementRole.PARENT,
-        axes=ctx.cycle.axes,
+        sample_index=ctx.cycle.sample_index,
         on_sample_scored=partial(ctx.callbacks.on_sample_scored, NO_ROUND_SLOT, 0),
         on_sample_starting=partial(ctx.callbacks.on_sample_started, NO_ROUND_SLOT, 0),
         measured=MeasuredCandidate(
@@ -349,7 +349,7 @@ def _catch_up(cycle: Cycle, sp: JobSearchPoint, sample: Sample, prior_id: str) -
         [sample],
         cycle.session,
         label=MeasurementRole.BACKFILL,
-        axes=cycle.axes,
+        sample_index=cycle.sample_index,
         on_sample_scored=None,
         on_sample_starting=None,
         # The PRIOR being caught up, never the arm whose cell triggered it; ``role`` marks
@@ -397,7 +397,7 @@ def _open_candidate(
         on_sample_scored=partial(callbacks.on_sample_scored, idx, n),
         on_sample_starting=partial(callbacks.on_sample_started, idx, n),
         checks=checks,
-        axes=ctx.cycle.axes,
+        sample_index=ctx.cycle.sample_index,
         # Handed to the gateway rather than bound here, so no re-entrant asker inherits it; the
         # L4 recursion stamps an inner campaign's provenance from it.
         measured=MeasuredCandidate(

@@ -95,7 +95,7 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> None:
     )
 
     live_obs = build_observations(cycle.rounds)
-    campaign_obs = list(cycle.archive_observations) + live_obs
+    campaign_obs = list(cycle.difficulty.observations) + live_obs
     campaign_artifact = build_hard_samples_artifact_from_observations(
         campaign_obs,
         cycle_id=cycle_id,

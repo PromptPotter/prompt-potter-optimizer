@@ -1582,7 +1582,9 @@ def test_a_dead_claimers_cell_is_taken_over(tmp_path: Path, monkeypatch) -> None
         n_min=6,
         n_samples=1,
         ruler=None,
-        backfill_fn=functools.partial(_catch_up, types.SimpleNamespace(session=session, axes=None)),
+        backfill_fn=functools.partial(
+            _catch_up, types.SimpleNamespace(session=session, sample_index=None)
+        ),
     )
     race.register_completed([], candidate_id="prior", sp=sp)
 
@@ -3479,6 +3481,7 @@ def test_digest_reads_the_ruler_off_the_cycle_not_the_unabsorbed_round() -> None
     from factories import round_result
 
     from promptpotter.application.bench.cycle import Cycle
+    from promptpotter.application.bench.difficulty import DifficultyView
     from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
     from promptpotter.application.optimizers.potter.dispatch.facade import build_bundle
     from promptpotter.application.optimizers.potter.dispatch.injections.panels import _r_confounds
@@ -3503,8 +3506,8 @@ def test_digest_reads_the_ruler_off_the_cycle_not_the_unabsorbed_round() -> None
         session=session,
         config=CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05)),
         working_state=state,
+        difficulty=DifficultyView(session=session, n_min=6, enable_2pl=True, ruler=warm),
         rounds=[round_result(0)],
-        ruler=warm,
     )
     # Exactly what `run_l1_critique` is handed: the round the loop has not folded in yet — so it
     # carries no reading of its own, and the digest's can only have come off the cycle.
@@ -3535,6 +3538,7 @@ def test_a_round_missing_its_critique_is_re_sent_before_the_generator_reads() ->
     from factories import round_result
 
     from promptpotter.application.bench.cycle import Cycle
+    from promptpotter.application.bench.difficulty import DifficultyView
     from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
     from promptpotter.application.optimizers.potter.l1 import critique as critique_mod
     from promptpotter.application.optimizers.potter.state import PotterState
@@ -3549,6 +3553,7 @@ def test_a_round_missing_its_critique_is_re_sent_before_the_generator_reads() ->
             session=session,
             config=CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05)),
             working_state=state,
+            difficulty=DifficultyView(session=session, n_min=6, enable_2pl=True),
             rounds=[round_result(0), prior],
         )
 
@@ -3866,7 +3871,7 @@ def _walk_over(
         run_id="walk_run",
         cached_sample_results=dict(cached or {}),
         on_sample_scored=None,
-        axes=None,
+        sample_index=None,
         scorer=types.SimpleNamespace(
             fitness=lambda r: r["fitness"], objective=lambda r: r["objective"]
         ),
@@ -5224,7 +5229,7 @@ def test_a_backend_retry_is_served_with_the_reason_it_happened(tmp_path: Path) -
         session_id="s",
         arms_per_round=2,
         sp_budget_round=20,
-        headline_metric="composite",
+        display_metric="composite",
     )
     view.on_record(
         PhaseRecord(
@@ -5268,7 +5273,7 @@ def test_the_parent_rescore_ticks_the_run_without_minting_a_candidate(tmp_path: 
         session_id="s",
         arms_per_round=2,
         sp_budget_round=20,
-        headline_metric="composite",
+        display_metric="composite",
     )
 
     def scored(ci: int, sid: int, offset: int) -> None:

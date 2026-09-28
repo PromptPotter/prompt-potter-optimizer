@@ -71,6 +71,7 @@ from promptpotter.application.views.view_models import (
 from promptpotter.domain.opt_search_point import OptSearchPoint, node_source
 from promptpotter.domain.phases import PhaseEvent, StopLoop, StopReason, emit_phase
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
+from promptpotter.domain.results import merge_known_outcomes
 from promptpotter.domain.run_records import (
     ConfigOverrides,
     ForkTrigger,
@@ -89,6 +90,7 @@ if TYPE_CHECKING:
     from promptpotter.application.optimizers.potter.dispatch.bundle import InjectionBundle
     from promptpotter.application.optimizers.potter.state import PotterState
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.ruler import AbilityReading
     from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 
 logger = logging.getLogger(__name__)
@@ -100,8 +102,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class TransitionResult:
-    """One fire's output. Either layer may emit a ``fork_proposal``: the post-apply hook stashes it on
-    ``cycle.rebase_request`` and raises ``StopLoop(REBASED)``, which ``runner.entry`` resolves to a fork."""
+    """One fire's output. Either layer may emit a ``fork_proposal``: the post-apply hook raises it as
+    ``StopLoop(REBASED, fork=...)``, which ``runner.entry`` resolves to a fork."""
 
     opt_sp: OptSearchPoint
     # The whole post-fire map, or ``None`` when the fire left the cycle's untouched.
@@ -117,6 +119,44 @@ class TransitionResult:
     l3_guard_breaches: list[ValidatorOutcome] = field(default_factory=list)
     fork_proposal: ForkProposal | None = None
     terminate_proposal: TerminateProposal | None = None
+
+
+@dataclass(frozen=True)
+class _HighWater:
+    """The best the cycle's closed rounds reached — the peak the stall ladder differences against.
+    The θ pair carries its SE, because a θ advance is only one relative to its own error."""
+
+    composite_fitness: float
+    accuracy: float | None
+    theta: float | None
+    theta_se: float | None
+
+
+def _high_water(cycle: Cycle) -> _HighWater:
+    """Derived off the round documents, never banked beside them. A round stamped on another δ scale
+    than the cycle's (a round file written before the ruler warmed) is re-read on the cycle's."""
+    best = cycle.rounds[0]
+    for rr in cycle.rounds[1:]:
+        if rr.composite_fitness > best.composite_fitness:
+            best = rr
+    view = cycle.difficulty
+    peak: AbilityReading | None = None
+    frontier: list[dict[str, Any]] = []
+    for rr in cycle.rounds:
+        frontier = merge_known_outcomes(frontier, list(rr.results))
+        reading = (
+            rr.ability
+            if rr.ability is not None and rr.ability.ruler_id == view.scale_id
+            else view.frontier(frontier)
+        )
+        if reading is not None and (peak is None or reading.theta > peak.theta):
+            peak = reading
+    return _HighWater(
+        composite_fitness=best.composite_fitness,
+        accuracy=best.accuracy,
+        theta=None if peak is None else peak.theta,
+        theta_se=None if peak is None else peak.se,
+    )
 
 
 ParseFn = Callable[[Any, OptSearchPoint, L2L3Memory], TransitionResult]
@@ -210,9 +250,9 @@ def _apply_l2(cycle: Cycle, state: PotterState, result: TransitionResult) -> Non
     if result.l1_layout is not None:
         memory.l1_layout = result.l1_layout
     memory.wounds.l2_guard_breaches = list(result.l2_guard_breaches)
+    best = _high_water(cycle)
     state.escalation.record_l2_fired(
-        best_composite_fitness=cycle.tracking.best_composite_fitness,
-        best_theta=cycle.tracking.best_theta,
+        best_composite_fitness=best.composite_fitness, best_theta=best.theta
     )
 
 
@@ -232,7 +272,7 @@ def _l2_enter(cycle: Cycle, state: PotterState) -> OptimizerStepEnterView:
         tag=f"L2 fire {esc.l2_round + 1}",
         lines=(
             f"L1 stalled {esc.l1_stall_count} rounds  |  "
-            f"acc={cycle.tracking.current_accuracy:.1%}  best={cycle.tracking.best_accuracy:.1%}",
+            f"acc={cycle.tracking.current_accuracy:.1%}  best={_high_water(cycle).accuracy:.1%}",
             overrides,
             "LLM analyzing failure patterns...",
         ),
@@ -305,9 +345,9 @@ def _apply_l3(cycle: Cycle, state: PotterState, result: TransitionResult) -> Non
     # The overwrite, possibly with ``""``, is the "cleared only when L3 fires again" contract.
     state.memory.wounds.l3_note = result.l3_note
     state.memory.wounds.l3_guard_breaches = list(result.l3_guard_breaches)
+    best = _high_water(cycle)
     state.escalation.record_l3_fired(
-        best_composite_fitness=cycle.tracking.best_composite_fitness,
-        best_theta=cycle.tracking.best_theta,
+        best_composite_fitness=best.composite_fitness, best_theta=best.theta
     )
 
 
@@ -518,17 +558,17 @@ async def _run_transition(
                 "%s emitted fork_proposal while rebase_capability is off — ignored",
                 transition.layer_id,
             )
-        elif _stash_rebase_request(cycle, transition.layer_id, result.fork_proposal, round_num):
-            raise StopLoop(StopReason.REBASED)
+        elif fork := _rebase_request(cycle, transition.layer_id, result.fork_proposal, round_num):
+            raise StopLoop(StopReason.REBASED, fork=fork)
 
     return result
 
 
-def _stash_rebase_request(
+def _rebase_request(
     cycle: Cycle, layer_id: str, proposal: ForkProposal, round_num: int
-) -> bool:
-    """Stash an L2/L3 ``fork_proposal`` as a ``Cycle.rebase_request``. **The layer decides WHETHER to
-    rewind; UCB decides WHERE** — :func:`select_rewind_round` over the backpropagated lineage."""
+) -> RebaseRequest | None:
+    """An L2/L3 ``fork_proposal`` as the fork it asks for. **The layer decides WHETHER to rewind;
+    UCB decides WHERE** — :func:`select_rewind_round` over the backpropagated lineage."""
     session = cycle.session
     spine = load_lineage_spine(session.store, session.campaign_id)
     target_round = select_rewind_round(
@@ -542,12 +582,12 @@ def _stash_rebase_request(
             layer_id,
             round_num,
         )
-        return False
+        return None
 
     unlock = bool(proposal.unlock_schema_field_rename) and not (
         potter_knobs(cycle.optimizer).l1_generate.schema_field_rename
     )
-    cycle.rebase_request = RebaseRequest(
+    request = RebaseRequest(
         fork_from_round=target_round,
         trigger=ForkTrigger.OPTIMIZER_REBASE,
         reason=str(proposal.reason or f"{layer_id} fork_proposal"),
@@ -568,7 +608,7 @@ def _stash_rebase_request(
         round_num,
         ", unlocking schema_field_rename" if unlock else "",
     )
-    return True
+    return request
 
 
 def _trigger_payload(
@@ -580,6 +620,7 @@ def _trigger_payload(
     layer: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     esc = state.escalation
+    best = _high_water(cycle)
     counter_round = getattr(esc, f"{layer}_round")
     inputs_ref = {
         "round_num": round_num,
@@ -590,9 +631,9 @@ def _trigger_payload(
         f"{layer}_round": counter_round,
         "stall_count": getattr(esc, f"{layer}_stall_count"),
         "best_composite_fitness_at_entry": getattr(esc, f"{layer}_best_composite_fitness_at_entry"),
-        "best_composite_fitness_this_round": cycle.tracking.best_composite_fitness,
+        "best_composite_fitness_this_round": best.composite_fitness,
         "best_theta_at_entry": getattr(esc, f"{layer}_best_theta_at_entry"),
-        "best_theta_this_round": cycle.tracking.best_theta,
+        "best_theta_this_round": best.theta,
         # Which of the two pairs above the stall verdict actually read.
         "comparator": getattr(esc, f"{layer}_comparator"),
     }
@@ -612,11 +653,12 @@ async def escalate_l2(
 ) -> StopReason | None:
     opt = potter_knobs(cycle.optimizer).escalation
     esc = state.escalation
+    best = _high_water(cycle)
 
     event = esc.observe_l2_escalation(
-        current_composite_fitness=cycle.tracking.best_composite_fitness,
-        current_theta=cycle.tracking.best_theta,
-        current_theta_se=cycle.tracking.best_theta_se,
+        current_composite_fitness=best.composite_fitness,
+        current_theta=best.theta,
+        current_theta_se=best.theta_se,
         escalation_ladder=opt.escalation_ladder,
         l2_patience=opt.l2_patience,
         l3_patience=opt.l3_patience,

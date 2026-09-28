@@ -3,13 +3,13 @@
 // contains the other.
 
 import { useSyncExternalStore } from "react";
-import type { HeadlineMetric } from "@/lib/derivations";
+import type { DisplayMetric } from "@/lib/derivations";
 
 interface CandidatesState {
   showForest: boolean;
 
   // Drives both the bar series and the number on every node. Never empty (see `toggleMetric`).
-  metrics: ReadonlySet<HeadlineMetric>;
+  metrics: ReadonlySet<DisplayMetric>;
   metricsSeededForCycle: string | null;
 
   // Which cells is `SelectionContext.sampleSet`, never a second copy here.
@@ -27,7 +27,7 @@ interface CandidatesState {
 
 let state: CandidatesState = {
   showForest: false,
-  metrics: new Set<HeadlineMetric>(["accuracy"]),
+  metrics: new Set<DisplayMetric>(["accuracy"]),
   metricsSeededForCycle: null,
   showOverlap: false,
   overlapSeededForCycle: null,
@@ -63,7 +63,7 @@ export function useCandidatesState(): CandidatesState {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
-export function toggleMetric(m: HeadlineMetric): void {
+export function toggleMetric(m: DisplayMetric): void {
   const next = new Set(state.metrics);
   if (next.has(m)) {
     if (next.size === 1) return;

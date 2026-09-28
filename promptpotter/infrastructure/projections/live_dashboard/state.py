@@ -18,7 +18,7 @@ from promptpotter.domain.dashboard_rows import (
     RunStanding,
 )
 from promptpotter.domain.phases import DashboardState, RunPhase
-from promptpotter.domain.results import HeadlineMetric, OverlapReading
+from promptpotter.domain.results import DisplayMetric, OverlapReading
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
@@ -232,9 +232,9 @@ class LiveDashboardState(StrictModel):
     # control disables rather than guessing, which is the whole point of serving it: a browser
     # parsing coefficients out of the string substitutes a default for whatever its regex missed.
     composite_fitness_weights: dict[str, float] | None = None
-    # DISPLAY config — the gate is always θ; this seeds the webapp's client-overridable
-    # headline toggle. Stamped at construction (``for_run``), so a fork carries its own.
-    headline_metric: HeadlineMetric = "accuracy"
+    # DISPLAY config — the selector decides on its own objective; this seeds the webapp's
+    # client-overridable metric toggle. Stamped at construction (``for_run``), so a fork carries its own.
+    display_metric: DisplayMetric = "accuracy"
     # Mirrors `RoundResult.stamps_theta` — campaign-wide, so the per-arm θ column reads ONE flag
     # rather than a candidate's `None` theta, which a cold ruler leaves `None` too.
     stamps_theta: bool = False
@@ -343,7 +343,7 @@ class LiveDashboardState(StrictModel):
         "session_id",
         "arms_per_round",
         "sp_budget_round",
-        "headline_metric",
+        "display_metric",
         "langfuse_trace_url",
         "max_cells_in_flight",
         "measured_unit",
@@ -360,7 +360,7 @@ class LiveDashboardState(StrictModel):
         arms_per_round: int | None,
         sp_budget_round: int,
         langfuse_trace_url: str | None,
-        headline_metric: HeadlineMetric,
+        display_metric: DisplayMetric,
     ) -> LiveDashboardState:
         """The state a starting run writes — ``prior`` carried forward WHOLESALE, this process's own facts
         stamped over it. This model IS the on-disk shape, so a hand-picked subset resets what it omits."""
@@ -374,7 +374,7 @@ class LiveDashboardState(StrictModel):
             "sp_budget_round": sp_budget_round,
             # Not carried from `prior` and not deferred to INIT:exit — round 0 runs before any
             # INIT event reaches the ledger, so waiting mis-headlines the whole origin pass.
-            "headline_metric": headline_metric,
+            "display_metric": display_metric,
             "declared_phase": RunPhase.RUNNING,
             "stop_reason": None,
             "error": None,

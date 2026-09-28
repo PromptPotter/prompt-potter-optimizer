@@ -17,7 +17,7 @@ from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.phases import StopReason
-from promptpotter.domain.results import HeadlineMetric
+from promptpotter.domain.results import DisplayMetric
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellScorer
 from promptpotter.infrastructure.backend import BackendClient
@@ -51,12 +51,12 @@ class ScorerSetup:
     scorer: CellScorer | None = None
     scorer_id: str = "none"
     scorer_cell_formula: str | None = None
-    # WHICH number the operator's surfaces headline. Here rather than only on
+    # WHICH number the operator's surfaces display first. Here rather than only on
     # `dashboard.json` because the terminal is an entry point too: served to the browser
     # alone, a campaign that declares `ability` still led every CLI line with the
     # subset-relative accuracy, which is the one reading `per_round_resubset` makes
-    # unsafe (`knobs.py::headline_subset_relative_under_resubset`).
-    headline_metric: HeadlineMetric = "accuracy"
+    # unsafe (`couplings.py::display_subset_relative_under_resubset`).
+    display_metric: DisplayMetric = "accuracy"
     partition: BankPartition | None = None
     degradation_checks: list[StopRule] = field(default_factory=list)
     judges: tuple[Evaluator, ...] = ()

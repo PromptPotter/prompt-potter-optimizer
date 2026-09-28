@@ -414,10 +414,10 @@ def test_lives_resume_fold_matches_live_observe() -> None:
     replay = EscalationFSM()
     replay_trace: list[int | None] = []
     # Round 0 leads, TWICE — the shape a real ledger has. The origin closes once at its own
-    # `emit_origin_round` and again when the ruler warms at round 1 (`runner/loop.py`), because
-    # its θ cannot be fit before a second arm exists. The live side banks neither: the origin
-    # reaches `close_round` without going through `post_round`, so `observe_round` never sees
-    # it. Folding them advanced the stall counter by two per resume and escalated to L2 early.
+    # `emit_origin_round` and again when the ruler warms at round 1 (`round.py::close_round`),
+    # because its θ cannot be fit before a second arm exists. The live side banks neither: the
+    # origin reaches `close_round` without going through `post_round`, so `observe_round` never
+    # sees it. Folding them advanced the stall counter by two per resume and escalated to L2 early.
     for _ in range(2):
         replay.fold(
             PhaseRecord(
@@ -655,7 +655,7 @@ def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) ->
     session = SimpleNamespace(
         state=SimpleNamespace(ledger=ledger, cycle_id=None, audit_projection=None)
     )
-    cycle = SimpleNamespace(pending_decisions=[], axes=None)
+    cycle = SimpleNamespace(pending_decisions=[], sample_index=None)
 
     # Round 1's own cut, then round 1's post-round escalation — recorded AFTER round 1
     # persisted, so it is still pending when round 2 closes.
@@ -1362,7 +1362,7 @@ def test_a_resume_before_round_one_regates_the_origin_it_measured(
         ),
         hop=CycleHop(campaign_id=_CAMPAIGN, cycle_id="cycle_r0"),
     )
-    stop, _ = asyncio.run(
+    stop = asyncio.run(
         loop.run_round_loop(
             cycle,
             [],
@@ -1371,7 +1371,7 @@ def test_a_resume_before_round_one_regates_the_origin_it_measured(
             None,
             budget_gate=None,
         )
-    )
+    ).stop_reason
     assert stop is StopReason.ORIGIN_GATE, "a resume reached round 1 past an ungated origin"
     assert gated_on == [37], "the gate read a verdict other than this launch's re-measure"
 

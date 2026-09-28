@@ -4,7 +4,7 @@ import { memo, useMemo } from "react";
 // `Bar` wrapper types its data as bar-only. Both controllers register in `lib/theme.ts`.
 import { Chart } from "react-chartjs-2";
 import { ensureChartRegistered, getCss, useThemeVersion } from "@/lib/theme";
-import { partialPanels, type HeadlineMetric } from "@/lib/derivations";
+import { partialPanels, type DisplayMetric } from "@/lib/derivations";
 import type { MeasuredUnit } from "@/lib/api/types";
 import { fmtSigned, unitCount } from "@/lib/format";
 import { NOT_SEPARABLE, liftSeparates } from "@/lib/fitness";
@@ -281,7 +281,7 @@ const ROTATE_THRESHOLD = 8;
 
 interface Props {
   views: CandidateView[];
-  metrics: ReadonlySet<HeadlineMetric>;
+  metrics: ReadonlySet<DisplayMetric>;
   showMask: boolean;
   showCache: boolean;
   showOverlap: boolean;
@@ -292,7 +292,7 @@ interface Props {
   // MUST be stable: it rides the `options` memo.
   onGeometry: (g: PlotGeometry) => void;
   unit: MeasuredUnit;
-  electedMetric: HeadlineMetric;
+  electedMetric: DisplayMetric;
 }
 
 export const FitnessChart = memo(function FitnessChart({

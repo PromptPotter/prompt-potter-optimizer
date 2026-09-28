@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from promptpotter.application.optimizers.nodes import CheckResult, ReviewReading
+from promptpotter.application.optimizers.nodes import CheckResult, ReviewReading, ReviewStat
 from promptpotter.application.optimizers.potter.escalation.state import exploration_budget
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
 from promptpotter.application.optimizers.potter.records import POTTER_MANIFEST, PotterRoundState
@@ -93,14 +93,23 @@ def review_reading(
     l1_checks, l2_checks = _behavior_per_round(
         rounds, audits, context_object, potter_knobs(selected).escalation.l1_patience
     )
+    stats = compute_l1_stats(
+        rounds,
+        origin_composite_fitness=origin_composite_fitness,
+        behavior_results=l1_checks,
+        l2_behavior_results=l2_checks,
+    )
     return ReviewReading(
         checks=l1_checks,
         check_ids=tuple(CHECK_REGISTRY),
-        stats=compute_l1_stats(
-            rounds,
-            origin_composite_fitness=origin_composite_fitness,
-            behavior_results=l1_checks,
-            l2_behavior_results=l2_checks,
+        verdict=ReviewStat("round-1 conformance", stats.round_1_verdict),
+        stats=(
+            ReviewStat("yield_rate", stats.yield_rate, ".2f"),
+            ReviewStat("top_lift_mean", stats.top_lift_mean, "+.4f"),
+            ReviewStat("behavior_pass_rate", stats.behavior_pass_rate, ".2f"),
+            ReviewStat("l2_behavior_pass_rate", stats.l2_behavior_pass_rate, ".2f"),
+            ReviewStat("stagnation_max", stats.stagnation_max),
+            ReviewStat("l2_fires", stats.l2_fires),
         ),
         variants=[extract_l1_variants(audit) for audit in audits],
         feedback=[

@@ -1,7 +1,7 @@
 "use client";
 import { memo, useMemo } from "react";
 import { cx } from "@/lib/cx";
-import { fmtHeadlineValue, type HeadlineMetric } from "@/lib/derivations";
+import { fmtDisplayValue, type DisplayMetric } from "@/lib/derivations";
 import { useStableContent } from "@/lib/stable";
 import { pressable } from "@/components/ui";
 import type { LineageNode } from "@/lib/api";
@@ -15,7 +15,7 @@ import type { PlotGeometry } from "./FitnessChart";
 interface Props {
   views: CandidateView[];
   plot: PlotGeometry | null;
-  metric: HeadlineMetric;
+  metric: DisplayMetric;
   selectedKey: string | null;
   onSelect: (view: CandidateView | null) => void;
   forkedFrom: ReadonlyMap<string, LineageNode>;
@@ -91,7 +91,7 @@ export const DendrogramStrip = memo(function DendrogramStrip({
           const selected = n.key === selectedKey;
           const forkCycle = forkedFrom.get(n.candidateId);
           const value = view
-            ? fmtHeadlineValue(metric, metric === "composite" ? view.composite : view.accuracy, view.theta)
+            ? fmtDisplayValue(metric, metric === "composite" ? view.composite : view.accuracy, view.theta)
             : "—";
           return (
             <g key={n.key} className="cand-dendro-node">

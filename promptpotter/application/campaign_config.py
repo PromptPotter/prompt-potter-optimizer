@@ -10,7 +10,7 @@ from pydantic import Field
 from promptpotter.config.settings import DEFAULT_ORIGIN_BUDGET
 from promptpotter.domain.bench import DatasetSplit
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeSearchNarrowing
-from promptpotter.domain.results import HardSampleOrder, HeadlineMetric
+from promptpotter.domain.results import DisplayMetric, HardSampleOrder
 from promptpotter.domain.strict_model import StrictModel
 
 # From the LEAF, never `promptpotter.judges`: importing the package would pull the registry (and
@@ -369,15 +369,16 @@ class CampaignConfig(StrictModel):
         "LLMs. A judge is a ruler, and a ruler that moved with whatever the search was last "
         "steered to would not be one.",
     )
-    headline_metric: Annotated[HeadlineMetric, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(
+    display_metric: Annotated[DisplayMetric, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(
         "accuracy",
-        description="Which fitness number headlines the operator's text surfaces "
-        "(lineage node value, Best tile, sidebar) by default. DISPLAY config, not "
-        "search state — the gate is always difficulty-adjusted ability θ; this only "
-        "picks the number the human READS, client-overridable per session. `ability` "
-        "shows θ (a logit, jargon) — defaults to `accuracy` so θ is never forced on "
-        "an operator who didn't ask for it. Rides the `composite_fitness_formula` "
-        "serve path to `dashboard.json::headline_metric`; never on `OptSearchPoint`.",
+        description="Which fitness number the operator's round and candidate views display "
+        "first (lineage node value, Best tile, sidebar). DISPLAY config, not search state — "
+        "the optimizer's selector decides on its own objective, and the campaign's headline "
+        "is the bench score; this only picks the number the human READS, client-overridable "
+        "per session. `ability` shows θ (a logit, jargon) where the selector stamps one — "
+        "defaults to `accuracy` so θ is never forced on an operator who didn't ask for it. "
+        "Rides the `composite_fitness_formula` serve path to "
+        "`dashboard.json::display_metric`; never on `OptSearchPoint`.",
     )
     hard_sample_order: Annotated[HardSampleOrder, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(
         "info_gain",
@@ -387,7 +388,7 @@ class CampaignConfig(StrictModel):
         "learning gain), contested-at-the-leader samples first; `difficulty` sorts by the "
         "Rasch ruler δ_s alone, hardest first. DISPLAY config: it picks the order the human "
         "READS and never what the engine scores, which is `build_round_order` and reaches no "
-        "knob. Client-overridable per session, like `headline_metric`.",
+        "knob. Client-overridable per session, like `display_metric`.",
     )
     accuracy_ceiling: Annotated[float | None, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(
         None,

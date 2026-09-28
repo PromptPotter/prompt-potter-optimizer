@@ -613,8 +613,9 @@ class LedgerFit(LedgerAbility):
 
 class LedgerRoundClose(StrictModel):
     """The fit facts, RE-READ on every close — which is what lets round 0's second close carry the
-    warm ruler's θ (``runner/loop.py``). The crown is on :class:`ElectionRecord` instead, because it
-    never moves. ``abilities`` keys are POSITIONAL: a resume re-mints a candidate under a fresh uuid."""
+    warm ruler's θ (``round.py::close_round``). The crown is on :class:`ElectionRecord` instead,
+    because it never moves. ``abilities`` keys are POSITIONAL: a resume re-mints a candidate under
+    a fresh uuid."""
 
     model_config = ConfigDict(frozen=True)
 

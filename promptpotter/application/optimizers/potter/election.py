@@ -105,6 +105,7 @@ def elect_on_theta(
     ctx: RoundContext, measured: Measured, population: Population, *, node: str
 ) -> Selection:
     cycle = ctx.cycle
+    ruler = cycle.difficulty.ruler
     scores = list(measured.scores)
     cs_by_id = {cs.candidate_id: i for i, cs in enumerate(scores)}
     electable = [ind.lineage.id for ind in measured.electable]
@@ -116,12 +117,12 @@ def elect_on_theta(
         measured.rows,
         measured.parent_rows,
         measured.coverage_floor,
-        cycle.ruler,
+        ruler,
         parent_bias=parent_bias,
     )
     # The election's own fit, never a second one, and none on a cold ruler, where θ is
     # logit-accuracy on each arm's own subset; ``electable`` stays whole as the decision's input.
-    for cid in electable if cycle.ruler is not None else ():
+    for cid in electable if ruler is not None else ():
         theta_c = abilities.theta.get(cid)
         if theta_c is None:
             continue
@@ -158,7 +159,7 @@ def elect_on_theta(
             labels={cs.candidate_id: cs.label for cs in scores},
             coverage_floor=measured.coverage_floor,
             n_scored=len(measured.scored),
-            ruler_n=len(cycle.ruler.delta) if cycle.ruler is not None else 0,
+            ruler_n=len(ruler.delta) if ruler is not None else 0,
         ),
         optimizer_state=population.optimizer_state,
     )

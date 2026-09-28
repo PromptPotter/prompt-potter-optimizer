@@ -47,6 +47,7 @@ async def run_generation_only_round(
             # (no measurement happened), not measurements of zero; `health` and the
             # matched-parent pair stay None because a degradation verdict and an
             # origin-restricted-to-the-winner's-samples both need scored samples.
+            axes = state.axes(cycle)
             generated = RoundResult(
                 round=round_num,
                 label="diag_gen_only",
@@ -63,7 +64,7 @@ async def run_generation_only_round(
                     l1_yield=yield_stats.l1_yield,
                     l1_parse_failure=yield_stats.l1_parse_failure,
                     prompt_hashes={},
-                    axis_memory_peaked=sorted(cycle.axes.peaked_axes()) if cycle.axes else [],
+                    axis_memory_peaked=sorted(axes.peaked_axes()) if axes else [],
                 ),
             )
             generated.optimizer_facts = round_facts(generated)

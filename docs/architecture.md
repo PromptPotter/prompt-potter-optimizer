@@ -992,7 +992,7 @@ the PR description.
     cache stamped with its `scorer_id`, never read as a fact — a reader under another grader reads
     the passes again.
   - **A cycle's "best" deliberately has two bases** — the optimizer's objective (its declared
-    pick, `Cycle.selection`; potter's L2/L3 stall comparator alone keeps the high-water of each
+    pick, `Cycle.selection`; potter's L2/L3 stall comparator alone derives the high-water of each
     round's own `composite_fitness`) and the bench's headline on the bench set. The shared-cells
     `overlap` reading (`domain/results.py::best_round_on_shared_cells`, over
     `overlap_accuracy`) stays a round-level reading beside both. Forcing the two bases to

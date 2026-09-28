@@ -38,7 +38,7 @@ from promptpotter.shared.instrument import MeasuredCandidate, measured_candidate
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.intelligence.indexes.axis import AxisIndex
+    from promptpotter.application.intelligence.indexes.sample import SampleIndex
     from promptpotter.application.scoring.query_loop import QueryLoopResult
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
@@ -314,7 +314,7 @@ async def score_search_point(
     label: str,
     on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None,
     on_sample_starting: Callable[[str, int, int, int, int, int | None], None] | None,
-    axes: AxisIndex | None = None,
+    sample_index: SampleIndex | None = None,
     measured: MeasuredCandidate | None,
     force_fresh: bool = False,
 ) -> ScoredWalk:
@@ -330,7 +330,7 @@ async def score_search_point(
             label=label,
             on_sample_scored=on_sample_scored,
             on_sample_starting=on_sample_starting,
-            axes=axes,
+            sample_index=sample_index,
             measured=measured,
             force_fresh=force_fresh,
         )
@@ -347,7 +347,7 @@ def open_walk(
     on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None,
     on_sample_starting: Callable[[str, int, int, int, int, int | None], None] | None,
     checks: Sequence[StopRule] = (),
-    axes: AxisIndex | None = None,
+    sample_index: SampleIndex | None = None,
     measured: MeasuredCandidate | None,
     force_fresh: bool = False,
 ) -> Walk:
@@ -491,7 +491,7 @@ def open_walk(
         run_id=run_id,
         cached_sample_results=cached_sample_results,
         on_sample_scored=on_sample_scored,
-        axes=axes,
+        sample_index=sample_index,
         scorer=session.scoring.scorer,
         deprecated_samples=deprecated_samples,
         persist_fresh=_persist_fresh,

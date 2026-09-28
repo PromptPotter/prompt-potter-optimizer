@@ -178,7 +178,10 @@ LEDGER_BASELINE = {
     # +1: `runner/campaign_result.py` — the campaign's result, which only the cycle holding its
     # line writes, and the readings off it. Not `bench.py`'s: a pass and its reading are that
     # module's subject, while the result also folds the line's cost off every ledger on it.
-    "modules": 389,
+    # +1: `bench/difficulty.py` — the δ ruler as a scoped bench view any selector reads. It takes
+    # three fields, six helpers and four methods off `Cycle`; the A/B replay and the L4 shared
+    # scale anchor through it, and inside `cycle.py` the ruler would read as Cycle state again.
+    "modules": 390,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     # +2: `application/optimizers/__init__.py` (the member registry) and its `potter/`, empty.
@@ -200,7 +203,7 @@ LEDGER_BASELINE = {
     # one; `Estimand.GATE` because it decides what counts as a correct answer.
     # +1: `CampaignConfig.accuracy_ceiling` — the accuracy a best-reachable prompt would score on
     # this dataset at this model, which `rounds_to_ceiling` counts rounds against. It folds into no
-    # neighbour: `dataset_split` partitions the bank and `headline_metric` picks which existing number
+    # neighbour: `dataset_split` partitions the bank and `display_metric` picks which existing number
     # renders, while this one is a claim no code can derive — only the dataset owner holds it, and
     # the clock reported nothing on any benchmark until a field existed to say it. `Scope.POLICY` /
     # `Estimand.DISPLAY`: it moves no gate, no selection and no stop.

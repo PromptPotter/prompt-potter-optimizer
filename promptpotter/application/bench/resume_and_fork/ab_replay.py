@@ -7,13 +7,12 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bench.cycle import _calibrate_delta_ruler
+from promptpotter.application.bench.difficulty import DifficultyView, _calibrate_delta_ruler
 from promptpotter.application.bench.resume_and_fork.replayers import (
     ReplayMismatch,
     replay_all_mismatches,
 )
 from promptpotter.application.bench.task_context import campaign_framing
-from promptpotter.application.intelligence.hard_sample_archive import build_archive_observations
 from promptpotter.application.mask.divergence import (
     Divergence,
     Verdict,
@@ -183,18 +182,14 @@ def ab_replay_cycle(
         )
         .sp_hash(session.pipeline_schema)
     )
-    ruler, _ = _calibrate_delta_ruler(
-        origin.results,
-        campaign_config.optimization.elimination_n_min,
+    view = DifficultyView(
+        session=session,
+        n_min=campaign_config.optimization.elimination_n_min,
         enable_2pl=campaign_config.optimization.enable_2pl_graduation,
-        archive_obs=build_archive_observations(
-            session.store,
-            dataset_name=session.dataset_name,
-            scorer=scorer,
-            scorer_id=sc.scorer_id,
-            sample_ids=sc.require_partition().admitted_ids,
-            origin_sp_hash=origin_sp_hash,
-        ),
+        origin_sp_hash=origin_sp_hash,
+    )
+    ruler, _ = _calibrate_delta_ruler(
+        origin.results, view.n_min, enable_2pl=view.enable_2pl, archive_obs=view.archive()
     )
 
     mismatches: list[ReplayMismatch] = []

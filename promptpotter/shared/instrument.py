@@ -100,8 +100,8 @@ class MeasurementRole(enum.StrEnum):
     # parent floor, no lift and no acquisition, so the pass may measure one arm without making
     # it better-identified than the arms it was judged against.
     OVERLAP = "overlap"
-    # The held-out pass: a run-level view an optimizer reads (`AxisIndex`) skips it whole, since a
-    # run's accuracy cannot be filtered to the search pool's rows.
+    # The held-out pass: a run-level view an optimizer reads (`SampleIndex.runs`) skips it whole,
+    # since a run's accuracy cannot be filtered to the search pool's rows.
     BENCH = "bench"
 
 

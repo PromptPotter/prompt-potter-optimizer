@@ -111,7 +111,7 @@ class PoBBRace:
             cast("PoBBKnobs", cycle.optimizer.knobs("pobb")),
             n_min=cycle.config.optimization.elimination_n_min,
             n_samples=len(panel.cells),
-            ruler=cycle.ruler,
+            ruler=cycle.difficulty.ruler,
             backfill_fn=catch_up,
         )
         # `current_results` = best-so-far per-sample history; `current_sp` is the leader,

@@ -75,7 +75,7 @@ __all__ = [
     "Race",
     "RaceSnapshot",
     "ReviewReading",
-    "ReviewStats",
+    "ReviewStat",
     "RoundContext",
     "RoundOpening",
     "Sampler",
@@ -126,33 +126,26 @@ class CheckResult:
     evidence: str
 
 
-class ReviewStats(Protocol):
-    """The cycle-wide stats ``review.md`` prints; ``None`` on a rate is NOT MEASURED."""
+@dataclass(frozen=True)
+class ReviewStat:
+    """One cycle-wide reading an optimizer states in its own words. ``None`` is NOT MEASURED and
+    renders as a dash; ``spec`` formats a measured value."""
 
-    @property
-    def yield_rate(self) -> float | None: ...
-    @property
-    def top_lift_mean(self) -> float | None: ...
-    @property
-    def behavior_pass_rate(self) -> float | None: ...
-    @property
-    def l2_behavior_pass_rate(self) -> float | None: ...
-    @property
-    def stagnation_max(self) -> int: ...
-    @property
-    def l2_fires(self) -> int: ...
-    @property
-    def round_1_verdict(self) -> str: ...
+    name: str
+    value: float | str | None
+    spec: str = ""
 
 
 @dataclass(frozen=True)
 class ReviewReading:
-    """An optimizer's own reading of a cycle, which ``review.md`` renders. Every list holds one
-    entry per round: its checks, the variants its proposer emitted, the feedback it closed on."""
+    """An optimizer's own reading of a cycle, which ``review.md`` renders: its verdict beside the
+    header, its statistics beside the bench's. Every list holds one entry per round: its checks,
+    the variants its proposer emitted, the feedback it closed on."""
 
     checks: list[list[CheckResult]]
     check_ids: tuple[str, ...]
-    stats: ReviewStats
+    verdict: ReviewStat | None
+    stats: tuple[ReviewStat, ...]
     variants: list[list[dict[str, Any]]]
     feedback: list[str]
 

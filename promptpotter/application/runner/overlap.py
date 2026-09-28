@@ -134,9 +134,8 @@ async def _measure_gaps(
         # One run per (member, gap set) in the archive, so the pass is identifiable on disk and
         # a re-run of the same round replays it free rather than paying twice.
         label=MeasurementRole.OVERLAP,
-        # The quarantine: ingesting into the AxisIndex would feed `axis_memory`, an optimizer
-        # panel, from rows one arm alone paid for.
-        axes=None,
+        # No sample history: a report-only pass re-sends no degraded cached cell.
+        sample_index=None,
         on_sample_scored=None,
         on_sample_starting=None,
         measured=MeasuredCandidate(

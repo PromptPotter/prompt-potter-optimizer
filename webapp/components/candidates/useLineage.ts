@@ -11,7 +11,7 @@ import {
   countDescendants,
   nodeKeyOf,
   nodeOverlays,
-  type HeadlineMetric,
+  type DisplayMetric,
 } from "@/lib/derivations";
 import { encodeCyclePath, rootCycleId, type CyclePath } from "@/lib/ids";
 import { useCommand } from "@/lib/hooks/useCommand";
@@ -34,7 +34,7 @@ export interface Lineage {
   tree: LineageNode | null;
   valueByKey: ReadonlyMap<string, number | null>;
   thetaByKey: ReadonlyMap<string, number | null>;
-  metric: HeadlineMetric;
+  metric: DisplayMetric;
   // The node, not its id: a bare cycle id cannot supply `pathOf` or `nodeKeyOf`.
   forkedFrom: ReadonlyMap<string, LineageNode>;
   expanded: ReadonlySet<string>;
@@ -58,7 +58,7 @@ export function useLineage({
   campaignId: string | null;
   cycleId: string | null;
   // Passed in: this hook touches no `dashboard.json`.
-  electedMetric: HeadlineMetric;
+  electedMetric: DisplayMetric;
   path: CyclePath | null;
 }): Lineage {
   const { tree, index } = useViewedLineage();

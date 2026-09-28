@@ -195,7 +195,7 @@ the registry itself (`optimizers/potter/validators/l1_strict.py`) plus `validate
 `PARAM_FORBIDDEN_KEYS` unconditionally — read the registry before assuming a check is unenforced.
 
 - **Evidence availability.** For round 1 (especially a fresh fork), does the rendered input actually
-  carry the signals a candidate claims to consult? `axis_memory` is present iff `AxisIndex.ensure_for`
+  carry the signals a candidate claims to consult? `axis_memory` is present iff `SampleIndex.ensure_for`
   found ≥1 prior archive measurement (empty on a backend's first cycle). `runtime_failures` is present
   iff this cycle produced one OR `Cycle.start` inherited from sibling forks — **empty in round 1 while
   siblings DID produce failures means the inheritance path is broken** (`sibling_wounds.py`,

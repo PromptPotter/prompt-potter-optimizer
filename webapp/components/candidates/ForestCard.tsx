@@ -51,7 +51,7 @@ export function ForestCard() {
     campaignId,
     cycleId,
     path: viewedPath,
-    electedMetric: dash?.headline_metric ?? "accuracy",
+    electedMetric: dash?.display_metric ?? "accuracy",
   });
 
   // Navigate on the node's OWN `coursePath`: `(campaignId, n.cycleId)` names the wrong run inside an

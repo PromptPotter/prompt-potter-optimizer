@@ -12,7 +12,7 @@ from promptpotter.application.bench.resume_and_fork.resume import (
     resume_with_divergence_check,
 )
 from promptpotter.application.initialization.session import Session, open_cycle_ledger
-from promptpotter.application.intelligence.indexes.axis import AxisIndex
+from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.preflight import check_model_reasoning_floors, run_preflight_checks
@@ -51,7 +51,7 @@ if TYPE_CHECKING:
     from promptpotter.application.origin import CampaignOrigin
     from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.application.scoring.search_point_scorer import ScoredWalk
-    from promptpotter.domain.results import HeadlineMetric
+    from promptpotter.domain.results import DisplayMetric
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.infrastructure.store.stores import Stores
@@ -136,7 +136,7 @@ def populate_session_scoring(
     scoring_formula: str | None,
     scoring_cell_formula: str | None = None,
     scorer_id: str,
-    headline_metric: HeadlineMetric = "accuracy",
+    display_metric: DisplayMetric = "accuracy",
     judge_specs: Mapping[str, JudgeSpec],
     source: RunSource,
 ) -> None:
@@ -157,7 +157,7 @@ def populate_session_scoring(
     )
     session.scoring.scorer_id = scorer_id
     session.scoring.scorer_cell_formula = scoring_cell_formula
-    session.scoring.headline_metric = headline_metric
+    session.scoring.display_metric = display_metric
     # The sole judge builder, serving the runner and the four verbs that score outside it
     # (`arm_diagnostic_scoring`) — so one line arms grading reuse on every entry point, and a
     # bad spec fails here rather than on the first cell. Required and assigned unconditionally:
@@ -196,7 +196,7 @@ def arm_diagnostic_scoring(
         scoring_formula=spec.per_sample,
         scoring_cell_formula=spec.per_cell,
         scorer_id=spec.scorer_id,
-        headline_metric=campaign_config.headline_metric,
+        display_metric=campaign_config.display_metric,
         judge_specs=campaign_config.judges,
         source=source,
     )
@@ -385,7 +385,7 @@ def _start_observability_and_scoring(
         scoring_formula=scoring_formula,
         scoring_cell_formula=scoring_cell_formula,
         scorer_id=scorer_id,
-        headline_metric=config.headline_metric,
+        display_metric=config.display_metric,
         judge_specs=config.judges,
         source=RunSource.OPTIMIZATION_LOOP,
     )
@@ -437,7 +437,7 @@ def _finalize_loop_state(
     resumed_from_round: int,
 ) -> None:
 
-    cycle.axes = AxisIndex.ensure_for(
+    cycle.sample_index = SampleIndex.ensure_for(
         session.store,
         scorer=session.scoring.require_scorer(),
         scorer_id=session.scoring.scorer_id,
@@ -452,7 +452,7 @@ def _finalize_loop_state(
             session.state.ledger = open_cycle_ledger(session, resolved_cycle_id)
         # First moment the lock from `Cycle.start` has an id to be written under, and round 0 is
         # already stamped with it.
-        cycle.persist_ruler()
+        cycle.difficulty.persist(round_num=len(cycle.rounds) - 1)
     session.state.tracing_campaign_id = tracing_campaign_id
     session.scoring.degradation_checks = build_degradation_checks(config)
     session.state.resumed_from_round = resumed_from_round

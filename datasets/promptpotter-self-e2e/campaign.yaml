@@ -25,7 +25,7 @@ campaign_config:
   # geometry artefact up as a cost signal.
   scoring:
     per_sample: max(0.0, min(1.0, (mean_round_delta + 1.0) / 3.0))
-  headline_metric: ability
+  display_metric: ability
   exclude_nodes: []
   pipeline_overlay: {}
   optimization:

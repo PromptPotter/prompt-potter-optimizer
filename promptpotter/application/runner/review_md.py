@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimizers.nodes import CheckResult, ReviewReading, ReviewStats
+from promptpotter.application.optimizers.nodes import CheckResult, ReviewReading, ReviewStat
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.domain.bench import BenchReading, BenchScore
 from promptpotter.domain.phases import STOP_REASON_INFO, StopReason
@@ -66,7 +66,7 @@ def render_review_md(
     calls_per_round = [_optimizer_call_count(a) for a in audits]
     halt = _halt_info(index, rounds)
     parts: list[str] = []
-    parts += _render_header(index, final, stats, halt)
+    parts += _render_header(index, final, review.verdict if review is not None else None, halt)
     parts += _render_bench(final, bench)
     # Counted here and not read off `final`: this renders at every round close, long before
     # finalize banks a `final` block. Only the minutes need the banked clock.
@@ -120,6 +120,11 @@ def _optimizer_call_count(audit: dict[str, Any] | None) -> int:
 # --- rendering helpers ----------------------------------------------------
 
 
+def _stat(stat: ReviewStat) -> str:
+    """An unmeasured reading renders as ``—``, never as a number the cycle never produced."""
+    return "—" if stat.value is None else format(stat.value, stat.spec)
+
+
 def _halt_info(index: dict[str, Any], rounds: list[RoundResult]) -> dict[str, str] | None:
     """The cycle's terminal health story, or ``None`` when it ended cleanly. Gated on the cycle's
     TERMINAL state, never on a critical round in history that L2 then self-healed away."""
@@ -145,7 +150,7 @@ def _halt_info(index: dict[str, Any], rounds: list[RoundResult]) -> dict[str, st
             "action": (last_critical.suggested_action or "").strip(),
             "terminated": terminated,
         }
-    return {"tag": "terminate_proposal", "node": "", "action": "", "terminated": terminated}
+    return {"tag": StopReason.OPTIMIZER_ABORT, "node": "", "action": "", "terminated": terminated}
 
 
 def _stop_next_step(index: dict[str, Any]) -> str:
@@ -160,16 +165,16 @@ def _stop_next_step(index: dict[str, Any]) -> str:
 def _render_header(
     index: dict[str, Any],
     final: dict[str, Any],
-    stats: ReviewStats | None,
+    verdict: ReviewStat | None,
     halt: dict[str, str] | None,
 ) -> list[str]:
     cycle_id = index.get("cycle_id") or "(unknown cycle)"
     mode = (final.get("mode") or "full").strip() or "full"
-    conformance = "" if stats is None else f" · round-1 conformance: **{stats.round_1_verdict}**"
+    said = "" if verdict is None else f" · {verdict.name}: **{_stat(verdict)}**"
     parts: list[str] = [
         f"# Review — {cycle_id}",
         "",
-        f"_mode: **{mode}**{conformance}_",
+        f"_mode: **{mode}**{said}_",
         "",
     ]
     if halt is not None:
@@ -254,16 +259,12 @@ def _render_bench(final: dict[str, Any], bench: BenchScore | None) -> list[str]:
 def _render_stats_block(
     clocks: RoundClocks,
     round_ended_s: dict[str, float],
-    stats: ReviewStats | None,
+    stats: tuple[ReviewStat, ...] | None,
     repairs_per_round: list[int],
     calls_per_round: list[int],
     halt: dict[str, str] | None,
     optimizer_name: str,
 ) -> list[str]:
-    def _rate(value: float | None, spec: str = ".2f") -> str:
-        """An unmeasured rate renders as ``—``, never as a number the cycle never produced."""
-        return "—" if value is None else format(value, spec)
-
     def _clock(rounds: int | None) -> str:
         """A round count and the minute it landed at, joined on the round number. The rounds are
         what a peer reports; the minutes are what a reader outside this project can price, because
@@ -290,19 +291,11 @@ def _render_stats_block(
     if stats is None:
         lines.append(f"- the optimizer's own stats: N/A — `{optimizer_name}` keeps none")
     else:
-        lines += [
-            f"- yield_rate: {_rate(stats.yield_rate)}",
-            f"- top_lift_mean: {_rate(stats.top_lift_mean, '+.4f')}",
-            f"- behavior_pass_rate: {_rate(stats.behavior_pass_rate)}",
-            f"- l2_behavior_pass_rate: {_rate(stats.l2_behavior_pass_rate)}",
-            f"- stagnation_max: {stats.stagnation_max}",
-            f"- l2_fires: {stats.l2_fires}",
-        ]
-    # A terminate is an L2 fire that produces no l2-sourced round, so `l2_fires`
-    # alone reads 0 — name it explicitly so an L2 halt isn't invisible.
+        lines += [f"- {s.name}: {_stat(s)}" for s in stats]
+    # An abort closes no round of its own, so no statistic above counts it.
     if halt is not None and halt["terminated"]:
         node = f" ({halt['node']})" if halt["node"] else ""
-        lines.append(f"- l2_terminated: {halt['tag']}{node}")
+        lines.append(f"- optimizer_abort: {halt['tag']}{node}")
     repairs_total = sum(repairs_per_round)
     calls_total = sum(calls_per_round)
     if calls_total:

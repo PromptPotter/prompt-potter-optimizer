@@ -5,11 +5,11 @@ import type { DashboardSnapshot } from "@/lib/poll";
 import { fmtPct0 } from "@/lib/format";
 
 // DISPLAY only: the selector decides on its own objective (θ where it stamps one), whatever is read.
-export type HeadlineMetric = LiveDashboardState["headline_metric"];
+export type DisplayMetric = LiveDashboardState["display_metric"];
 
 // The one owner of a metric's name, prose and order — `candidates/series.ts` joins to it.
 // Order is `primaryMetric`'s tiebreak only; the elected metric wins when it is on.
-export const HEADLINE_METRICS: { id: HeadlineMetric; glyph: string; title: string }[] = [
+export const DISPLAY_METRICS: { id: DisplayMetric; glyph: string; title: string }[] = [
   {
     id: "accuracy",
     glyph: "%",
@@ -29,27 +29,27 @@ export const HEADLINE_METRICS: { id: HeadlineMetric; glyph: string; title: strin
   },
 ];
 
-export function headlineMetricLabel(m: HeadlineMetric): string {
+export function displayMetricLabel(m: DisplayMetric): string {
   return m === "ability" ? "ability θ" : m === "composite" ? "composite" : "accuracy";
 }
 
 // The elected metric first: the bars paint it at full accent, so a node label must print it too.
 export function primaryMetric(
-  metrics: ReadonlySet<HeadlineMetric>,
-  elected?: HeadlineMetric,
-): HeadlineMetric {
+  metrics: ReadonlySet<DisplayMetric>,
+  elected?: DisplayMetric,
+): DisplayMetric {
   if (elected && metrics.has(elected)) return elected;
-  return HEADLINE_METRICS.find((m) => metrics.has(m.id))?.id ?? "accuracy";
+  return DISPLAY_METRICS.find((m) => metrics.has(m.id))?.id ?? "accuracy";
 }
 
 // θ heads a node only where its optimizer stamps one (`LineageNode.stamps_theta`); elsewhere the
 // node shows the accuracy it measured, never a blank that reads as a cold ruler.
-export function nodeMetric(metric: HeadlineMetric, stampsTheta: boolean): HeadlineMetric {
+export function nodeMetric(metric: DisplayMetric, stampsTheta: boolean): DisplayMetric {
   return metric === "ability" && !stampsTheta ? "accuracy" : metric;
 }
 
-export function fmtHeadlineValue(
-  metric: HeadlineMetric,
+export function fmtDisplayValue(
+  metric: DisplayMetric,
   pct: number | null,
   theta: number | null,
 ): string {

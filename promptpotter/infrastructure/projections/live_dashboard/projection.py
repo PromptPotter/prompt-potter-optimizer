@@ -11,7 +11,7 @@ from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop, WorkspaceDi
 from promptpotter.domain.dashboard_rows import RoundSummary, RunStanding
 from promptpotter.domain.phases import CampaignPhase, DashboardState, PhaseEvent, RunPhase
 from promptpotter.domain.results import (
-    HeadlineMetric,
+    DisplayMetric,
     best_round_on_shared_cells,
     candidate_label,
     overlap_row,
@@ -123,7 +123,7 @@ class LiveDashboardProjection(Projection):
         session_id: str,
         arms_per_round: int | None,
         sp_budget_round: int,
-        headline_metric: HeadlineMetric,
+        display_metric: DisplayMetric,
         langfuse_trace_url: str | None = None,
         resume_from: LiveDashboardState | None = None,
         initial_llm_nodes: dict[str, dict[str, Any]] | None = None,
@@ -144,7 +144,7 @@ class LiveDashboardProjection(Projection):
             arms_per_round=arms_per_round,
             sp_budget_round=sp_budget_round,
             langfuse_trace_url=langfuse_trace_url,
-            headline_metric=headline_metric,
+            display_metric=display_metric,
         )
         self.short_formula_template: str | None = None
         self._buffer = RoundBuffer()
@@ -201,7 +201,7 @@ class LiveDashboardProjection(Projection):
         session_id: str,
         arms_per_round: int | None,
         sp_budget_round: int,
-        headline_metric: HeadlineMetric,
+        display_metric: DisplayMetric,
         langfuse_trace_url: str | None = None,
         resumed_from_round: int | None = None,
         seed_from_cycle_id: str | None = None,
@@ -236,7 +236,7 @@ class LiveDashboardProjection(Projection):
             session_id=session_id,
             arms_per_round=arms_per_round,
             sp_budget_round=sp_budget_round,
-            headline_metric=headline_metric,
+            display_metric=display_metric,
             langfuse_trace_url=langfuse_trace_url,
             resume_from=resume_from,
             initial_llm_nodes=initial_llm_nodes,
@@ -999,7 +999,7 @@ def fold_at(cut: Cut) -> LiveDashboardState:
         session_id="",
         arms_per_round=0,
         sp_budget_round=0,
-        headline_metric="accuracy",
+        display_metric="accuracy",
     )
     limit = None if cut.offset is None else cut.offset + 1
     for offset, record in open_with_history(cut.cycle).iter(limit):

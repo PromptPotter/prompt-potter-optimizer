@@ -1,6 +1,6 @@
 """Potter's working state between rounds: the memory its escalation layers author, the stall
-ladder's counters, and the block library mined at run init. The bench reaches it only through
-``nodes.WorkingState``; ``members.py::PotterRuntime`` mints it."""
+ladder's counters, the block library mined at run init and the axis digest. The bench reaches it
+only through ``nodes.WorkingState``; ``members.py::PotterRuntime`` mints it."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from promptpotter.application.intelligence.earned_blocks import (
     answer_space_signature,
     earned_library_for,
 )
+from promptpotter.application.intelligence.indexes.axis import AxisIndex
 from promptpotter.application.intelligence.sibling_wounds import gather_sibling_runtime_failures
 from promptpotter.application.optimizers.potter.dispatch.layout import default_l1_layout
 from promptpotter.application.optimizers.potter.escalation.state import EscalationFSM
@@ -26,6 +27,7 @@ from promptpotter.domain.wounds import rf_dedup_key
 from promptpotter.infrastructure.store.layout import root_cycle_id
 
 if TYPE_CHECKING:
+    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
@@ -52,6 +54,16 @@ class PotterState:
     # Reusable field values that earned credible lift on a run with the SAME answer-space
     # signature, mined once at run init (the walk is cross-campaign). Never the static seed set.
     earned_blocks: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    axis_index: AxisIndex | None = None
+
+    def axes(self, cycle: Cycle) -> AxisIndex | None:
+        """The axis digest over the bench's sample view, folded as far as that view has read."""
+        if cycle.sample_index is None:
+            return None
+        if self.axis_index is None:
+            self.axis_index = AxisIndex(cycle.sample_index)
+        self.axis_index.refresh()
+        return self.axis_index
 
     @classmethod
     def start(

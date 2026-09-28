@@ -343,7 +343,7 @@ def build_bundle(
         # frozen prefix however the knob is set, so the knob alone would misreport round 0.
         subset_mode=(
             "adaptive"
-            if knobs.adaptive_queue.per_round_resubset and cycle.ruler is not None
+            if knobs.adaptive_queue.per_round_resubset and cycle.difficulty.ruler is not None
             else "frozen"
         ),
         elimination_n_min=opt.elimination_n_min,
@@ -366,7 +366,7 @@ def build_bundle(
     trajectory_results = merge_known_outcomes(list(cycle.tracking.current_results), latest_results)
     # The frontier absorb is about to fit, fit here over the same merge — so the ability the
     # prompt states and the ability the round document banks are one computation.
-    ability = cycle.cumulative_ability(trajectory_results)
+    ability = cycle.difficulty.frontier(trajectory_results)
     # The round before *latest_round*, whichever path we are on: `cycle.rounds[-1]` IS
     # `latest_round` on the generate/L2/L3 path and the round before it on critique. Resolved
     # once here so "did the subset move?" cannot be right on one path and wrong on the other.
@@ -401,10 +401,10 @@ def build_bundle(
             ability=ability,
             arms=_arm_readings(latest_round),
         ),
-        axes=cycle.axes,
+        axes=state.axes(cycle),
         origin_per_sample=origin_per_sample,
         trajectory_results=trajectory_results,
-        ruler=cycle.ruler,
+        ruler=cycle.difficulty.ruler,
         # Every round that MEASURED, the one being critiqued included where there is one. Empty on
         # the paths that pass none — `l1_generate`, L2 and L3 — would blank the ALREADY TRIED panel
         # for the life of a cycle while `detect_invariants` went on rejecting a repeat off the same

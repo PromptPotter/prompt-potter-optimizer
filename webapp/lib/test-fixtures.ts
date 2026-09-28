@@ -216,7 +216,7 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
     bench_lift_per_incurred_usd: null,
     composite_fitness_formula: null,
     composite_fitness_weights: null,
-    headline_metric: "accuracy",
+    display_metric: "accuracy",
     stamps_theta: true,
     degraded_count: 0,
     error_count: 0,

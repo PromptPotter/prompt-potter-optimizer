@@ -36,8 +36,8 @@ __all__ = [
     "DegradationContext",
     "DegradationHealth",
     "DiagnosticRunRecord",
+    "DisplayMetric",
     "HardSampleOrder",
-    "HeadlineMetric",
     "LineStep",
     "OptimizerFact",
     "OverlapMember",
@@ -1112,9 +1112,9 @@ HealthCause = Literal[
     "degraded",
 ]
 
-# Which fitness number headlines the operator's surfaces. ONE owner, so `CampaignConfig` and
-# `LiveDashboardState` cannot drift into a wide `str` on one side and a closed union on the other.
-HeadlineMetric = Literal["accuracy", "composite", "ability"]
+# Which fitness number the operator's round and candidate views display first. ONE owner, so
+# `CampaignConfig` and `LiveDashboardState` cannot drift into a wide `str` and a closed union.
+DisplayMetric = Literal["accuracy", "composite", "ability"]
 
 # Which key ranks the hard-sample leaderboard: `info_gain` is the queue's own acquisition score,
 # `difficulty` the Rasch ruler δ_s alone. Same one-owner rule. Ranks what the operator READS and

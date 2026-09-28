@@ -2,7 +2,7 @@
 // The bar-chart channels, each declared once (`webapp/CLAUDE.md` § Display-data sources).
 
 import type { MeasuredUnit } from "@/lib/api/types";
-import type { HeadlineMetric } from "@/lib/derivations";
+import type { DisplayMetric } from "@/lib/derivations";
 import { fmtNum, unitCount } from "@/lib/format";
 import type { CandidateView } from "@/lib/types";
 
@@ -16,19 +16,19 @@ export type SeriesKey =
   | "cached";
 
 export interface SeriesCtx {
-  metrics: ReadonlySet<HeadlineMetric>;
+  metrics: ReadonlySet<DisplayMetric>;
   showMask: boolean;
   showCache: boolean;
   showOverlap: boolean;
   views: readonly CandidateView[];
   unit: MeasuredUnit;
-  electedMetric: HeadlineMetric;
+  electedMetric: DisplayMetric;
 }
 
 export interface SeriesSpec {
   key: SeriesKey;
-  metric?: HeadlineMetric;
-  // The JOIN to `HEADLINE_METRICS`; its presence also means "this channel has a chip".
+  metric?: DisplayMetric;
+  // The JOIN to `DISPLAY_METRICS`; its presence also means "this channel has a chip".
   // Chipless channels only.
   legend?: (ctx: SeriesCtx) => string;
   hint?: (ctx: SeriesCtx) => string;
@@ -44,12 +44,12 @@ export interface SeriesSpec {
   tip: (v: CandidateView, ctx: SeriesCtx) => string;
 }
 
-export function metricInkToken(m: HeadlineMetric, elected: HeadlineMetric): string {
+export function metricInkToken(m: DisplayMetric, elected: DisplayMetric): string {
   return m === elected ? "--series-elected" : "--series-reading";
 }
 
 const metricInk =
-  (m: HeadlineMetric) =>
+  (m: DisplayMetric) =>
   (ctx: SeriesCtx): string =>
     metricInkToken(m, ctx.electedMetric);
 

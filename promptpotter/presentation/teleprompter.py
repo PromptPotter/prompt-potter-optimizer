@@ -266,7 +266,7 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
                     # The caller's metric already graded the sample; the formula only carries its
                     # number through. Overriding `scoring` composes evaluators on top of it.
                     "scoring": self.scoring,
-                    "headline_metric": "accuracy",
+                    "display_metric": "accuracy",
                     "optimization": self.loop._optimization(),
                 }
             },

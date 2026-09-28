@@ -125,19 +125,20 @@ class AdaptiveQueue:
     def draw(self, ctx: RoundContext, pool: list[Sample]) -> Panel:
         cycle = ctx.cycle
         config = cycle.config
+        view = cycle.difficulty
         knobs = potter_knobs(cycle.optimizer).adaptive_queue
-        if not knobs.per_round_resubset or cycle.ruler is None:
+        if not knobs.per_round_resubset or view.ruler is None:
             # The campaign-start prefix: on a COLD ruler a re-picked subset is difficulty-blind, and
             # freezing concentrates measurements so the ruler warms and locks fastest.
             cells = select_round_subset(pool, [], knobs.sp_budget_round)
         else:
-            # Archive obs are dataset-scoped + abort-residue-free → cross-cycle evidence.
+            # The view's archive rows are scoped + abort-residue-free → cross-cycle evidence.
             own = build_observations(cycle.rounds)
             cells = select_round_subset(
                 pool,
-                [*cycle.archive_observations, *own],
+                [*view.observations, *own],
                 knobs.sp_budget_round,
-                ruler=cycle.ruler,
+                ruler=view.ruler,
                 # Enough already-anchored cells for the next extension to equate against: the
                 # acquisition prefers unmeasured cells, whose δ SE is widest.
                 anchor_floor=config.optimization.elimination_n_min,
@@ -155,7 +156,7 @@ class AdaptiveQueue:
                 for r in parent_results
                 if (sid := r.get("sample_id")) is not None and is_graded(r)
             }
-        order = build_round_order(parent_grades, cycle.ruler, [int(s.id) for s in cells])
+        order = build_round_order(parent_grades, view.ruler, [int(s.id) for s in cells])
         by_id = {int(s.id): s for s in cells}
         # Every cell closes a block: PoBB decides after each one.
         return nodes.Panel(cells=cells, order=[by_id[sid] for sid in order], block_size=1)
@@ -210,6 +211,7 @@ class L1Generate:
             prompt_block_catalogue=knobs.prompt_block_catalogue,
         )
         yield_stats = _fold_strict_rejections(yield_stats, proposals)
+        axes = state.axes(cycle)
         return nodes.Population(
             proposals=proposals,
             individuals=individuals,
@@ -220,7 +222,7 @@ class L1Generate:
                 # Stamped with the round rather than at save time: a re-save (a repair, a rescore)
                 # must not restamp a round with the optimizer running NOW.
                 prompt_hashes=cycle.optimizer.prompt_hashes(),
-                axis_memory_peaked=sorted(cycle.axes.peaked_axes()) if cycle.axes else [],
+                axis_memory_peaked=sorted(axes.peaked_axes()) if axes else [],
             ),
         )
 
@@ -302,12 +304,16 @@ class Escalation:
 
     def observe(self, ctx: RoundContext, round_result: RoundResult) -> Boundary:
         cycle = ctx.cycle
+        state = potter_state(ctx.state)
         knobs = potter_knobs(cycle.optimizer).escalation
+        axes = state.axes(cycle)
         axes_with_positive_yield = (
             None
-            if cycle.axes is None
-            else sum(1 for r in cycle.axes.axis_rankings() if r.effect_size > NOISE_THRESHOLD)
+            if axes is None
+            else sum(1 for r in axes.axis_rankings() if r.effect_size > NOISE_THRESHOLD)
         )
+        if axes is not None:
+            axes.record_flips_from_rounds(cycle.rounds, ctx.round_num)
         # A dropped mandatory backend placeholder is structural, not a stall — heal L2 now
         # (patience 0) instead of burning l1_patience rounds while L1 re-drops it.
         l1_mandatory_breach = any(
@@ -325,7 +331,7 @@ class Escalation:
         evidence_starved = (
             evidence_starved_node(compute_node_failure_rates(round_result.results)) is not None
         )
-        event = potter_state(ctx.state).escalation.observe_round(
+        event = state.escalation.observe_round(
             improved=round_result.improved,
             compared=round_result.electable_count > 0,
             separable=round_result.separable,

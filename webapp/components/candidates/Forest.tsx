@@ -2,11 +2,11 @@
 import { memo, useCallback, useMemo } from "react";
 import { fmtPct0 } from "@/lib/format";
 import {
-  fmtHeadlineValue,
-  headlineMetricLabel,
+  fmtDisplayValue,
+  displayMetricLabel,
   nodeKeyOf,
   nodeMetric,
-  type HeadlineMetric,
+  type DisplayMetric,
 } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 import { pressable } from "@/components/ui";
@@ -69,7 +69,7 @@ const CandidateNode = memo(function CandidateNode({
   n: RoundNodePos;
   accuracy: number | null;
   theta: number | null;
-  metric: HeadlineMetric;
+  metric: DisplayMetric;
   selected: boolean;
   onPick: (n: RoundNodePos) => void;
   dimmed: boolean;
@@ -96,14 +96,14 @@ const CandidateNode = memo(function CandidateNode({
       )}
       {...pressable(() => onPick(n))}
       aria-pressed={selected}
-      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, ${invalidated ? "unknown — a setting was changed at or above this point" : `${headlineMetricLabel(shown)} ${fmtHeadlineValue(shown, accuracy, theta)}`}${n.isElected ? ", round winner" : ""}${ink ? ", a channel of the comparison" : ""}${retiredBy ? ", retired — the run branched away and continued elsewhere" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
+      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, ${invalidated ? "unknown — a setting was changed at or above this point" : `${displayMetricLabel(shown)} ${fmtDisplayValue(shown, accuracy, theta)}`}${n.isElected ? ", round winner" : ""}${ink ? ", a channel of the comparison" : ""}${retiredBy ? ", retired — the run branched away and continued elsewhere" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
       style={{ cursor: "pointer" }}
     >
       <title>
         {n.candidateLabel} ·{" "}
         {invalidated
           ? "unknown"
-          : fmtHeadlineValue(shown, accuracy, theta)}
+          : fmtDisplayValue(shown, accuracy, theta)}
         {!invalidated && shown !== "ability" && typeof theta === "number"
           ? ` · ability θ ${theta.toFixed(2)}`
           : ""}
@@ -148,7 +148,7 @@ const CandidateNode = memo(function CandidateNode({
           className={cx("lineage-label", n.isWinner && "winner", selected && "selected")}
           style={ink ? { fill: ink } : undefined}
         >
-          {n.candidateLabel} {invalidated ? "?" : fmtHeadlineValue(shown, accuracy, theta)}
+          {n.candidateLabel} {invalidated ? "?" : fmtDisplayValue(shown, accuracy, theta)}
         </text>
       )}
       <rect
@@ -176,7 +176,7 @@ export function Forest({
   tree: LineageNode;
   valueByKey: ReadonlyMap<string, number | null>;
   thetaByKey: ReadonlyMap<string, number | null>;
-  metric: HeadlineMetric;
+  metric: DisplayMetric;
   expanded: ReadonlySet<string>;
   // Toggles the lane in place; never changes the dashboard's selected cycle.
   onLaneActivate: (courseKey: string) => void;
@@ -390,7 +390,7 @@ export function Forest({
                       className="family-cladogram-roundlabel"
                       textAnchor="middle"
                     >
-                      R{n.round} {fmtHeadlineValue(shown, valOf(n), thetaOf(n))}
+                      R{n.round} {fmtDisplayValue(shown, valOf(n), thetaOf(n))}
                     </text>
                   )}
                   {d.labels && rowLabelText && (
@@ -409,7 +409,7 @@ export function Forest({
                     </text>
                   )}
                   <title>
-                    {nodeCycleId} · R{n.round} · {fmtHeadlineValue(shown, valOf(n), thetaOf(n))}
+                    {nodeCycleId} · R{n.round} · {fmtDisplayValue(shown, valOf(n), thetaOf(n))}
                     {shown !== "ability" && typeof thetaOf(n) === "number"
                       ? ` · ability θ ${thetaOf(n)!.toFixed(2)}`
                       : ""}

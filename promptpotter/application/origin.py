@@ -97,7 +97,7 @@ async def rescore_parent(
         scoring_set,
         session,
         label=MeasurementRole.PARENT,
-        axes=cycle.axes,
+        sample_index=cycle.sample_index,
         # Ticked, not silenced. This is the LONGEST phase of a held round — the parent walks the
         # whole panel while the candidates stopped wherever PoBB cut them — so a silenced one
         # serves `between_samples` throughout, which on a `measured_unit="cell"` connector is tens
@@ -366,7 +366,7 @@ async def establish_campaign_origin(
         scoring_formula=spec.per_sample,
         scoring_cell_formula=spec.per_cell,
         scorer_id=spec.scorer_id,
-        headline_metric=campaign_config.headline_metric,
+        display_metric=campaign_config.display_metric,
         judge_specs=campaign_config.judges,
         source=RunSource.ORIGIN,
     )

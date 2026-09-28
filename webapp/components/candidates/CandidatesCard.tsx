@@ -46,12 +46,12 @@ import {
   barsAreCourses,
   candidateViews,
   forkKeysOf,
-  HEADLINE_METRICS,
-  headlineMetricLabel,
+  DISPLAY_METRICS,
+  displayMetricLabel,
   nodeKeyOf,
   pathOf,
   sortedRounds,
-  type HeadlineMetric,
+  type DisplayMetric,
 } from "@/lib/derivations";
 import { isSelectedCandidate } from "@/lib/types";
 import { encodeCyclePath } from "@/lib/ids";
@@ -107,7 +107,7 @@ export function CandidatesCard() {
     overlapSeededForCycle,
     showCache,
   } = useCandidatesState();
-  const electedMetric: HeadlineMetric = dash?.headline_metric ?? "accuracy";
+  const electedMetric: DisplayMetric = dash?.display_metric ?? "accuracy";
 
   const inflightCandidates: DashboardCandidate[] = useMemo(() => liveCandidates(dash), [dash]);
 
@@ -153,10 +153,10 @@ export function CandidatesCard() {
         )
       : null;
 
-  // Gated on `dash`, or the seed runs before `headline_metric` arrives.
+  // Gated on `dash`, or the seed runs before `display_metric` arrives.
   if (cycleId && dash && metricsSeededForCycle !== cycleId) {
     setCandidatesState({
-      metrics: new Set<HeadlineMetric>(["accuracy", electedMetric]),
+      metrics: new Set<DisplayMetric>(["accuracy", electedMetric]),
       metricsSeededForCycle: cycleId,
     });
   }
@@ -408,7 +408,7 @@ export function CandidatesCard() {
           <ToolbarSep />
           {/* Display only — the selector elects on its own objective whatever is lit here. */}
           <ChipGroup label="Bars" joined>
-            {HEADLINE_METRICS.map((m) => {
+            {DISPLAY_METRICS.map((m) => {
               // Rows carry θ only where the selector fits it; a lit chip would draw no bar.
               const unfit = m.id === "ability" && !dash?.stamps_theta;
               return (
@@ -418,7 +418,7 @@ export function CandidatesCard() {
                   on={metrics.has(m.id) && !unfit}
                   disabled={unfit}
                   ink={`var(${metricInkToken(m.id, electedMetric)})`}
-                  ariaLabel={headlineMetricLabel(m.id)}
+                  ariaLabel={displayMetricLabel(m.id)}
                   title={unfit ? "This optimizer does not elect on θ, so no candidate carries one" : m.title}
                   onClick={() => toggleMetric(m.id)}
                 >

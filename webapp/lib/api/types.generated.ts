@@ -653,7 +653,7 @@ export interface LiveDashboardState {
   bench_lift_per_incurred_usd: number | null;
   composite_fitness_formula: string | null;
   composite_fitness_weights: Record<string, number> | null;
-  headline_metric: 'accuracy' | 'composite' | 'ability';
+  display_metric: 'accuracy' | 'composite' | 'ability';
   stamps_theta: boolean;
   degraded_count: number;
   error_count: number;

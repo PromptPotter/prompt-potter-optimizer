@@ -231,7 +231,7 @@ async def resume_with_divergence_check(
             div = optimizer_mismatches.get(t.round) or replay_decisions(
                 t,
                 ledger_decisions.get(t.round),
-                ruler=cycle.ruler,
+                ruler=cycle.difficulty.ruler,
             )
             if div is not None:
                 return _branch_or_halt(div, list(prior[:i]), self_inflicted=False)

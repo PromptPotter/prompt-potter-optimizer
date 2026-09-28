@@ -46,7 +46,7 @@ from promptpotter.shared.errors import (
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.intelligence.indexes.axis import AxisIndex
+    from promptpotter.application.intelligence.indexes.sample import SampleIndex
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 logger = logging.getLogger(__name__)
@@ -749,10 +749,10 @@ async def execute_stale_data_protocol(
     session: Session,
     *,
     pipeline_params: dict[str, Any] | None = None,
-    axes: AxisIndex | None = None,
+    sample_index: SampleIndex | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Walk the stale-data ladder for a degraded cached query, returning ``(result, step_taken)``.
-    Observation counts come from ``axes.sample_index``, constant within a round — no mutable state."""
+    Observation counts come from ``sample_index``, constant within a round — no mutable state."""
     result = cached_result
 
     for step in protocol_steps:
@@ -760,7 +760,7 @@ async def execute_stale_data_protocol(
             declare_run_phase(session, RunPhase.PAUSED)
             return {**result, "cached": result.get("cached", False)}, "paused"
         if step == "rerun":
-            historical = axes.sample_index.degradation_count(sample.id) if axes else 0
+            historical = sample_index.degradation_count(sample.id) if sample_index else 0
             effective_count = historical + 1
             if effective_count < RERUN_TRIGGER_COUNT:
                 return {
@@ -789,9 +789,8 @@ async def execute_stale_data_protocol(
 
         elif step == "sampleswitch":
             if (
-                axes
-                and axes.sample_index.degradation_rate(sample.id)
-                >= SAMPLESWITCH_MIN_DEGRADATION_RATE
+                sample_index
+                and sample_index.degradation_rate(sample.id) >= SAMPLESWITCH_MIN_DEGRADATION_RATE
             ):
                 result = {**cached_result, "cached": True, "switched_out": True}
                 return result, "sampleswitch"

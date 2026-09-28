@@ -1057,7 +1057,7 @@ def test_delta_ruler_stays_flat_until_a_second_arm_exists() -> None:
     # It cost two campaigns: rounds carrying +14.3pp at p<0.05 were stamped `improved=False`.
     # The warm attempt now also runs BEFORE the round's election (`warm_ruler_if_cold`), which
     # relaxes the TIMING only — this is what pins the rule itself as untouched.
-    from promptpotter.application.bench.cycle import _calibrate_delta_ruler
+    from promptpotter.application.bench.difficulty import _calibrate_delta_ruler
     from promptpotter.application.intelligence.exploration import Observation
 
     n_min = 4
@@ -1111,7 +1111,7 @@ def test_an_instrument_reads_on_the_scale_its_spawner_fixed(tmp_path: Path) -> N
     import contextvars
     import types
 
-    from promptpotter.application.bench.cycle import _given_ruler
+    from promptpotter.application.bench.difficulty import _given_ruler
     from promptpotter.shared.instrument import enter_instrument_mode
 
     given = _ruler({1: 0.5, 2: -0.25, 3: 0.0})
@@ -1155,25 +1155,24 @@ def test_an_arm_that_beats_a_far_off_ruler_is_fit_not_oscillated_past() -> None:
     assert parent_se < 1.0 and better_se < 1.0, (parent_se, better_se)
 
 
-def test_best_theta_is_re_read_on_the_warm_ruler_it_will_be_differenced_against() -> None:
-    # SILENT, and it ends runs. `_restamp_on_warm` re-reads every banked θ onto the freshly locked
-    # δ scale — but `tracking.best_theta` is one of those θ and was left on the cold one, where θ is
-    # regularized logit-accuracy rather than a level centred on `mu_delta`. The ladder then
-    # differences a WARM current reading against a COLD peak (`escalation/state.py::_improved`, and
-    # the entry comparator `record_l2_fired` stamps): on an easy set the cold value is the larger,
-    # so it pins for the rest of the run and every round after reports "no advance" — feeding
-    # `l2_stall_count`, `l3_stall_count` and `STOP_L3_PATIENCE`, which terminates the cycle.
-    # Nothing raises; the numbers all render.
+def test_the_stall_ladders_peak_is_read_on_the_scale_it_is_differenced_on() -> None:
+    # SILENT, and it ends runs. The ladder differences the cycle's best θ against the one a layer
+    # entered on (`escalation/state.py::_improved`, and the entry comparator `record_l2_fired`
+    # stamps). A round file written before the ruler warmed carries a θ on the COLD scale, where θ
+    # is regularized logit-accuracy rather than a level centred on `mu_delta`: on an easy set that
+    # value is the larger, so a peak taking it as-is pins for the rest of the run and every round
+    # after reports "no advance" — feeding `l2_stall_count`, `l3_stall_count` and
+    # `STOP_L3_PATIENCE`, which terminates the cycle. Nothing raises; the numbers all render.
     from types import SimpleNamespace
 
-    from promptpotter.application.bench.cycle import (
-        Cycle,
-        CycleRoundState,
+    from promptpotter.application.bench.cycle import Cycle
+    from promptpotter.application.bench.difficulty import (
+        DifficultyView,
         _calibrate_delta_ruler,
         _cumulative_theta,
-        _reading,
     )
     from promptpotter.application.intelligence.exploration import Observation
+    from promptpotter.application.optimizers.potter.escalation.firing import _high_water
 
     def rows(hit: set[int]) -> list[dict[str, Any]]:
         return [
@@ -1195,32 +1194,31 @@ def test_best_theta_is_re_read_on_the_warm_ruler_it_will_be_differenced_against(
     )
     assert ruler is not None and ruler.mu_delta < 0
 
-    cold = _reading(
-        _cumulative_theta(origin_rows, None), None, objective_id="obj", results=origin_rows
-    )
+    session: Any = SimpleNamespace(scoring=SimpleNamespace(scorer_id="obj"))
+    cold = DifficultyView(session=session, n_min=4, enable_2pl=False).frontier(origin_rows)
     assert cold is not None
 
     cycle = Cycle.__new__(Cycle)
-    cycle.session = SimpleNamespace(scoring=SimpleNamespace(scorer_id="obj"))  # type: ignore[assignment]
-    cycle.ruler = ruler
+    cycle.session = session
+    cycle.difficulty = DifficultyView(session=session, n_min=4, enable_2pl=False, ruler=ruler)
+    # What a resume reads back: two rounds written while the ruler was still cold.
     cycle.rounds = [
         round_result(0, results=origin_rows, ability=cold),
         round_result(1, results=round1_rows, ability=cold),
     ]
-    # What a live cold cycle banked: the peak taken on the flat ruler.
-    cycle.tracking = CycleRoundState(best_theta=cold.theta, best_theta_se=cold.se)
+    resumed = _high_water(cycle)
 
-    cycle._restamp_on_warm(_cumulative_theta(origin_rows, ruler))
-
+    # What a live cycle holds once the warm fit re-read every banked θ.
+    cycle.difficulty._restamp(cycle.rounds, _cumulative_theta(origin_rows, ruler))
     warm_thetas = [rr.ability.theta for rr in cycle.rounds if rr.ability is not None]
     assert len(warm_thetas) == 2
-    assert cycle.tracking.best_theta == pytest.approx(max(warm_thetas))
-    # The peak is the ROUNDS' max, never the stale cold seed carried through as a floor.
-    assert cycle.tracking.best_theta < cold.theta
-    # And it names the scale it will be differenced on, so `comparable_to` can refuse a cross-scale
-    # read rather than silently making one.
     assert cycle.origin_round.ability is not None
     assert cycle.origin_round.ability.ruler_id == ruler.anchor_id
+
+    for peak in (resumed, _high_water(cycle)):
+        assert peak.theta == pytest.approx(max(warm_thetas))
+        # The ROUNDS' max on the warm scale, never a cold stamp carried through as a floor.
+        assert peak.theta is not None and peak.theta < cold.theta
 
 
 # 4. Electing a round winner
@@ -3367,7 +3365,7 @@ def test_parents_lift_reads_a_crossover_against_its_better_parent_on_its_own_cel
         config=config,
         rounds=[],
         framing=TaskDecomposition(),
-        axes=None,
+        sample_index=None,
         session=types.SimpleNamespace(
             pipeline_schema=_single_node_schema(),
             scoring=types.SimpleNamespace(require_partition=lambda: partition),
@@ -4629,7 +4627,7 @@ def test_cached_calls_are_metered_but_not_billed(tmp_path: Path) -> None:
         session_id="s1",
         arms_per_round=2,
         sp_budget_round=5,
-        headline_metric="accuracy",
+        display_metric="accuracy",
     )
 
     def usage(*, cached: bool) -> TokenUsageRecord:

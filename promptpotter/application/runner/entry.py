@@ -386,7 +386,7 @@ def _build_cycle_result(
     # ``origin_accuracy`` / ``origin_level``. Counting it as a search result would credit the
     # outer loop with the floor it started from.
     cycle_rounds = [rr for rr in cycle.rounds if rr.round > 0] if cycle is not None else []
-    ds = cycle.ruler if cycle is not None else None
+    ds = cycle.difficulty.ruler if cycle is not None else None
     origin_lv: tuple[float, float] | None = None
     levels: list[tuple[float, float]] = []
     if cycle is not None:
@@ -532,7 +532,7 @@ class _CycleOutcome:
     so the driver keeps this live reference rather than the one it passed in."""
 
     cycle_result: CycleResult
-    cycle: Cycle | None
+    fork: RebaseRequest | None
     observers: RunObservers
 
 
@@ -558,6 +558,7 @@ async def _run_single_cycle(
     budget_gate: BudgetGate | None = None
     banked: BenchPasses | None = None
     unheld: BenchScore | None = None
+    fork: RebaseRequest | None = None
     try:
         cycle = await init_optimization_loop(
             origin,
@@ -623,7 +624,7 @@ async def _run_single_cycle(
                     graded(cb, session, banked.origin)
         elif not session.scoring.require_partition().bench:
             unheld = nothing_held_out(cb, scorer_id=session.scoring.scorer_id)
-        stop_reason, cycle_error = await run_round_loop(
+        stop_reason, cycle_error, fork = await run_round_loop(
             cycle,
             dataset,
             campaign_config,
@@ -722,7 +723,7 @@ async def _run_single_cycle(
         # The caught instance, not a fresh class — it carries the reason its raise site named.
         raise cancel_exc
 
-    return _CycleOutcome(cycle_result=cycle_result, cycle=cycle, observers=observers)
+    return _CycleOutcome(cycle_result=cycle_result, fork=fork, observers=observers)
 
 
 def _mint_and_rebase_fork(
@@ -860,7 +861,7 @@ async def run_optimization(
         observers = outcome.observers  # may have been rebuilt by fork-on-divergence
         cycle_result = outcome.cycle_result
 
-        rebase_req = outcome.cycle.rebase_request if outcome.cycle is not None else None
+        rebase_req = outcome.fork
         if (
             cycle_result.stop_reason != StopReason.REBASED
             or rebase_req is None

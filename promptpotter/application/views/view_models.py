@@ -9,8 +9,8 @@ from typing import Any
 from promptpotter.domain.dashboard_rows import RunStanding
 from promptpotter.domain.results import (
     ArmOutcome,
+    DisplayMetric,
     HardSampleOrder,
-    HeadlineMetric,
     OptimizerFact,
     OverlapReading,
 )
@@ -57,7 +57,7 @@ class ViewContext:
     parent_composite_fitness: float | None = None
     composite_fitness_formula: str | None = None
     composite_fitness_formula_short: str | None = None
-    headline_metric: HeadlineMetric = "accuracy"
+    display_metric: DisplayMetric = "accuracy"
     original_sp_flat: dict[str, str] = field(default_factory=dict)
     current_sp_flat: dict[str, str] = field(default_factory=dict)
     node_param_keys: dict[str, list[str]] | None = None
@@ -70,7 +70,7 @@ class ViewContext:
             "parent_composite_fitness": self.parent_composite_fitness,
             "composite_fitness_formula": self.composite_fitness_formula,
             "composite_fitness_formula_short": self.composite_fitness_formula_short,
-            "headline_metric": self.headline_metric,
+            "display_metric": self.display_metric,
         }
 
 
@@ -244,9 +244,9 @@ class RoundCompleteView:
     # read as lift the arm never earned. No default: a ``0.0`` here would render as a real rate.
     reference_accuracy: float | None
     reference_composite: float | None = None
-    # WHICH number headlines the verdict line. Carried rather than read from config at render
+    # WHICH number leads the verdict line. Carried rather than read from config at render
     # time: a knob resolved in the renderer is one the disk round-trip cannot reproduce.
-    headline_metric: HeadlineMetric = "accuracy"
+    display_metric: DisplayMetric = "accuracy"
     # ``RoundResult.ability``'s θ. ``None`` while the ruler is cold, where the headline falls back
     # to accuracy — a cold θ is logit-accuracy on the arm's own subset, so headlining it dresses a
     # subset-relative number as the difficulty-adjusted one.

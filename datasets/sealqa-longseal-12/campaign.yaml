@@ -2,10 +2,10 @@ campaign_config:
   dataset_name: sealqa-longseal-12
   exclude_nodes: []
   # θ decides every round, and `per_round_resubset` is ON, so accuracy is subset-relative while the
-  # gate is not. Headline the number the gate actually used rather than the one that moves when the
-  # subset does — preflight raises `headline_subset_relative_under_resubset` for as long as this
+  # gate is not. Lead with the number the gate actually used rather than the one that moves when the
+  # subset does — preflight raises `display_subset_relative_under_resubset` for as long as this
   # reads `accuracy`. DISPLAY scope: it changes what the operator READS, never what is decided.
-  headline_metric: ability
+  display_metric: ability
   scoring:
     # The ANSWER step alone decides the round — the screen the two evidence rubrics were declared
     # for has run and is written up beside `judges` below.

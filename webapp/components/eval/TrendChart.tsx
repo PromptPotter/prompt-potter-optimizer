@@ -30,7 +30,7 @@ export const TrendChart = memo(function TrendChart({ compact = false }: { compac
   const degraded = degradedRoundNotices(dash);
 
   // θ's ink comes from the one declaration the candidates card reads.
-  const elected = dash?.headline_metric ?? "accuracy";
+  const elected = dash?.display_metric ?? "accuracy";
   // θ is an unbounded, signed LOGIT, so it gets its own visible axis — on 0..1 every negative
   // clips to the floor. A changed dataset id re-raises a line, so the live round line pulses.
   const data = {

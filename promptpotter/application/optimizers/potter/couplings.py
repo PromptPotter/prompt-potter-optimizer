@@ -22,7 +22,7 @@ ADAPTIVE_QUEUE = (
             "per_round_resubset=ON re-picks the scored subset per candidate. Every "
             "cross-round comparator reads ONE anchored δ ruler in θ — the stall replayer, "
             "c0_ok, the round-winner election and PoBB elimination all via "
-            "fit_theta_given_delta on cycle.ruler — and that ruler is EXTENDED to cover each "
+            "fit_theta_given_delta on cycle.difficulty — and that ruler is EXTENDED to cover each "
             "round's new cells, so the accuracy-space collision is resolved."
         ),
         consequence=(
@@ -41,25 +41,25 @@ ADAPTIVE_QUEUE = (
         predicate=lambda c, k, d: bool(k.per_round_resubset),
     ),
     MemberCoupling(
-        name="headline_subset_relative_under_resubset",
+        name="display_subset_relative_under_resubset",
         knobs=("per_round_resubset",),
-        bench_knobs=("headline_metric",),
+        bench_knobs=("display_metric",),
         estimand=Estimand.DISPLAY,
         relation=(
             "With per_round_resubset ON, accuracy/composite are subset-relative while "
-            "the gate is θ; the headline number the operator reads should be ability "
+            "the gate is θ; the number the operator reads first should be ability "
             "(θ) or carry the subset badge."
         ),
         consequence=(
-            "The headline reads accuracy/composite while θ decides the winner. Every "
+            "The views lead with accuracy/composite while θ decides the winner. Every "
             "surface now prints θ beside it, so the pairing is legible rather than "
-            "unexplained — but the headline is still the subset-relative one. Set "
-            "headline_metric='ability' under resubset."
+            "unexplained — but the number read first is still the subset-relative one. Set "
+            "display_metric='ability' under resubset."
         ),
         # `inert`, not `info`: nothing co-moves — one knob's display choice wastes the other's
         # invariance, which is exactly what inert names.
         severity="inert",
-        predicate=lambda c, k, d: bool(k.per_round_resubset) and c.headline_metric != "ability",
+        predicate=lambda c, k, d: bool(k.per_round_resubset) and c.display_metric != "ability",
     ),
 )
 

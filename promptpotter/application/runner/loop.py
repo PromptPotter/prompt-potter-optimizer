@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import traceback
+from typing import NamedTuple
 
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.campaign_config import CampaignConfig
@@ -18,7 +19,6 @@ from promptpotter.application.runner.origin_gate import run_origin_gate
 from promptpotter.application.runner.round import (
     emit_origin_round,
     execute_round,
-    persist_round,
     post_round,
     round_plan,
 )
@@ -31,9 +31,10 @@ from promptpotter.application.runner.termination import (
 )
 from promptpotter.domain.phases import (
     RunPhase,
+    StopLoop,
     StopReason,
 )
-from promptpotter.domain.run_records import ErrorRecord, PhaseRecord
+from promptpotter.domain.run_records import ErrorRecord, PhaseRecord, RebaseRequest
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.llm.telemetry import emit_error_record
 from promptpotter.infrastructure.runtime_flags import read_run_limits_mirror
@@ -45,6 +46,15 @@ logger = logging.getLogger(__name__)
 # Runaway-loop guard for a run neither a round cap nor its controller stops, counted in ARMS raced
 # rather than rounds: a one-child optimizer gets as many proposals as a five-arm one.
 HARD_CAP_ARMS: int = 500
+
+
+class LoopEnd(NamedTuple):
+    """How the round loop ended: the stop, the error a crash left (so the caller need not re-read
+    the ledger), and the fork a rebase asks for."""
+
+    stop_reason: StopReason
+    error: ErrorRecord | None = None
+    fork: RebaseRequest | None = None
 
 
 def set_round_cap(config: CampaignConfig, max_rounds: int | None) -> CampaignConfig:
@@ -73,10 +83,9 @@ async def run_round_loop(
     halt_at_accuracy: float | None = None,
     stop_after_rounds: int | None = None,
     budget_gate: BudgetGate,
-) -> tuple[StopReason, ErrorRecord | None]:
+) -> LoopEnd:
     """The round loop. The budget gate and the round cap are re-read every clean round, so
-    ``change-run-limits`` moves either mid-flight. Returns ``(stop_reason, error)`` — ``error`` is
-    set so the caller need not re-read the ledger."""
+    ``change-run-limits`` moves either mid-flight."""
     opt = config.optimization
     # resumed_from_round = next L1 round (fresh=1); clean_rounds = lifetime L1 completed (origin not counted).
     round_num = session.state.resumed_from_round
@@ -97,7 +106,7 @@ async def run_round_loop(
                     cycle, dataset, config, session, cb, opt.origin_gate
                 )
                 if gate_stop is not None:
-                    return gate_stop, None
+                    return LoopEnd(gate_stop)
 
         while True:
             # Set on the config every reader holds (the optimizer's "round N of M", the result's
@@ -106,10 +115,10 @@ async def run_round_loop(
             if cap != config.optimization.max_rounds:
                 config = cycle.config = set_round_cap(config, cap)
             if cap is not None and clean_rounds >= cap:
-                return StopReason.MAX_ROUNDS, None
+                return LoopEnd(StopReason.MAX_ROUNDS)
             # Off the rounds on record, so a resume counts the arms its priors raced.
             if sum(len(rr.candidate_scores) for rr in cycle.rounds) >= HARD_CAP_ARMS:
-                return StopReason.HARD_CAP, None
+                return LoopEnd(StopReason.HARD_CAP)
             # Pause cooperation: exit cleanly at the round boundary when the
             # operator set the pause flag. The scoring phase (run_walks)
             # checks the same predicate, so a mid-round pause lands once the
@@ -118,7 +127,7 @@ async def run_round_loop(
             # resumable — `_finalize_run` skips terminal marking on PAUSED.
             if pause_requested(session):
                 declare_run_phase(session, RunPhase.PAUSED)
-                return StopReason.PAUSED, None
+                return LoopEnd(StopReason.PAUSED)
 
             # `step-cycle` boundary: once this invocation has advanced its allotted
             # rounds, auto-pause through the same resumable stop as an operator pause.
@@ -127,7 +136,7 @@ async def run_round_loop(
                 and clean_rounds - clean_rounds_at_start >= stop_after_rounds
             ):
                 declare_run_phase(session, RunPhase.PAUSED)
-                return StopReason.PAUSED, None
+                return LoopEnd(StopReason.PAUSED)
 
             logger.debug(
                 "Round %d (clean=%d/%s, acc=%s)",
@@ -151,26 +160,10 @@ async def run_round_loop(
             # can only be known after the round is scored, so `execute_round` asks it there.
             is_final_round = cap is not None and clean_rounds + 1 >= cap
 
-            # Sampled BEFORE the round is scored, because the warm now happens inside scoring
-            # (`calibrate_ruler`, ahead of the election that needs it). Read after
-            # `execute_round` this is already False on the round that warmed, and round 0 keeps
-            # its cold θ on disk forever — the exact silence the re-persist below exists to break.
-            ruler_was_cold = cycle.ruler is None
             round_result = await execute_round(
                 cycle, round_num, dataset, cb, is_final_round=is_final_round
             )
-            # A cold ruler warms during the round, and the warm fit gives round 0 the θ it could
-            # not have had at its own close. Round 0's document was written back then, so without
-            # this the origin's ability lives only in memory: the file and the ledger keep the
-            # cold value, and every non-live reader shows a θ-less C0 beside candidates that
-            # have one.
             cycle.absorb_round(round_result)
-            if ruler_was_cold and cycle.ruler is not None:
-                persist_round(cycle, cycle.origin_round, session, cb)
-
-            if cycle.axes and len(cycle.rounds) >= 2:
-                cycle.axes.record_flips_from_rounds(cycle.rounds, round_num)
-
             await post_round(
                 cycle,
                 round_result,
@@ -185,10 +178,10 @@ async def run_round_loop(
 
             target_stop = target_tripped(cycle, halt_at_accuracy)
             if target_stop is not None:
-                return target_stop, None
+                return LoopEnd(target_stop)
             budget_stop = budget_gate.tripped()
             if budget_stop is not None:
-                return budget_stop, None
+                return LoopEnd(budget_stop)
 
             if diag and clean_rounds >= 1:
                 # The controller acts on round 1's evidence and shows round 2's proposals.
@@ -197,10 +190,12 @@ async def run_round_loop(
                     await controller.diagnose(
                         RoundContext(cycle=cycle, round_num=round_num - 1, callbacks=cb)
                     )
-                return StopReason.DIAG_COMPLETE, None
+                return LoopEnd(StopReason.DIAG_COMPLETE)
 
     except RUN_STOPS as stop:
-        return run_stop_reason(stop), None
+        return LoopEnd(
+            run_stop_reason(stop), fork=stop.fork if isinstance(stop, StopLoop) else None
+        )
     except KeyboardInterrupt as exc:
         # The PAUSE FLAG's stop (`scoring/search_point_scorer.py`), not the terminal's — a
         # Ctrl+C arrives as ``CancelledError`` and lands in `runner/entry.py`. Which is also why
@@ -208,7 +203,7 @@ async def run_round_loop(
         logger.warning(
             "Optimization paused at round %d (%s).", round_num, str(exc) or "user-initiated"
         )
-        return StopReason.PAUSED, None
+        return LoopEnd(StopReason.PAUSED)
     except PromptCompositionError as exc:
         # Distinct from CRASHED — the composition is at fault, not the search — and a HALT: a node
         # handed no subject still answers, confidently, and every instrument downstream reads green.
@@ -221,8 +216,9 @@ async def run_round_loop(
             "Fix the composition and resume.",
             round_num,
         )
-        return StopReason.RENDER_ERROR, emit_error_record(
-            kind=kind, message=message, stop_reason="RENDER_ERROR", traceback=tb
+        return LoopEnd(
+            StopReason.RENDER_ERROR,
+            emit_error_record(kind=kind, message=message, stop_reason="RENDER_ERROR", traceback=tb),
         )
     except TimeoutError:
         # Optimizer LLM blew deadline twice (provider stalled mid-stream); plain ``resume`` re-fires.
@@ -231,7 +227,7 @@ async def run_round_loop(
             "its deadline twice. Resume to retry.",
             round_num,
         )
-        return StopReason.OPTIMIZER_TIMEOUT, None
+        return LoopEnd(StopReason.OPTIMIZER_TIMEOUT)
     except Exception as exc:
         # Escalation flows via return value, not exception; stash traceback for ``_finalize_run`` (sys.exc_info dead by then).
         tb = traceback.format_exc()
@@ -239,9 +235,10 @@ async def run_round_loop(
         message = str(exc) or type(exc).__name__
         kind = type(exc).__name__
         logger.exception("Optimization crashed at round %d.", round_num)
-        return StopReason.CRASHED, emit_error_record(
-            kind=kind, message=message, stop_reason="CRASHED", traceback=tb
+        return LoopEnd(
+            StopReason.CRASHED,
+            emit_error_record(kind=kind, message=message, stop_reason="CRASHED", traceback=tb),
         )
 
 
-__all__ = ["HARD_CAP_ARMS", "run_round_loop", "set_round_cap"]
+__all__ = ["HARD_CAP_ARMS", "LoopEnd", "run_round_loop", "set_round_cap"]

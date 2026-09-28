@@ -21,7 +21,7 @@
   /* Teal, outside the accent and status registers: it rides the accuracy axis beside bars measured
      on a DIFFERENT basis, so it must read as its own reading. */
   --color-overlap:#2dd4bf;
-  /* Ink by ROLE: `components/candidates/series.ts` resolves it off the served `headline_metric`, and
+  /* Ink by ROLE: `components/candidates/series.ts` resolves it off the served `display_metric`, and
      legend and canvas read one name. Three steps is the ceiling — a fourth alpha is lost on ~6px bars. */
   --series-elected:var(--color-accent);
   --series-reading:rgba(var(--color-accent-rgb),0.45);

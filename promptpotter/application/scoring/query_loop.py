@@ -49,7 +49,7 @@ from promptpotter.shared.errors import (
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.intelligence.indexes.axis import AxisIndex
+    from promptpotter.application.intelligence.indexes.sample import SampleIndex
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.infrastructure.store.measurement_archive import CellClaim
@@ -247,7 +247,7 @@ class QueryLoopState:
     run_id: str
     cached_sample_results: dict[int, QueryMeasurement]
     on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None
-    axes: AxisIndex | None
+    sample_index: SampleIndex | None
     scorer: CellScorer  # narrowed from session.scoring.scorer (asserted non-None on construction)
     # The cached entry itself, so display can show the original DEPR row before the retry row.
     deprecated_samples: dict[int, QueryMeasurement]
@@ -304,7 +304,7 @@ async def _maybe_recover_degraded(
         cast(dict[str, Any], result),
         ctx.session,
         pipeline_params=ctx.search_point.pipeline_params,
-        axes=ctx.axes,
+        sample_index=ctx.sample_index,
     )
     return cast(QueryMeasurement, recovered)
 

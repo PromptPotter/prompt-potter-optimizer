@@ -175,7 +175,7 @@ against a parent that also wins those rows it carries no information.
 **The promotion gate and the PoBB posterior can disagree — they are asking different questions.**
 `p_better` is a **stopping** posterior (is more measurement worth buying?); `improved` is a
 **promotion effect-size** gate (is the lift big enough to adopt?). Both read θ on the locked δ
-ruler — `headline_metric` is DISPLAY config, never what the gate compares. They can legitimately
+ruler — `display_metric` is DISPLAY config, never what the gate compares. They can legitimately
 disagree without either being broken. Read both, name both.
 
 **A number can be set by where you STOPPED — ask what CHOSE the rows.** `reference_*` strata
@@ -196,7 +196,7 @@ it.** A held round whose `p_better` sits far off 0.5 is a promotion the gate ref
 candidate that failed. Report it as an instrument disagreement, and name both numbers.
 
 Do **not** answer this by retuning PoBB's `epsilon`, and do **not** route promotion through
-`headline_metric` — that knob is display-only on purpose, and the gate is already θ. A held round
+`display_metric` — that knob is display-only on purpose, and the gate is already θ. A held round
 now means exactly one thing: no candidate's ability exceeded the parent's. If that still looks
 wrong after reading both numbers, ask what the round measured, not which estimator the gate uses.
 

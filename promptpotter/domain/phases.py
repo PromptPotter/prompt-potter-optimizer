@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import enum
 from collections.abc import Callable
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ErrorCategory
+
+if TYPE_CHECKING:
+    from promptpotter.domain.run_records import RebaseRequest
 
 __all__ = [
     "REFUSAL_STOPS",
@@ -313,10 +316,19 @@ REFUSAL_STOPS: dict[ErrorCategory, StopReason] = {
 class StopLoop(Exception):  # noqa: N818 — control-flow signal, not an error
     """Control-flow signal caught once at the top of the round loop."""
 
-    def __init__(self, reason: StopReason, *, unmeasured: int | None = None) -> None:
+    def __init__(
+        self,
+        reason: StopReason,
+        *,
+        unmeasured: int | None = None,
+        fork: RebaseRequest | None = None,
+    ) -> None:
+        if (reason is StopReason.REBASED) != (fork is not None):
+            raise ValueError("a REBASED stop, and only one, carries the fork it asks for")
         self.reason = reason
         # Cells of the walk this stop left unmeasured, where the raiser is a walk.
         self.unmeasured = unmeasured
+        self.fork = fork
         super().__init__(reason.value)
 
 

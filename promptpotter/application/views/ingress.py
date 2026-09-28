@@ -92,7 +92,7 @@ def _init_exit(d: dict[str, Any], ctx: ViewContext) -> InitExitView:
     full, short = resolve_cell_formula(session.scoring.scorer_cell_formula, schema)
     ctx.composite_fitness_formula = full
     ctx.composite_fitness_formula_short = short
-    ctx.headline_metric = session.scoring.headline_metric
+    ctx.display_metric = session.scoring.display_metric
 
     for field_name, value in cycle.opt_sp.prompt_field_dict().items():
         if value:
@@ -258,7 +258,7 @@ def _select_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
         composite_fitness_formula_short=ctx.composite_fitness_formula_short,
         reference_accuracy=reference_acc,
         reference_composite=reference_composite,
-        headline_metric=ctx.headline_metric,
+        display_metric=ctx.display_metric,
         ability_theta=ability_theta,
     )
 
