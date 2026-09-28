@@ -251,6 +251,12 @@ class OptimizerRuntime(Protocol):
         picture marks movable, where the manifest's ``param_keys`` declare none."""
         ...
 
+    @property
+    def priced_surface(self) -> Mapping[str, int]:
+        """``{row: count}`` of its own declared surface no manifest shows — a panel registry, a
+        rule set — which ``complexity_ledger`` sums across every runtime."""
+        ...
+
     def start(
         self, session: Session, config: CampaignConfig, origin_results: list[dict[str, Any]]
     ) -> WorkingState: ...
@@ -435,6 +441,8 @@ class RaceSnapshot:
     current_id: str
     n_samples: int
     paired_breakdown: dict[str, dict[str, float]]
+    # Whether `n_samples` reached the depth this race lets a standing decide at.
+    decision_grade: bool
 
 
 class Race(CatchUps, Protocol):

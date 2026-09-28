@@ -21,7 +21,6 @@ from promptpotter.domain.spend import TokenAccount
 from promptpotter.domain.validators import StopSignal
 from promptpotter.domain.wounds import NurseOwner, RuntimeFailure, ValidationFailure
 from promptpotter.shared.errors import ErrorCategory
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 __all__ = [
     "INVALID_SCORES",
@@ -195,7 +194,6 @@ INVALID_SCORES: dict[str, Any] = {
 }
 
 
-@shapes_optimizer_prompt
 def fatal_validation_failures(failures: Sequence[ValidationFailure]) -> list[ValidationFailure]:
     """The failures that cost a candidate its measurement, as opposed to riding along as signal.
 

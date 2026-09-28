@@ -3,6 +3,7 @@ runtime, registered under the manifest's."""
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import random
 from collections.abc import Callable, Mapping, Sequence
@@ -17,7 +18,7 @@ from promptpotter.application.bench.resume_and_fork.decisions import (
 )
 from promptpotter.application.campaign_config import Estimand, Knob, Scope
 from promptpotter.application.optimizers import nodes, paper_templates
-from promptpotter.application.optimizers.capo.operators import initial_population
+from promptpotter.application.optimizers.capo import operators
 from promptpotter.application.optimizers.capo.state import (
     CapoState,
     capo_round_state,
@@ -25,9 +26,7 @@ from promptpotter.application.optimizers.capo.state import (
 )
 from promptpotter.application.optimizers.paper_templates import (
     ask,
-    fill,
     marked,
-    task_description,
     unmarked,
     walk_rng,
 )
@@ -344,7 +343,7 @@ class PairedTRace(nodes.NoCatchUps):
                 pid: {"p_better": p, "n_paired": float(width)} for pid, (p, width) in tested.items()
             }
             p_best = min(p for p, _ in tested.values())
-            snapshot = nodes.RaceSnapshot(p_best, cid, len(arm_rows), breakdown)
+            snapshot = nodes.RaceSnapshot(p_best, cid, len(arm_rows), breakdown, True)
             self._on_snapshot(self.node, self._round_num, i, self._n_arms, snapshot)
             # Uncorrected for the multiple tests, as CAPO races: a correction makes cuts rarer.
             beaten_by = sorted(pid for pid, (p, _) in tested.items() if p < self._alpha)
@@ -453,6 +452,38 @@ class PairedT:
         )
 
 
+INIT_NODE = "capo_init"
+"""The llm node generating the initial instructions. It runs once, when the first crossover finds
+the population empty, so the manifest declares it in a one-step pipeline of its own."""
+
+
+async def initial_population(ctx: RoundContext, *, size: int, k_max: int) -> list[OptSearchPoint]:
+    """App. D.2's instructions, ``size`` of them drawn at random, each given 0..k_max demo-pool
+    shots at random (Alg. 1 lines 3-8). Every one derives from the origin, keeping its other fields."""
+    cycle = ctx.cycle
+    origin = cycle.origin_round.opt_sp
+    assert origin is not None, "round 0 closes with the origin's individual"
+    raw = await ask(ctx, INIT_NODE, None, operators.init_prompt(cycle, INIT_NODE))
+    start, end = raw.find("["), raw.rfind("]")
+    listed = ast.literal_eval(raw[start : end + 1]) if 0 <= start < end else None
+    if not isinstance(listed, list) or not all(isinstance(s, str) for s in listed):
+        raise ValueError(f"{INIT_NODE} answered no array of instructions: {raw[:300]!r}")
+    instructions = [s.strip() for s in listed if s.strip()]
+    pool = [s.id for s in cycle.session.scoring.require_partition().demo]
+    rng = walk_rng(cycle, ctx.round_num, INIT_NODE)
+    drawn = rng.sample(instructions, min(size, len(instructions)))
+    return [
+        OptSearchPoint.derive(
+            [origin],
+            source=node_source(CAPO_MANIFEST, INIT_NODE),
+            changes_description=f"initial instruction {n + 1}",
+            instruction=text,
+            shot_ids=rng.sample(pool, min(rng.randint(0, k_max), len(pool))),
+        )
+        for n, text in enumerate(drawn)
+    ]
+
+
 class CapoCrossoverKnobs(StrictModel):
     crossovers: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
         ge=1,
@@ -496,21 +527,9 @@ class CapoCrossover:
         rng = walk_rng(cycle, ctx.round_num, self.name)
         pairs = [rng.sample(state.population, 2) for _ in range(crossovers)]
         shots = [cross_shots([a.shot_ids, b.shot_ids], rng=rng) for a, b in pairs]
-        described = task_description(cycle)
         answers = await asyncio.gather(
             *(
-                ask(
-                    ctx,
-                    self.name,
-                    i,
-                    fill(
-                        cycle,
-                        self.name,
-                        task_description=described,
-                        mother=a.instruction,
-                        father=b.instruction,
-                    ),
-                )
+                ask(ctx, self.name, i, operators.crossover_prompt(cycle, self.name, a, b))
                 for i, (a, b) in enumerate(pairs)
             )
         )
@@ -561,7 +580,6 @@ class CapoMutate:
                 "capo_mutate rephrases the offspring a crossover made; a manifest walking it first "
                 "hands it none"
             )
-        described = task_description(ctx.cycle)
         live = [
             i
             for i, p in enumerate(population.proposals)
@@ -573,12 +591,7 @@ class CapoMutate:
                     ctx,
                     self.name,
                     i,
-                    fill(
-                        ctx.cycle,
-                        self.name,
-                        task_description=described,
-                        instruction=population.individuals[i].instruction,
-                    ),
+                    operators.mutation_prompt(ctx.cycle, self.name, population.individuals[i]),
                 )
                 for i in live
             )
@@ -762,6 +775,7 @@ class CapoRuntime:
 
     name: ClassVar[str] = CAPO_MANIFEST
     own_axes: ClassVar[dict[str, set[str]]] = {}
+    priced_surface: ClassVar[Mapping[str, int]] = {}
     phases: ClassVar[tuple[nodes.OptimizerPhase, ...]] = ()
 
     def start(
@@ -776,7 +790,7 @@ class CapoRuntime:
         return None
 
     def source_digest(self, *covered: ModuleType) -> str:
-        return paper_templates.preset_source_digest(__name__, *covered)
+        return paper_templates.preset_source_digest(operators, *covered)
 
     def override_levers(self, node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
         return {}

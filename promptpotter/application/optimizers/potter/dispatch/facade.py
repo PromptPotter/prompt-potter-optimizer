@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.knobs import check_couplings
 from promptpotter.application.optimizer_manifest import bound_inner_optimizer
+from promptpotter.application.optimizers import other_optimizer_packages
 from promptpotter.application.optimizers.potter.dispatch import compose
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     OPTIMIZER_DISCRETIONARY_CHARS,
@@ -429,7 +430,7 @@ def fingerprinted_modules() -> tuple[ModuleType, ...]:
     ``compose`` is hashed beside the renderers because it decides which panels a prompt receives AT
     ALL, and this module because it picks the allowance and derives the mandatory/exempt sets
     ``compose`` is handed; ``bundle``, whose constants decide how much of a panel a prompt
-    receives, marks itself, since every optimizer's digest reads it. A module that shapes the
+    receives, marks itself. A module that shapes the
     prompt and is not hashed here pools corpora the fingerprint exists to keep apart — which is why
     the renderer half is WALKED rather than listed, and why what a move costs is counted at the mint
     (``jobs/mint.py::_warn_on_novel_instrument``) rather than pinned as a name census.
@@ -448,7 +449,10 @@ def injection_source_digest(*measured: ModuleType) -> str:
     """*measured* are the modules the estimator digest hashes beside this one: the scan counts
     their names as hashed, and leaves their own reads to that digest."""
     modules = fingerprinted_modules()
-    return module_source_digest(*modules, *optimizer_prompt_shapers(modules, covered=measured))
+    shapers = optimizer_prompt_shapers(
+        modules, covered=measured, foreign=other_optimizer_packages(__name__)
+    )
+    return module_source_digest(*modules, *shapers)
 
 
 __all__ = [

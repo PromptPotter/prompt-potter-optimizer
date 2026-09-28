@@ -21,6 +21,7 @@ __all__ = [
     "RUNTIME_ENTRY_POINT_GROUP",
     "member",
     "member_origins",
+    "other_optimizer_packages",
     "registered",
     "runtime",
     "runtimes",
@@ -119,3 +120,14 @@ def runtimes() -> Mapping[str, OptimizerRuntime]:
 
 def runtime(name: str) -> OptimizerRuntime:
     return lookup(RUNTIME_ENTRY_POINT_GROUP, _load_runtimes(), name)
+
+
+def other_optimizer_packages(module: str) -> frozenset[str]:
+    """Every built-in optimizer's package but the one holding *module*: what that optimizer's
+    prompt digest leaves to the others' own."""
+    own = module.removeprefix(f"{__name__}.").split(".")[0]
+    return frozenset(
+        f"{__name__}.{pkg.name}"
+        for pkg in pkgutil.iter_modules(__path__)
+        if pkg.ispkg and pkg.name != own
+    )

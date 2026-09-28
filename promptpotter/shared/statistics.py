@@ -352,12 +352,10 @@ def rank_correlation(xs: list[float], ys: list[float]) -> float | None:
     return None if math.isnan(rho) else rho
 
 
-@shapes_optimizer_prompt
 def _order(a: float, b: float) -> int:
     return (a > b) - (a < b)
 
 
-@shapes_optimizer_prompt
 def _rank_agreement(full: Sequence[float], proxy: Sequence[float]) -> float:
     pairs = [(i, j) for i in range(len(full)) for j in range(i + 1, len(full))]
     if not pairs:
@@ -370,7 +368,6 @@ def _rank_agreement(full: Sequence[float], proxy: Sequence[float]) -> float:
     return total / len(pairs)
 
 
-@shapes_optimizer_prompt
 def _pearson(xs: Sequence[float], ys: Sequence[float]) -> float:
     mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
     sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys, strict=True))
@@ -379,7 +376,6 @@ def _pearson(xs: Sequence[float], ys: Sequence[float]) -> float:
     return sxy / math.sqrt(sxx * syy) if sxx > 0.0 and syy > 0.0 else 0.0
 
 
-@shapes_optimizer_prompt
 def greedy_column_subset(
     matrix: Sequence[Sequence[float]],
     k: int,

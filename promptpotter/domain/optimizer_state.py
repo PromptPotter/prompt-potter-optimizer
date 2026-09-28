@@ -43,11 +43,11 @@ __all__ = [
 PotterManifest = Literal["potter"]
 POTTER_MANIFEST: PotterManifest = "potter"
 CapoManifest = Literal["capo"]
-CAPO_MANIFEST: Annotated[CapoManifest, shapes_optimizer_prompt] = "capo"
+CAPO_MANIFEST: CapoManifest = "capo"
 LeviManifest = Literal["levi"]
-LEVI_MANIFEST: Annotated[LeviManifest, shapes_optimizer_prompt] = "levi"
+LEVI_MANIFEST: LeviManifest = "levi"
 GepaManifest = Literal["gepa"]
-GEPA_MANIFEST: Annotated[GepaManifest, shapes_optimizer_prompt] = "gepa"
+GEPA_MANIFEST: GepaManifest = "gepa"
 
 # The reasons `PotterRoundState.l1_parse_failure` can carry. Opposite kinds of evidence, so no
 # reader may treat the field as a bool:

@@ -161,7 +161,6 @@ class EvidenceGrounding(StrictModel):
 ORIGIN_SOURCE = "origin"
 
 
-@shapes_optimizer_prompt
 def node_source(manifest: str, node: str) -> str:
     return f"{manifest}:{node}"
 

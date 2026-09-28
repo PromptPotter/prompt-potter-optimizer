@@ -329,6 +329,7 @@ class PoBBCheck:
             current_id=cid,
             n_samples=n,
             paired_breakdown=paired_breakdown,
+            decision_grade=n >= self.lock_in_n_min,
         )
         if self._on_snapshot is not None:
             self._on_snapshot(snap)

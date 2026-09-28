@@ -101,6 +101,7 @@ __all__ = [
     "L3PlanOutput",
     "VariantEvidenceGrounding",
     "build_l1_response_model",
+    "build_l2_response_model",
 ]
 
 
@@ -392,6 +393,18 @@ class L2ContextOutput(OptimizerResponseModel):
     )
     fork_proposal: ForkProposal | None = None
     terminate_proposal: TerminateProposal | None = None
+
+
+@functools.lru_cache(maxsize=4)
+def build_l2_response_model(withheld: frozenset[str]) -> type[L2ContextOutput]:
+    """``L2ContextOutput`` whose ``l1_layout`` enum leaves *withheld* out."""
+    if not withheld:
+        return L2ContextOutput
+    schema = layout_json_schema(
+        NODE_LAYOUTS["l1_generate"], description=LAYOUT_SCHEMA_INSTRUCTION, withheld=withheld
+    )
+    layout: Any = (Annotated[dict[str, str], WithJsonSchema(schema)], Field(default_factory=dict))
+    return create_model("L2ContextOutput", __base__=L2ContextOutput, l1_layout=layout)
 
 
 # ---------------------------------------------------------------------------

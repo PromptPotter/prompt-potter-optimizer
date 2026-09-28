@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Collection, Iterable
     from types import ModuleType
 
 # SHA256 truncated to 24 hex chars (96 bits) — sufficient for content-addressed
@@ -264,16 +264,20 @@ class _Package:
 
 
 def optimizer_prompt_shapers(
-    hashed: Iterable[ModuleType], *, covered: Iterable[ModuleType] = ()
+    hashed: Iterable[ModuleType],
+    *,
+    covered: Iterable[ModuleType] = (),
+    foreign: Collection[str] = (),
 ) -> tuple[ast.AST, ...]:
-    """Every marked definition in the package, in path then source order — read off the source, so
-    the set cannot depend on which modules a process happened to import. RAISES where *hashed* or
-    marked code reads a package name that is not hashed, *covered*, marked, a class or plumbing: a
-    helper it calls would shape the prompt for free."""
+    """Every marked definition in the package outside the *foreign* packages, in path then source
+    order — read off the source, so the set cannot depend on which modules a process happened to
+    import. RAISES where *hashed* or marked code reads a package name that is not hashed, *covered*,
+    marked, a class or plumbing: a helper it calls would shape the prompt for free."""
     units: list[tuple[str, ast.AST]] = [
-        (_module_name(path), node)
+        (module, node)
         for path in sorted(_PACKAGE_ROOT.rglob("*.py"))
-        if shapes_optimizer_prompt.__name__ in (text := path.read_text(encoding="utf-8"))
+        if not (module := _module_name(path)).startswith(tuple(f"{f}." for f in foreign))
+        and shapes_optimizer_prompt.__name__ in (text := path.read_text(encoding="utf-8"))
         for node in _marked(ast.parse(text))
     ]
     whole = {m for m, unit in units if isinstance(unit, ast.Module)}

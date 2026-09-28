@@ -1477,6 +1477,23 @@ def test_a_dead_claimers_cell_is_taken_over(tmp_path: Path, monkeypatch) -> None
     assert asyncio.run(_discarded()), "the catch-up never shared its row"
     assert feed.claimed_row(spare.key) is None, "a discarded catch-up kept its cell claimed"
 
+    # A waiter reading the shared row as its holder releases refuses the delete on Windows. The
+    # release must still free the cell, or every later walk waits on it, heartbeating, forever.
+    def _refused(self: Path, missing_ok: bool = False) -> None:
+        raise PermissionError(13, "held open by a reader", str(self))
+
+    claim = feed.claim(spare.key, shareable=bool)
+    assert claim is not None
+    claim.publish({"predicted": "a"})
+    with open(claim.row_path, encoding="utf-8"), monkeypatch.context() as held:
+        if sys.platform != "win32":
+            held.setattr(Path, "unlink", _refused)
+        claim.release()
+    taken = feed.claim(spare.key, shareable=bool)
+    assert taken is not None, "a row read during its release kept the cell claimed"
+    assert feed.claimed_row(spare.key) is None, "the next claimer served a released row"
+    taken.release()
+
 
 def test_unscoreable_cells_counts_holes_but_not_stops_or_deprecated_rows() -> None:
     """A HOLE is a cell that was attempted and returned nothing — not a stop, not a retry.

@@ -428,7 +428,7 @@ LEDGER_BASELINE = {
     # justification measured false: `_shared`/`reaper` already ride most handlers' own module-scope
     # imports, so `--help` paid their cost either way; hoisting the 24 handlers adds only their
     # verb-specific tail (numpy for `ab`, httpx for `new`).
-    # Of the 10, all are deliberate: `complexity_ledger`'s own 7 (it counts every layer, so it may
+    # Of the 10, all are deliberate: `complexity_ledger`'s own 6 (it counts every layer, so it may
     # import none at module scope), `escalation/state` (1, documented there) and the two walks,
     # which import each member when the table completes. Count cycles with care: an
     # `if TYPE_CHECKING:` import sits in the module body and reads as top-level to an AST walk,
@@ -438,7 +438,11 @@ LEDGER_BASELINE = {
     # registry walks above — each optimizer's members import when the table completes.
     # +1: the preset digest's walk (`paper_templates.py::preset_source_digest`) — every module of a
     # preset's package, walked as `renderer_modules` is: a hand-kept list left members unhashed.
-    "deferred_imports": 12,
+    # -1: the ledger reads each optimizer's own rows off `OptimizerRuntime.priced_surface`, one
+    # `optimizers` import where potter's panel table and rule set were two.
+    # -1: the preset digest hashes the preset's `operators` module, what its llm nodes send, and
+    # walks the package no more: members' search code re-keyed every inner cell it touched.
+    "deferred_imports": 10,
     # +1: `judges/CLAUDE.md` — the per-layer contract for a new top-level package, indexed from
     # `promptpotter/CLAUDE.md` like every other. It earns a page rather than a section in
     # `connectors/CLAUDE.md` because its load-bearing rule is the OPPOSITE concern: a connector

@@ -3,6 +3,7 @@ is new (the scoring walk re-saves per sample), and a read tails only the bytes s
 
 from __future__ import annotations
 
+import contextlib
 import gzip
 import hashlib
 import json
@@ -538,10 +539,19 @@ class CellClaim:
             self.release()
 
     def release(self) -> None:
-        """Idempotent. The row goes first: one standing with the lock free reads as a dead holder's."""
-        unlink_robust(self.row_path)
-        if self._lock.is_locked:
-            self._lock.release()
+        """Idempotent. The row goes first: one standing with the lock free is no live holder's."""
+        try:
+            _drop_row(self.row_path)
+        finally:
+            if self._lock.is_locked:
+                self._lock.release()
+
+
+def _drop_row(path: Path) -> None:
+    # Windows refuses the delete while a waiter reads the row. Left so, it is no live holder's, and the
+    # next claimer's drop or publish removes it — a busy row never fails a walk.
+    with contextlib.suppress(PermissionError):
+        unlink_robust(path)
 
 
 class ReplayFeed:
@@ -624,8 +634,8 @@ class ReplayFeed:
         except Timeout:
             return None
         claim = CellClaim(lock, path.with_suffix(".json"), shareable)
-        # A holder unlinks its row before it unlocks, so a row found here outlived a dead holder.
-        unlink_robust(claim.row_path)
+        # A holder unlinks its row before it unlocks, so a row found here outlived its holder.
+        _drop_row(claim.row_path)
         return claim
 
     def claimed_row(self, sample_key: str) -> dict[str, Any] | None:
@@ -634,7 +644,7 @@ class ReplayFeed:
         try:
             return read_json_optional(path.with_suffix(".json"))
         except PermissionError:
-            # Windows: the holder is unlinking it this instant — the next poll finds it gone.
+            # Windows: a holder is unlinking or replacing it this instant — the next poll reads again.
             return None
 
     def _banked_since(self, run_id: str) -> list[dict[str, Any]]:

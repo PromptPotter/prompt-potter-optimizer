@@ -356,6 +356,7 @@ class LiveDisplay(Projection):
                     str(pid): {str(k): float(v) for k, v in (entry or {}).items()}
                     for pid, entry in (payload.get("paired_breakdown") or {}).items()
                 },
+                bool(payload["decision_grade"]),
             )
         elif ev == "sample_order_preview":
             self.on_sample_order_preview(
@@ -440,15 +441,15 @@ class LiveDisplay(Projection):
         n_samples: int,
         p_best: float,
         paired_breakdown: dict[str, dict[str, float]],
+        decision_grade: bool,
     ) -> None:
         apply_race_standing(self._core, member, current_id, n_samples, p_best)
-        STANDING_DISPLAY_MIN_SAMPLES = 8  # matches ``lock_in_n_min`` in pobb/checks.py
         # A block race decides at its closes, and the summary names what each close cut.
         if (
             not self._block_racing
             and current_id
             and current_id != self._standing_printed_for
-            and n_samples >= STANDING_DISPLAY_MIN_SAMPLES
+            and decision_grade
         ):
             self._standing_printed_for = current_id
             current_p = p_best

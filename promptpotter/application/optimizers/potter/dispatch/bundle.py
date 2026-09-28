@@ -307,6 +307,10 @@ class InjectionBundle:
     # The manifest whose prompts an L4 outer edits (`bound_inner_optimizer`); `None` off the recursion.
     inner_optimizer: SelectedOptimizer | None = None
 
+    @property
+    def offers_shots(self) -> bool:
+        return bool(self.demo_pool) and self.shot_k_max > 0
+
 
 @dataclass(frozen=True)
 class Item:

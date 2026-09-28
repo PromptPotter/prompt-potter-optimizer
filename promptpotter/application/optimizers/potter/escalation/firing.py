@@ -37,6 +37,9 @@ from promptpotter.application.optimizers.potter.dispatch.facade import (
     injection_coverage_counts,
     injection_silent_panels,
 )
+from promptpotter.application.optimizers.potter.dispatch.injections.catalogues import (
+    withheld_l1_panels,
+)
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
     coerce_l1_layout,
@@ -46,11 +49,11 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import (
     load_optimizer_prompt,
 )
 from promptpotter.application.optimizers.potter.dispatch.schemas import (
-    OPTIMIZER_RESPONSE_MODELS,
     ForkProposal,
     L2ContextOutput,
     L3PlanOutput,
     TerminateProposal,
+    build_l2_response_model,
 )
 from promptpotter.application.optimizers.potter.escalation.state import NextAction, PotterPhase
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
@@ -76,7 +79,10 @@ from promptpotter.infrastructure.tracing.bridge import observed_node
 from promptpotter.shared import truncate
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from promptpotter.application.bench.cycle import Cycle
+    from promptpotter.application.optimizers.potter.dispatch.bundle import InjectionBundle
     from promptpotter.application.optimizers.potter.state import PotterState
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
@@ -122,6 +128,7 @@ class LayerStrategy:
     phase: PotterPhase
     # What a surface names the layer's phase by while it runs.
     activity: str
+    response_model: Callable[[InjectionBundle], type[BaseModel]]
     parse: ParseFn
     apply: ApplyFn
     enter_view: EnterFn
@@ -257,6 +264,7 @@ L2 = LayerStrategy(
     template_name="l2_context",
     phase=PotterPhase.REFINE_STRATEGY,
     activity="refining strategy",
+    response_model=lambda bundle: build_l2_response_model(withheld_l1_panels(bundle)),
     parse=_parse_l2,
     apply=_apply_l2,
     enter_view=_l2_enter,
@@ -335,6 +343,7 @@ L3 = LayerStrategy(
     template_name="l3_plan",
     phase=PotterPhase.MODIFY_PLAN,
     activity="replanning",
+    response_model=lambda _bundle: L3PlanOutput,
     parse=_parse_l3,
     apply=_apply_l3,
     enter_view=_l3_enter,
@@ -372,17 +381,16 @@ async def _run_transition(
         campaign_id=tracing_campaign_id,
         round_num=round_num,
     ):
+        bundle = build_bundle(cycle, state)
         template, prompt_vars, rendered, coverage = DispatchHub.fill(
-            load_optimizer_prompt(transition.template_name),
-            build_bundle(cycle, state),
-            node=transition.template_name,
+            load_optimizer_prompt(transition.template_name), bundle, node=transition.template_name
         )
         try:
             raw, _, _ = await run_optimizer_node(
                 template_name=transition.template_name,
                 prompt_vars=prompt_vars,
                 template=template,
-                response_model=OPTIMIZER_RESPONSE_MODELS[transition.template_name],
+                response_model=transition.response_model(bundle),
                 context=LLMCallContext(
                     ledger=cycle.session.state.ledger,
                     round_num=round_num,

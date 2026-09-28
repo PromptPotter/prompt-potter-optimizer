@@ -177,7 +177,7 @@ def _r_prompt_block_catalogue(b: InjectionBundle) -> list[Item]:
 def _r_demo_pool(b: InjectionBundle) -> list[Item]:
     """The value space of `shot_ids`: the parent's shots, which no other panel shows, then a window
     of the rest that moves each round."""
-    if not b.demo_pool or b.shot_k_max <= 0:
+    if not b.offers_shots:
         return []
     rows = {s.id: s for s in b.demo_pool}
     current = [rows[i] for i in b.opt_sp.shot_ids]
@@ -204,6 +204,11 @@ def _r_demo_pool(b: InjectionBundle) -> list[Item]:
     ]
 
 
+def withheld_l1_panels(b: InjectionBundle) -> frozenset[str]:
+    """The panels L2's layout menu leaves out: ones this campaign cannot fill on any round."""
+    return frozenset() if b.offers_shots else frozenset({"demo_pool"})
+
+
 @signal(
     "l1_signal_catalogue",
     kind=InjectionKind.DERIVED,
@@ -223,7 +228,7 @@ def _r_l1_signal_catalogue(b: InjectionBundle) -> list[Item]:
     which is what ``validate_l1_layout`` is handed — so it is a rule about what an edit may take
     AWAY, and stating it as one an edit must satisfy by itself is what asked L2 to restate a layout
     it was not changing."""
-    mandatory = sorted(NODE_LAYOUTS["l1_generate"].mandatory)
+    mandatory = sorted(NODE_LAYOUTS["l1_generate"].mandatory - withheld_l1_panels(b))
     return [
         Item(
             "L1 LAYOUT — the response schema's `l1_layout` carries the legal slots and the signal "

@@ -575,6 +575,7 @@ class LeviRuntime:
 
     name: ClassVar[str] = LEVI_MANIFEST
     own_axes: ClassVar[dict[str, set[str]]] = {}
+    priced_surface: ClassVar[Mapping[str, int]] = {}
     phases: ClassVar[tuple[nodes.OptimizerPhase, ...]] = ()
 
     def start(
@@ -589,7 +590,7 @@ class LeviRuntime:
         return None
 
     def source_digest(self, *covered: ModuleType) -> str:
-        return paper_templates.preset_source_digest(__name__, *covered)
+        return paper_templates.preset_source_digest(operators, *covered)
 
     def override_levers(self, node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
         return {}

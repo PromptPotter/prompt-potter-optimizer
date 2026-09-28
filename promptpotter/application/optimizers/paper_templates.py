@@ -4,8 +4,6 @@ manifest's ``resolved_prompts``, and the answer read off the ``<prompt>`` marker
 from __future__ import annotations
 
 import functools
-import importlib
-import pkgutil
 import random
 import re
 import sys
@@ -13,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.llm_call import LLMCallContext, llm_call
 from promptpotter.application.optimizer_manifest import running_prompt
+from promptpotter.application.optimizers import other_optimizer_packages
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED, PARSE_FAILURE_TOOLING
 from promptpotter.domain.wounds import ValidationFailure
 from promptpotter.shared.hashing import module_source_digest, optimizer_prompt_shapers
@@ -98,15 +97,11 @@ def walk_rng(cycle: Cycle, round_num: int, node: str) -> random.Random:
 
 
 @functools.cache
-def preset_source_digest(members: str, *covered: ModuleType) -> str:
-    """Every module of the preset package holding *members*, and this one, with every marked
-    definition — ``OptimizerRuntime.source_digest`` for a preset whose prompts are these templates."""
-    package = sys.modules[members.rpartition(".")[0]]
-    hashed = (
-        sys.modules[__name__],
-        *(
-            importlib.import_module(f"{package.__name__}.{m.name}")
-            for m in pkgutil.iter_modules(package.__path__)
-        ),
+def preset_source_digest(operators: ModuleType, *covered: ModuleType) -> str:
+    """This module and the preset's *operators* — what its llm nodes send — with every marked
+    definition outside the other optimizers' packages: ``OptimizerRuntime.source_digest``."""
+    hashed = (sys.modules[__name__], operators)
+    shapers = optimizer_prompt_shapers(
+        hashed, covered=covered, foreign=other_optimizer_packages(operators.__name__)
     )
-    return module_source_digest(*hashed, *optimizer_prompt_shapers(hashed, covered=covered))
+    return module_source_digest(*hashed, *shapers)

@@ -391,7 +391,9 @@ for _node, _spec in NODE_LAYOUTS.items():
 del _node, _spec, _floor_ph, _early
 
 
-def layout_json_schema(spec: NodeLayoutSpec, *, description: str) -> dict[str, Any]:
+def layout_json_schema(
+    spec: NodeLayoutSpec, *, description: str, withheld: frozenset[str] = frozenset()
+) -> dict[str, Any]:
     """The wire shape of a layout edit against ``spec``: a panel name addresses the ONE slot it fills.
     ONE builder for BOTH seams that offer the edit — L4's per-node ``layout`` param and L2's
     ``l1_layout`` — because a vocabulary the emitter is never shown is not a vocabulary.
@@ -404,7 +406,7 @@ def layout_json_schema(spec: NodeLayoutSpec, *, description: str) -> dict[str, A
     return {
         "type": "object",
         "description": description,
-        "propertyNames": {"enum": sorted(spec.possible)},
+        "propertyNames": {"enum": sorted(spec.possible - withheld)},
         "additionalProperties": {"type": "string", "enum": list(L1_LAYOUT_SLOTS)},
     }
 

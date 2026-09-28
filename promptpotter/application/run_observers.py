@@ -464,6 +464,7 @@ class RunCallbacks:
                 "n_samples": int(snapshot.n_samples),
                 "p_best": float(snapshot.p_best),
                 "paired_breakdown": dict(snapshot.paired_breakdown),
+                "decision_grade": snapshot.decision_grade,
             },
             round_num=round_num,
             sample_idx=int(snapshot.n_samples) - 1,

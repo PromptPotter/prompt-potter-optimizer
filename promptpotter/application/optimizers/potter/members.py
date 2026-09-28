@@ -25,6 +25,7 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import (
 from promptpotter.application.optimizers.potter.dispatch.schemas import L2_NODE_AXES
 from promptpotter.application.optimizers.potter.election import elect_on_theta
 from promptpotter.application.optimizers.potter.escalation.firing import L2, L3, escalate_l2
+from promptpotter.application.optimizers.potter.escalation.rules import DEFAULT_ESCALATION_RULES
 from promptpotter.application.optimizers.potter.escalation.state import NextAction
 from promptpotter.application.optimizers.potter.generation_only import run_generation_only_round
 from promptpotter.application.optimizers.potter.knobs import (
@@ -368,6 +369,13 @@ class PotterRuntime:
 
     def complete(self) -> None:
         injection_table()
+
+    @property
+    def priced_surface(self) -> Mapping[str, int]:
+        return {
+            "injections": len(injection_table()),
+            "escalation_rules": len(DEFAULT_ESCALATION_RULES),
+        }
 
     def source_digest(self, *covered: ModuleType) -> str:
         return injection_source_digest(*covered)
