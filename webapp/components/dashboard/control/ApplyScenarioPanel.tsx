@@ -39,7 +39,8 @@ export function ApplyScenarioPanel({
       () =>
         postSteerFork(campaignId, cycleId, at, "", {
           // No `origin_prompt_fields`: the lifted round 0 IS the origin, and the server refuses the pair.
-          seed: { config_overrides: { scoring: criterion } },
+          // A map lays onto the parent's scoring block, so the fork keeps its correctness formula.
+          seed: { config_overrides: { scoring: { per_cell: criterion } } },
           steeredBy: steeredBy(me),
           keepRounds: true,
           pauseFirst: isLive,

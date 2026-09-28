@@ -473,15 +473,25 @@ def freeze_campaign_config(config: CampaignConfig) -> dict[str, Any]:
     return config.model_dump(mode="json")
 
 
+def _scoring_block(scoring: str | dict[str, str] | None) -> dict[str, str]:
+    if isinstance(scoring, dict):
+        return dict(scoring)
+    return {"per_sample": scoring} if scoring else {}
+
+
 def apply_config_overrides(config: CampaignConfig, overrides: ConfigOverrides) -> CampaignConfig:
-    """ABSOLUTE values over *config*, ``nodes`` key by key; a budget arm is not applied here, since
-    a seed's budget is composed and admitted before launch (`jobs/quota.py::declare_run_ceiling`)."""
+    """ABSOLUTE values over *config*, ``nodes`` and a ``scoring`` map key by key (a lens's
+    ``{per_cell: F}`` keeps ``per_sample``). A seed's budget is admitted before launch, not here."""
     opt_updates: dict[str, Any] = (
         {"max_rounds": overrides.max_rounds} if overrides.max_rounds is not None else {}
     )
     if overrides.nodes:
         opt_updates["nodes"] = merge_node_overlays(config.optimization.nodes, overrides.nodes)
-    top_updates: dict[str, Any] = {"scoring": overrides.scoring} if overrides.scoring else {}
+    top_updates: dict[str, Any] = {}
+    if isinstance(overrides.scoring, dict):
+        top_updates["scoring"] = {**_scoring_block(config.scoring), **overrides.scoring}
+    elif overrides.scoring:
+        top_updates["scoring"] = overrides.scoring
     if not opt_updates and not top_updates:
         return config
     if opt_updates:

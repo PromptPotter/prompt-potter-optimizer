@@ -324,10 +324,6 @@ class CellScorer(NamedTuple):
 CellGrade = Literal["fitness", "objective"]
 
 
-# The MASK's evaluator, over a round's stored per-round evaluator map. A read-side counterfactual,
-# so it stays per-round: the record it reads may no longer have the rows.
-RoundScorer = Callable[[dict[str, float]], float]
-
 DEFAULT_SCORER_ID = "default_hit"
 
 HIT_THRESHOLD: Annotated[float, shapes_optimizer_prompt] = 1.0
@@ -585,7 +581,6 @@ __all__ = [
     "CellScorer",
     "PipelineData",
     "QueryMeasurement",
-    "RoundScorer",
     "ScoringSpec",
     "TurnRecord",
     "all_verifier_graded",

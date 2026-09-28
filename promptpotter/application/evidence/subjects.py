@@ -4,7 +4,7 @@ from typing import Literal, NamedTuple
 
 from pydantic import Field
 
-from promptpotter.application.mask.load import parse_sample_ids
+from promptpotter.application.mask.record import parse_sample_ids
 from promptpotter.domain.cycle_paths import (
     CycleHop,
     CyclePath,
@@ -52,8 +52,8 @@ class SubjectSpec(NamedTuple):
     # works on it unchanged once the store has descended; without it the whole of a
     # `promptpotter-self` tree is unaddressable.
     inside: CyclePath = ()
-    # `score:<formula>`. Course-only: a campaign is an origin no election reaches, and a
-    # candidate is one point rather than a chain, so neither has an election to re-decide.
+    # `score:<formula>`, a `per_cell` composite. Course-only: a campaign is an origin no election
+    # reaches, and a candidate one point rather than a chain; neither has an election to re-decide.
     lens: str = ""
     samples: frozenset[int] | None = None
 

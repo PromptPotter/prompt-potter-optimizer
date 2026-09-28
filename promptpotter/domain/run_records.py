@@ -487,10 +487,8 @@ class ConfigOverrides(StrictModel):
     # The fork's delta over the selected optimizer manifest, laid key by key onto the parent's own
     # `optimization.nodes`. No field here switches the manifest: two optimizers are two campaigns.
     nodes: dict[str, ManifestNodeOverlay] = Field(default_factory=dict)
-    # The composite-fitness criterion (`CampaignConfig.scoring`). The one setting a mask can
-    # PREVIEW against the record — a lens re-elects every round from rows already measured, so the
-    # round it parts at is the round a fork carrying this is minted at. Every other field here moves
-    # a ceiling or a node's knob, which no measurement can be re-read under.
+    # `CampaignConfig.scoring`, a map laid key by key over the parent's. The one setting a mask
+    # PREVIEWS: `{"per_cell": F}` is the `score:F` lens, so the fork is cut where the preview parts.
     scoring: str | dict[str, str] | None = None
 
 
@@ -571,8 +569,6 @@ class LedgerCandidate(StrictModel):
     # The searchpoint id — the archive's `prompt_fields_id`, and the only key joining a node of
     # the served tree to the rows it paid for.
     sp_hash: str = ""
-    # The candidate's stored evaluator namespace — what a `score:` lens re-scores against.
-    evaluators: dict[str, float] = Field(default_factory=dict)
     scored_samples: int | None = None
     expected_samples: int | None = None
     # ``None`` = minted, never measured; ``0`` = measured, nothing cached.

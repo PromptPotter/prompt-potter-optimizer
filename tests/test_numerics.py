@@ -41,12 +41,7 @@ from promptpotter.application.intelligence.exploration import (
     select_round_subset,
 )
 from promptpotter.application.mask.backprop import accumulate_node_stats, select_rewind_round
-from promptpotter.application.mask.record import (
-    MaskCandidate,
-    MaskCycle,
-    MaskRound,
-    SpineCycle,
-)
+from promptpotter.application.mask.record import SpineCycle
 from promptpotter.application.optimizer_manifest import bind_optimizer
 from promptpotter.application.optimizers import paper_templates
 from promptpotter.application.optimizers.capo.state import CapoState, capo_state
@@ -296,14 +291,6 @@ def test_scorer_rejects_non_finite_instead_of_scoring_it_perfect() -> None:
     with pytest.raises(ScoringFormulaError, match="non-finite"):
         compile_scorer("after_N_rounds_delta", verifier_graded=False).fitness(result)
 
-    # The per-ROUND scorer clamps identically and was the twin hole: the fix to the per-sample
-    # clamp above left the composite one wide open, so a NaN evaluator scored a perfect ROUND.
-    # Both now pass through one `clamp_unit_score`; this pins that they cannot drift apart again.
-    from promptpotter.application.scoring.formula import compile_round_scorer
-
-    with pytest.raises(ScoringFormulaError, match="non-finite"):
-        compile_round_scorer("accuracy")({"accuracy": float("nan")})
-
 
 def test_a_miss_is_charged_its_cost_and_a_solved_cell_scores_its_composite(monkeypatch) -> None:
     """A ``per_cell`` composite scales correctness by a cost factor, so on its own every miss
@@ -415,18 +402,13 @@ def _recall_schema() -> PipelineSchema:
 def test_an_unmeasured_term_is_never_scored_as_zero() -> None:
     # SILENT wrong-score. Every empty-collection aggregate in the evaluator registry used to
     # return a PERFECT value — no rows meant "no errors" (0.0), "instant" (1.0), "maximally
-    # compact" (1.0). The registry now omits the key, so a formula that names an unmeasured term
-    # halts instead of scoring the round on a number nobody computed. The distinction matters:
-    # a round that measured every sample and failed them all IS a 0.0; a round that measured
-    # nothing is not.
+    # compact" (1.0). The registry now omits the key, so a reading shows the absence instead of a
+    # number nobody computed. The distinction matters: a round that measured every sample and
+    # failed them all IS a 0.0; a round that measured nothing is not.
     from promptpotter.application.scoring.evaluators import (
         compute_accuracy,
         compute_degraded_rate,
         compute_error_rate,
-    )
-    from promptpotter.application.scoring.formula import (
-        ScoringTermMissingError,
-        compile_round_scorer,
     )
     from promptpotter.domain.scoring import recorded_cost_s
 
@@ -461,12 +443,6 @@ def test_an_unmeasured_term_is_never_scored_as_zero() -> None:
     assert compute_accuracy(results=[scored, errored]) == 1.0
     # ...while it still surfaces on the error channel, counted over ALL rows.
     assert compute_error_rate(results=[scored, errored]) == 0.5
-
-    # The default composite (`accuracy`) refuses a round it cannot score, rather than 0.0.
-    with pytest.raises(ScoringTermMissingError, match="accuracy"):
-        compile_round_scorer(None)({"latency": 600.0})
-    with pytest.raises(ScoringTermMissingError, match="latency"):
-        compile_round_scorer("accuracy * 500.0 / latency")({"accuracy": 0.9})
 
     # But the GATEWAY over an EMPTY round is defined, not a crash: an operator skip at query
     # 0/N (or an all-excluded round) hands ``compute_composite_fitness`` no rows. It records the
@@ -3458,75 +3434,106 @@ def test_paired_reading_matches_ttest_rel_and_brackets_the_same_evidence_it_test
     assert paired_reading([0.5], [0.1])[1:4] == (None, None, None)
 
 
-def test_a_scenario_chain_stops_where_the_record_parts() -> None:
-    """The mask's silent failure: walking PAST the round the two readings part. Every step after
-    it is judged against a parent the run never carried — no candidate was measured against it, and
-    L1 would have generated a different population from it — yet those steps render exactly like
-    the prefix that is real, so a chart of "what would have happened" plots rounds that could not
-    have. The round the walk stops on is also the round a fork applying this criterion is minted at
-    (`resume_and_fork/resume.py`), so a chain that runs long misreports where that fork goes.
+def test_a_lens_reads_the_record_as_a_fresh_run_under_its_formula(built_stores) -> None:
+    """A `score:F` lens answers "what would this campaign read under F", and the only honest answer
+    is the one a run under F reports: each cell graded, then folded. F over the round's MEANS is a
+    different number wherever F is nonlinear — the shipped length charge is — and it ranks arms
+    differently, so the lens crowned one a run under F never would and the fork applying it was
+    minted at the wrong round. Silent: every value renders.
 
-    Also pins the self-consistency floor: fed the criterion the run actually realized, the chain
-    reproduces the recorded winners and never parts. One that cannot reproduce the record under its
-    own formula is measuring the fold, not the formula.
-    """
-    from promptpotter.application.mask.record import MaskCandidate
+    Also pins the walk: it STOPS on the round the two readings part — past it the run would stand on
+    a parent it never had — and, fed the criterion the run realized, reproduces the record."""
+    from promptpotter.application.campaign_config import apply_config_overrides
+    from promptpotter.application.mask.load import lens_overrides, load_mask_record
     from promptpotter.application.mask.scenario import scenario_spine
+    from promptpotter.application.scoring.formula.compiler import compile_expression
+    from promptpotter.domain.run_records import ElectionRecord
 
-    def cand(cid: str, acc: float, latency: float, *, winner: bool = False) -> MaskCandidate:
-        return MaskCandidate(
-            candidate_id=cid,
-            evaluators={"accuracy": acc, "mean_latency_s": latency},
-            accuracy=acc,
-            n_scored=4,
-            is_selected=winner,
+    stores = built_stores
+    per_sample = "label_match(predicted, ground_truth)"
+    lens = "fitness * (0.92 + 0.08 * 692.0 / max(692.0, tokens))"
+    hop = CycleHop(campaign_id="ds__lens", cycle_id="cycle_lens")
+    config = {
+        "optimization": {"optimizer": "potter", "degradation_threshold": 0.0},
+        "scoring": per_sample,
+    }
+    stores.campaigns.create_campaign(
+        Campaign(
+            campaign_id=hop.campaign_id,
+            dataset_name="ds",
+            created_at="2026-09-28T00:00:00Z",
+            root_cycle_id=hop.cycle_id,
+            config=config,
+        )
+    )
+    stores.campaigns.create(hop, {})
+
+    def arm(said: str, tokens: list[int]) -> list[dict[str, Any]]:
+        return [
+            measurement(
+                sid,
+                None,
+                query=f"q{sid}",
+                predicted=answer,
+                ground_truth="a",
+                error=None,
+                pipeline_data={"step_tokens": {"solve": {"input": t, "output": 0}}},
+            )
+            for sid, (answer, t) in enumerate(zip(said, tokens, strict=True))
+        ]
+
+    # `steady` is the more accurate and ten times the origin's length on every cell; `spiky` is
+    # short on its hits and runs away on its one miss.
+    arms = {
+        "c0": arm("abbb", [692] * 4),
+        "steady": arm("aaaab", [6920] * 5),
+        "spiky": arm("aaab", [692, 692, 692, 20000]),
+        "after": arm("aaaaa", [692] * 5),
+    }
+    rounds = [(0, ["c0"], None, "c0"), (1, ["steady", "spiky"], "c0", "steady")]
+    for rnd, ids, parent, crowned in [*rounds, (2, ["after"], "steady", "after")]:
+        stores.campaigns.save_round_file(
+            hop,
+            round_result(
+                rnd,
+                candidates_scored=len(ids),
+                candidate_scores=[scored_candidate(cid) for cid in ids],
+                all_candidate_results={cid: arms[cid] for cid in ids},
+                reference_results={parent: arms[parent]} if parent else {},
+            ),
+        )
+        CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop))).append(
+            ElectionRecord(round=rnd, selected_labels=[crowned], stamps_theta=True)
         )
 
-    origin = cand("c0", 0.50, 1.0)
-    # Round 1: `slow` is the most accurate and is crowned. Round 2 exists only so that "the walk
-    # stopped" is a claim with something to stop BEFORE — with no round after the parting, a chain
-    # that ran on and one that halted are the same list.
-    slow = cand("slow", 0.80, 9.0, winner=True)
-    fast = cand("fast", 0.60, 1.0)
-    steady = cand("steady", 0.85, 8.0, winner=True)
-    cycle = MaskCycle(
-        cycle_id="cycle_0",
-        rounds=[
-            MaskRound(cycle_id="cycle_0", round=0, candidates=[origin]),
-            MaskRound(
-                cycle_id="cycle_0",
-                round=1,
-                candidates=[slow, fast],
-                parent_evaluators=dict(origin.evaluators),
-                parent_accuracy=origin.accuracy,
-            ),
-            MaskRound(
-                cycle_id="cycle_0",
-                round=2,
-                candidates=[steady],
-                parent_evaluators=dict(slow.evaluators),
-                parent_accuracy=slow.accuracy,
-            ),
-        ],
-    )
+    record = load_mask_record(stores, hop.campaign_id, lens=lens)
+    (cycle,) = record.cycles
+    fresh = compile_scorer(per_sample, lens, verifier_graded=False)
+    for rnd in cycle.rounds:
+        for cand in rnd.candidates:
+            run = rescore_results([dict(r) for r in arms[cand.candidate_id]], fresh)
+            reported = compute_composite_fitness(run, _single_node_schema())["composite_fitness"]
+            assert cand.reading is not None
+            assert cand.reading.composite_fitness == pytest.approx(reported)
 
-    # Realized criterion ⇒ the record, reproduced, the two readings agreeing on every round.
-    realized = scenario_spine(cycle, "accuracy")
-    assert [(s.round, s.candidate_id, s.recorded_id) for s in realized] == [
-        (0, "c0", "c0"),
-        (1, "slow", "slow"),
-        (2, "steady", "steady"),
-    ]
+    def on_means(cid: str) -> float:
+        rows = rescore_results([dict(r) for r in arms[cid]], fresh)
+        tokens = [r["pipeline_data"]["step_tokens"]["solve"]["input"] for r in rows]
+        means = {"fitness": np.mean([r["fitness"] for r in rows]), "tokens": np.mean(tokens)}
+        return compile_expression(lens, source="lens").evaluate(means, cid)
 
-    # Flip to a criterion that punishes latency: round 1 elects `fast` (0.55) over the origin
-    # (0.45), where `slow` scores 0.35 — so it parts from the record's `slow` right there, and the
-    # walk ends. Round 2 is NOT on the chain: `steady` was measured against `slow`, and what it
-    # would have scored against `fast` is not a thing the record knows.
-    flipped = scenario_spine(cycle, "accuracy - 0.05 * mean_latency_s")
-    assert [(s.round, s.candidate_id, s.recorded_id) for s in flipped] == [
-        (0, "c0", "c0"),
-        (1, "fast", "slow"),
-    ]
+    # The round algebra keeps `steady`; the per-cell reading elects `spiky` and the walk ends there.
+    assert on_means("steady") > on_means("spiky")
+    walk = [(s.round, s.candidate_id, s.recorded_id) for s in scenario_spine(cycle)]
+    assert walk == [(0, "c0", "c0"), (1, "spiky", "steady")]
+
+    realized = load_mask_record(stores, hop.campaign_id, lens=None)
+    walk = [(s.round, s.candidate_id, s.recorded_id) for s in scenario_spine(realized.cycles[0])]
+    assert walk == [(0, "c0", "c0"), (1, "steady", "steady"), (2, "after", "after")]
+
+    # The fork applying the lens runs exactly the scorer the lens read under.
+    forked = apply_config_overrides(load_campaign_config(config), lens_overrides(lens))
+    assert forked.scoring == {"per_sample": per_sample, "per_cell": lens}
 
 
 def test_a_human_authored_arm_never_pools_with_the_loop_that_proposed_one() -> None:

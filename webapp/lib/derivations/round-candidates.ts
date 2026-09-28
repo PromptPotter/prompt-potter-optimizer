@@ -61,7 +61,6 @@ function rowOf(
     referenceLift: c.reference_lift,
     referenceLiftCiLo: c.reference_lift_ci_lo,
     referenceLiftCiHi: c.reference_lift_ci_hi,
-    evaluators: c.evaluators,
     // `false` may mean nothing is crowned yet, never "lost" — `election.ts::crownState` reads it.
     is_selected: c.is_selected,
     outcome: c.outcome,
@@ -105,7 +104,6 @@ export function scoreboardRow(
     referenceLift: c.reference_lift,
     referenceLiftCiLo: c.reference_lift_ci_lo,
     referenceLiftCiHi: c.reference_lift_ci_hi,
-    evaluators: {},
     is_selected: c.is_selected,
     outcome: c.outcome,
     n_samples: c.total,

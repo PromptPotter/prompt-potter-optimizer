@@ -31,7 +31,6 @@ function node(
     theta_se: null,
   theta_caveat: null,
     stamps_theta: false,
-    evaluators: {},
     mean_fitness_ci_lo: null,
     mean_fitness_ci_hi: null,
     reference_lift: null,

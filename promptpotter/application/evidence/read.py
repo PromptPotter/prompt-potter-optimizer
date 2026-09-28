@@ -52,7 +52,6 @@ from promptpotter.application.evidence.subjects import (
 )
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.scenario import scenario_spine
-from promptpotter.application.scoring.formula import compile_round_scorer
 from promptpotter.application.scoring.formula.compiler import ScoringFormulaError
 from promptpotter.domain.candidate_diff import build_candidate_flat, flatten_sp_summary
 from promptpotter.domain.cycle_paths import CycleHop
@@ -503,12 +502,16 @@ def _scenario(
     none — so a channel plotted from it plots measurements, under a criterion that would have
     carried a different one of them forward.
     """
-    criterion = compile_round_scorer(spec.lens.removeprefix(LENS_SCORE_PREFIX))
-    record = load_mask_record(stores, spec.campaign_id, spec.samples)
+    try:
+        record = load_mask_record(
+            stores, spec.campaign_id, spec.samples, lens=spec.lens.removeprefix(LENS_SCORE_PREFIX)
+        )
+    except ScoringFormulaError as exc:
+        raise ValueError(f"The lens {spec.lens!r} cannot grade this branch: {exc}") from exc
     cycle = next((c for c in record.cycles if c.cycle_id == spec.cycle_id), None)
     if cycle is None:
         return None
-    steps = scenario_spine(cycle, criterion)
+    steps = scenario_spine(cycle)
     points = [p for s in steps if (p := _point_at(cycle_dir, s.round, candidate_id=s.candidate_id))]
     if not points:
         return None

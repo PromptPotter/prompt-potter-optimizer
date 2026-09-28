@@ -25,7 +25,6 @@ function node(over: Partial<LineageNode> & Pick<LineageNode, "kind" | "id" | "la
     is_selected: false,
     theta: null,
     theta_se: null,
-    evaluators: {},
     mean_fitness_ci_lo: null,
     mean_fitness_ci_hi: null,
     scored_samples: null,

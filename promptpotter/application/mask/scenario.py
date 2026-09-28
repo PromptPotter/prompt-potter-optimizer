@@ -1,7 +1,7 @@
-"""``scenario_spine`` — how far a swapped criterion agrees with the record, and the round it stops
-agreeing. Where ``find_divergences`` answers *which rounds rank differently* one round at a time,
-this walks the chain: each round is decided against the winner the scenario is standing on, which
-is only meaningful while that is still the winner the run carried.
+"""``scenario_spine`` — how far the criterion a record was read under agrees with the record, and
+the round it stops agreeing. Where ``find_divergences`` answers *which rounds rank differently*
+one round at a time, this walks the chain: each round is decided against the winner the scenario
+is standing on, which is only meaningful while that is still the winner the run carried.
 
 **It ends at the round the two part.** Past that the run would have stood on a parent it never had
 — nothing was measured against it, and L1 would have generated a different population from it — so
@@ -25,7 +25,6 @@ from typing import NamedTuple
 
 from promptpotter.application.mask.record import MaskCycle
 from promptpotter.application.mask.verdicts import masked_election
-from promptpotter.domain.scoring import RoundScorer
 
 
 class ScenarioStep(NamedTuple):
@@ -38,11 +37,11 @@ class ScenarioStep(NamedTuple):
     recorded_id: str
 
 
-def scenario_spine(cycle: MaskCycle, criterion: RoundScorer | str | None) -> list[ScenarioStep]:
-    """The branch as *criterion* would have run it, origin first, up to and including the round the
-    two readings part.
+def scenario_spine(cycle: MaskCycle) -> list[ScenarioStep]:
+    """The branch as the record's scorer would have run it, origin first, up to and including the
+    round the two readings part.
 
-    A round that cannot be decided under the mask (its standing parent is unscorable there) carries
+    A round that cannot be decided under the mask (its standing parent has no reading there) carries
     the parent forward rather than guessing — the honest reading, and the same one the divergence
     verdict takes. So does a round that HELD: the record crowns nobody, the scenario is still
     standing on whoever it carried in, and agreeing on the parent is not a parting.
@@ -52,7 +51,7 @@ def scenario_spine(cycle: MaskCycle, criterion: RoundScorer | str | None) -> lis
     # The branch's starting point — the first round's single arm, which no criterion elects and
     # every criterion inherits. A branch whose first round scored nothing has no chain to walk,
     # and taking the NEXT round's arm instead would claim it began somewhere it did not.
-    origin = next((c for c in first.candidates if c.evaluators), None) if first else None
+    origin = next((c for c in first.candidates if c.reading), None) if first else None
     if origin is None or first is None:
         return []
     # One variable for both readings' standing winner: they are equal at the top of every round the
@@ -61,7 +60,7 @@ def scenario_spine(cycle: MaskCycle, criterion: RoundScorer | str | None) -> lis
     steps = [ScenarioStep(first.round, origin.candidate_id, origin.candidate_id)]
     for rnd in rounds[1:]:
         by_id = {c.candidate_id: c for c in rnd.candidates}
-        election = masked_election(rnd, criterion, standing.evaluators, standing.accuracy)
+        election = masked_election(rnd, standing.reading)
         elected = by_id.get(election.winner_id) if election.winner_id else None
         scenario_winner = elected if elected is not None else standing
         crowned = next((c for c in rnd.candidates if c.is_selected), None)

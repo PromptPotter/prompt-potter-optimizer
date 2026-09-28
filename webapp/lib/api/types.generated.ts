@@ -1654,9 +1654,6 @@ export interface LineageNode {
    * theta is not a column here, so a surface hides it rather than drawing a
    * cold ruler's blank. */
   stamps_theta: boolean;
-  /** The candidate's stored evaluator namespace — the measurement a `score:` lens
-   * re-scores against. */
-  evaluators: Record<string, number>;
   mean_fitness_ci_lo: number | null;
   mean_fitness_ci_hi: number | null;
   /** The candidate's blocked lift over the floor it was JUDGED against — the origin
@@ -1675,9 +1672,10 @@ export interface LineageNode {
   /** Of `scored_samples`, how many were replayed from the MeasurementArchive rather
    * than measured. `None` on a course and on any candidate never measured. */
   cached_samples: number | null;
-  /** This candidate's fitness under the request's `score:` lens, re-scored server-
-   * side from its stored evaluator namespace. Null without a lens, or when
-   * the namespace can't satisfy the formula. */
+  /** This candidate's composite fitness under the request's `score:` lens — its
+   * rows re-graded per cell under that `per_cell` formula and folded, the
+   * number a fresh run under it reports. Null without a lens, or where no row
+   * carries a verdict under it. */
   lens_value: number | null;
   /** 1-based position by `composite_fitness` descending among THIS node's siblings
    * — the bars one chart draws. Null where the value is. An ordering is a
@@ -2404,25 +2402,31 @@ export const ABORT_LENS_LABELS: Record<string, string> = {
   'all_off': 'No early abort',
 };
 
-export interface EvaluatorMeta {
+export interface CellTermMeta {
   name: string;
-  scope: "per_round" | "per_sample";
   direction: "high" | "low";
-  node_type: string | null;
-  from_rows: boolean;
   description: string;
 }
 
-// The evaluator registry, mirrored from application/scoring/evaluators.py.
-export const EVALUATOR_META: EvaluatorMeta[] = [
-  { name: 'accuracy', scope: 'per_round', direction: 'high', node_type: null, from_rows: true, description: 'Mean per-sample score across non-deprecated samples.' },
-  { name: 'error_rate', scope: 'per_round', direction: 'low', node_type: null, from_rows: true, description: 'Fraction of queries that errored (ERROR predicted or exception).' },
-  { name: 'degraded_rate', scope: 'per_round', direction: 'low', node_type: null, from_rows: true, description: 'Fraction of queries that completed with pipeline degradation warnings.' },
-  { name: 'source_recall', scope: 'per_round', direction: 'high', node_type: 'candidate_source', from_rows: false, description: "Fraction of queries where GT appears in a candidate_source node's output." },
-  { name: 'candidate_recall', scope: 'per_round', direction: 'high', node_type: 'ranker', from_rows: false, description: "Fraction of queries where GT appears in a ranker node's final_ranking." },
-  { name: 'cache_hit_rate', scope: 'per_round', direction: 'high', node_type: 'cache', from_rows: false, description: 'Fraction of queries resolved by a cache node (non-null timing).' },
-  { name: 'retrieval_shortfall', scope: 'per_sample', direction: 'high', node_type: null, from_rows: false, description: 'Per-sample min(observed/target, 1.0) across nodes with max_*/num_* limits on list-valued outputs. 1.0 = target met or exceeded.' },
-  { name: 'mean_retrieval_shortfall', scope: 'per_round', direction: 'high', node_type: null, from_rows: false, description: "Mean of retrieval_shortfall across the round's results." },
+// What a per_cell formula can name, mirrored from application/scoring/evaluators.py.
+export const CELL_TERM_META: CellTermMeta[] = [
+  { name: 'fitness', direction: 'high', description: "The cell's correctness under the per-sample formula." },
+  { name: 'ground_truth_rank', direction: 'low', description: 'Where the truth landed in the ranking; 1 is the top.' },
+  { name: 'latency', direction: 'low', description: 'Seconds the cell took when measured; a replay keeps them.' },
+  { name: 'unworked', direction: 'low', description: 'Seconds the cell sat blocked (suspend, rate-limit queue).' },
+  { name: 'lift', direction: 'high', description: "L4: the inner campaign's mean lift over its own origin." },
+  { name: 'origin', direction: 'high', description: "L4: the inner campaign's origin level." },
+  { name: 'final_lift', direction: 'high', description: 'L4: the lift the inner campaign ended on.' },
+  { name: 'peak_lift', direction: 'high', description: 'L4: the best lift the inner campaign reached.' },
+  { name: 'rounds', direction: 'low', description: 'L4: rounds the inner campaign ran.' },
+  { name: 'round_budget', direction: 'high', description: 'L4: rounds the inner campaign was allowed.' },
+  { name: 'cost', direction: 'low', description: 'USD the cell cost.' },
+  { name: 'tokens', direction: 'low', description: 'Input plus output tokens the cell spent.' },
+  { name: 'target_prompt_chars', direction: 'low', description: "Characters of the candidate's prompt template." },
+  { name: 'errored', direction: 'low', description: '1 where the cell errored, else 0.' },
+  { name: 'degraded', direction: 'low', description: '1 where the pipeline reported degradation, else 0.' },
+  { name: 'cached', direction: 'high', description: '1 where the cell was replayed from the archive, else 0.' },
+  { name: 'retrieval_shortfall', direction: 'high', description: 'Per-sample min(observed/target, 1.0) across nodes with max_*/num_* limits on list-valued outputs. 1.0 = target met or exceeded.' },
 ];
 
 // Seconds of silence after which a cycle's producer is treated as vanished. Mirror of

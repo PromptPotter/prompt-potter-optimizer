@@ -3972,7 +3972,7 @@ async def _walk(
     # The one seam stubbed; the window, cursors, checkpoints and discard are shipping code.
     with mock.patch.object(query_loop, "measure_sample", _measure), spending_under(book):
         session = types.SimpleNamespace(
-            scoring=types.SimpleNamespace(scorer=lambda r: 1.0, round_scorer=None),
+            scoring=types.SimpleNamespace(scorer=lambda r: 1.0),
             state=types.SimpleNamespace(ledger=None),
             pause_check=lambda: pause_after_call is not None and len(returned) >= pause_after_call,
             skip_check=None,
@@ -4054,7 +4054,7 @@ async def _round(
         return {"accuracy": 1.0}
 
     session = types.SimpleNamespace(
-        scoring=types.SimpleNamespace(scorer=lambda r: 1.0, round_scorer=None),
+        scoring=types.SimpleNamespace(scorer=lambda r: 1.0),
         state=types.SimpleNamespace(ledger=None),
         pause_check=lambda: flag["pause"],
         skip_check=None,

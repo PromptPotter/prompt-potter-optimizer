@@ -18,7 +18,6 @@ function node(
     is_selected: false,
     theta: null,
     theta_se: null,
-    evaluators: {},
     mean_fitness_ci_lo: null,
     mean_fitness_ci_hi: null,
     scored_samples: null,
@@ -72,7 +71,6 @@ function live(over: Partial<DashboardCandidate> & Pick<DashboardCandidate, "labe
 const EMPTY = {
   inflightByLabel: new Map<string, DashboardCandidate>(),
   sampleSet: null,
-  lensSubsetExact: false,
   diagByLabel: new Map(),
   overlapByCandidate: new Map(),
   overlapSize: null,
@@ -248,32 +246,6 @@ describe("a picked sample set moves the overlap bars, and nothing else", () => {
       })[0];
     expect(on(20)).toMatchObject({ overlapAccuracy: 0.55, overlapN: 20 });
     expect(on(19)).toMatchObject({ overlapAccuracy: null, overlapN: null });
-  });
-
-  // FALSE arm: an evaluator only in the full-set snapshot re-scores half on the subset, silently.
-  // TRUE arm: a value re-deriving whole from the picked rows is the server's own — keep it.
-  it("keeps a masked value that re-derives whole from the picked rows, drops one that cannot", () => {
-    const lensed = course([
-      node({
-        kind: "candidate",
-        id: "a",
-        label: "C1.1",
-        round: 1,
-        sample_set_accuracy: 0.5,
-        sample_set_n: 6,
-        lens_value: 0.42,
-        lens_rank: 1,
-      }),
-    ]);
-    const picked = { ...EMPTY, viewedNode: lensed, sampleSet: [1, 2, 3, 4, 5, 6] };
-    expect(candidateViews({ ...picked, lensSubsetExact: true })[0]).toMatchObject({
-      lensValue: 0.42,
-      lensRank: 1,
-    });
-    expect(candidateViews({ ...picked, lensSubsetExact: false })[0]).toMatchObject({
-      lensValue: null,
-      lensRank: null,
-    });
   });
 
   it("gives a run no basis at all — the server decorates candidates only", () => {

@@ -3,9 +3,9 @@
 // `webapp/CLAUDE.md` § Scoring authority.
 
 import { useSyncExternalStore } from "react";
-import { EVALUATOR_META, type EvaluatorMeta } from "@/lib/api/types.generated";
+import { CELL_TERM_META, type CellTermMeta } from "@/lib/api/types.generated";
 
-// Weight for a selected evaluator the served decomposition carries no coefficient for.
+// Weight for a selected term the served decomposition carries no coefficient for.
 export const DEFAULT_MASK_WEIGHT = 0.1;
 
 export type ScoringMask =
@@ -17,11 +17,6 @@ export function emptyMask(): ScoringMask {
   return { kind: "weights", selected: new Set(), weights: {} };
 }
 
-// A node-bound evaluator arrives prefixed (`ranker_source_recall`), so the suffix match is the rule.
-function metaFor(name: string): EvaluatorMeta | undefined {
-  return EVALUATOR_META.find((m) => name === m.name || name.endsWith("_" + m.name));
-}
-
 // A menu highlight only, never a scoring read: slider coefficients are served
 // (`composite_fitness_weights`).
 export function identifiersInFormula(formula: string | undefined | null): Set<string> {
@@ -29,55 +24,26 @@ export function identifiersInFormula(formula: string | undefined | null): Set<st
   return new Set(formula.match(/[a-zA-Z_][a-zA-Z0-9_]*/g) || []);
 }
 
-export interface Row {
-  displayName: string;
-  registryName: string;
-  applicable: boolean;
-  description: string;
-  direction: "high" | "low";
+// One tile per term a `per_cell` formula can name, plus any the realized formula names beyond
+// the served vocabulary (a judge's term) — so a seeded weight always has a tile to sit on.
+export function termRows(extra: Iterable<string> = []): CellTermMeta[] {
+  const known = new Set(CELL_TERM_META.map((m) => m.name));
+  const unknown = [...extra].filter((name) => !known.has(name));
+  return [
+    ...CELL_TERM_META,
+    ...unknown.map((name) => ({ name, direction: "high" as const, description: "" })),
+  ];
 }
 
-export function buildRows(meta: readonly EvaluatorMeta[], applicable: Set<string>): Row[] {
-  const out: Row[] = [];
-  const used = new Set<string>();
-  for (const m of meta) {
-    const matches = [...applicable].filter((a) => a === m.name || a.endsWith("_" + m.name));
-    if (matches.length === 0) {
-      out.push({
-        displayName: m.name,
-        registryName: m.name,
-        applicable: false,
-        description: m.description,
-        direction: m.direction,
-      });
-    } else {
-      for (const an of matches) {
-        out.push({
-          displayName: an,
-          registryName: m.name,
-          applicable: true,
-          description: m.description,
-          direction: m.direction,
-        });
-        used.add(an);
-      }
-    }
-  }
-  for (const an of applicable) {
-    if (used.has(an)) continue;
-    out.push({ displayName: an, registryName: an, applicable: true, description: "", direction: "high" });
-  }
-  return out;
-}
-
-// A "low" evaluator flips to `(1 - name)`, matching the server composite's shape so seeded
-// weights reproduce the realized criterion.
+// A "low" term flips to `(1 - name)`, matching the server composite's shape so seeded weights
+// reproduce the realized criterion.
 function formulaFromWeights(mask: Extract<ScoringMask, { kind: "weights" }>): string | null {
   const terms: string[] = [];
   for (const sel of mask.selected) {
     const w = mask.weights[sel] ?? DEFAULT_MASK_WEIGHT;
     if (w === 0) continue;
-    terms.push(`${w} * ${metaFor(sel)?.direction === "low" ? `(1 - ${sel})` : sel}`);
+    const low = CELL_TERM_META.find((m) => m.name === sel)?.direction === "low";
+    terms.push(`${w} * ${low ? `(1 - ${sel})` : sel}`);
   }
   return terms.length > 0 ? terms.join(" + ") : null;
 }
@@ -91,23 +57,11 @@ export function lensOf(mask: ScoringMask | null): string | null {
   return formula ? SCORE + formula : null;
 }
 
-// The bare formula `CampaignConfig.scoring` takes; `null` for an `abort:` lens.
+// The bare `per_cell` formula a `score:` lens names — what a fork applying it carries as
+// `scoring.per_cell`; `null` for an `abort:` lens.
 export function criterionOf(mask: ScoringMask | null): string | null {
   const lens = lensOf(mask);
   return lens?.startsWith(SCORE) ? lens.slice(SCORE.length) : null;
-}
-
-// Only row-derivable evaluators recompute under a sample-set mask
-// (`mask/load.py::materialize_row_derivable`); the rest are whole-set, so mixing them misleads.
-export function subsetExactFor(mask: ScoringMask | null): boolean {
-  if (mask == null) return false;
-  const names = mask.kind === "weights" ? mask.selected : identifiersInFormula(mask.lens);
-  let any = false;
-  for (const name of names) {
-    if (!metaFor(name)?.from_rows) return false;
-    any = true;
-  }
-  return any;
 }
 
 // Module state, not a context: the candidates card and `lib/lineage.tsx` share no ancestor.

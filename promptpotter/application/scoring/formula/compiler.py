@@ -8,7 +8,7 @@ import hashlib
 import math
 from collections.abc import Callable, Mapping
 from types import SimpleNamespace
-from typing import Any, NamedTuple, cast
+from typing import Any, Literal, NamedTuple, cast
 
 from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
 from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS
@@ -36,8 +36,8 @@ class ScoringTermMissingError(ScoringFormulaError):
     """The formula names a term the measurement does not carry. Distinct from its parent because the readers want opposites:
     the parent is a contract bug every cell fails, while this one is PER-CELL — a grading that fails
     past its retry omits its term while the cell beside it grades fine. So neither reader halts on
-    it: ``rescore_results`` resolves the row to UNSCORED and keeps the paid measurement, and the
-    read-side mask reports *unscorable*."""
+    it: ``rescore_results`` resolves the row to UNSCORED and keeps the paid measurement — under a
+    lens too, which reads through it."""
 
 
 SAFE_BUILTINS = {
@@ -275,6 +275,34 @@ _ROW_HEALTH: dict[str, Callable[[Mapping[str, Any]], float]] = {
 CELL_CHANNELS: tuple[str, ...] = tuple(_CHANNEL_READERS)
 
 
+class CellTerm(NamedTuple):
+    """How a ``per_cell`` term is TAUGHT — the scoring-mask editor's vocabulary, never a reading."""
+
+    direction: Literal["high", "low"]
+    description: str
+
+
+CELL_TERMS: dict[str, CellTerm] = {
+    "fitness": CellTerm("high", "The cell's correctness under the per-sample formula."),
+    "ground_truth_rank": CellTerm("low", "Where the truth landed in the ranking; 1 is the top."),
+    "latency": CellTerm("low", "Seconds the cell took when measured; a replay keeps them."),
+    "unworked": CellTerm("low", "Seconds the cell sat blocked (suspend, rate-limit queue)."),
+    "lift": CellTerm("high", "L4: the inner campaign's mean lift over its own origin."),
+    "origin": CellTerm("high", "L4: the inner campaign's origin level."),
+    "final_lift": CellTerm("high", "L4: the lift the inner campaign ended on."),
+    "peak_lift": CellTerm("high", "L4: the best lift the inner campaign reached."),
+    "rounds": CellTerm("low", "L4: rounds the inner campaign ran."),
+    "round_budget": CellTerm("high", "L4: rounds the inner campaign was allowed."),
+    "cost": CellTerm("low", "USD the cell cost."),
+    "tokens": CellTerm("low", "Input plus output tokens the cell spent."),
+    "target_prompt_chars": CellTerm("low", "Characters of the candidate's prompt template."),
+    "errored": CellTerm("low", "1 where the cell errored, else 0."),
+    "degraded": CellTerm("low", "1 where the pipeline reported degradation, else 0."),
+    "cached": CellTerm("high", "1 where the cell was replayed from the archive, else 0."),
+}
+assert set(CELL_TERMS) == {*_CHANNEL_READERS, *_ROW_HEALTH}, "a per-cell term went untaught"
+
+
 def cell_channels_of(result: Mapping[str, Any]) -> dict[str, float]:
     """Every channel this ONE row can answer. A key absent from the result is a channel the row
     cannot answer, and every caller downstream treats it that way."""
@@ -507,7 +535,9 @@ def split_scoring_block(
 
 __all__ = [
     "CELL_CHANNELS",
+    "CELL_TERMS",
     "SAFE_BUILTINS",
+    "CellTerm",
     "CompiledExpression",
     "ScoringFormulaError",
     "ScoringTermMissingError",

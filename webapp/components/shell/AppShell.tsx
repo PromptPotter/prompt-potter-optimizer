@@ -270,8 +270,8 @@ function AppShellInner() {
   return (
     <SelectionProvider cycleId={leafCycleId}>
     <ConnectorProvider campaignId={leafHop?.campaignId ?? null} at={connectorAt}>
-    {/* ONE lineage fetch owner, rooted at the ROOT hop. Inside both providers above: it
-        composes SelectionProvider's `sampleSet` and ConnectorProvider's evaluators. */}
+    {/* ONE lineage fetch owner, rooted at the ROOT hop. Inside the providers above: it
+        composes SelectionProvider's `sampleSet` into the masked read. */}
     <LineageProvider campaignId={campaignId} cycleId={cycleId}>
     {/* Here, not in the chat tab: its consumers sit on two different branches of that tab. */}
     <HardSamplesProvider path={viewedPath} datasetName={leafDatasetName}>

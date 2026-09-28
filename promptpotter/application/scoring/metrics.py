@@ -14,24 +14,17 @@ from promptpotter.application.scoring.evaluators import (
     compute_accuracy,
     materialize_round_values,
 )
-from promptpotter.application.scoring.formula import (
-    ScoringTermMissingError,
-    cell_channels_of,
-    compile_round_scorer,
-)
+from promptpotter.application.scoring.formula import ScoringTermMissingError, cell_channels_of
 from promptpotter.application.scoring.row_diagnostics import count_degraded_samples
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.scoring import QueryMeasurement, RoundScorer
+    from promptpotter.domain.scoring import QueryMeasurement
 
 __all__ = [
     "compute_composite_fitness",
     "fold_cells",
     "matched_parent_stats",
-    "value_with_mask_applied",
 ]
 
 
@@ -119,9 +112,8 @@ def compute_composite_fitness(
     base = _compute_accuracy(results)
     scoreable = scoreable_rows(results)
     evaluator_values = materialize_round_values(pipeline_schema, results)
-    # Meaned in under the SAME names the composite formula uses, so a mask is written `latency`
-    # rather than a second spelling of it. That makes the mask the PROJECTION of the elected
-    # formula, exact only where it is linear (`operations/mask-projection.md`).
+    # Meaned in under the SAME names the per-cell composite uses. A reading of the round, never a
+    # formula input: a lens re-grades the rows (`mask/load.py`), since f(mean) is not mean(f).
     evaluator_values.update(_channel_means(scoreable))
     return {
         **base,
@@ -148,16 +140,3 @@ def matched_parent_stats(
     # numbers, and a second place for the two to disagree.
     composite = compute_composite_fitness(parent_results, pipeline_schema)
     return {key: composite[key] for key in ("accuracy", "total", "composite_fitness")}
-
-
-def value_with_mask_applied(
-    evaluators: Mapping[str, float],
-    criterion: RoundScorer | str | None,
-) -> float | None:
-    """``None`` when the criterion names an evaluator absent from this record's namespace —
-    unscorable under this mask, never a fabricated score. Every OTHER scoring error still propagates."""
-    scorer = criterion if callable(criterion) else compile_round_scorer(criterion)
-    try:
-        return float(scorer(dict(evaluators)))
-    except ScoringTermMissingError:
-        return None

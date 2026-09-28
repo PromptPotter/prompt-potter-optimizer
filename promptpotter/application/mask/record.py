@@ -1,5 +1,5 @@
-"""The **record** — the realized lineage as the mask fold reads it: raw recorded facts, no scoring
-math. The verdict supplies the math, the record the data, the fold the traversal. Pure data, no I/O."""
+"""The **record** — the realized lineage as the mask fold reads it: every arm's rows already read
+under ONE scorer (the lens, or each cycle's own) — and the sample-set mask's parser. No I/O."""
 
 from __future__ import annotations
 
@@ -11,20 +11,37 @@ from promptpotter.domain.results import RoundResult
 from promptpotter.domain.strict_model import StrictModel
 
 
+def parse_sample_ids(text: str | None) -> frozenset[int] | None:
+    """The sample-set mask as a CALLER names it — a comma-separated id list. Empty / unset ⇒
+    ``None``, the full-set mask; a non-integer token raises ``ValueError`` for the entry point to
+    turn into its own refusal. Here rather than at either edge, because both the lineage-tree
+    route and an evidence subject address the same mask and may not spell it two ways."""
+    if not text or not text.strip():
+        return None
+    ids = frozenset(int(tok) for tok in text.split(",") if tok.strip())
+    return ids or None
+
+
+class MaskReading(StrictModel):
+    """One arm's rows graded and folded — what a fresh run under the same scorer reports for it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    composite_fitness: float
+    accuracy: float | None
+    # How many samples the reading carries a verdict for — the full measured set, or its
+    # intersection with the sample-set mask; `accuracy` is the mean over exactly these.
+    n_scored: int
+
+
 class MaskCandidate(StrictModel):
-    """One round candidate as the fold sees it; ``evaluators`` is the STORED namespace over the set it was
-    measured on. ``is_eligible`` is a recorded fact, invariant under a scoring swap — hence the gate."""
+    """One round candidate as the fold sees it. ``reading`` is ``None`` where no row of it carries
+    a verdict under the scorer. ``is_eligible`` is a recorded fact, invariant under a scoring swap."""
 
     model_config = ConfigDict(frozen=True)
 
     candidate_id: str
-    evaluators: dict[str, float] = Field(default_factory=dict)
-    accuracy: float | None = None
-    # How many samples this candidate carries a SCOREABLE verdict for — the full measured set,
-    # or the intersection with the sample-set mask. Lets a subset re-score serve an honest
-    # "n of N": a candidate that never ran some chosen samples, or errored on them, reads a
-    # smaller n, and `accuracy` beside it is the mean over exactly these.
-    n_scored: int = 0
+    reading: MaskReading | None = None
     is_selected: bool = False
     is_eligible: bool = True
     # Which PoBB gate cut this candidate's measurement early, if any — an ``EliminationGate``
@@ -34,25 +51,23 @@ class MaskCandidate(StrictModel):
 
 
 class MaskRound(StrictModel):
-    """One round on a cycle's spine. The parent is round ``N-1``'s elected winner (empty at round 0),
-    and the verdict needs it to reproduce the "parent held, no promotion" outcome under a swap.
+    """One round on a cycle's spine. ``parent`` is round ``N-1``'s elected winner read under the
+    record's scorer (``None`` at round 0), which the verdict needs to reproduce "parent held".
 
-    Under a SAMPLE-SET mask these two are re-derived from the round's own ``parent_results``
-    rather than carried (``load.py::_parent``), so the bar is read on the same cells as the arms;
-    empty means the round banked no parent panel and cannot be decided on a subset at all."""
+    Under a SAMPLE-SET mask it is read off the round's own ``reference_results`` instead
+    (``load.py::_parent``), so the bar sits on the same cells as the arms; ``None`` means the round
+    banked no parent panel and cannot be decided on a subset at all."""
 
     model_config = ConfigDict(frozen=True)
 
     cycle_id: str
     round: int
     candidates: list[MaskCandidate] = Field(default_factory=list)
-    parent_evaluators: dict[str, float] = Field(default_factory=dict)
-    parent_accuracy: float | None = None
+    parent: MaskReading | None = None
     # The recorded round itself, and the pool of known per-sample outcomes as it stood
-    # BEFORE this round ran — the substrate a REPLAY verdict re-derives from, and the only
-    # thing on this model that is a raw measurement rather than a summary of one. Carried
+    # BEFORE this round ran — the substrate a REPLAY verdict re-derives from. Carried
     # only when the caller asked (``load_mask_record(..., with_replay=True)``): a scoring or
-    # abort lens reads neither, and a lens should not pay for rows it never touches.
+    # abort lens reads neither.
     round_data: RoundResult | None = None
     known_outcomes: list[dict[str, Any]] = Field(default_factory=list)
     # This round's ledger decisions — the replay verdict re-derives them. Carried only under
@@ -95,4 +110,12 @@ class SpineCycle(StrictModel):
     theta_by_round: dict[int, float] = Field(default_factory=dict)
 
 
-__all__ = ["MaskCandidate", "MaskCycle", "MaskRecord", "MaskRound", "SpineCycle"]
+__all__ = [
+    "MaskCandidate",
+    "MaskCycle",
+    "MaskReading",
+    "MaskRecord",
+    "MaskRound",
+    "SpineCycle",
+    "parse_sample_ids",
+]

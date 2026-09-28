@@ -35,7 +35,6 @@ import {
   criterionOf,
   lensOf,
   setScoringMask,
-  subsetExactFor,
   useScoringMask,
 } from "@/components/shell/mask/scoring-mask";
 import { FitnessRankSummary } from "./FitnessRankSummary";
@@ -57,7 +56,7 @@ import { isSelectedCandidate } from "@/lib/types";
 import { encodeCyclePath } from "@/lib/ids";
 import { useWorkspace } from "@/lib/workspace";
 import { useLineage } from "./useLineage";
-import { useCycleEvaluators } from "@/components/shell/mask/useCycleEvaluators";
+import { useMaskTerms } from "@/components/shell/mask/useMaskTerms";
 import { SampleSetControl } from "./SampleSetControl";
 import { measuredUniverse } from "@/lib/sample-set";
 import { useViewedLineage, divergenceRoundsFor } from "@/lib/lineage";
@@ -137,7 +136,7 @@ export function CandidatesCard() {
   }, [diagRunsResp, campaignId, cycleId]);
 
   const { open: maskOpen, mask } = useScoringMask();
-  const evaluators = useCycleEvaluators();
+  const terms = useMaskTerms();
   const activeLens = maskOpen ? lensOf(mask) : null;
 
   // Carries the on-screen mask, so a scenario built here opens in Compare reading the same thing.
@@ -205,7 +204,6 @@ export function CandidatesCard() {
         viewedNode,
         inflightByLabel,
         sampleSet,
-        lensSubsetExact: subsetExactFor(mask),
         diagByLabel,
         overlapByCandidate,
         overlapSize: overlap?.sample_ids.length ?? null,
@@ -215,7 +213,6 @@ export function CandidatesCard() {
       viewedNode,
       inflightByLabel,
       sampleSet,
-      mask,
       diagByLabel,
       overlapByCandidate,
       overlap,
@@ -477,7 +474,7 @@ export function CandidatesCard() {
                   }}
                 />
                 <MenuSep />
-                <HoverCard content="Pick evaluators and reweight them to recompute every score under a criterion you choose.">
+                <HoverCard content="Pick per-cell terms and reweight them to re-read every score under a criterion you choose.">
                   <MenuCheck on={maskOpen} onClick={() => setScoringMask({ open: !maskOpen })}>
                     Scoring mask
                   </MenuCheck>
@@ -599,11 +596,11 @@ export function CandidatesCard() {
         </div>
         {maskOpen && !viewedCandidateId && (
           <ScoringMaskEditor
-            rows={evaluators.rows}
-            inActive={evaluators.inActive}
+            rows={terms.rows}
+            inActive={terms.inActive}
             mask={mask}
             onMask={(next) => setScoringMask({ mask: next })}
-            seeded={evaluators.seeded}
+            seeded={terms.seeded}
             // No samples field: the chip strip owns that axis.
             summary={<FitnessRankSummary views={views} criterion={activeLens != null} />}
           />

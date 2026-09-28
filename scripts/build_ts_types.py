@@ -592,35 +592,24 @@ def _emit_abort_lens_labels() -> str:
     )
 
 
-def _emit_evaluator_meta() -> str:
-    """Emit the evaluator registry (``application/scoring/evaluators.py``) as a TS const.
-
-    The What-If panel hand-copied it. The copy listed 13 of the registry's 16
-    evaluators and described two of them wrongly — a name-set the compiler didn't
-    derive, gone stale in silence, exactly as the ``run_phase`` union did.
-    """
-    from promptpotter.application.scoring.evaluators import evaluators_meta
+def _emit_cell_term_meta() -> str:
+    """Emit what a ``per_cell`` formula can name (``evaluators.py::cell_terms_meta``) as a TS const —
+    the scoring-mask editor's vocabulary, so a hand copy cannot go stale beside the compiler's."""
+    from promptpotter.application.scoring.evaluators import cell_terms_meta
 
     rows = "\n".join(
-        f"  {{ name: {m['name']!r}, scope: {m['scope']!r}, direction: {m['direction']!r},"
-        # Through ``str`` first: a StrEnum member's ``repr`` is ``<NodeType.RANKER: 'ranker'>``,
-        # which emits as TS the compiler cannot parse. Every other emitter here renders ``.value``.
-        f" node_type: {repr(str(m['node_type'])) if m['node_type'] else 'null'},"
-        f" from_rows: {'true' if m['from_rows'] else 'false'},"
+        f"  {{ name: {m['name']!r}, direction: {m['direction']!r},"
         f" description: {m['description']!r} }},"
-        for m in evaluators_meta()
+        for m in cell_terms_meta()
     )
     return (
-        "export interface EvaluatorMeta {\n"
+        "export interface CellTermMeta {\n"
         "  name: string;\n"
-        '  scope: "per_round" | "per_sample";\n'
         '  direction: "high" | "low";\n'
-        "  node_type: string | null;\n"
-        "  from_rows: boolean;\n"
         "  description: string;\n"
         "}\n\n"
-        "// The evaluator registry, mirrored from application/scoring/evaluators.py.\n"
-        "export const EVALUATOR_META: EvaluatorMeta[] = [\n"
+        "// What a per_cell formula can name, mirrored from application/scoring/evaluators.py.\n"
+        "export const CELL_TERM_META: CellTermMeta[] = [\n"
         f"{rows}\n"
         "];"
     )
@@ -767,7 +756,7 @@ def main() -> int:
     blocks.append(_emit_non_activity_kinds())
     blocks.append(_emit_stop_reason_tables())
     blocks.append(_emit_abort_lens_labels())
-    blocks.append(_emit_evaluator_meta())
+    blocks.append(_emit_cell_term_meta())
     blocks.append(_emit_run_freshness())
     blocks.append(_emit_cycle_path_grammar())
     blocks.append(_emit_prompt_string_fields())

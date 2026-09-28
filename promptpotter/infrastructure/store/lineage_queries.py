@@ -166,11 +166,6 @@ class LineageNode(StrictModel):
         "its rounds are won on theta. False: theta is not a column here, so a surface hides it "
         "rather than drawing a cold ruler's blank.",
     )
-    evaluators: dict[str, float] = Field(
-        default_factory=dict,
-        description="The candidate's stored evaluator namespace — the measurement a `score:` "
-        "lens re-scores against.",
-    )
     mean_fitness_ci_lo: float | None = None
     mean_fitness_ci_hi: float | None = None
     reference_lift: float | None = Field(
@@ -194,9 +189,9 @@ class LineageNode(StrictModel):
     )
     lens_value: float | None = Field(
         default=None,
-        description="This candidate's fitness under the request's `score:` lens, re-scored "
-        "server-side from its stored evaluator namespace. Null without a lens, or when the "
-        "namespace can't satisfy the formula.",
+        description="This candidate's composite fitness under the request's `score:` lens — its "
+        "rows re-graded per cell under that `per_cell` formula and folded, the number a fresh "
+        "run under it reports. Null without a lens, or where no row carries a verdict under it.",
     )
     composite_rank: int | None = Field(
         default=None,
@@ -755,7 +750,6 @@ def _candidate_node(
         accuracy=cand.accuracy,
         composite_fitness=cand.composite_fitness,
         status=cand.state,
-        evaluators=cand.evaluators,
         # The candidate's own band, and only ever that.
         mean_fitness_ci_lo=cand.mean_fitness_ci_lo,
         mean_fitness_ci_hi=cand.mean_fitness_ci_hi,

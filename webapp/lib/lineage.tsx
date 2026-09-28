@@ -20,7 +20,7 @@ import { reportIncident } from "@/lib/diagnostics";
 import { indexLineage, type LineageIndex } from "@/lib/derivations";
 import { createRegistry, type TreeFetchOpts } from "@/lib/lineage-registry";
 import { lensOf, useScoringMask } from "@/components/shell/mask/scoring-mask";
-import { useScoringMaskSeed } from "@/components/shell/mask/useCycleEvaluators";
+import { useScoringMaskSeed } from "@/components/shell/mask/useMaskTerms";
 import { useAuthGate } from "@/lib/auth-context";
 import { useDebounced } from "@/lib/hooks/useDebounced";
 import { usePoll } from "@/lib/hooks/usePoll";

@@ -147,8 +147,8 @@ def build_score_report(
     rows — so the report and the archive name one identity; ``""`` where nothing was measured.
     ``run_id`` is the walk's own (``ScoredWalk.run_id``), ``None`` where nothing was walked."""
     evaluators = dict(score_summary.get("evaluators") or {})
-    # The row-derivable subset refreshed from the rows, as `mask/load.py` does: a snapshot off disk
-    # carries the vocabulary of its day. An EMPTY one is an invalid candidate and stays empty.
+    # The row-derivable subset refreshed from the rows: a snapshot off disk carries the vocabulary
+    # of its day. An EMPTY one is an invalid candidate and stays empty.
     if evaluators.get("accuracy") is not None and query_results:
         evaluators.update(materialize_row_derivable(query_results))
     return ScoredCandidate(

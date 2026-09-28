@@ -11,14 +11,12 @@ from fastapi.responses import JSONResponse
 from promptpotter.application import optimizers
 from promptpotter.application.evidence.subjects import LENS_SCORE_PREFIX
 from promptpotter.application.mask.divergence import Verdict, find_divergences
-from promptpotter.application.mask.load import load_mask_record, parse_sample_ids
-from promptpotter.application.mask.record import MaskRecord
+from promptpotter.application.mask.load import load_mask_record
+from promptpotter.application.mask.record import MaskReading, MaskRecord, parse_sample_ids
 from promptpotter.application.mask.verdicts import make_abort_verdict, make_scoring_verdict
-from promptpotter.application.scoring.formula import compile_round_scorer
-from promptpotter.application.scoring.metrics import value_with_mask_applied
+from promptpotter.application.scoring.formula import ScoringFormulaError
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop, CyclePath, WorkspaceDir
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.scoring import RoundScorer
 from promptpotter.infrastructure.projections.live_dashboard.projection import fold_at
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     LiveDashboardState,
@@ -188,12 +186,12 @@ def get_cycle_dashboard(
 
 class _Lens(NamedTuple):
     verdict: Verdict
-    criterion: RoundScorer | None
+    # The `per_cell` formula every record is read under; `None` reads each cycle's own scorer.
+    formula: str | None
 
 
 def _resolve_lens(lens: str | None) -> _Lens:
-    """The API-edge selector: one ``lens`` value → its verdict strategy; a bad value is a clean 400. Parsed ONCE, so the
-    criterion the fold asks and the criterion served per node are the same object."""
+    """The API-edge selector: one ``lens`` value → its verdict strategy; a bad value is a clean 400."""
     if lens and lens.startswith("abort:"):
         variant = lens.removeprefix("abort:")
         lenses = _abort_lenses()
@@ -207,17 +205,11 @@ def _resolve_lens(lens: str | None) -> _Lens:
         raise BadRequestError(
             f"Unknown lens: {lens!r} (expected '{LENS_SCORE_PREFIX}<formula>' or 'abort:<variant>')"
         )
-    try:
-        criterion = compile_round_scorer(lens.removeprefix(LENS_SCORE_PREFIX) if lens else None)
-    except (ValueError, SyntaxError) as exc:
-        raise BadRequestError(f"Invalid mask scoring formula: {exc}") from exc
-    # No lens at all ⇒ a samples-only mask: the accuracy default folds, but nothing is served
-    # as `lens_value` — the operator named no alternative to show it against.
-    return _Lens(make_scoring_verdict(criterion), criterion if lens else None)
+    return _Lens(make_scoring_verdict(), lens.removeprefix(LENS_SCORE_PREFIX) if lens else None)
 
 
 def _mask_records(
-    stores: Stores, tree: LineageNode, samples: frozenset[int] | None
+    stores: Stores, tree: LineageNode, samples: frozenset[int] | None, formula: str | None
 ) -> dict[CyclePath, MaskRecord]:
     """One ``MaskRecord`` per campaign the tree spans, keyed by the course's OWN PATH.
 
@@ -232,7 +224,12 @@ def _mask_records(
             path = tuple(node.path)
             if path not in out:
                 leaf_store, leaf = resolve_cycle_path(stores, path)
-                out[path] = load_mask_record(leaf_store, leaf.campaign_id, samples)
+                try:
+                    out[path] = load_mask_record(
+                        leaf_store, leaf.campaign_id, samples, lens=formula
+                    )
+                except (ValueError, SyntaxError, ScoringFormulaError) as exc:
+                    raise BadRequestError(f"Invalid mask scoring formula: {exc}") from exc
         for kid in node.children:
             visit(kid)
 
@@ -249,12 +246,15 @@ class _Overlay:
     def __init__(
         self,
         records: dict[CyclePath, MaskRecord],
-        lens: str | None,
-        sample_ids: frozenset[int] | None,
+        verdict: Verdict,
+        *,
+        serves_value: bool,
+        serves_subset: bool,
     ):
-        verdict, self.criterion = _resolve_lens(lens)
         self.diverged: dict[tuple[CyclePath, int], LineageDivergence] = {}
-        self.subset: dict[tuple[CyclePath, str], tuple[float | None, int]] = {}
+        self.readings: dict[tuple[CyclePath, str], MaskReading | None] = {}
+        self.serves_value = serves_value
+        self.serves_subset = serves_subset
         dimmed: set[tuple[CyclePath, int]] = set()
         for path, record in records.items():
             sandbox, campaign_id = path[:-1], path[-1].campaign_id
@@ -268,16 +268,11 @@ class _Overlay:
                 ((*sandbox, CycleHop(campaign_id=campaign_id, cycle_id=cid)), rnd)
                 for cid, rnd in result.divergent
             )
-            if not sample_ids:
-                continue
             for cyc in record.cycles:
                 course = (*sandbox, CycleHop(campaign_id=campaign_id, cycle_id=cyc.cycle_id))
                 for rnd_rec in cyc.rounds:
                     for cand in rnd_rec.candidates:
-                        self.subset[(course, cand.candidate_id)] = (
-                            cand.accuracy if cand.n_scored > 0 else None,
-                            cand.n_scored,
-                        )
+                        self.readings[(course, cand.candidate_id)] = cand.reading
         self.dimmed: frozenset[tuple[CyclePath, int]] = frozenset(dimmed)
 
     @staticmethod
@@ -302,7 +297,8 @@ class _Overlay:
             return node.model_copy(update={"children": kids})
         course = tuple(node.path)
         key = (course, node.round)
-        subset = self.subset.get((course, node.id))
+        read = (course, node.id) in self.readings
+        reading = self.readings.get((course, node.id))
         return node.model_copy(
             update={
                 "children": kids,
@@ -311,12 +307,14 @@ class _Overlay:
                 "divergence": self.diverged.get(key) if node.is_selected else None,
                 "divergent": key in self.dimmed,
                 "lens_value": (
-                    value_with_mask_applied(node.evaluators, self.criterion)
-                    if self.criterion
-                    else None
+                    reading.composite_fitness if reading and self.serves_value else None
                 ),
-                "sample_set_accuracy": subset[0] if subset else None,
-                "sample_set_n": subset[1] if subset else None,
+                "sample_set_accuracy": (
+                    reading.accuracy if reading and self.serves_subset else None
+                ),
+                "sample_set_n": (
+                    (reading.n_scored if reading else 0) if read and self.serves_subset else None
+                ),
             }
         )
 
@@ -342,8 +340,9 @@ def get_lineage_tree(
     and the recursion bound is ``lineage_queries._MAX_COURSE_DEPTH``.
 
     An optional **lens** decorates the nodes with a counterfactual. ``lens=score:<formula>``
-    = an alternative scoring formula (each candidate's ``lens_value``, plus a ``divergence``
-    marker where that criterion would have elected someone else); ``lens=abort:<variant>``,
+    = an alternative ``per_cell`` composite, each candidate's rows re-graded under it and folded
+    (its ``lens_value``, plus a ``divergence`` marker where that criterion would have elected
+    someone else) — the number a fresh run under that formula reports; ``lens=abort:<variant>``,
     variant ∈ the registered eliminators' abort lenses (one ``<gate>_off`` per gate, plus
     ``all_off``) = switch off an elimination gate's abort contribution. ``samples`` = a comma-separated sample-id list (the **sample-set mask**):
     re-score over only those samples. No lens + no samples ⇒ the tree is the raw read.
@@ -371,10 +370,16 @@ def get_lineage_tree(
     except ValueError as exc:
         raise BadRequestError(f"Invalid samples list: {samples!r} ({exc})") from exc
     if lens or sample_ids:
-        # One record read per campaign: an `abort:` lens reads the firing log rather than
-        # evaluators, so it loads the full set. The same records feed the divergence fold AND
-        # the subset re-score — no double-score.
+        # One record read per campaign, every arm's rows graded once under the lens: an `abort:`
+        # lens reads the firing log rather than a score, so it loads the full set. The same
+        # readings feed the divergence fold, `lens_value` and the subset — no double-score.
+        verdict, formula = _resolve_lens(lens)
         is_abort = bool(lens and lens.startswith("abort:"))
         masked = sample_ids if not is_abort else None
-        tree = _Overlay(_mask_records(stores, tree, masked), lens, masked).apply(tree)
+        tree = _Overlay(
+            _mask_records(stores, tree, masked, formula),
+            verdict,
+            serves_value=formula is not None,
+            serves_subset=bool(masked),
+        ).apply(tree)
     return JSONResponse(tree.model_dump(mode="json"), headers=headers)

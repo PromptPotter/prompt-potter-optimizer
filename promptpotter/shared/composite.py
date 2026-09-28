@@ -117,9 +117,8 @@ def inline_short_formula_values(
 # Composite-score rendering primitives
 # ===========================================================================
 
-# Builtins exposed to ``compile_round_scorer``'s eval namespace — exclude
-# them from name discovery so they don't get spuriously rendered as
-# evaluator values.
+# Builtins a formula may call (``compiler.py::SAFE_BUILTINS``) — excluded from name
+# discovery so they don't get spuriously rendered as evaluator values.
 _FORMULA_BUILTINS = {
     "min",
     "max",

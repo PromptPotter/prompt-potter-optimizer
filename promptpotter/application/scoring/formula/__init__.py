@@ -10,7 +10,6 @@ from promptpotter.application.scoring.formula.compiler import (
 )
 from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
 from promptpotter.application.scoring.formula.rescore import rescore_results
-from promptpotter.application.scoring.formula.round_scorer import compile_round_scorer
 
 __all__ = [
     "SCORING_FUNCTIONS",
@@ -18,7 +17,6 @@ __all__ = [
     "ScoringTermMissingError",
     "auto_scorer_id",
     "cell_channels_of",
-    "compile_round_scorer",
     "compile_scorer",
     "rescore_results",
     "split_scoring_block",

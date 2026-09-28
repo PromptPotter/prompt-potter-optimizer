@@ -16,7 +16,7 @@ const TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_CAMPAIGNS = 24;
 
 // Ids, flags and UI keys only — never a measurement. The card's headline `metrics` is not stored:
-// `CandidatesCard` seeds it per cycle from the evaluators the run actually produced.
+// `CandidatesCard` seeds it per cycle from the run's own headline metric.
 export interface CampaignView {
   v: number;
   // Drives both the TTL and the LRU eviction order.

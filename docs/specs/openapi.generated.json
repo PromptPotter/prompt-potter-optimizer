@@ -4063,14 +4063,6 @@
             "title": "Election Held",
             "type": "boolean"
           },
-          "evaluators": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "description": "The candidate's stored evaluator namespace — the measurement a `score:` lens re-scores against.",
-            "title": "Evaluators",
-            "type": "object"
-          },
           "expected_samples": {
             "anyOf": [
               {
@@ -4139,7 +4131,7 @@
                 "type": "null"
               }
             ],
-            "description": "This candidate's fitness under the request's `score:` lens, re-scored server-side from its stored evaluator namespace. Null without a lens, or when the namespace can't satisfy the formula.",
+            "description": "This candidate's composite fitness under the request's `score:` lens — its rows re-graded per cell under that `per_cell` formula and folded, the number a fresh run under it reports. Null without a lens, or where no row carries a verdict under it.",
             "title": "Lens Value"
           },
           "mean_fitness_ci_hi": {
@@ -7895,7 +7887,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/tree": {
       "get": {
-        "description": "The lineage tree rooted at this cycle — the single served genealogy.\n\nNodes alternate ``course -> candidate -> (course | sample)`` forever, so an L4 inner\nrun is the same shape one level down rather than a special case, and L5+ needs no new\ntier. There is no ``depth`` parameter: one tree per campaign serves every consumer,\nand the recursion bound is ``lineage_queries._MAX_COURSE_DEPTH``.\n\nAn optional **lens** decorates the nodes with a counterfactual. ``lens=score:<formula>``\n= an alternative scoring formula (each candidate's ``lens_value``, plus a ``divergence``\nmarker where that criterion would have elected someone else); ``lens=abort:<variant>``,\nvariant ∈ the registered eliminators' abort lenses (one ``<gate>_off`` per gate, plus\n``all_off``) = switch off an elimination gate's abort contribution. ``samples`` = a comma-separated sample-id list (the **sample-set mask**):\nre-score over only those samples. No lens + no samples ⇒ the tree is the raw read.\n\nA shell, deliberately: resolve the path, build the view, serve it. The assembly rules\nlive in ``store/lineage_queries.py``.",
+        "description": "The lineage tree rooted at this cycle — the single served genealogy.\n\nNodes alternate ``course -> candidate -> (course | sample)`` forever, so an L4 inner\nrun is the same shape one level down rather than a special case, and L5+ needs no new\ntier. There is no ``depth`` parameter: one tree per campaign serves every consumer,\nand the recursion bound is ``lineage_queries._MAX_COURSE_DEPTH``.\n\nAn optional **lens** decorates the nodes with a counterfactual. ``lens=score:<formula>``\n= an alternative ``per_cell`` composite, each candidate's rows re-graded under it and folded\n(its ``lens_value``, plus a ``divergence`` marker where that criterion would have elected\nsomeone else) — the number a fresh run under that formula reports; ``lens=abort:<variant>``,\nvariant ∈ the registered eliminators' abort lenses (one ``<gate>_off`` per gate, plus\n``all_off``) = switch off an elimination gate's abort contribution. ``samples`` = a comma-separated sample-id list (the **sample-set mask**):\nre-score over only those samples. No lens + no samples ⇒ the tree is the raw read.\n\nA shell, deliberately: resolve the path, build the view, serve it. The assembly rules\nlive in ``store/lineage_queries.py``.",
         "operationId": "get_lineage_tree_api_v1_campaigns__campaign_id__cycles__cycle_id__tree_get",
         "parameters": [
           {

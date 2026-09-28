@@ -50,8 +50,6 @@ export interface CandidateViewsInput {
   inflightByLabel: ReadonlyMap<string, DashboardCandidate>;
   // null ⇒ the served reading.
   sampleSet: number[] | null;
-  // Decided off the served evaluator registry (`scoring-mask::subsetExactFor`), not here.
-  lensSubsetExact: boolean;
   diagByLabel: ReadonlyMap<string, DiagnosticRunRecord>;
   overlapByCandidate: ReadonlyMap<string, OverlapMember>;
   // The denominator a member must match to be readable.
@@ -64,7 +62,6 @@ export function candidateViews({
   viewedNode,
   inflightByLabel,
   sampleSet,
-  lensSubsetExact,
   diagByLabel,
   overlapByCandidate,
   overlapSize,
@@ -107,7 +104,6 @@ export function candidateViews({
       referenceLift: isCourse ? null : n.reference_lift,
       referenceLiftCiLo: isCourse ? null : n.reference_lift_ci_lo,
       referenceLiftCiHi: isCourse ? null : n.reference_lift_ci_hi,
-      evaluators: n.evaluators,
       is_selected: m.is_selected ?? false,
       n_samples: m.scored_samples ?? null,
       n_expected: m.expected_samples ?? null,
@@ -115,11 +111,11 @@ export function candidateViews({
       source: useLive ? "inflight" : "history",
       // The route composes `lens` and `samples` in one read, so a picked set masks this number
       // too — the one channel besides the overlap bars that a pick still moves.
-      lensValue: pickedSet && !lensSubsetExact ? null : n.lens_value,
+      lensValue: n.lens_value,
       // Ranks follow their values exactly, or a bar carries a position in an ordering whose
       // number it is not showing.
       compositeRank: isCourse ? null : n.composite_rank,
-      lensRank: pickedSet && !lensSubsetExact ? null : n.lens_rank,
+      lensRank: n.lens_rank,
       started: accuracy != null,
       // SERVED, never inferred from whether the round has closed: a round that HELD crowned
       // nobody and reads exactly like one still scoring.

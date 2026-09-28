@@ -120,8 +120,8 @@ collects everything else.
   notice the absence, jump to a distant default, and find a docstring clause naming the
   intended callers. `open_walk` / `score_search_point` take `measured` this way.
   A default is fine when it is a *derivation* every caller would repeat identically
-  (`round_scorer=None` → the schema's own default formula), not when the right value
-  genuinely differs per call site.
+  (`compile_scorer(per_sample, per_cell=None)` → the objective IS the fitness), not when the
+  right value genuinely differs per call site.
 - **A query module reads a persisted document through its MODEL, never as a dict.** A round file
   parses as `RoundResult`, `dashboard.json` as its projection model — then direct field access is
   the natural reading, not an aspiration defended by `.get()`/`isinstance` at every key. A dict

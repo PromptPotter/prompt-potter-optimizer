@@ -181,7 +181,9 @@ LEDGER_BASELINE = {
     # +1: `bench/difficulty.py` — the δ ruler as a scoped bench view any selector reads. It takes
     # three fields, six helpers and four methods off `Cycle`; the A/B replay and the L4 shared
     # scale anchor through it, and inside `cycle.py` the ruler would read as Cycle state again.
-    "modules": 390,
+    # -1: `scoring/formula/round_scorer.py` — a lens compiles to the cell scorer the loop runs, so
+    # no formula reads a round's evaluator map.
+    "modules": 389,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     # +2: `application/optimizers/__init__.py` (the member registry) and its `potter/`, empty.
@@ -842,7 +844,9 @@ LEDGER_BASELINE = {
     # NET of `CycleListEntry.bench_score`. The headline is the CAMPAIGN's, read off `result.json`,
     # so a line a rebase ended on a fork keeps it; a per-cycle copy served the retired root's none.
     # `wall_clock_*` became `worked_*`: the line's launches less gate and unworked time.
-    "served_fields": 743,
+    # -1: `LineageNode.evaluators` — the round map a `score:` lens re-scored; a lens now re-grades
+    # the arm's rows per cell (`mask/load.py`), so no browser or fold reads the map off the tree.
+    "served_fields": 742,
 }
 
 

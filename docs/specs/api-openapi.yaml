@@ -972,7 +972,7 @@ paths:
       summary: Set a cycle's composite formula.
       description: |
         Wire form of editing `campaign.json::scoring`. There is no live-swap
-        counterpart to be the wire form OF: `round_scorer` compiles once at run
+        counterpart to be the wire form OF: the cell scorer compiles once at run
         init and is never re-read, and a mid-cycle redefinition makes the
         composite incomparable to its own past — `EscalationFSM._advanced` reads
         `best_composite_fitness` as the L2/L3 stall gate whenever the θ ruler is
@@ -1704,9 +1704,12 @@ paths:
           in: query
           required: false
           description: |
-            A counterfactual overlay. `score:<formula>` = an alternative scoring formula —
-            stamps each candidate's `lens_value` and marks a `divergence` on the spine node
-            where that criterion would have elected someone else. `abort:<variant>`,
+            A counterfactual overlay. `score:<formula>` = an alternative `per_cell` composite:
+            every candidate's rows are re-graded under the campaign's per-sample formula and it,
+            then folded — the number a fresh run under it reports — into `lens_value`, with a
+            `divergence` on the spine node where that criterion would have elected someone
+            else. Reads every round document of each campaign the tree spans and grades each
+            row once per request. `abort:<variant>`,
             variant ∈ {`epsilon_off`, `lock_in_off`, `all_off`} = switch off a PoBB abort
             contributor. Absent → the tree is the raw read. Unknown value → 400.
           schema: { type: string }
@@ -1716,7 +1719,8 @@ paths:
           description: |
             The sample-set mask: a comma-separated sample-id list. Re-scores each candidate
             over only those samples into `sample_set_accuracy` / `sample_set_n`. Composes
-            with a `score:` lens; ignored for an `abort:` lens. A non-integer token → 400.
+            with a `score:` lens, which then reads the same subset per cell and so stays
+            exact on it; ignored for an `abort:` lens. A non-integer token → 400.
           schema: { type: string }
         - name: If-None-Match
           in: header
@@ -2956,10 +2960,6 @@ components:
             Difficulty-adjusted Rasch ability the election ranked on — what explains a
             lower-accuracy winner. Null outside the round's election fit.
         theta_se: { type: [number, "null"] }
-        evaluators:
-          type: object
-          additionalProperties: { type: number }
-          description: The candidate's stored evaluator namespace — what a `score:` lens re-scores.
         mean_fitness_ci_lo: { type: [number, "null"] }
         mean_fitness_ci_hi: { type: [number, "null"] }
         scored_samples: { type: [integer, "null"] }
@@ -2979,8 +2979,9 @@ components:
         lens_value:
           type: [number, "null"]
           description: |
-            This candidate's fitness under the request's `score:` lens, re-scored
-            server-side. Null without a lens, or when the namespace can't satisfy it.
+            This candidate's composite fitness under the request's `score:` lens — its rows
+            re-graded per cell and folded, server-side. Null without a lens, or where no
+            row carries a verdict under it.
         sample_set_accuracy:
           type: [number, "null"]
           description: |
@@ -3670,10 +3671,12 @@ components:
           nullable: true
           description: |
             The composite-fitness criterion (`CampaignConfig.scoring`) — a formula
-            string, or the per-node map. The ONE override a mask can preview
-            against the record: a lens re-elects every round from rows already
-            measured, so the round the preview parts at is the round a
-            `keep_rounds` fork carrying this is minted at. Every other field here
+            string (the per-sample formula, replacing the block), or a
+            `{per_sample, per_cell}` map laid key by key over the parent's block.
+            The ONE override a mask can preview against the record: a `score:F`
+            lens IS `{per_cell: F}`, re-grading rows already measured, so the round
+            the preview parts at is the round a `keep_rounds` fork carrying this is
+            minted at. Every other field here
             moves a ceiling or a patience count, which no measurement can be
             re-read under, so those forks preview nothing.
 

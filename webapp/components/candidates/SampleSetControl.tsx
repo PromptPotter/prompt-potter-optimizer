@@ -16,7 +16,6 @@ import {
 } from "@/lib/sample-set";
 import { Button, Chip, ChipGroup, HoverCard, SegmentedControl, type Segment } from "@/components/ui";
 import { SampleTrajectorySeries } from "@/components/dashboard/samples/SampleTrajectory";
-import { subsetExactFor, useScoringMask } from "@/components/shell/mask/scoring-mask";
 
 type LoadMode = "measured" | "planned";
 
@@ -35,12 +34,8 @@ export function SampleSetControl({
   unit: MeasuredUnit;
 }) {
   const { sampleSet, setSelectionForSampleSet } = useSelection();
-  const { open: maskOpen, mask } = useScoringMask();
   const [detailOpen, setDetailOpen] = useState(false);
   const [load, setLoad] = useState<LoadMode>("measured");
-  // The server composes `lens` and `samples` in one read, so a criterion that cannot re-derive
-  // whole from the masked rows is dropped.
-  const maskDropped = maskOpen && !subsetExactFor(mask);
 
   if (sampleSet == null) return null; // mode off — nothing to control
 
@@ -118,7 +113,6 @@ export function SampleSetControl({
         </ChipGroup>
         <span className="ss-count">
           {sampleSet.length}/{universe.length}
-          {maskDropped ? " · mask off" : ""}
         </span>
       </div>
 

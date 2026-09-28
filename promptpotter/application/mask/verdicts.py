@@ -3,75 +3,56 @@ shared, which is why ``replay`` lives in ``resume_and_fork/ab_replay.py`` with t
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import NamedTuple
 
 from promptpotter.application.mask.divergence import Verdict, VerdictOutcome
-from promptpotter.application.mask.record import MaskRound
-from promptpotter.application.scoring.metrics import value_with_mask_applied
+from promptpotter.application.mask.record import MaskReading, MaskRound
 from promptpotter.domain.results import ScoreboardRankKey, scoreboard_rank_key
-from promptpotter.domain.scoring import RoundScorer
 
 
 class MaskedElection(NamedTuple):
-    """What a swapped criterion would have made of ONE round, against a stated parent floor.
+    """What the record's scorer would have made of ONE round, against a stated parent floor.
 
-    ``decidable`` is False where the parent itself is unscorable under the mask: there is then no
-    floor to reproduce the "parent held" case against, and every caller must say nothing rather
-    than guess. ``winner_id`` is ``None`` for "the parent held" — a real outcome, not an absence.
+    ``decidable`` is False where the parent itself has no reading: there is then no floor to
+    reproduce the "parent held" case against, and every caller must say nothing rather than guess.
+    ``winner_id`` is ``None`` for "the parent held" — a real outcome, not an absence.
     """
 
     decidable: bool
     winner_id: str | None
 
 
-def masked_election(
-    rnd: MaskRound,
-    criterion: RoundScorer | str | None,
-    parent_evaluators: Mapping[str, float],
-    parent_accuracy: float | None,
-) -> MaskedElection:
+def _key(reading: MaskReading) -> ScoreboardRankKey:
+    return scoreboard_rank_key(reading.composite_fitness, reading.accuracy)
+
+
+def masked_election(rnd: MaskRound, parent: MaskReading | None) -> MaskedElection:
     """The one-round ranking every mask consumer shares — the divergence verdict against the
     RECORDED parent, the scenario spine against the counterfactual one it threaded forward. Both
     must order candidates identically or a divergence marker and the chain it explains would
     disagree about the same round.
 
     The eligible filter is the realized one (``is_electable``); the ordering is
-    ``scoreboard_rank_key`` over the masked aggregate.
+    ``scoreboard_rank_key`` over each arm's reading. An arm with none is skipped, never scored 0.
     """
-
-    def _key(evaluators: Mapping[str, float], accuracy: float | None) -> ScoreboardRankKey | None:
-        # A candidate/parent whose stored namespace can't satisfy this mask's formula —
-        # it references a schema-bound evaluator absent from those values — is
-        # *unscorable under the mask*, not a crash. ``value_with_mask_applied`` owns
-        # that single resolution (returns None); same class of incompleteness as the
-        # `not c.evaluators` skip below, so we thread None to the caller as a missing
-        # candidate. Row-derivable evaluators are recomputed into every record upstream,
-        # and the realized formula only names evaluators that WERE stored, so feeding it
-        # never trips this — self-consistency is untouched.
-        value = value_with_mask_applied(evaluators, criterion)
-        return None if value is None else scoreboard_rank_key(value, accuracy)
-
-    best_key = _key(parent_evaluators, parent_accuracy)
-    if not parent_evaluators or best_key is None:
+    if parent is None:
         return MaskedElection(decidable=False, winner_id=None)
+    best_key = _key(parent)
     leader_id: str | None = None  # the parent holds until a challenger beats it
     for c in rnd.candidates:
-        if not c.is_eligible or not c.evaluators:
+        if not c.is_eligible or c.reading is None:
             continue
-        k = _key(c.evaluators, c.accuracy)
-        if k is None:  # unscorable under this mask — skip, like missing evaluators
-            continue
+        k = _key(c.reading)
         if k > best_key:
             best_key = k
             leader_id = c.candidate_id
     return MaskedElection(decidable=True, winner_id=leader_id)
 
 
-def make_scoring_verdict(criterion: RoundScorer | str | None) -> Verdict:
-    """The scoring verdict for a swapped criterion: **re-ranks the RECORD, it does not re-run the
-    election.** The ordering is :func:`masked_election`'s, where the election ranks Rasch θ-lift
-    over the parent behind a coverage floor.
+def make_scoring_verdict() -> Verdict:
+    """The scoring verdict over a record read under a swapped criterion: **re-ranks the RECORD, it
+    does not re-run the election.** The ordering is :func:`masked_election`'s, where the election
+    ranks Rasch θ-lift over the parent behind a coverage floor.
 
     That gap is not closable here: θ under another formula must be re-fit from per-sample grades
     against a re-calibrated δ ruler — ``ab_replay``'s substrate (``with_replay=True`` plus an
@@ -83,7 +64,7 @@ def make_scoring_verdict(criterion: RoundScorer | str | None) -> Verdict:
         if rnd.round == 0:
             return VerdictOutcome(diverged=False)
         recorded_winner = next((c.candidate_id for c in rnd.candidates if c.is_selected), None)
-        election = masked_election(rnd, criterion, rnd.parent_evaluators, rnd.parent_accuracy)
+        election = masked_election(rnd, rnd.parent)
         if not election.decidable:
             return VerdictOutcome(diverged=False)
         diverged = election.winner_id != recorded_winner

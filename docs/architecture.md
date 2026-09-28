@@ -973,9 +973,12 @@ the PR description.
     composite-or-accuracy resolution. `scoreboard_rank_key` is its argmax form and
     **is not a selection** — selection is the optimizer's `selector` node (potter's is
     `elect_round_winner`'s Rasch θ-lift, which no aggregate reproduces).
-  - **Every score is served, never recomputed in the consumer.** Alternative
-    formulas re-project from the stored per-ROUND evaluator namespace via
-    `value_with_mask_applied`; the webapp recomputes nothing.
+  - **Every score is served, never recomputed in the consumer — and a mask is scored the way
+    the run is.** A `score:F` lens is the cycle's scoring block with `per_cell` set to `F`
+    (the `ConfigOverrides` a fork applying it carries), graded over each arm's rows by
+    `rescore_results` and folded by `fold_cells` (`application/mask/load.py`): the reading a
+    fresh run under `F` reports. A round's evaluator map is a served reading, never a formula
+    input. The webapp recomputes nothing.
   - **The headline is the bench score, and no optimizer computes it.** One evaluator
     scores every optimizer's result on the held-out bench set (§ The bench score is not an
     optimizer's selection). A cleanup cannot let a node read the bench set, serve an

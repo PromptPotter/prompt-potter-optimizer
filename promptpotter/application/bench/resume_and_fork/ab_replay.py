@@ -149,7 +149,7 @@ def ab_replay_cycle(
     scorer = sc.scorer
     assert scorer is not None, "session.scoring.scorer required for A/B replay"
 
-    record = load_mask_record(session.store, hop.campaign_id, with_replay=True)
+    record = load_mask_record(session.store, hop.campaign_id, lens=None, with_replay=True)
     origin = next(
         (
             rnd.round_data

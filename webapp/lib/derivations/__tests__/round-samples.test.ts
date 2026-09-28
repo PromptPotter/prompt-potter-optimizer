@@ -24,7 +24,6 @@ function row(source: CandidateRow["source"]): CandidateRow {
     referenceLift: null,
     referenceLiftCiLo: null,
     referenceLiftCiHi: null,
-    evaluators: {},
     is_selected: false,
     n_samples: null,
     n_expected: null,

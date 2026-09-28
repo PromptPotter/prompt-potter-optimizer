@@ -29,7 +29,6 @@ export interface CandidateRow {
   referenceLift: number | null;
   referenceLiftCiLo: number | null;
   referenceLiftCiHi: number | null;
-  evaluators: Record<string, number>;
   is_selected: boolean;
   n_samples: number | null;
   n_expected: number | null;

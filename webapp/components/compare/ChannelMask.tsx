@@ -3,22 +3,18 @@
 // Applying REPLACES that channel in place; the grammar is `lib/api/reads.ts::maskedSubject`'s — never split here.
 
 import { useState } from "react";
-import { EVALUATOR_META } from "@/lib/api/types.generated";
 import { maskedSubject } from "@/lib/api/reads";
 import type { SubjectReading } from "@/lib/api/types";
 import { ScoringMaskEditor } from "@/components/shell/mask/ScoringMaskEditor";
 import {
-  buildRows,
   emptyMask,
   lensOf,
+  termRows,
   type ScoringMask,
 } from "@/components/shell/mask/scoring-mask";
 
-// The whole registry: a board can span pipelines, and the server reports a term a channel cannot answer.
-const ALL_ROWS = buildRows(
-  EVALUATOR_META,
-  new Set(EVALUATOR_META.map((m) => m.name)),
-);
+// The whole vocabulary: a board can span pipelines, and the server reports a term a channel cannot answer.
+const ALL_ROWS = termRows();
 // No campaign-wide formula on a multi-campaign board, so no tile is marked "in the actual formula".
 const NONE: ReadonlySet<string> = new Set();
 
