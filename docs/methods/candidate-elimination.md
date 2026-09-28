@@ -196,6 +196,61 @@ Where the bench runs LEVI differently from the paper:
 - **A repeated prompt replays its reply** from the optimizer reuse cache where the paper resamples;
   the duplicate lands in an occupied cell, the redundancy §3.2 calls harmless.
 
+## GEPA mapping and deviations
+
+GEPA (arXiv 2507.19457) races its children against their parents, not against each other: its
+manifest (`assets/optimizers/gepa/pipeline.yaml`, every value cited there) runs one iteration of
+Alg. 1 per round, and its eliminator is Alg. 1's acceptance test.
+
+| Paper | Node · config |
+|---|---|
+| Split D_train into D_feedback and D_pareto (Alg. 1 line 1) | `minibatch.pareto_share` 0.5 — AIME, LiveBench-Math and PUPA split equally (App. E.1); the Pareto set rides `GepaRoundState.pareto_set` |
+| P ← [Φ], Φ scored on D_pareto (lines 2-5) | round 1 mutates the incumbent, the origin; `pareto` seats it with its Pareto-set scores off the bench's re-score of the round's panel |
+| SELECTCANDIDATE (line 7, Alg. 2) | `pareto`, at each round's close: per-cell fronts, the dominated removed, the next parent drawn ∝ cells led — `GepaRoundState.parent_id` |
+| SELECTMODULE, round-robin (line 8, §3) | an individual renders one prompt, so the module is its `instruction` every round |
+| A minibatch of b from D_feedback (line 9), b = 3 (App. E.4) | `minibatch.size` 3, the panel's first block |
+| Feedback, scores and traces on M through μ_f (line 10) | `gepa_reflect` runs the parent on the minibatch through the scoring gateway, filed as a parent's reading; μ_f's text is `row_diagnostics.py::cell_feedback` |
+| UPDATEPROMPT (line 11, App. C) | `gepa_reflect/1`, verbatim; the reply's fenced block is the child's instruction |
+| σ′ improved on σ (lines 13-14) | `minibatch_gate`: a child not strictly above its parent's mean objective on the minibatch is cut — a `minibatch_gate` decision, REPLAYED off the parent's recorded scores |
+| Φ′ added to P, scored on D_pareto (lines 15-18) | an accepted child walks the rest of the panel, the Pareto set; `pareto` admits it with its per-cell scores |
+| Return the best average on D_pareto (line 21) | the round selects the best aggregate unless it is the incumbent; a tie holds |
+| The reflection on the system's own model: Qwen3 8B at 0.6, top-p 0.95, a 16,384-token window (App. E.2) | `gepa_reflect` on `qwen/qwen3-8b`, `temperature` 0.6, `top_p` 0.95, `max_tokens` 16,384 |
+| Budget B in rollouts (Eq. 2), matched to MIPROv2's per benchmark (App. E.4) | the campaign's round, spend and token ceilings |
+
+Where the bench runs GEPA differently from the paper:
+
+- **No merge.** Alg. 3 admits a pair only where one descendant kept the ancestor's module, and
+  Alg. 4 then hands the child the other descendant's module — on a one-module individual that
+  child IS the other descendant. The bench runs the paper's GEPA row, not GEPA+Merge.
+- **The prompt** is the individual's `instruction`, its other fields the origin's, as § CAPO's
+  population and operators states for CAPO.
+- **Unstated values, chosen:** the Pareto set is the pool's first half in the bank's order; the
+  minibatch is drawn uniformly each round by the run's seed, where the reference implementation
+  walks a once-per-epoch shuffle; dominance is read as the reference implementation reads it — a
+  candidate is dominated when every cell it leads another survivor also leads, lowest aggregate
+  removed first; the examples are laid out as its `# Example` / `## Inputs` /
+  `## Generated Outputs` / `## Feedback` markdown, inside the untrusted-content fence.
+- **The acceptance test** compares means over the minibatch cells both runs graded, on the
+  campaign's per-cell objective, so an errored cell leaves both sides; the reference implementation
+  compares sums. A parent perfect on the minibatch still gets its reflection, as Alg. 1 has it;
+  the reference implementation skips that iteration.
+- **μ_f** is what the scorer can say about a cell — its objective, its correctness where the
+  composite differs, the expected answer and each judge's banked reason — where the paper's
+  feedback functions are written per benchmark (App. E.1).
+- **A reply without a fenced block** makes an invalid arm that costs no cell; the reference
+  implementation takes the whole reply. Top-k 20 (App. E.2) is not carried, an llm node's call
+  config having none, and the context window stands in for the output cap.
+- **One model for reflection and target** is the campaign's choice, as it is CAPO's: matching
+  `gepa_reflect`'s model to the target's is an overlay.
+- **The draw moves to the close.** Alg. 2 runs at an iteration's start; the bench draws the next
+  parent when the round closes and banks it, so a resume or a fork re-seats the front and the
+  draw together. A member's Pareto-set scores are banked at admission, and a scorer change
+  re-grades none of them, as LEVI's elites.
+- **The bench re-scores its incumbent** on the whole panel each round, minibatch included — cells
+  GEPA's rollout count leaves out, billed in the same book. Under `lift_reference: parents` each
+  child's lift is read against its GEPA parent on the child's cells, which the proposer already
+  measured.
+
 ## On-disk shape and replay
 
 Each `ELIMINATION_CUT` / `LEADER_LOCK_IN` decision record (in `rounds/round_NNNN.json`) carries the paired snapshot under `data`: `p_best`, `leader_id`, `candidate_sample_ids` (the ordered list the candidate had measured at decision time) and `prior_histories[cid]` (each prior's grades restricted to exactly those samples, after backfill). `inputs_ref` records the gate parameters in force **and which `EliminationGate` (`pobb/checks.py`) fired** — only ε computed a posterior, so a replayer re-deriving a collapse cut under the ε rule tests a real `p_best` against a bar nobody set.

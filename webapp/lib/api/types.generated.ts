@@ -465,11 +465,25 @@ export interface LeviRoundState {
   rounds_without_advance: number;
 }
 
+/** One member of GEPA's candidate pool and its row of the score matrix: its campaign objective */
+export interface GepaCandidate {
+  individual: OptSearchPoint;
+  scores: Record<string, number>;
+}
+
+/** GEPA's payload: its candidate pool scored on the Pareto set, and the parent the next round */
+export interface GepaRoundState {
+  pareto_set: string[];
+  pool: GepaCandidate[];
+  parent_id: string | null;
+  rounds_without_advance: number;
+}
+
 /** ``{manifest, prompt_hashes, payload}`` — the one envelope every optimizer's state rides. */
 export interface OptimizerState {
-  manifest: 'potter' | 'capo' | 'levi';
+  manifest: 'potter' | 'capo' | 'levi' | 'gepa';
   prompt_hashes: Record<string, string>;
-  payload: PotterRoundState | CapoRoundState | LeviRoundState;
+  payload: PotterRoundState | CapoRoundState | LeviRoundState | GepaRoundState;
 }
 
 /** The individual: prompt structure + lineage. */
@@ -1047,6 +1061,7 @@ export interface BenchReading {
   accuracy: number | null;
   /** Under the campaign's formula — the number the headline reads. */
   composite_fitness: number | null;
+  /** The 95% band on `composite_fitness`, drawn from the same per-row values. */
   ci_lo: number | null;
   ci_hi: number | null;
   n_scored: number;
@@ -1062,8 +1077,9 @@ export interface BenchScore {
   bench_size: number;
   origin: BenchReading;
   selected: BenchReading;
-  /** `selected` over `origin` on the bench rows both scored, paired per row; `None`
-   * below two shared rows, and 0.0 where the origin is the selection. */
+  /** `selected` over `origin` in `composite_fitness`, paired per bench row both
+   * scored; `None` below two shared rows, and 0.0 where the origin is the
+   * selection. */
   lift: number | null;
   lift_ci_lo: number | null;
   lift_ci_hi: number | null;

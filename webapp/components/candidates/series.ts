@@ -186,14 +186,6 @@ export function seriesColumn(
   });
 }
 
-export function whiskerAnchor(ctx: SeriesCtx): SeriesKey | null {
-  if (ctx.electedMetric !== "ability" && ctx.metrics.has(ctx.electedMetric)) {
-    const spec = CANDIDATE_SERIES.find((s) => s.metric === ctx.electedMetric);
-    if (spec && spec.axis === "y") return spec.key;
-  }
-  return ctx.metrics.has("accuracy") ? "accuracy" : null;
-}
-
 export interface WhiskerBand {
   anchor: SeriesKey;
   lo: (number | null)[];
@@ -206,10 +198,10 @@ const Z95 = 1.96;
 
 export function whiskerBands(ctx: SeriesCtx): WhiskerBand[] {
   const bands: WhiskerBand[] = [];
-  const percent = whiskerAnchor(ctx);
-  if (percent !== null) {
+  // `mean_fitness_ci` is accuracy's band; the composite bar gets none rather than a borrowed one.
+  if (ctx.metrics.has("accuracy")) {
     bands.push({
-      anchor: percent,
+      anchor: "accuracy",
       lo: ctx.views.map((v) => v.meanFitnessCiLo),
       hi: ctx.views.map((v) => v.meanFitnessCiHi),
     });

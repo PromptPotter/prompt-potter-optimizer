@@ -92,7 +92,9 @@ class BenchReading(StrictModel):
     composite_fitness: float | None = Field(
         description="Under the campaign's formula — the number the headline reads."
     )
-    ci_lo: float | None
+    ci_lo: float | None = Field(
+        description="The 95% band on `composite_fitness`, drawn from the same per-row values."
+    )
     ci_hi: float | None
     n_scored: int
     run_id: str = Field(description="The archive run its bench rows were filed under.")
@@ -111,8 +113,8 @@ class BenchScore(StrictModel):
     origin: BenchReading
     selected: BenchReading
     lift: float | None = Field(
-        description="`selected` over `origin` on the bench rows both scored, paired per row; "
-        "`None` below two shared rows, and 0.0 where the origin is the selection."
+        description="`selected` over `origin` in `composite_fitness`, paired per bench row both "
+        "scored; `None` below two shared rows, and 0.0 where the origin is the selection."
     )
     lift_ci_lo: float | None
     lift_ci_hi: float | None

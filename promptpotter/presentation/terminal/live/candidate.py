@@ -91,7 +91,7 @@ def individual_summary_from_dict(
 
     acc = scores["accuracy"]
     n = scores.get("total", 0)
-    # The served composite interval, not a Wilson band re-derived here: this row draws
+    # The served accuracy interval, not a Wilson band re-derived here: this row draws
     # the candidate's own numbers, and the CI must bracket one of them.
     ci = fmt_ci(scores.get("mean_fitness_ci_lo"), scores.get("mean_fitness_ci_hi"), spec="{:.1%}")
     tag = f"{fmt_pct(acc)} {ci}"
@@ -155,6 +155,11 @@ def individual_summary_from_dict(
         )
         raced = elim["raced_against"]
         detail_lines.append(f"  raced against {len(raced)}: {_labels(raced, cap=5)}")
+    elif gate == "not_improved":
+        # GEPA's minibatch test (`_GateRace.gate`): no gain over the parent where both were graded.
+        mean, bar = elim.get("sigma_prime"), elim.get("sigma")
+        reading = f"{mean:.3f} ≤ parent's {bar:.3f}" if mean is not None else "no shared cell"
+        detail_lines.append(f"{YELLOW}✂ no gain on the minibatch {q}{RESET}  {reading}")
     elif outcome == ArmOutcome.BROKEN and degrad:
         dc = int(degrad.get("degraded_count", 0))
         ts = int(degrad.get("total_scored", 0))

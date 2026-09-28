@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import types
 from collections.abc import Callable
 from pathlib import Path
@@ -47,6 +48,8 @@ from promptpotter.application.optimization.validators.l1_invariants import (
 from promptpotter.application.optimizer_manifest import bind_optimizer
 from promptpotter.application.optimizers import paper_templates
 from promptpotter.application.optimizers.capo.state import CapoState, capo_state
+from promptpotter.application.optimizers.gepa.members import draw_parent, pareto_frequencies
+from promptpotter.application.optimizers.gepa.state import GepaState
 from promptpotter.application.optimizers.levi.state import LeviState
 from promptpotter.application.optimizers.nodes import Population, RoundContext
 from promptpotter.application.runner.bench import bench_selection, score_on_bench
@@ -76,6 +79,7 @@ from promptpotter.application.scoring.metrics import (
 from promptpotter.application.scoring.sample_measurement import measure_sample
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.export import build_prompt_export
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import StopReason
@@ -824,26 +828,28 @@ def test_the_mean_interval_is_clipped_to_the_support_the_metric_actually_has() -
     """
     from promptpotter.application.scoring.selection import mean_fitness_ci
 
-    lo, hi = mean_fitness_ci(measurements([0.0] * 6))
+    lo, hi = mean_fitness_ci(measurements([0.0] * 6), grade="fitness")
     assert lo == 0.0 and hi is not None and hi > 0.0, "the floor is the metric's, not the band's"
 
-    lo, hi = mean_fitness_ci(measurements([1.0] * 6))
+    lo, hi = mean_fitness_ci(measurements([1.0] * 6), grade="fitness")
     assert hi == 1.0 and lo is not None and lo < 1.0
 
     # A mid arm is untouched by the clamp — the band is a real interval, not a clamp artifact.
-    lo, hi = mean_fitness_ci(measurements([0.0, 1.0] * 3))
+    lo, hi = mean_fitness_ci(measurements([0.0, 1.0] * 3), grade="fitness")
     assert lo is not None and hi is not None and 0.0 < lo < 0.5 < hi < 1.0
 
     # Nothing scoreable is ABSENT, never a zero-width interval at 0.0.
-    assert mean_fitness_ci([]) == (None, None)
-    assert mean_fitness_ci([measurement(0, None, error_category="provider")]) == (None, None)
+    assert mean_fitness_ci([], grade="fitness") == (None, None)
+    errored = [measurement(0, None, error_category="provider")]
+    assert mean_fitness_ci(errored, grade="fitness") == (None, None)
 
     # And an errored cell does not drag the band down: it never happened, so it widens nothing.
     # `_mean_fitness_by_cell` floors a grade-less row to 0.0 on purpose for the ELECTION, which is
     # why the filter sits at this entry and not inside it.
-    clean = mean_fitness_ci(measurements([1.0] * 6))
+    clean = mean_fitness_ci(measurements([1.0] * 6), grade="fitness")
     with_error = mean_fitness_ci(
-        [*measurements([1.0] * 6), measurement(9, None, error_category="provider")]
+        [*measurements([1.0] * 6), measurement(9, None, error_category="provider")],
+        grade="fitness",
     )
     assert with_error == clean
 
@@ -1777,6 +1783,12 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
     assert (
         picked.selected_labels and picked.composite_fitness < cycle.origin_round.composite_fitness
     )
+    from promptpotter.application.runner.termination import target_tripped
+
+    assert picked.accuracy is not None and picked.accuracy > 0.0
+    assert target_tripped(cycle, picked.accuracy) is StopReason.TARGET_HIT, (
+        "the target stop reads the declared pick, not the round of the composite high-water"
+    )
 
     spend = SpendRollup()
     origin = cycle.origin_round.opt_sp
@@ -1794,7 +1806,13 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
         bench_selection(cycle, session, origin=origin_pass, cb=_QUIET_CALLBACKS, spend=spend)  # type: ignore[arg-type]
     )
     assert (bench.selected.round, bench.selected.sp_hash) == (1, picked.selected_scores[0].sp_hash)
-    assert bench.lift == pytest.approx(1.0), "GOOD solves every bench row the origin misses"
+    assert (bench.selected.accuracy, bench.origin.accuracy) == (1.0, 0.0), "GOOD solves them all"
+    # Point, band and lift read ONE per-row series, the composite, whose misses keep a cost share:
+    # the accuracy gap is not the lift, and a band folded off `fitness` misses its own point.
+    for reading in (bench.origin, bench.selected):
+        assert reading.ci_lo <= reading.composite_fitness <= reading.ci_hi
+    composite_gap = bench.selected.composite_fitness - bench.origin.composite_fitness
+    assert bench.lift == pytest.approx(composite_gap) and composite_gap < 1.0
     result = _build_cycle_result(
         cycle,
         None,
@@ -1807,6 +1825,31 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
         bench=bench,
     )
     assert result.result_round == bench.selected.round, "the result names the round graded"
+    # The export carries that composite headline beside the round's own reading, whose lift is
+    # ACCURACY's over the parent: the bar it pairs with is the parent's accuracy, not its composite.
+    won = scored_candidate(
+        "C1.1",
+        accuracy=0.75,
+        composite_fitness=0.40,
+        reference_accuracy=0.50,
+        reference_composite=0.60,
+        reference_lift=0.25,
+        reference_lift_ci_lo=0.05,
+        reference_lift_ci_hi=0.45,
+    )
+    m = build_prompt_export(
+        round_result(1).model_copy(update={"candidate_scores": [won], "selected_labels": ["C1.1"]}),
+        **dict.fromkeys(("tool_version", "campaign_id", "cycle_id", "dataset_name"), ""),
+        **dict.fromkeys(("dataset_hash", "stop_reason", "finished_at"), ""),
+        optimizer_manifest_hashes={},
+        formula=None,
+        origin_accuracy=None,
+        origin_composite_fitness=None,
+        framing=cycle.framing,
+        demo=(),
+        bench=bench,
+    ).measurement
+    assert (m.reference_lift, m.reference_accuracy) == (0.25, 0.50)
 
 
 def test_a_levi_run_calibrates_a_proxy_then_spends_one_large_call_per_period(
@@ -1942,6 +1985,132 @@ def test_a_levi_run_calibrates_a_proxy_then_spends_one_large_call_per_period(
         e.individual.lineage.id for e in kept.elites
     ]
     assert resumed.calibration is not None and resumed.calibration.proxy == proxy
+
+
+def test_a_gepa_run_admits_a_child_only_past_the_minibatch_and_draws_parents_off_the_front(
+    built_stores, tmp_path, monkeypatch
+) -> None:
+    """GEPA through the real round spine (arXiv 2507.19457 Alg. 1-2): the parent runs on a
+    minibatch of the feedback set, the reflection reads its rows, and the child walks the Pareto
+    set only where it strictly beat the parent there; the pool is ranked on the Pareto set and the
+    next parent is drawn among the candidates that lead a cell no other survivor leads. Silent if
+    wrong: a tie admitted, or a parent drawn off the aggregate, still yields a round with a winner."""
+    replies: list[str] = []
+    prompts: list[str] = []
+    # Longer prompts score higher per cell under `_peer_cycle`'s composite, a miss keeping a fifth:
+    # BETA (past 200 rendered characters) beats ALPHA (~0.6) where both solve, never where only
+    # ALPHA does.
+    alpha, beta = "Solve ALPHA." + " Be brief." * 8, "Solve BETA." + " Take care." * 16
+
+    async def _llm(messages: list[dict], **_kw: Any) -> Any:
+        prompt = messages[0]["content"]
+        prompts.append(prompt)
+        current = prompt.split("```")[1]
+        if len(prompts) == 1:
+            text = f"Here it is:\n```text\n{alpha}\n```"
+        elif len(prompts) == 2:
+            text = f"```\n{beta}\n```"
+        else:
+            # A rewording that solves the same cells at the same length: a tie on the minibatch.
+            tie = alpha if "ALPHA" in current else beta
+            text = f"```\n{tie.replace('.', '!', 1)}\n```"
+        replies.append(text)
+        return types.SimpleNamespace(content=text)
+
+    def solves(prompt: str, s: Sample) -> bool:
+        if "ALPHA" in prompt:
+            return s.key not in pareto or s.key in pareto[:4]
+        return "BETA" in prompt and (s.key not in pareto or s.key in pareto[4:])
+
+    nodes = {"minibatch": {"config": {"size": 3, "pareto_share": 0.5}}}
+    cycle = _peer_cycle(built_stores, tmp_path, monkeypatch, "gepa", nodes, solves)
+    monkeypatch.setattr(paper_templates, "llm_call", _llm)
+    search = list(cycle.session.scoring.partition.search)
+    pareto = [s.key for s in search[:7]]
+    origin_id = cycle.opt_sp.lineage.id
+
+    def arm(rr: RoundResult) -> Any:
+        (cs,) = rr.candidate_scores
+        return cs
+
+    first = asyncio.run(execute_round(cycle, 1, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
+    payload = first.optimizer_state.payload
+    assert payload.pareto_set == pareto
+    child = arm(first)
+    assert child.scored_samples == 3 + len(pareto), "past the minibatch, the whole Pareto set"
+    assert "<UNTRUSTED_DATASET_CONTENT" in prompts[0] and "Answer." in prompts[0].split("```")[1]
+    assert prompts[0].count("# Example ") == 3 and "Expected answer: a" in prompts[0]
+    gate = [d.model_dump(mode="json") for d in cycle.pending_decisions]
+    assert [(d["kind"], d["outcome"]) for d in gate] == [("minibatch_gate", True)]
+    minibatch = set(gate[0]["inputs_ref"]["parent_scores"])
+    assert len(minibatch) == 3 and not minibatch & set(pareto), "drawn off the feedback set"
+    assert replay_all_mismatches(first, gate) == []
+    ids = [c.individual.lineage.id for c in payload.pool]
+    assert ids == [origin_id, child.candidate_id]
+    assert payload.pool[1].individual.instruction == alpha, "the fence's language tag dropped"
+    assert first.selected_labels == [child.label]
+    assert payload.parent_id == child.candidate_id, "the origin leads no cell alone"
+
+    cycle.absorb_round(first)
+    cycle.pending_decisions.clear()
+    second = asyncio.run(execute_round(cycle, 2, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
+    assert alpha in prompts[1].split("```")[1], "the drawn parent is what the reflection reads"
+    beta_arm = arm(second)
+    assert beta_arm.scored_samples == 3 + len(pareto)
+    kept = second.optimizer_state.payload
+    assert second.selected_labels == [beta_arm.label], "the best aggregate on the Pareto set"
+    assert pareto_frequencies(kept.pool, kept.pareto_set) == {
+        child.candidate_id: 4,
+        beta_arm.candidate_id: 3,
+    }, "each survivor counts the cells it leads; the origin leads none"
+    rng = random.Random(0)
+    drawn_ids = [draw_parent(kept.pool, kept.pareto_set, rng) for _ in range(2000)]
+    assert drawn_ids.count(child.candidate_id) / 2000 == pytest.approx(4 / 7, abs=0.04), (
+        "drawn in proportion to the cells each leads — not the best aggregate, not uniformly"
+    )
+    # A candidate that only TIES a survivor on the cells it leads is dominated.
+    _, alpha_c, beta_c = kept.pool
+    tie_pool = [
+        alpha_c.model_copy(update={"scores": dict.fromkeys(pareto, 0.0) | {pareto[0]: 1.0}}),
+        beta_c.model_copy(update={"scores": beta_c.scores | {pareto[0]: 1.0}}),
+    ]
+    assert pareto_frequencies(tie_pool, pareto) == {beta_arm.candidate_id: 7}
+
+    cycle.absorb_round(second)
+    cycle.pending_decisions.clear()
+    third = asyncio.run(execute_round(cycle, 3, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
+    drawn = next(c for c in kept.pool if c.individual.lineage.id == kept.parent_id)
+    assert drawn.individual.instruction in prompts[2].split("```")[1]
+    tied = arm(third)
+    assert tied.outcome is ArmOutcome.ELIMINATED and tied.scored_samples == 3, "a tie is no gain"
+    gate = [d.model_dump(mode="json") for d in cycle.pending_decisions]
+    assert [(d["kind"], d["outcome"]) for d in gate] == [("minibatch_gate", False)]
+    assert replay_all_mismatches(third, gate) == []
+    held = third.optimizer_state.payload
+    assert not third.selected_labels and held.rounds_without_advance == 1
+    assert [c.individual.lineage.id for c in held.pool] == [
+        c.individual.lineage.id for c in kept.pool
+    ]
+    cycle.absorb_round(third)
+    picked = cycle.selection.opt_sp
+    assert picked is not None and picked.lineage.id == beta_arm.candidate_id, (
+        "the pick GEPA hands over is its best aggregate on the Pareto set"
+    )
+    runtime = cycle.optimizer.runtime
+    packages = runtime.round_packages(cycle, cycle.rounds)
+    repaired = [rr.model_copy(deep=True) for rr in cycle.rounds]
+    repaired[1].all_candidate_results[child.candidate_id][0]["predicted"] = "repaired"
+    moved = runtime.round_packages(cycle, repaired)
+    assert [packages[k] == moved[k] for k in range(4)] == [True, True, False, False], (
+        "a repair to round 1's rows drifts the rounds that read them, never the ones before"
+    )
+
+    resumed = GepaState()
+    resumed.replay(third)
+    assert resumed.pareto_set == pareto and resumed.parent_id == held.parent_id
+    assert pareto_frequencies(resumed.pool, resumed.pareto_set) == pareto_frequencies(
+        held.pool, held.pareto_set
+    ), "a resume re-seats the front"
 
 
 # 5. Elimination — who is cut, and when
@@ -2760,9 +2929,9 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
     every cell of the set its rate is read over. Break it and each bar still renders — over a
     smaller denominator, at a rate nothing measured, side by side as if comparable.
 
-    Also pins the rules that keep the set affordable and honest: the line is the bench's own
-    best-so-far, so an optimizer's pick that never beat it is no member; a round re-reading a
-    member widens its coverage; the panel is the ORIGIN's own cells and does not move,
+    Also pins the rules that keep the set affordable and honest: the line is the optimizer's
+    declared picks, so a pick joins it whatever its round's composite, read on other rows; a round
+    re-reading a member widens its coverage; the panel is the ORIGIN's own cells and does not move,
     so a late member is topped up onto it rather than narrowing it for everyone before it; and a
     member is a CONFIGURATION — the RENDERED target prompt, not the six fields and not a lineage
     id. An L2/L3 transition re-mints the parent's OSP from the same fields, and shots move the
@@ -2792,7 +2961,14 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
         )
 
     def rnd(
-        n: int, cid: str, label: str, instruction: str, comp: float, *ids: int, shot: int = 0
+        n: int,
+        cid: str,
+        label: str,
+        instruction: str,
+        comp: float,
+        *ids: int,
+        shot: int = 0,
+        held: bool = False,
     ) -> RoundResult:
         # `instruction` and `shot` BOTH make the configuration here — the second only through
         # the render, which is the whole point.
@@ -2812,7 +2988,7 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
             results=rows(*ids),
             candidates_scored=1,
             candidate_scores=[scored(cid, label)],
-            selected_labels=[],
+            selected_labels=[] if held else [label],
             opt_sp=osp,
             optimizer_state=optimizer_state(),
         )
@@ -2821,9 +2997,9 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
     # best; round 3 HELD but an L2 transition re-minted the parent — same instruction, new id.
     history = [
         rnd(0, "c0", "C0", "base", 0.5, 1, 2, 3, 4, 5, 6),
-        rnd(1, "c0", "C0", "base", 0.5, 7, 8),
+        rnd(1, "c0", "C0", "base", 0.5, 7, 8, held=True),
         rnd(2, "w2", "C2.1", "edited", 0.6, 5, 6, 7, 9),
-        rnd(3, "l2-remint", "C3.1", "edited", 0.6, 5, 6),
+        rnd(3, "l2-remint", "C3.1", "edited", 0.6, 5, 6, held=True),
     ]
     line = best_line(history)
     # TWO members, not three: the L2 re-mint is the same configuration as C2.1, so it folds in
@@ -2835,9 +3011,9 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
     # rows would overwrite C2.1's on every cell they share.
     ctx = best_line([*history, rnd(4, "w4", "C4.1", "edited", 0.7, 5, 6, 7, shot=90)])
     assert [s.candidate_id for s in ctx] == ["c0", "w2", "w4"]
-    # An optimizer's pick that never beat the bench's best joins no line, whatever it elected.
+    # The pick joins the line though its round's composite, read on other rows, is below C2.1's.
     worse = best_line([*history, rnd(4, "w4", "C4.1", "worse", 0.55, 5, 6, 7)])
-    assert [s.candidate_id for s in worse] == ["c0", "w2"]
+    assert [s.candidate_id for s in worse] == ["c0", "w2", "w4"]
     # The held round WIDENED the parent rather than replacing it — without that, 7 and 8 are
     # lost and cell 7 could never join the set below.
     assert measured_cells(line[0].rows) == {1, 2, 3, 4, 5, 6, 7, 8}
@@ -2928,14 +3104,16 @@ def test_matched_parent_lift_drops_the_cell_that_measured_nothing() -> None:
         },
     ]
 
-    lift = matched_parent_lift(errored, [*origin, {"query": "d", "sample_id": 3, "fitness": 0.5}])
+    lift = matched_parent_lift(
+        errored, [*origin, {"query": "d", "sample_id": 3, "fitness": 0.5}], grade="fitness"
+    )
     assert lift is not None
     assert lift[0] == pytest.approx(0.4)  # not dragged toward the floor by cell d
     assert lift[1] < lift[0] < lift[2]
 
     # Below two shared cells there is no spread, so no interval — reported as absence rather than
     # as the `_normal_posterior` n=1 fallback, which invents an SE of 0.5 out of one reading.
-    assert matched_parent_lift(clean[:1], origin[:1]) is None
+    assert matched_parent_lift(clean[:1], origin[:1], grade="fitness") is None
 
 
 def test_parents_lift_reads_a_crossover_against_its_better_parent_on_its_own_cells(
@@ -3007,7 +3185,7 @@ def test_parents_lift_reads_a_crossover_against_its_better_parent_on_its_own_cel
     assert asked == {weak.lineage.id: [0, 1, 2, 3], strong.lineage.id: [0, 1, 2, 3]}
     reference_id, reference_rows = read_against[child.lineage.id]
     assert reference_id == strong.lineage.id
-    lift = matched_parent_lift(rows[child.lineage.id], reference_rows)
+    lift = matched_parent_lift(rows[child.lineage.id], reference_rows, grade="fitness")
     assert lift is not None and lift[0] == pytest.approx(0.2)
     assert read_against[mutant.lineage.id] == (best.lineage.id, bar_rows[:2])
     assert set(banked) == {strong.lineage.id, best.lineage.id}

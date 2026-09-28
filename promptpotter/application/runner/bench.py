@@ -7,7 +7,7 @@ from functools import partial
 from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.scoring.search_point_scorer import score_search_point
-from promptpotter.application.scoring.selection import matched_parent_lift
+from promptpotter.application.scoring.selection import matched_parent_lift, mean_fitness_ci
 from promptpotter.domain.bench import BenchReading, BenchScore
 from promptpotter.domain.phases import CampaignPhase, emit_phase
 from promptpotter.domain.results import resolved_fitness
@@ -59,6 +59,8 @@ async def score_on_bench(
         emit_phase(cb.on_phase, CampaignPhase.BENCH, "exit")
     scores = scored.scores
     accuracy = scores["accuracy"]
+    # The walk's served band is accuracy's; the headline is the composite, so its band is too.
+    ci_lo, ci_hi = mean_fitness_ci(scored.results, grade="objective")
     reading = BenchReading(
         round=round_num,
         sp_hash=search_point.sp_hash(session.pipeline_schema),
@@ -67,8 +69,8 @@ async def score_on_bench(
         composite_fitness=(
             None if accuracy is None else resolved_fitness(scores["composite_fitness"], accuracy)
         ),
-        ci_lo=scores["mean_fitness_ci_lo"],
-        ci_hi=scores["mean_fitness_ci_hi"],
+        ci_lo=ci_lo,
+        ci_hi=ci_hi,
         n_scored=len(scored.results),
         run_id=scored.run_id,
         stopped=scored.stopped,
@@ -92,7 +94,7 @@ async def bench_selection(
         if selected_sp.sp_hash(session.pipeline_schema) == origin.reading.sp_hash
         else await score_on_bench(session, selected_sp, round_num=picked.round, cb=cb, spend=spend)
     )
-    paired = matched_parent_lift(selected.rows, origin.rows)
+    paired = matched_parent_lift(selected.rows, origin.rows, grade="objective")
     score = BenchScore(
         bench_size=len(session.scoring.require_partition().bench),
         origin=origin.reading,

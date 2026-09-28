@@ -213,7 +213,9 @@ def _round_result(
     if base["total"] > 0 and winner_reference is not None:
         # A recorded diagnostic; it gates nothing. Significance runs on the per-sample FITNESS
         # rather than binary hits, TWO-SIDED to match the winner's `reference_lift_ci_*` beside it.
-        cand_fit, parent_fit = paired_fitness(best_results, measured.references[winner_reference])
+        cand_fit, parent_fit = paired_fitness(
+            best_results, measured.references[winner_reference], grade="fitness"
+        )
         _d, _lo, _hi, p_value, _n = paired_reading(cand_fit, parent_fit)
     return RoundResult(
         round=ctx.round_num,

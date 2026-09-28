@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from promptpotter.application.intelligence.exploration import RaschPosterior
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.ruler import DeltaRuler
-    from promptpotter.domain.scoring import QueryMeasurement
+    from promptpotter.domain.scoring import CellGrade, QueryMeasurement
 
 __all__ = [
     "distinct_valid_cells",
@@ -54,14 +54,14 @@ __all__ = [
 ]
 
 
-def mean_fitness_ci(results: list[QueryMeasurement]) -> tuple[float | None, float | None]:
+def mean_fitness_ci(
+    results: list[QueryMeasurement], *, grade: CellGrade
+) -> tuple[float | None, float | None]:
     """Brackets the scoreable population, since that is the number it is drawn beside. A DECISION
     grades an errored row 0.0 (the arm was asked and produced nothing); an interval drawn beside a
     point estimate must bracket the population that estimate came from — hence the filter here and
     deliberately not inside ``_mean_fitness_by_cell``."""
-    # Lazy: scoring → optimization circular.
-
-    per_cell = list(_mean_fitness_by_cell(scoreable_rows(results)).values())
+    per_cell = list(_mean_fitness_by_cell(scoreable_rows(results), grade=grade).values())
     if not per_cell:
         return (None, None)
     _, ci_lo, ci_hi = mean_ci(per_cell)
@@ -83,14 +83,14 @@ def mean_fitness_ci(results: list[QueryMeasurement]) -> tuple[float | None, floa
 # ---------------------------------------------------------------------------
 
 
-def _mean_fitness_by_cell(rows: list[QueryMeasurement]) -> dict[Any, float]:
+def _mean_fitness_by_cell(rows: list[QueryMeasurement], *, grade: CellGrade) -> dict[Any, float]:
     """Un-predicated ON PURPOSE — this is the origin-overlap population, not the display one, and
     ``elect_round_winner`` relies on an errored row counting as a 0.0 cell. Do not add the filter."""
     acc: dict[Any, list[float]] = {}
     for r in rows:
         sid = r.get("sample_id")
         if sid is not None:
-            acc.setdefault(sid, []).append(float(r.get("fitness", 0.0) or 0.0))
+            acc.setdefault(sid, []).append(float(r.get(grade, 0.0) or 0.0))
     return {sid: sum(v) / len(v) for sid, v in acc.items()}
 
 
@@ -104,11 +104,13 @@ def distinct_valid_cells(results: list[QueryMeasurement]) -> int:
 def paired_fitness(
     candidate_results: list[QueryMeasurement],
     parent_results: list[QueryMeasurement],
+    *,
+    grade: CellGrade,
 ) -> tuple[list[float], list[float]]:
     """The matched pairs the round-significance test runs on. Sorted by ``sample_id`` so a replay
     is deterministic. Every caller pairs against the PARENT — the origin only at round 0."""
-    cand_by_sid = _mean_fitness_by_cell(candidate_results)
-    parent_by_sid = _mean_fitness_by_cell(parent_results)
+    cand_by_sid = _mean_fitness_by_cell(candidate_results, grade=grade)
+    parent_by_sid = _mean_fitness_by_cell(parent_results, grade=grade)
     cand_fit: list[float] = []
     parent_fit: list[float] = []
     for sid in sorted(cand_by_sid.keys() & parent_by_sid.keys(), key=lambda s: (s is None, s)):
@@ -120,6 +122,8 @@ def paired_fitness(
 def matched_parent_lift(
     candidate_results: list[QueryMeasurement],
     parent_results: list[QueryMeasurement],
+    *,
+    grade: CellGrade,
 ) -> tuple[float, float, float] | None:
     """``(lift, ci_lo, ci_hi)`` against the PARENT ON THE CELLS BOTH MEASURED — the blocked comparison,
     sharper than ``mean_fitness_ci`` on the same rows. The parent is the origin only at round 0 and the
@@ -130,7 +134,7 @@ def matched_parent_lift(
     # makes the panel a narrowed comparison rather than a smaller one; ``n_cells`` cannot say which.
 
     cand_fit, parent_fit = paired_fitness(
-        scoreable_rows(candidate_results), scoreable_rows(parent_results)
+        scoreable_rows(candidate_results), scoreable_rows(parent_results), grade=grade
     )
     lift, ci_lo, ci_hi, _p, _n = paired_reading(cand_fit, parent_fit)
     return None if ci_lo is None or ci_hi is None else (lift, ci_lo, ci_hi)
@@ -242,7 +246,7 @@ def elect_round_winner(
         # cuts below its own `n_min`, which IS this floor, so no cut arm is stopped here.
         if n_cells < coverage_floor:
             continue
-        cand_fit, _ = paired_fitness(cand_results, parent_results)
+        cand_fit, _ = paired_fitness(cand_results, parent_results, grade="fitness")
         if not cand_fit:
             continue
         # ADMISSION is the bare point lift, no SE margin — subtracting one shrinks the estimate

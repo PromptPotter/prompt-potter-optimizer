@@ -14,6 +14,7 @@ from promptpotter.shared.errors import SendRefusedError, is_repairable_hole
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.domain.results import DegradationHealth
     from promptpotter.infrastructure.llm.spend_book import SpendBook
 
@@ -77,6 +78,16 @@ def panel_gate_tripped(
     return StopReason.PAUSED
 
 
+def target_tripped(cycle: Cycle, target: float | None) -> StopReason | None:
+    """``TARGET_HIT`` once the optimizer's declared pick read ``target`` on the round that picked it —
+    never a high-water across rounds, whose readings sat different rows and outrank the pick."""
+    if target is None:
+        return None
+    # An UNMEASURED pick never hits: its rounds failed to read the bar, not reached it.
+    accuracy = cycle.selection.accuracy
+    return StopReason.TARGET_HIT if accuracy is not None and accuracy >= target else None
+
+
 __all__ = [
     "RUN_STOPS",
     "BudgetGate",
@@ -84,4 +95,5 @@ __all__ = [
     "origin_gate_tripped",
     "panel_gate_tripped",
     "run_stop_reason",
+    "target_tripped",
 ]

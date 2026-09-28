@@ -100,6 +100,14 @@ So **a winner with lower accuracy than a rival, or than the previous round, is n
 reads the accuracy column and calls the election wrong, say which column the election used; do not
 treat the inversion as a defect on their word.
 
+**So no harness rule ranks rounds by their own readings.** The `--halt-at` target stop
+(`runner/termination.py::target_tripped`) reads the optimizer's declared pick (`Cycle.selection`)
+on the round that picked it — the individual the bench grades — never the high-water of each round's
+composite, which can name a round that is not the pick and stop, or refuse to, on rows the pick never
+sat. The overlap line's members are those picks too (`overlap` below): a pick whose round's composite
+trails an earlier round's still joins it. Only potter's L2/L3 stall comparator keeps that
+high-water, as its own signal.
+
 **States where θ is NOT ability, and the pushback above is wrong.** Count them off
 `domain/ruler.py::ThetaCaveat`, not off prose.
 
@@ -154,8 +162,9 @@ responses. A sound round can carry a pinned arm, and a pinned arm can sit on a s
 
   **The question this state makes unanswerable — "is the round-N winner better than C0?" — has its
   own answer, and it is not θ.** `RoundResult.overlap` (`domain/results.py::OverlapReading`) reads
-  C0 and each individual the bench has since ranked best (`domain/results.py::best_line`, the
-  same line for every optimizer) on the ORIGIN PANEL (`domain/results.py::origin_panel`) — cells the
+  C0 and each individual the optimizer has since declared its pick — the best-so-far the bench
+  grades, by the rule above, never a composite high-water (`domain/results.py::best_line`, the
+  same line for every optimizer) — on the ORIGIN PANEL (`domain/results.py::origin_panel`) — cells the
   origin answered, fixed for the life of the cycle, each new best topped up onto them once. Fixed because a set re-chosen from what the line happened to share CONTRACTED as the
   line grew, so consecutive rounds' bars answered different questions and a winner that shared
   too little simply had no bar. It is a rate, not an ability, so it needs

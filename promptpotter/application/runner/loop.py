@@ -27,6 +27,7 @@ from promptpotter.application.runner.termination import (
     BudgetGate,
     origin_gate_tripped,
     run_stop_reason,
+    target_tripped,
 )
 from promptpotter.domain.phases import (
     RunPhase,
@@ -179,15 +180,9 @@ async def run_round_loop(
             round_num += 1
             clean_rounds += 1
 
-            # An UNMEASURED best never hits the target: a cycle whose rounds came back unreadable
-            # has not reached the operator's bar, it has failed to read one.
-            best_acc = cycle.tracking.best_accuracy
-            if (
-                halt_at_accuracy is not None
-                and best_acc is not None
-                and best_acc >= halt_at_accuracy
-            ):
-                return StopReason.TARGET_HIT, None
+            target_stop = target_tripped(cycle, halt_at_accuracy)
+            if target_stop is not None:
+                return target_stop, None
             budget_stop = budget_gate.tripped()
             if budget_stop is not None:
                 return budget_stop, None

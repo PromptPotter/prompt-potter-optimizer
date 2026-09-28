@@ -61,8 +61,8 @@ whole sanctioned set; they name a sample's state, never a back-compat shim
 - `optimizer_state.py` — an optimizer's own working state: the `OptimizerState` envelope
   (`{manifest, prompt_hashes, payload}`) every round document banks, and each optimizer's payload
   under it (`PotterRoundState`, whose `L2L3Memory` is the cycle's wounds, layout, overrides and
-  plan; `CapoRoundState`, the population; `LeviRoundState`, the archive). The bench restores it
-  on resume and fork and reads
+  plan; `CapoRoundState`, the population; `LeviRoundState`, the archive; `GepaRoundState`, the
+  pool and its Pareto-set scores). The bench restores it on resume and fork and reads
   nothing inside `payload`; a potter reader narrows through `potter_round_state`.
 - `campaign.py` — `Campaign` frozen manifest (`campaign.json`); the
   first-class optimization-effort entity, single owner of the frozen

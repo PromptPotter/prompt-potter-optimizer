@@ -37,6 +37,7 @@ from promptpotter.application.optimization.dispatch.bundle import (
 from promptpotter.application.optimization.escalation.state import ExplorationBudget
 from promptpotter.application.optimization.pobb.checks import EliminationGate
 from promptpotter.application.scoring.evaluators import DEFAULT_CELL_FORMULA, compute_accuracy
+from promptpotter.application.scoring.row_diagnostics import judge_readings
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.candidate_diff import (
@@ -463,16 +464,11 @@ def _judge_verdict(row: dict[str, Any]) -> str:
     Derived from the banked keys rather than from a campaign's judge config: this renderer reads
     rows off a bundle and has no session, and a row measured before the judge was declared
     legitimately carries none. Self-suppressing, like every panel here."""
-    pd = row.get("pipeline_data") or {}
-    # Keyed off `_why`, not `_label`: a grading that FAILED carries a reason and no verdict, and
-    # that is the case a reader most needs to see — a cell with no judge term is otherwise
-    # indistinguishable from one the judge was never asked about.
-    names = [k.removesuffix("_why") for k in pd if k.endswith("_why") and pd[k]]
-    if not names:
+    readings = judge_readings(row)
+    if not readings:
         return ""
-    name = names[0]
-    label = str(pd.get(f"{name}_label") or "NOT GRADED")
-    return f"JUDGE ({name}): {label} — {str(pd[f'{name}_why'])[:200]}"
+    name, label, why = readings[0]
+    return f"JUDGE ({name}): {label} — {why[:200]}"
 
 
 # A cell is called WORSE only when its paired difference clears this many of its own SEs. Two —
@@ -1144,7 +1140,7 @@ def _r_precision(b: InjectionBundle) -> list[Item]:
         if arm.mean_fitness_ci_lo is None or arm.mean_fitness_ci_hi is None:
             continue
         rows.append(
-            f"{arm.label} fitness in [{arm.mean_fitness_ci_lo:.3f}, {arm.mean_fitness_ci_hi:.3f}]"
+            f"{arm.label} accuracy in [{arm.mean_fitness_ci_lo:.3f}, {arm.mean_fitness_ci_hi:.3f}]"
             f" on {arm.scored_samples}/{arm.expected_samples} {unit_plural(b.measured_unit)}"
         )
     if not rows:

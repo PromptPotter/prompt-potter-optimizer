@@ -7,7 +7,6 @@ import ast
 import asyncio
 import hashlib
 import inspect
-import json
 import math
 import random
 from collections.abc import Mapping, Sequence
@@ -605,19 +604,8 @@ class LeviRuntime:
         return LEVI_REPLAYERS
 
     def round_packages(self, cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
-        # A round's proposers read every earlier round's rows, through the archive's scores and
-        # the failures a refinement is shown, so a repair drifts every round after the one it hit.
-        out: dict[int, dict[str, str]] = {}
-        digest = hashlib.sha256()
-        for rr in sorted(rounds, key=lambda r: r.round):
-            out[rr.round] = {name: digest.hexdigest()[:16] for name in _PROPOSERS}
-            for rows in (*rr.reference_results.values(), *rr.all_candidate_results.values()):
-                seen = [
-                    [r["sample_key"], r["predicted"], r.get("fitness"), r.get("objective")]
-                    for r in rows
-                ]
-                digest.update(json.dumps(seen, default=str).encode("utf-8"))
-        return out
+        # Through the archive's scores and the failures a refinement is shown.
+        return nodes.rows_read_packages(rounds, _PROPOSERS)
 
     async def rederive(
         self,

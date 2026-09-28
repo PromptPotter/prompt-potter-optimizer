@@ -507,9 +507,8 @@ def _score_cells(c: ScoredCandidate | None, selected_labels: Sequence[str]) -> s
     outside the election fit, or one sharing under two cells with its parent, where ``None`` is
     deliberate: a 0.0 there reads as a measurement.
 
-    The ``won`` column is the round's SELECTION, and the margin beside it is the θ-lift with its
-    interval. Both replace a composite Δ and a ``✓`` derived from it — which is not the election
-    rule and carried no interval, so the glyph read as a verdict the round had not made."""
+    The ``won`` column is the round's SELECTION, and the margin beside it is the paired accuracy
+    lift over the parent with its interval."""
     if c is None:
         return "— | — | — | — | —"
     theta = "—" if c.theta is None else f"{c.theta:+.3f}"

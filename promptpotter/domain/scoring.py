@@ -6,7 +6,7 @@ from __future__ import annotations
 import ast
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import Annotated, Any, NamedTuple, NotRequired, TypedDict, cast
+from typing import Annotated, Any, Literal, NamedTuple, NotRequired, TypedDict, cast
 
 from promptpotter.config.settings import ANSWER_SPACE_CAP, NO_RESULT
 from promptpotter.shared.errors import ErrorCategory, is_error_result
@@ -318,6 +318,10 @@ class CellScorer(NamedTuple):
     objective: Callable[[dict[str, Any]], float]
 
 
+# Which of a row's two :class:`CellScorer` numbers a per-cell fold reads.
+CellGrade = Literal["fitness", "objective"]
+
+
 # The MASK's evaluator, over a round's stored per-round evaluator map. A read-side counterfactual,
 # so it stays per-round: the record it reads may no longer have the rows.
 RoundScorer = Callable[[dict[str, float]], float]
@@ -564,6 +568,7 @@ __all__ = [
     "HIT_THRESHOLD",
     "UNREAD_PIPELINE_KEYS",
     "UNREAD_ROW_KEYS",
+    "CellGrade",
     "CellScorer",
     "PipelineData",
     "QueryMeasurement",

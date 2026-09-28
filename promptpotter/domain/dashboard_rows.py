@@ -191,7 +191,7 @@ class DashboardCandidate(StrictModel):
     theta_caveat: ThetaCaveat | None = None
     # The whisker the chart draws (`ScoredCandidate.mean_fitness_ci_lo/hi`), folded off the
     # candidate's own rows by the scoring gateway (`search_point_scorer::_composite`) on every
-    # sample, so it widens with the bar instead of arriving whole when the walk ends. ONE band per
+    # sample, so it widens with the accuracy bar instead of arriving whole at the end. ONE band per
     # candidate from that one writer: a second estimator overriding it makes the whisker come and
     # go by gating rather than by evidence.
     mean_fitness_ci_lo: float | None = None

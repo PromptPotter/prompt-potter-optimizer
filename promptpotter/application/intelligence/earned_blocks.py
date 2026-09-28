@@ -65,16 +65,14 @@ def _answer_space_signature(round_doc: dict[str, Any], dataset: str) -> str:
 
 
 def _credible_lift(cand: dict[str, Any]) -> float | None:
-    """A candidate's lift over its MATCHED parent, kept only when ``mean_fitness_ci_lo`` clears that parent — real signal,
-    not a noise win. ``None`` when uncredible or unpaired."""
-    parent = cand.get("reference_composite")
-    comp = cand.get("composite_fitness")
-    ci_lo = cand.get("mean_fitness_ci_lo")
-    if not isinstance(parent, (int, float)) or not isinstance(comp, (int, float)):
+    """The paired ``reference_lift`` over a MATCHED parent whose interval clears zero. Accuracy,
+    never the composite: blocks pool across campaigns, and each formula prices cells its own way."""
+    if cand.get("reference_accuracy") is None:
         return None
-    if not isinstance(ci_lo, (int, float)) or ci_lo <= parent:
+    lift, ci_lo = cand.get("reference_lift"), cand.get("reference_lift_ci_lo")
+    if not isinstance(lift, (int, float)) or not isinstance(ci_lo, (int, float)) or ci_lo <= 0:
         return None
-    return float(comp) - float(parent)
+    return float(lift)
 
 
 def _accumulate(

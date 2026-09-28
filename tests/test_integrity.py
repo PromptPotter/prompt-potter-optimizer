@@ -1331,9 +1331,9 @@ def test_earned_blocks_gate_on_credible_lift_and_task_fit() -> None:
     so it rides the SAME serialization a round file carries (the earlier fabricated
     ``prompt_fields_updates`` shape the model never emits made this test green while the feature
     mined nothing): the changed reusable field is the candidate's RESOLVED ``prompt_fields`` diffed
-    against the round's parent ``prompt_fields``, kept only when ``mean_fitness_ci_lo`` clears the
-    matched parent, keyed by the run's answer-space signature so a logic block never reaches a
-    ranking run."""
+    against the round's parent ``prompt_fields``, kept only when its paired accuracy lift over the
+    matched parent clears zero, keyed by the run's answer-space signature so a logic block never
+    reaches a ranking run."""
     from collections import defaultdict
 
     from promptpotter.application.intelligence.earned_blocks import _accumulate
@@ -1341,19 +1341,27 @@ def test_earned_blocks_gate_on_credible_lift_and_task_fit() -> None:
 
     parent = {"persona": "You answer.", "instruction": "Do the task."}
 
-    def scored(label: str, fields: dict[str, str], comp: float, ci_lo: float) -> dict[str, Any]:
+    def scored(
+        label: str, fields: dict[str, str], lift: float, lift_lo: float, *, matched: bool = True
+    ) -> dict[str, Any]:
         return ScoredCandidate(
             run_id=None,
             candidate_id=label,
             label=label,
-            accuracy=comp,
-            composite_fitness=comp,
+            accuracy=0.60 + lift,
+            # Every arm's composite and accuracy band clear the parent's composite, so a credit
+            # read across the two series would keep them all.
+            composite_fitness=0.80,
             total=10,
             outcome=ArmOutcome.MEASURED,
             prompt_fields={**parent, **fields},  # RESOLVED fields, parent + this candidate's change
+            reference_accuracy=0.60 if matched else None,
             reference_composite=0.50,
-            mean_fitness_ci_lo=ci_lo,
-            mean_fitness_ci_hi=ci_lo + 0.1,
+            reference_lift=lift,
+            reference_lift_ci_lo=lift_lo,
+            reference_lift_ci_hi=2 * lift - lift_lo,
+            mean_fitness_ci_lo=0.55 + lift,
+            mean_fitness_ci_hi=0.65 + lift,
         ).model_dump()
 
     logic_run = {
@@ -1366,19 +1374,23 @@ def test_earned_blocks_gate_on_credible_lift_and_task_fit() -> None:
             ]
         },
         "candidate_scores": [
-            # credible: ci_lo 0.62 clears origin 0.50, changed a reusable field → kept
-            scored("c-good", {"persona": "Be a careful logician."}, 0.70, 0.62),
-            # noise win: composite up but ci_lo 0.48 below origin 0.50 → dropped
-            scored("c-noise", {"persona": "Guess fast."}, 0.55, 0.48),
+            # credible: the paired lift's interval clears 0, changed a reusable field → kept
+            scored("c-good", {"persona": "Be a careful logician."}, 0.12, 0.04),
+            # noise win: the composite is up, but the paired lift's interval spans 0 → dropped
+            scored("c-noise", {"persona": "Guess fast."}, 0.05, -0.03),
+            # credible on the cells both reached, but a truncated prefix is no matched parent
+            scored("c-cut", {"persona": "Stop early."}, 0.12, 0.04, matched=False),
             # a long, task-specific field is never reusable material → dropped even if credible
-            scored("c-long", {"instruction": "step 1 ..."}, 0.70, 0.62),
+            scored("c-long", {"instruction": "step 1 ..."}, 0.12, 0.04),
         ],
     }
     acc: dict[tuple[str, str, str], list[float]] = defaultdict(list)
     _accumulate(logic_run, "justlogic-d234", acc)
     fit = "FALSE|TRUE|Uncertain"
-    assert (fit, "persona", "Be a careful logician.") in acc
+    # Credited in accuracy, the lift's own series — not the 0.30 composite gap.
+    assert acc[(fit, "persona", "Be a careful logician.")] == [pytest.approx(0.12)]
     assert (fit, "persona", "Guess fast.") not in acc
+    assert (fit, "persona", "Stop early.") not in acc
     assert not any(field == "instruction" for _, field, _ in acc)
 
     # A closed label set IS a task shape and transfers across datasets; an OPEN one is the absence

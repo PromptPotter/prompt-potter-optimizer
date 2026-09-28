@@ -15,7 +15,6 @@ import {
   seriesColumn,
   whiskerBands,
   type SeriesCtx,
-  type SeriesKey,
   type SeriesSpec,
   type WhiskerBand,
 } from "./series";
@@ -48,11 +47,7 @@ declare module "chart.js" {
     barCaps?: { counts: (number | null)[]; parent: number | null; crown: string };
     divergenceLine?: { index: number | null };
     inFlightPulse?: { index: number | null };
-    meanFitnessCiWhisker?: {
-      anchor: SeriesKey | null;
-      ciLo: (number | null)[];
-      ciHi: (number | null)[];
-    };
+    ciWhisker?: { bands: WhiskerBand[] };
     xBridge?: { onGeometry: (g: PlotGeometry) => void };
   }
 }
@@ -322,6 +317,7 @@ export const FitnessChart = memo(function FitnessChart({
     [metrics, showMask, showCache, showOverlap, views, unit, electedMetric],
   );
   const active = useMemo(() => activeSeries(ctx), [ctx]);
+  const bands = useMemo(() => whiskerBands(ctx), [ctx]);
   const showAbility = metrics.has("ability");
 
   const selectionBorder = useMemo(() => {
@@ -479,7 +475,7 @@ export const FitnessChart = memo(function FitnessChart({
             const ciLo = views[idx]?.meanFitnessCiLo;
             const ciHi = views[idx]?.meanFitnessCiHi;
             if (typeof ciLo === "number" && typeof ciHi === "number") {
-              lines.push(`95% CI [${ciLo.toFixed(3)}, ${ciHi.toFixed(3)}]`);
+              lines.push(`accuracy 95% CI [${ciLo.toFixed(3)}, ${ciHi.toFixed(3)}]`);
             }
             const lift = views[idx]?.referenceLift;
             const lLo = views[idx]?.referenceLiftCiLo;
@@ -487,7 +483,7 @@ export const FitnessChart = memo(function FitnessChart({
             if (lift != null && lLo != null && lHi != null) {
               const flat = liftSeparates(lLo, lHi) ? "" : ` — ${NOT_SEPARABLE}`;
               lines.push(
-                `lift vs parent ${fmtSigned(lift)} [${fmtSigned(lLo)}, ${fmtSigned(lHi)}]${flat}`,
+                `accuracy lift vs parent ${fmtSigned(lift)} [${fmtSigned(lLo)}, ${fmtSigned(lHi)}]${flat}`,
               );
             }
             // Keyed on the election, not the round close: after it, no crown does mean "lost".
@@ -501,11 +497,11 @@ export const FitnessChart = memo(function FitnessChart({
       barCaps: { counts: partialPanels(views), parent: parentIdx, crown },
       divergenceLine: { index: divergenceBoundary },
       inFlightPulse: { index: inFlightIndex },
-      ciWhisker: { bands: whiskerBands(ctx) },
+      ciWhisker: { bands },
       xBridge: { onGeometry },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [themeVersion, ctx, rotate, views, selectedKey, onSelect, divergenceBoundary, inFlightIndex, showAbility, parentIdx, crown, onGeometry]);
+  }), [themeVersion, ctx, rotate, views, selectedKey, onSelect, divergenceBoundary, inFlightIndex, showAbility, parentIdx, crown, onGeometry, bands]);
 
   return (
     <div className="fitness-chart-frame">
@@ -517,7 +513,9 @@ export const FitnessChart = memo(function FitnessChart({
         plugins={CHART_PLUGINS}
         aria-label={`Candidates this round — ${views.length} bar${
           views.length === 1 ? "" : "s"
-        } on ${showAbility ? "ability (θ)" : "composite fitness"}, each with its interval.`}
+        } per series (${active.map((s) => s.key).join(", ")}); intervals on ${
+          bands.map((b) => b.anchor).join(" and ") || "none"
+        }.`}
       />
     </div>
   );

@@ -28,6 +28,7 @@ __all__ = [
     "ErrorRecord",
     "ForkSpec",
     "ForkTrigger",
+    "GepaCheckpointKind",
     "LLMCallProgressRecord",
     "LLMCallRecord",
     "LLMCallStartRecord",
@@ -79,14 +80,25 @@ class LeviCheckpointKind(enum.StrEnum):
     PROXY_SELECTED = "proxy_selected"
 
 
+class GepaCheckpointKind(enum.StrEnum):
+    """Decisions GEPA's members take: its eliminator's minibatch acceptance test."""
+
+    MINIBATCH_GATE = "minibatch_gate"
+
+
 ResumeCheckpointKind = (
-    BenchCheckpointKind | PotterCheckpointKind | CapoCheckpointKind | LeviCheckpointKind
+    BenchCheckpointKind
+    | PotterCheckpointKind
+    | CapoCheckpointKind
+    | LeviCheckpointKind
+    | GepaCheckpointKind
 )
 RESUME_CHECKPOINT_KINDS: tuple[ResumeCheckpointKind, ...] = (
     *BenchCheckpointKind,
     *PotterCheckpointKind,
     *CapoCheckpointKind,
     *LeviCheckpointKind,
+    *GepaCheckpointKind,
 )
 
 

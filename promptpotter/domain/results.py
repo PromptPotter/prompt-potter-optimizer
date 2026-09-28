@@ -464,7 +464,7 @@ class OverlapMember(StrictModel):
 
     model_config = ConfigDict(frozen=True)
 
-    # The round this individual became the bench's best so far; 0 is the origin.
+    # The round the optimizer picked this individual; 0 is the origin.
     round: int
     candidate_id: str
     label: str
@@ -492,7 +492,7 @@ class OverlapReading(StrictModel):
     The comparison no other surface can make. Not a second fitness: a round's own accuracy is
     read on the subset that round bought, and the acquisition maximises information about one
     ability rather than spread, so consecutive rounds can share almost no cells at all. This is
-    one exam, sat by C0 and by each new best since — the bench's ranking, whatever the optimizer.
+    one exam, sat by C0 and by each new best since — each pick the optimizer declared, whichever.
 
     REPORT-ONLY, and that is what makes measuring OUTSIDE the election unbiased. These rows reach
     no election, no parent floor, no lift, no ruler and no acquisition — fed to any of them the
@@ -602,12 +602,12 @@ def parent_key(rr: RoundResult) -> str:
 
 
 def best_line(rounds: Sequence[RoundResult]) -> list[LineStep]:
-    """The campaign's best-so-far line — C0, then each individual that became the best the bench
-    has measured, in the order it did — each member carrying the union of every cell the cycle
-    measured it on. One line per campaign, the same for every optimizer.
+    """The campaign's best-so-far line — C0, then each individual the optimizer declared its pick,
+    in the order it did — each member carrying the union of every cell the cycle measured it on.
+    One line per campaign, the same for every optimizer.
 
-    "Best" is the bench's own ranking, the one ``Cycle.absorb_round`` keeps: the high-water of each
-    round's headline composite, strictly exceeded. ``results`` belongs to the individual the round
+    The best-so-far is the pick the bench grades (``Cycle.selection``), never a high-water of each
+    round's composite: those sat different rows. ``results`` belongs to the individual the round
     ended on, so a round that re-reads a member WIDENS its coverage instead of losing it. The overlap
     rows an earlier round paid for join it too — that individual's own measurement, quarantined
     from the decisions and from nothing else.
@@ -617,9 +617,8 @@ def best_line(rounds: Sequence[RoundResult]) -> list[LineStep]:
     first: dict[str, str] = {}
     labels: dict[str, str] = {}
     config: dict[str, tuple[OptSearchPoint | None, dict[str, Any]]] = {}
-    # key → the round it became best, in that order.
+    # key → the round it became the pick, in that order.
     became: dict[str, int] = {}
-    best: float | None = None
     for rr in rounds:
         for cs in rr.candidate_scores:
             labels.setdefault(cs.candidate_id, cs.label)
@@ -629,8 +628,7 @@ def best_line(rounds: Sequence[RoundResult]) -> list[LineStep]:
         first.setdefault(key, rr.opt_sp.lineage.id)
         config.setdefault(key, (rr.opt_sp, dict(rr.pipeline_params or {})))
         rows[key] = merge_known_outcomes(rows.get(key, []), list(rr.results))
-        if best is None or rr.composite_fitness > best:
-            best = rr.composite_fitness
+        if rr.selected_labels:
             became.setdefault(key, rr.round)
     # Attributed to the individual they MEASURED, never to the round that bought them: one round
     # tops up several members, so folding them into the round's own key publishes one arm's cells

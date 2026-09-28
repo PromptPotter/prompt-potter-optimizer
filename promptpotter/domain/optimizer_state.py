@@ -18,6 +18,7 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 __all__ = [
     "CAPO_MANIFEST",
+    "GEPA_MANIFEST",
     "L1_PARSE_FAILURE_CHARGED",
     "L1_PARSE_FAILURE_MALFORMED",
     "L1_PARSE_FAILURE_TOOLING",
@@ -27,6 +28,8 @@ __all__ = [
     "CapoRoundState",
     "CritiqueReadout",
     "DescriptorStats",
+    "GepaCandidate",
+    "GepaRoundState",
     "L2L3Memory",
     "LeviCalibration",
     "LeviElite",
@@ -43,6 +46,8 @@ CapoManifest = Literal["capo"]
 CAPO_MANIFEST: CapoManifest = "capo"
 LeviManifest = Literal["levi"]
 LEVI_MANIFEST: LeviManifest = "levi"
+GepaManifest = Literal["gepa"]
+GEPA_MANIFEST: GepaManifest = "gepa"
 
 # The reasons `PotterRoundState.l1_parse_failure` can carry. Opposite kinds of evidence, so no
 # reader may treat the field as a bool:
@@ -185,24 +190,46 @@ class LeviRoundState(StrictModel):
     rounds_without_advance: int
 
 
+class GepaCandidate(StrictModel):
+    """One member of GEPA's candidate pool and its row of the score matrix: its campaign objective
+    on each Pareto-set cell, by sample key."""
+
+    individual: OptSearchPoint
+    scores: dict[str, float]
+
+
+class GepaRoundState(StrictModel):
+    """GEPA's payload: its candidate pool scored on the Pareto set, and the parent the next round
+    mutates."""
+
+    # Sample keys, in the order every round walks them; empty until round 1 draws the split.
+    pareto_set: list[str]
+    # Empty on the origin's document: round 1 seats the origin with its Pareto-set scores.
+    pool: list[GepaCandidate]
+    # Drawn at each round's close; ``None`` until round 1 closes, the origin being the only parent.
+    parent_id: str | None
+    rounds_without_advance: int
+
+
 _PAYLOADS: dict[str, type[StrictModel]] = {
     POTTER_MANIFEST: PotterRoundState,
     CAPO_MANIFEST: CapoRoundState,
     LEVI_MANIFEST: LeviRoundState,
+    GEPA_MANIFEST: GepaRoundState,
 }
 
 
 class OptimizerState(StrictModel):
     """``{manifest, prompt_hashes, payload}`` — the one envelope every optimizer's state rides."""
 
-    manifest: PotterManifest | CapoManifest | LeviManifest
+    manifest: PotterManifest | CapoManifest | LeviManifest | GepaManifest
     # Which prompts of the manifest produced this round, per llm node — the only thing that can
     # answer "was this round produced by the optimizer I am holding now?" once the process exited.
     # Resume diverges at the FIRST round that disagrees. Empty on a generation-only round.
     # IDENTITY, NOT A FIRE RECORD — every node is named on every round, including ones that never
     # run. Which node RAN, and what each panel cost it, is the ledger's `llm_call`.
     prompt_hashes: dict[str, str] = Field(default_factory=dict)
-    payload: PotterRoundState | CapoRoundState | LeviRoundState
+    payload: PotterRoundState | CapoRoundState | LeviRoundState | GepaRoundState
 
     @model_validator(mode="after")
     def _payload_is_the_manifests(self) -> Self:

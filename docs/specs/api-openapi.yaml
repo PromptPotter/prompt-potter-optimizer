@@ -3613,7 +3613,7 @@ components:
           minimum: 0
           maximum: 1
           description: |
-            Stop once the best measured accuracy reaches this. Omitted, the run
+            Stop once the optimizer's declared pick reaches this accuracy. Omitted, the run
             never halts on accuracy. Must be FINITE — `NaN` satisfies a
             `minimum`/`maximum` pair and then never compares true, so a halt that
             can never fire looks identical to no halt at all.
@@ -3667,7 +3667,7 @@ components:
               minimum: 0
               maximum: 1
               description: |
-                Stop once the best measured accuracy reaches this. Omitted, the run
+                Stop once the optimizer's declared pick reaches this accuracy. Omitted, the run
                 never halts on accuracy. Must be FINITE — `NaN` satisfies a
                 `minimum`/`maximum` pair and then never compares true.
             spend_budget_usd:
@@ -4894,7 +4894,7 @@ components:
           minimum: 0
           maximum: 1
           description: |
-            Stop once the best measured accuracy reaches this. Omitted, the run
+            Stop once the optimizer's declared pick reaches this accuracy. Omitted, the run
             never halts on accuracy. Must be FINITE — `NaN` satisfies a
             `minimum`/`maximum` pair and then never compares true.
         spend_budget_usd:

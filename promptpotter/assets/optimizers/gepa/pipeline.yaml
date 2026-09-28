@@ -1,0 +1,83 @@
+# gepa — GEPA (Agrawal et al., "GEPA: Reflective Prompt Evolution Can Outperform Reinforcement
+# Learning", arXiv 2507.19457) at its paper configuration, as a manifest the bench runs like any
+# other. A campaign selects it with `optimization.optimizer: gepa` and adjusts it with
+# `optimization.nodes.{node}.config`.
+#
+# Every value below cites the section it comes from. Where the bench runs GEPA differently from
+# the paper, `docs/methods/candidate-elimination.md` § GEPA mapping and deviations lists it.
+#
+# One round is one iteration of Alg. 1: the parent Alg. 2 drew runs on a minibatch of the feedback
+# set, the reflection writes its child a new instruction, the child walks the same minibatch and,
+# only where it beats its parent there, the whole Pareto set, which admits it to the pool.
+#
+# Editing a `resolved_prompts` field below changes what every GEPA call reads; the text is the
+# paper's own (App. C), with its `<placeholder>`s spelled as `{{placeholder}}`.
+name: gepa
+version: v1.0
+available_models:
+  - qwen/qwen3-8b
+  - openai/gpt-4.1-mini
+  - deepseek/deepseek-v4-flash:nitro
+  - openai/gpt-oss-20b:nitro
+  - openai/gpt-oss-120b:nitro
+nodes:
+  # b = 3 (App. E.4). The paper's D_train splits into D_feedback and D_pareto (Alg. 1 line 1);
+  # AIME-2025, LiveBench-Math and PUPA split them equally (App. E.1).
+  minibatch:
+    type: sampler
+    config:
+      size: 3
+      pareto_share: 0.5
+  # The reflection runs on the model under optimization (App. E.2, "GEPA-Qwen-Opt", Table 2):
+  # Qwen3 8B at its recommended temperature 0.6 and top-p 0.95, in a 16,384-token context window
+  # (App. E.2). NOT the paper's: its top-k 20, which an llm node's call config does not carry.
+  gepa_reflect:
+    type: llm
+    config:
+      prompt_family: gepa_reflect
+      prompt_version: 1
+      temperature: 0.6
+      top_p: 0.95
+      max_tokens: 16384
+      provider: openrouter
+      model: qwen/qwen3-8b
+  # A child joins the pool only if it improves on its parent on the minibatch (Alg. 1 line 14).
+  minibatch_gate:
+    type: eliminator
+    config: {}
+  score:
+    type: measurement
+    config: {}
+  # Pareto-based candidate selection (Alg. 2) over the pool; the best aggregate on the Pareto set
+  # is what GEPA returns (Alg. 1 line 21).
+  pareto:
+    type: selector
+    config: {}
+pipelines:
+  default:
+    - minibatch
+    - gepa_reflect
+    - minibatch_gate
+    - score
+    - pareto
+resolved_prompts:
+  # App. C: "GEPA's Meta Prompt", paragraphed as the reference implementation's template is.
+  gepa_reflect/1:
+    instruction: |-
+      I provided an assistant with the following instructions to perform a task for me:
+      ```
+      {{current_instruction}}
+      ```
+
+      The following are examples of different task inputs provided to the assistant along with the assistant's response for each of them, and some feedback on how the assistant's response could be better:
+      ```
+      {{examples}}
+      ```
+
+      Your task is to write a new instruction for the assistant.
+
+      Read the inputs carefully and identify the input format and infer detailed task description about the task I wish to solve with the assistant.
+
+      Read all the assistant responses and the corresponding feedback. Identify all niche and domain specific factual information about the task and include it in the instruction, as a lot of it may not be available to the assistant in the future. The assistant may have utilized a generalizable strategy to solve the task, if so, include that in the instruction as well.
+
+      Provide the new instructions within ``` blocks.

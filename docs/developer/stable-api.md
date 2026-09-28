@@ -250,11 +250,12 @@ export.measurement.composite_fitness  # under export.measurement.formula, never 
 Four rules hold it, each a defect of DSPy's own `save()` inverted (`domain/export.py` argues them):
 **fields by name** (their `load_state` zips positionally with `strict=False`, so a signature that
 gained a field reloads scrambled and raises nothing) · **provenance inside the file** — the fitness
-under its named formula, n, lift + CI, θ, the rows' hash, the optimizer manifest, which is the half
-we compute and they cannot · **an `artifact_version` a reader refuses on**, since we owe no
-back-compat · **JSON and scalars, never pickle**. `tuned_params` carries the node config the winner
-ran under, minus each node's rendered prompt — that is `prompt_fields` again, and one artifact does
-not state a fact twice.
+under its named formula, n, the lift + CI over the parent (in accuracy, beside the parent's
+accuracy as its bar — the composite's lift over the origin is `bench.lift`), θ, the rows' hash, the
+optimizer manifest, which is the half we compute and they cannot · **an `artifact_version` a reader
+refuses on**, since we owe no back-compat · **JSON and scalars, never pickle**. `tuned_params`
+carries the node config the winner ran under, minus each node's rendered prompt — that is
+`prompt_fields` again, and one artifact does not state a fact twice.
 
 That node config names the model the winner was won on, and a reader must treat it as binding: an
 optimized prompt does not carry across models. [Why Prompt Optimization Works, and Why It Sometimes

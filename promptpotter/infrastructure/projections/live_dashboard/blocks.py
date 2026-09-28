@@ -118,7 +118,7 @@ def build_candidate_rows(
     whole row from one half instead of filling one in from the other per field.
 
     ``scores`` is the ``candidate_scored`` report, folded onto by the election; before it lands, ``running`` is the
-    gateway's own per-sample fold. Both carry the composite CI, so the whisker widens with the bar. The ``or`` between
+    gateway's own per-sample fold. Both carry accuracy's CI, so the whisker widens with its bar. The ``or`` between
     them is a PRECEDENCE, not two spellings of one thing — only ``scores`` carries ``label``, ``candidate_id``
     and ``outcome``. ``label`` is canonical — display sites read it verbatim, and no ``idx + 1``
     arithmetic exists."""

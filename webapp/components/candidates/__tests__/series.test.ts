@@ -3,7 +3,7 @@ import {
   CANDIDATE_SERIES,
   activeSeries,
   seriesColumn,
-  whiskerAnchor,
+  whiskerBands,
   type SeriesCtx,
 } from "../series";
 import type { CandidateView } from "@/lib/types";
@@ -121,11 +121,17 @@ describe("what is on screen", () => {
 });
 
 describe("the confidence band", () => {
-  it("anchors on a percent-axis bar, and reports NOTHING rather than guessing", () => {
-    expect(whiskerAnchor(ctx({ electedMetric: "ability" }))).toBe("accuracy");
-    expect(whiskerAnchor(ctx({ electedMetric: "composite", metrics: new Set(["composite"]) })))
-      .toBe("composite");
-    // θ alone on screen: no percent bar exists, so the band must not be drawn.
-    expect(whiskerAnchor(ctx({ metrics: new Set(["ability"]) }))).toBeNull();
+  it("draws the served band only on the bar that produced it", () => {
+    const anchors = (c: Partial<SeriesCtx>) => whiskerBands(ctx(c)).map((b) => b.anchor);
+    expect(anchors({ electedMetric: "ability" })).toEqual(["accuracy", "ability"]);
+    // `mean_fitness_ci` is accuracy's: under a composite headline it stays on the accuracy bar,
+    // and with no accuracy bar on screen the composite bar gets no borrowed whisker.
+    const both: Partial<SeriesCtx> = {
+      electedMetric: "composite",
+      metrics: new Set(["accuracy", "composite"]),
+    };
+    expect(anchors(both)).toEqual(["accuracy"]);
+    expect(anchors({ electedMetric: "composite", metrics: new Set(["composite"]) })).toEqual([]);
+    expect(anchors({ metrics: new Set(["ability"]) })).toEqual(["ability"]);
   });
 });

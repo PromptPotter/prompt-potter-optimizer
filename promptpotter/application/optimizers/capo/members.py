@@ -272,10 +272,10 @@ def _readings(
     return out
 
 
-class PairedTRace:
+class PairedTRace(nodes.NoCatchUps):
     """Every live arm walks each block, then at its close each is tested against every other live
     arm; the arms μ others beat are cut together, and once μ or fewer remain the race stops them
-    where they stand (App. B, `do_racing`). Every arm walks the same panel, so no pair catches up."""
+    where they stand (App. B, `do_racing`)."""
 
     gate = "outscored"
     settled = "settled"
@@ -426,27 +426,6 @@ class PairedTRace:
         return context
 
     def admit(self, candidate_id: str, results: list[QueryMeasurement], sp: JobSearchPoint) -> None:
-        return None
-
-    def start_backfill(self, sample: Sample, room: int) -> list[asyncio.Future[Any]]:
-        return []
-
-    def owed_backfills(self, sample: Sample) -> int:
-        return 0
-
-    def backfills_in_flight(self) -> list[asyncio.Future[Any]]:
-        return []
-
-    def backfills_for(self, sample: Sample) -> list[asyncio.Future[Any]]:
-        return []
-
-    def commit_backfills(self, sample: Sample) -> None:
-        return None
-
-    def bank_backfills(self, samples: Sequence[Sample]) -> None:
-        return None
-
-    def discard_backfills(self) -> None:
         return None
 
 

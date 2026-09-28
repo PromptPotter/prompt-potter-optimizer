@@ -161,14 +161,18 @@ LEDGER_BASELINE = {
     # +1: `optimizers/paper_templates.py` — the template fill, the call and the `<prompt>` markers
     # every paper preset shares, out of CAPO's `operators.py` so LEVI stops importing CAPO. Each
     # preset's `source_digest` hashes it beside its own operators, which is why it is a module.
-    "modules": 382,
+    # +4: `optimizers/gepa/{__init__,members,state,operators}.py` — GEPA's preset, split as CAPO's
+    # and LEVI's are and for their reasons; `operators.py` is what `GepaRuntime.source_digest`
+    # hashes beside `paper_templates.py`.
+    "modules": 386,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     # +2: `application/optimizers/__init__.py` (the member registry) and its `potter/`, empty.
     # -1: `optimization/l1/score/`, its modules gone to the round walk.
     # +1: `optimizers/capo/__init__.py`, empty, as `potter/`'s is.
     # +1: `optimizers/levi/__init__.py`, empty, as `capo/`'s is.
-    "init_files": 56,
+    # +1: `optimizers/gepa/__init__.py`, empty, as `levi/`'s is.
+    "init_files": 57,
     # +1: `judges/__init__.py` — flagged for the same reason `connectors/__init__.py` is, and by
     # the same text test: a registry module has both an `__all__` and imports. Named rather than
     # emptied; the protocol types are deliberately NOT re-exported through it.
@@ -230,7 +234,10 @@ LEDGER_BASELINE = {
     # `n_diverse_seeds`, `levi_refine`'s parent temperatures, inspiration count and drop rate and
     # feedback count, `map_elites.centroids` / `cvt_samples` / `descriptors`. No CAPO or potter
     # knob holds any: a proxy, an archive and a routing period are mechanisms neither runs.
-    "config_leaf_fields": 69,
+    # +2: GEPA's split on the sampler that draws it — `minibatch.size` (b) and `pareto_share`, the
+    # share of the pool held as the Pareto set. No sampler knob draws a fresh subset beside a fixed
+    # one: CAPO's blocks and LEVI's proxy are both one fixed panel.
+    "config_leaf_fields": 71,
     # +1: `QUEUE_MAX_WAIT_S` — how long a launch may wait in line before it is withdrawn. It is a
     # setting and not a constant because it is the one queue number a HOST has to be able to
     # answer for: on a shared box it decides when someone else's waiting launch is given up on.
@@ -317,7 +324,11 @@ LEDGER_BASELINE = {
     # (`Selector.stamps_theta`), mirrored onto the round document so the webapp's per-arm θ column
     # can be ABSENT for a selector that never fits one (CAPO) rather than reading as a cold ruler.
     # The terminal already read this off a phase event; the round document had no field for it.
-    "cycle_result_fields": 292,
+    # +17: `GepaRoundState` under `optimizer_state.payload` — the Pareto set's keys, the pool (each
+    # member the individual's 13 leaves and its per-cell scores), the parent the next round mutates
+    # and the rounds without advance. The scores come from rows of the round each member was
+    # admitted in, so no one round re-derives the front a resume must re-seat.
+    "cycle_result_fields": 309,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
@@ -612,7 +623,9 @@ LEDGER_BASELINE = {
     # +1: a bench that picks its selection by comparing rounds' composites read on different rows
     # grades the origin in place of the pick the optimizer declared, and serves lift 0 while every
     # number renders (test_numerics § 4).
-    "test_functions": 216,
+    # +1: a GEPA child admitted on a minibatch tie, or a parent drawn off the best aggregate rather
+    # than in proportion to the cells each survivor leads, still selects a winner (test_numerics § 4).
+    "test_functions": 217,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

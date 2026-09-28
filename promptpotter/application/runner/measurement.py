@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.validators import StopRule
     from promptpotter.infrastructure.ledger import CycleEventLog
 
-__all__ = ["measure_population"]
+__all__ = ["measure_as_parent", "measure_population"]
 
 
 async def measure_population(
@@ -107,7 +107,7 @@ async def measure_population(
             matched = matched_parent_stats(reference_rows, cand_rows, schema)
             # Unconditional on ``matched``: the lift is defined on the cells both reached, so a
             # truncated arm gets an honest (wider) interval instead of nothing.
-            lift = matched_parent_lift(cand_rows, reference_rows)
+            lift = matched_parent_lift(cand_rows, reference_rows, grade="fitness")
             scores[cs_idx] = scores[cs_idx].model_copy(
                 update={
                     "reference_id": reference_id,
@@ -186,22 +186,9 @@ async def _lift_references(
             )
         else:
             sp = cycle.searchpoint(pid)
-        walked = await score_search_point(
-            sp,
-            [s for s in panel.cells if int(s.id) in sids],
-            cycle.session,
-            label=MeasurementRole.PARENT,
-            axes=cycle.axes,
-            on_sample_scored=partial(ctx.callbacks.on_sample_scored, NO_ROUND_SLOT, 0),
-            on_sample_starting=partial(ctx.callbacks.on_sample_started, NO_ROUND_SLOT, 0),
-            measured=MeasuredCandidate(
-                idx=NO_ROUND_SLOT,
-                candidate_id=pid,
-                label=f"parent:{pid[:8]}",
-                role=MeasurementRole.PARENT,
-            ),
+        references[pid] = await measure_as_parent(
+            ctx, sp, pid, [s for s in panel.cells if int(s.id) in sids]
         )
-        references[pid] = walked.results
 
     read_against: dict[str, tuple[str, list[QueryMeasurement]]] = {}
     for ind in scored:
@@ -218,8 +205,31 @@ async def _lift_references(
     return read_against, {pid: rs for pid, rs in references.items() if pid in named}
 
 
+async def measure_as_parent(
+    ctx: RoundContext, sp: JobSearchPoint, individual_id: str, cells: list[Sample]
+) -> list[QueryMeasurement]:
+    walked = await score_search_point(
+        sp,
+        cells,
+        ctx.cycle.session,
+        label=MeasurementRole.PARENT,
+        axes=ctx.cycle.axes,
+        on_sample_scored=partial(ctx.callbacks.on_sample_scored, NO_ROUND_SLOT, 0),
+        on_sample_starting=partial(ctx.callbacks.on_sample_started, NO_ROUND_SLOT, 0),
+        measured=MeasuredCandidate(
+            idx=NO_ROUND_SLOT,
+            candidate_id=individual_id,
+            label=f"parent:{individual_id[:8]}",
+            role=MeasurementRole.PARENT,
+        ),
+    )
+    return walked.results
+
+
 def _mean_on(arm_rows: list[QueryMeasurement], parent_rows: list[QueryMeasurement]) -> float:
-    _, parent_fit = paired_fitness(scoreable_rows(arm_rows), scoreable_rows(parent_rows))
+    _, parent_fit = paired_fitness(
+        scoreable_rows(arm_rows), scoreable_rows(parent_rows), grade="fitness"
+    )
     return sum(parent_fit) / len(parent_fit) if parent_fit else -math.inf
 
 

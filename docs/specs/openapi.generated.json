@@ -524,6 +524,7 @@
                 "type": "null"
               }
             ],
+            "description": "The 95% band on `composite_fitness`, drawn from the same per-row values.",
             "title": "Ci Lo"
           },
           "composite_fitness": {
@@ -601,7 +602,7 @@
                 "type": "null"
               }
             ],
-            "description": "`selected` over `origin` on the bench rows both scored, paired per row; `None` below two shared rows, and 0.0 where the origin is the selection.",
+            "description": "`selected` over `origin` in `composite_fitness`, paired per bench row both scored; `None` below two shared rows, and 0.0 where the origin is the selection.",
             "title": "Lift"
           },
           "lift_ci_hi": {

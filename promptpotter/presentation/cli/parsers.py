@@ -67,7 +67,7 @@ def _add_runtime_halts(p: argparse.ArgumentParser) -> None:
         type=float,
         default=None,
         metavar="ACC",
-        help="Halt when best accuracy ≥ ACC (e.g. 0.66).",
+        help="Halt when the optimizer's declared pick has accuracy ≥ ACC (e.g. 0.66).",
     )
     p.add_argument(
         "--spend-budget",

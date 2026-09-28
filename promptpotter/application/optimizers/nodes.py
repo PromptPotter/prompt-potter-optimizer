@@ -3,6 +3,8 @@ walks a manifest through (`docs/developer/node-standard.md` § Optimizer node ty
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
@@ -55,6 +57,7 @@ __all__ = [
     "Eliminator",
     "Measured",
     "MemberCoupling",
+    "NoCatchUps",
     "NodeMember",
     "OptimizerRuntime",
     "Panel",
@@ -69,6 +72,7 @@ __all__ = [
     "Selection",
     "Selector",
     "WorkingState",
+    "rows_read_packages",
 ]
 
 
@@ -240,6 +244,24 @@ class OptimizerRuntime(Protocol):
         ...
 
 
+def rows_read_packages(
+    rounds: Sequence[RoundResult], proposers: Sequence[str]
+) -> dict[int, dict[str, str]]:
+    """``round_packages`` for proposers that read every earlier round's rows: a round's package
+    digests all rows before it, so a repair drifts every round after the one it hit."""
+    out: dict[int, dict[str, str]] = {}
+    digest = hashlib.sha256()
+    for rr in sorted(rounds, key=lambda r: r.round):
+        out[rr.round] = dict.fromkeys(proposers, digest.hexdigest()[:16])
+        for rows in (*rr.reference_results.values(), *rr.all_candidate_results.values()):
+            seen = [
+                [r["sample_key"], r["predicted"], r.get("fitness"), r.get("objective")]
+                for r in rows
+            ]
+            digest.update(json.dumps(seen, default=str).encode("utf-8"))
+    return out
+
+
 @dataclass(frozen=True)
 class RoundContext:
     """One round as every node of its walk sees it."""
@@ -363,6 +385,31 @@ class Race(CatchUps, Protocol):
     def admit(
         self, candidate_id: str, results: list[QueryMeasurement], sp: JobSearchPoint
     ) -> None: ...
+
+
+class NoCatchUps:
+    """The catch-up half of a ``Race`` whose arms all walk one panel, so no prior is paired."""
+
+    def start_backfill(self, sample: Sample, room: int) -> list[asyncio.Future[Any]]:
+        return []
+
+    def owed_backfills(self, sample: Sample) -> int:
+        return 0
+
+    def backfills_in_flight(self) -> list[asyncio.Future[Any]]:
+        return []
+
+    def backfills_for(self, sample: Sample) -> list[asyncio.Future[Any]]:
+        return []
+
+    def commit_backfills(self, sample: Sample) -> None:
+        return None
+
+    def bank_backfills(self, samples: Sequence[Sample]) -> None:
+        return None
+
+    def discard_backfills(self) -> None:
+        return None
 
 
 class Eliminator(NodeMember, Protocol):

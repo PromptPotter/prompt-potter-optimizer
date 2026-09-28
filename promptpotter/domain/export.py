@@ -4,7 +4,7 @@ import json
 from collections.abc import Sequence
 from typing import Any
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
 
 from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.opt_search_point import FEW_SHOT_BLOCK, PromptTemplate
@@ -51,15 +51,23 @@ class ExportMeasurement(StrictModel):
     n: int
     # ``None`` on a round that crowned nobody, and on the origin round, whose lift over itself is
     # not a measurement. A consumer reading a lift must be able to tell "zero" from "not asked".
-    reference_lift: float | None = None
+    reference_lift: float | None = Field(
+        default=None,
+        description="The winner over its PARENT in `accuracy`, paired per cell both measured — "
+        "never in `composite_fitness`; its bar is `reference_accuracy`.",
+    )
     reference_lift_ci_lo: float | None = None
     reference_lift_ci_hi: float | None = None
+    reference_accuracy: float | None = Field(
+        default=None,
+        description="The parent's `accuracy` on its own panel; `None` unless the winner covered it.",
+    )
     # Subset-invariant ability, with the δ scale it was read on — an exported θ naming no ruler
     # is a level nothing outside this cycle can be compared against. ``None`` when never fit.
     ability: AbilityReading | None = None
     origin_accuracy: float | None
-    # ``None`` where the origin was never scored — the bar the exported lift is read against, so a
-    # stand-in 0.0 hands another program a lift measured off nothing.
+    # ``None`` where the origin was never scored — the level ``composite_fitness`` is compared
+    # against, so a stand-in 0.0 hands another program a gain measured off nothing.
     origin_composite_fitness: float | None
 
 
@@ -179,6 +187,7 @@ def build_prompt_export(
             reference_lift=selected.reference_lift if selected else None,
             reference_lift_ci_lo=selected.reference_lift_ci_lo if selected else None,
             reference_lift_ci_hi=selected.reference_lift_ci_hi if selected else None,
+            reference_accuracy=selected.reference_accuracy if selected else None,
             ability=winner.ability,
             origin_accuracy=origin_accuracy,
             origin_composite_fitness=origin_composite_fitness,
