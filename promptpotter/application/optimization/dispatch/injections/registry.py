@@ -17,7 +17,7 @@ from promptpotter.application.optimization.dispatch.bundle import (
     _Injection,
     injection_registry,
 )
-from promptpotter.domain.escalation_signals import ExplorationBudget
+from promptpotter.application.optimization.escalation.state import ExplorationBudget
 from promptpotter.domain.l1_layout import NODE_LAYOUTS, L1Layout
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
 from promptpotter.shared.hashing import shapes_optimizer_prompt

@@ -18,13 +18,13 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
 )
 from promptpotter.application.optimization.escalation.state import EscalationFSM
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
-from promptpotter.domain.escalation_signals import rf_dedup_key
 from promptpotter.domain.optimizer_state import (
     POTTER_MANIFEST,
     L2L3Memory,
     OptimizerState,
     PotterRoundState,
 )
+from promptpotter.domain.wounds import rf_dedup_key
 from promptpotter.infrastructure.store.layout import root_cycle_id
 
 if TYPE_CHECKING:

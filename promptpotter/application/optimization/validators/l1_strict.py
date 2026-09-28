@@ -16,13 +16,13 @@ from promptpotter.application.optimization.dispatch.llm_call import prompts as _
 from promptpotter.application.optimizer_manifest import resolve_layout_override
 from promptpotter.application.pipeline_resolve import missing_template_vars
 from promptpotter.config.prompt_blocks import prompt_blocks
-from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
 from promptpotter.domain.l1_layout import NODE_LAYOUTS
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, OptSearchPoint, PromptTemplate
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import SCHEMA_OWNED_FIELDS, PipelineSchema
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, WHO_ANSWERS_KEYS
 from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
+from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 
 __all__ = [
     "DROPPED_MANDATORY_PLACEHOLDER",

@@ -455,7 +455,8 @@ def _course_scalars(
     fork, spawned = _block(index, "fork"), _block(index, "spawned_by")
     limits = dash.get("run_limits") if isinstance(dash.get("run_limits"), dict) else {}
     best, hearts = index.get("best_accuracy"), dash.get("hearts")
-    cap = limits.get("lives_cap") if isinstance(limits, dict) else None
+    potter = limits.get("potter") if isinstance(limits, dict) else None
+    cap = potter.get("lives_cap") if isinstance(potter, dict) else None
     campaign = reads.campaign(stores, hop.campaign_id)
 
     # INNER by where it LIVES, not by saying so: a rebase pair in the sandbox has no

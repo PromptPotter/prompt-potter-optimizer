@@ -11,7 +11,7 @@ export const TopStrip = memo(function TopStrip() {
   const lastQuery = dash?.last_query_elapsed_s ?? null;
   // Only in improvement-banked-budget mode; the cap is the denominator (3-of-4 vs 3-of-7).
   const hearts = dash?.hearts ?? null;
-  const livesCap = dash?.run_limits?.lives_cap ?? null;
+  const livesCap = dash?.run_limits?.potter?.lives_cap ?? null;
 
   return (
     <div className="topstrip">

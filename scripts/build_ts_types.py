@@ -80,7 +80,6 @@ from promptpotter.domain.dashboard_rows import (
     RoundSummary,
     RoundSummaryCandidate,
 )
-from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
 from promptpotter.domain.l1_layout import L1Layout
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.opt_search_point import (
@@ -119,6 +118,7 @@ from promptpotter.domain.results import (
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
 from promptpotter.domain.spend import SpendBucket, SpendRollup
+from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     BackendWarning,
     CatchUpLogEntry,
@@ -126,6 +126,7 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     DashboardError,
     LiveDashboardState,
     LoopWarning,
+    PotterLimits,
     RacingBlock,
     RunLimits,
 )
@@ -222,6 +223,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     BackendWarning,
     LoopWarning,
     DashboardError,
+    PotterLimits,
     RunLimits,
     CatchUpLogEntry,
     RacingBlock,

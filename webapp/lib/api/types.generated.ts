@@ -566,16 +566,21 @@ export interface DashboardError {
   stop_reason: string;
 }
 
-/** ``state.run_limits`` — the cycle's run-limit ceilings, stamped at WIRING off the effective */
-export interface RunLimits {
-  max_rounds: number | null;
+/** ``run_limits.potter`` — a potter cycle's own ceilings: its stall ladder's patiences, PoBB's */
+export interface PotterLimits {
   l1_patience: number;
   l2_patience: number | null;
   l3_patience: number | null;
   pobb_epsilon: number;
+  lives_cap: number | null;
+}
+
+/** ``state.run_limits`` — the cycle's run-limit ceilings, stamped at WIRING off the effective */
+export interface RunLimits {
+  max_rounds: number | null;
   spend_budget_usd: number | null;
   token_budget: number | null;
-  lives_cap: number | null;
+  potter: PotterLimits | null;
 }
 
 /** One race catch-up — the priors eliminator ``member`` re-measured on one sample. */

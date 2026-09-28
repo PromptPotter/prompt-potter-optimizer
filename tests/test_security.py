@@ -78,15 +78,15 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
         RoundDigest,
     )
     from promptpotter.application.optimization.dispatch.facade import DispatchHub
-    from promptpotter.domain.escalation_signals import (
-        RuntimeFailure,
-        ValidationFailure,
-    )
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.optimizer_state import L2L3Memory, WoundChannels
     from promptpotter.domain.round_diagnostics import RoundDiagnostics, SampleDiag
     from promptpotter.domain.search_point import TaskDecomposition
     from promptpotter.domain.validators import ValidatorOutcome
+    from promptpotter.domain.wounds import (
+        RuntimeFailure,
+        ValidationFailure,
+    )
 
     cycle_slice = CycleSlice(
         round_num=1,

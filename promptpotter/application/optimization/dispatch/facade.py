@@ -40,10 +40,10 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     load_optimizer_prompt,
     node_layout,
 )
+from promptpotter.application.optimization.escalation.state import exploration_budget
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.domain import ruler
-from promptpotter.domain.escalation_signals import exploration_budget
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
 from promptpotter.domain.results import merge_known_outcomes

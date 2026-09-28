@@ -25,6 +25,7 @@ __all__ = [
     "DashboardError",
     "LiveDashboardState",
     "LoopWarning",
+    "PotterLimits",
     "RacingBlock",
     "RunLimits",
     "warming_payload",
@@ -102,6 +103,19 @@ class DashboardError(StrictModel):
     stop_reason: str
 
 
+class PotterLimits(StrictModel):
+    """``run_limits.potter`` — a potter cycle's own ceilings: its stall ladder's patiences, PoBB's
+    ε and the lives bank's cap. Null on a cycle whose optimizer declares none of them."""
+
+    l1_patience: int
+    l2_patience: int | None = None
+    l3_patience: int | None = None
+    pobb_epsilon: float
+    # DENOMINATOR for the live ``hearts`` count — without it ``hearts: 3`` is scaleless, and
+    # in lives mode ``max_rounds`` is null. ``None`` when lives is off.
+    lives_cap: int | None = None
+
+
 class RunLimits(StrictModel):
     """``state.run_limits`` — the cycle's run-limit ceilings, stamped at WIRING off the effective
     ``campaign_config``, so a fork's reconcile dialog can default against them. It rode
@@ -115,15 +129,9 @@ class RunLimits(StrictModel):
     ``change-run-limits`` lands."""
 
     max_rounds: int | None = None
-    l1_patience: int
-    l2_patience: int | None = None
-    l3_patience: int | None = None
-    pobb_epsilon: float
     spend_budget_usd: float | None = None
     token_budget: int | None = None
-    # DENOMINATOR for the live ``hearts`` count — without it ``hearts: 3`` is scaleless, and
-    # in lives mode ``max_rounds`` is null. ``None`` when lives is off.
-    lives_cap: int | None = None
+    potter: PotterLimits | None = None
 
 
 class RacingBlock(StrictModel):
@@ -362,7 +370,7 @@ class LiveDashboardState(StrictModel):
         *,
         hop: CycleHop,
         session_id: str,
-        l1_patience: int,
+        l1_patience: int | None,
         n_variants: int,
         sp_budget_round: int,
         langfuse_trace_url: str | None,
@@ -378,7 +386,7 @@ class LiveDashboardState(StrictModel):
             "state_since": utcnow_iso(),
             "n_variants": n_variants,
             "sp_budget_round": sp_budget_round,
-            "patience": f"0/{l1_patience}",
+            "patience": f"0/{l1_patience}" if l1_patience is not None else "",
             # Not carried from `prior` and not deferred to INIT:exit — round 0 runs before any
             # INIT event reaches the ledger, so waiting mis-headlines the whole origin pass.
             "headline_metric": headline_metric,

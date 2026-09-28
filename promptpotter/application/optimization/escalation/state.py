@@ -9,10 +9,32 @@ from typing import TYPE_CHECKING
 
 from promptpotter.domain.phases import PotterPhase, StopReason
 from promptpotter.domain.run_records import CycleRecord, PhaseRecord, view_fields
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizers.potter.knobs import EscalationLadder, LivesConfig
     from promptpotter.infrastructure.ledger import CycleEventLog
+
+
+@shapes_optimizer_prompt
+class ExplorationBudget(enum.StrEnum):
+    """How freely ``l1_generate`` may explore. The single source for the ``escalation_panel.exploration_budget`` signal AND
+    for the value the review writer feeds ``ValidatorContext``, so prompt and validator cannot disagree."""
+
+    TIGHT = "tight"  # improving — exploit the parent; speculative gambles rejected
+    NORMAL = "normal"  # stalling — stall_exploration citations permitted
+    WIDE = "wide"  # patience exhausted — explore freely; a PEAKED axis is mutable with a wide rebut
+
+
+@shapes_optimizer_prompt
+def exploration_budget(stall_count: int, l1_patience: int) -> ExplorationBudget:
+    """Widen the budget with MEASURED L1 stall depth, never a round-count schedule. Pure, and called by both the prompt side
+    and the validator side with the same stall depth, so the two consumers can never disagree on the mapping."""
+    if stall_count <= 0:
+        return ExplorationBudget.TIGHT
+    if stall_count >= l1_patience:
+        return ExplorationBudget.WIDE
+    return ExplorationBudget.NORMAL
 
 
 class NextAction(enum.StrEnum):
@@ -387,4 +409,10 @@ class EscalationFSM:
         return s
 
 
-__all__ = ["EscalationEvent", "EscalationFSM", "NextAction"]
+__all__ = [
+    "EscalationEvent",
+    "EscalationFSM",
+    "ExplorationBudget",
+    "NextAction",
+    "exploration_budget",
+]

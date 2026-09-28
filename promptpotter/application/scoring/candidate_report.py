@@ -9,7 +9,6 @@ from typing import Any
 
 from promptpotter.application.scoring.evaluators import materialize_row_derivable
 from promptpotter.application.scoring.search_point_scorer import SCORING_ERROR_ABORT, ScoredWalk
-from promptpotter.domain.escalation_signals import NurseOwner, RuntimeFailure, ValidationFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import (
     ArmOutcome,
@@ -20,6 +19,7 @@ from promptpotter.domain.results import (
 from promptpotter.domain.ruler import ThetaCaveat
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.domain.validators import StopSignal
+from promptpotter.domain.wounds import NurseOwner, RuntimeFailure, ValidationFailure
 from promptpotter.shared.errors import ErrorCategory
 
 __all__ = [

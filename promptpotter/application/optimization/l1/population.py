@@ -19,10 +19,10 @@ from promptpotter.application.optimization.validators.l1_strict import (
 )
 from promptpotter.application.pipeline_resolve import merge_pipeline_params
 from promptpotter.domain.candidate_diff import candidate_delta
-from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import CandidateProposal
+from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 
 logger = logging.getLogger(__name__)
 

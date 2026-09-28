@@ -23,7 +23,6 @@ from typing import Any, cast
 
 from promptpotter.application.optimizer_manifest import resolve_optimizer
 from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
-from promptpotter.domain.escalation_signals import ValidationFailure
 from promptpotter.domain.optimizer_state import (
     POTTER_MANIFEST,
     L2L3Memory,
@@ -39,6 +38,7 @@ from promptpotter.domain.results import (
     ScoredCandidate,
 )
 from promptpotter.domain.spend import SpendBucket, SpendRollup
+from promptpotter.domain.wounds import ValidationFailure
 
 # Repeated as the ground truth of every row a factory-built round measures. Deliberately
 # only two labels: with as many distinct truths as rows the answer space reads as

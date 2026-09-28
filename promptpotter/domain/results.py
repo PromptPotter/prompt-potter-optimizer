@@ -8,11 +8,6 @@ from typing import Any, Literal, NamedTuple, NotRequired, TypedDict, overload
 from pydantic import ConfigDict, Field, computed_field
 
 from promptpotter.domain.bench import BenchScore
-from promptpotter.domain.escalation_signals import (
-    INVARIANT_REASONS,
-    RuntimeFailure,
-    ValidationFailure,
-)
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.phases import StopReason
@@ -24,6 +19,11 @@ from promptpotter.domain.scoring import is_answer_collapsed, is_hit
 from promptpotter.domain.search_point import strip_rendered_prompt
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.wounds import (
+    INVARIANT_REASONS,
+    RuntimeFailure,
+    ValidationFailure,
+)
 from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 

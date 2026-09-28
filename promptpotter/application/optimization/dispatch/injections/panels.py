@@ -33,6 +33,7 @@ from promptpotter.application.optimization.dispatch.bundle import (
     Item,
     signal,
 )
+from promptpotter.application.optimization.escalation.state import ExplorationBudget
 from promptpotter.application.optimization.pobb.checks import EliminationGate
 from promptpotter.application.scoring.evaluators import compute_accuracy
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
@@ -46,7 +47,6 @@ from promptpotter.domain.candidate_diff import (
     same_idea,
 )
 from promptpotter.domain.connector import MeasuredUnit, unit_count, unit_plural
-from promptpotter.domain.escalation_signals import ExplorationBudget
 from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS, PARENT_LEVEL_SE_KEY
 from promptpotter.domain.optimizer_state import CritiqueReadout
 from promptpotter.domain.results import ArmOutcome, RoundResult, ScoredCandidate

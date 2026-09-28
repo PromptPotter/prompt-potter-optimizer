@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
+from promptpotter.application.optimization.escalation.state import exploration_budget
 from promptpotter.application.optimization.validators.behavior_base import ValidatorContext
 from promptpotter.application.optimization.validators.l1_behavior import (
     CHECK_REGISTRY,
@@ -18,7 +19,6 @@ from promptpotter.application.optimizers.potter.knobs import potter_knobs
 from promptpotter.application.views.render.optimizer_prompt_text import (
     format_l1_critique_for_prompt,
 )
-from promptpotter.domain.escalation_signals import exploration_budget
 from promptpotter.domain.opt_search_point import node_source
 from promptpotter.domain.optimizer_state import L1_PARSE_FAILURE_CHARGED, POTTER_MANIFEST
 from promptpotter.domain.results import RoundResult

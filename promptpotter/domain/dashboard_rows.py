@@ -16,13 +16,13 @@ from typing import Any, Literal
 
 from pydantic import ConfigDict, Field
 
-from promptpotter.domain.escalation_signals import ValidationFailure
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.results import ArmOutcome, DegradationHealth, OverlapReading
 from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
 from promptpotter.domain.scoring import is_hit, is_unscored
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.wounds import ValidationFailure
 
 __all__ = [
     "DashboardCandidate",

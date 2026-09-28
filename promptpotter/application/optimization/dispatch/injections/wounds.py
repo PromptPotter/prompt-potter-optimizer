@@ -14,10 +14,10 @@ from promptpotter.application.optimization.dispatch.bundle import (
     Item,
     signal,
 )
-from promptpotter.domain.escalation_signals import RuntimeFailure
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, L1_POSSIBLE
 from promptpotter.domain.search_point import WHO_ANSWERS_KEYS
 from promptpotter.domain.validators import ValidatorOutcome
+from promptpotter.domain.wounds import RuntimeFailure
 
 # Evidence values safe to render into an UNFENCED panel: a signal name or a slot name, both closed
 # vocabularies. An LLM-authored placeholder or plan is neither, and reports its size instead.

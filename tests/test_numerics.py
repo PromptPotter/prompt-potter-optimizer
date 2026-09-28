@@ -58,7 +58,6 @@ from promptpotter.application.scoring.metrics import (
 )
 from promptpotter.application.scoring.sample_measurement import measure_sample
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.escalation_signals import ValidationFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import (
@@ -86,6 +85,7 @@ from promptpotter.domain.ruler import (
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import extract_item_label
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
+from promptpotter.domain.wounds import ValidationFailure
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
 from promptpotter.shared import extract_gsm8k_number

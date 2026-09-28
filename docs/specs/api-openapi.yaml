@@ -1567,11 +1567,11 @@ paths:
         manifest `member` and null before a reading; `catch_up_log[]` names the
         member too. `bench_score` (`BenchScore`) is the headline, folded from the
         `bench:scored` phase record and null until the bench pass grades the
-        selection.
+        selection. `run_limits` holds the bench's ceilings alone; a potter cycle's
+        patiences, ε and lives ceiling ride `run_limits.potter` (`PotterLimits`,
+        null on any other optimizer).
 
-        DECLARED, not yet written: `run_limits` holds the bench's ceilings alone;
-        a potter cycle's patiences, ε and lives ceiling ride `potter` (null on any
-        other optimizer), and `stall` replaces the `patience` string.
+        DECLARED, not yet written: `stall` replaces the `patience` string.
       tags: [cycles]
       parameters:
         - name: campaign_id

@@ -45,7 +45,6 @@ from promptpotter.application.optimization.dispatch.schemas import (
     build_l1_response_model,
 )
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
-from promptpotter.domain.escalation_signals import ValidationFailure
 from promptpotter.domain.opt_search_point import EvidenceGrounding, OptSearchPoint, node_source
 from promptpotter.domain.optimizer_state import (
     L1_PARSE_FAILURE_MALFORMED,
@@ -54,6 +53,7 @@ from promptpotter.domain.optimizer_state import (
     POTTER_MANIFEST,
 )
 from promptpotter.domain.results import CandidateProposal, candidate_label
+from promptpotter.domain.wounds import ValidationFailure
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 from promptpotter.shared import truncate

@@ -9,10 +9,10 @@ from typing import Any, Literal, TypedDict
 
 from pydantic import Field
 
-from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
 from promptpotter.domain.l1_layout import L1Layout, default_l1_layout
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
+from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 
 __all__ = [
     "L1_PARSE_FAILURE_CHARGED",

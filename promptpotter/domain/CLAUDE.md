@@ -86,7 +86,7 @@ whole sanctioned set; they name a sample's state, never a back-compat shim
   three consumers of "already tried" — round-local dedup, the cross-round repeat gate, the ALREADY
   TRIED panel — must share both definitions, or a re-proposal one rejects is rendered as new by another.
 - `pipeline_parsing.py` — pure dict → `PipelineSchema` parser.
-- `validators.py`, `phases.py`, `escalation_signals.py`, `round_diagnostics.py`,
+- `validators.py`, `phases.py`, `wounds.py`, `round_diagnostics.py`,
   `scoring.py`, `connector.py`, `backend.py`, `sample.py`, `bench.py`, `l1_layout.py` —
   domain types and pure logic shared across the application layer.
 

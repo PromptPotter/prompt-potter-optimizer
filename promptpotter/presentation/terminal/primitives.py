@@ -5,10 +5,10 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.escalation_signals import INVARIANT_REASONS
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import ArmOutcome, resolved_fitness, scoreboard_rank_key
+from promptpotter.domain.wounds import INVARIANT_REASONS
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

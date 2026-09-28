@@ -190,7 +190,7 @@ class LiveDashboardProjection(Projection):
         state_path: Path | None,
         hop: CycleHop,
         session_id: str,
-        l1_patience: int,
+        l1_patience: int | None,
         n_variants: int,
         sp_budget_round: int,
         headline_metric: HeadlineMetric,
@@ -270,7 +270,7 @@ class LiveDashboardProjection(Projection):
         *,
         tenant_root: str,
         session_id: str,
-        l1_patience: int,
+        l1_patience: int | None,
         n_variants: int,
         sp_budget_round: int,
         headline_metric: HeadlineMetric,
@@ -869,7 +869,9 @@ class LiveDashboardProjection(Projection):
         s.current_acc = acc
         if s.best is None or acc > s.best:
             s.best = acc
-        s.patience = f"{l1_stall_count}/{self.patience_max}"
+        s.patience = (
+            f"{l1_stall_count}/{self.patience_max}" if self.patience_max is not None else ""
+        )
         s.hearts = hearts
 
     # -- Round-state mutations (snapshot-record fan-out) ----------------------

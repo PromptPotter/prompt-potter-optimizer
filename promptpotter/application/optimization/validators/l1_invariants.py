@@ -22,9 +22,9 @@ from promptpotter.domain.candidate_diff import (
     candidate_idea,
     same_idea,
 )
-from promptpotter.domain.escalation_signals import INVARIANT_REASONS, ValidationFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import ArmOutcome, CandidateProposal, is_leader_eligible
+from promptpotter.domain.wounds import INVARIANT_REASONS, ValidationFailure
 
 logger = logging.getLogger(__name__)
 
