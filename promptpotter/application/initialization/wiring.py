@@ -11,7 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from promptpotter import connectors
+from promptpotter import connectors, judges
 from promptpotter.application.datasets.csv_ingest import read_candidate_library_file
 from promptpotter.application.datasets.loaders import resolve_dataset_items, samples_from_dicts
 from promptpotter.application.initialization.session import Session
@@ -342,6 +342,7 @@ def _resolve_backend_id(
 
 def complete_registries() -> None:
     table = connectors.registered()
+    judges.registered()
     injection_table()
     for connector in table.values():
         if connector.completion_check is not None:

@@ -86,9 +86,11 @@ def instrument_depth() -> int:
 
 
 class MeasurementRole(enum.StrEnum):
-    """WHY a scoring pass ran — the half of provenance an id alone cannot carry. ``PANEL`` is a
-    candidate's own evidence in the round's shared order; every other member re-enters outside it."""
+    """WHY a scoring pass ran — the half of provenance an id alone cannot carry, and the name of the
+    archive run it files. ``PANEL`` is a candidate's own evidence in the round's shared order and
+    ``ORIGIN`` the campaign's C0; every other member re-enters outside it."""
 
+    ORIGIN = "origin"
     PANEL = "panel"
     BACKFILL = "backfill"
     PARENT = "parent"
@@ -98,6 +100,9 @@ class MeasurementRole(enum.StrEnum):
     # parent floor, no lift and no acquisition, so the pass may measure one arm without making
     # it better-identified than the arms it was judged against.
     OVERLAP = "overlap"
+    # The held-out pass: a run-level view an optimizer reads (`AxisIndex`) skips it whole, since a
+    # run's accuracy cannot be filtered to the search pool's rows.
+    BENCH = "bench"
 
 
 # The ``idx`` of a measurement that occupies no slot in the round's population — a prior's PoBB

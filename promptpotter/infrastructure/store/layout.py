@@ -213,6 +213,12 @@ class CycleLayout:
         return self.cycle_dir / "experiment.resolved.yaml"
 
     @property
+    def bank_partition(self) -> Path:
+        """Which bank rows this cycle's search may draw and which the bench holds out
+        (``domain/bench.py::BankPartition``)."""
+        return self.cycle_dir / "bank_partition.json"
+
+    @property
     def optimized_surface(self) -> Path:
         """What this cycle OPTIMIZES, and the channel each value reaches the model by — the reading
         of the declaration beside it that the declaration itself cannot give, since it names a key

@@ -124,7 +124,6 @@ async def run_campaign(
         observers=build_run_observers(
             session=session,
             campaign_config=campaign_config,
-            dataset=train_data,
             display=display,
         ),
         langfuse_session_id=langfuse_session_id,

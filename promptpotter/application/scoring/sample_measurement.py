@@ -11,10 +11,9 @@ from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 
-from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
-from promptpotter.application.optimization.pobb.classification import terminal_ranking
 from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
+from promptpotter.application.scoring.classification import terminal_ranking
 from promptpotter.application.scoring.evaluators import materialize_sample_values
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.formula.compiler import ScoringFormulaError
@@ -30,6 +29,7 @@ from promptpotter.domain.results_health import classify_result, terminal_node
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import QueryMeasurement, extract_item_label, is_hit, turn_scalars
 from promptpotter.domain.spend import StepTokenUsage, TokenAccount
+from promptpotter.infrastructure.llm.heartbeat import heartbeat
 from promptpotter.infrastructure.llm.pricing import rate_ceiling
 from promptpotter.infrastructure.llm.spend_book import FRAMING_TOKENS, Billed, SendBound
 from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND, emit_token_usage
@@ -582,6 +582,13 @@ async def measure_sample(
         # connector: this is the one seam that HOLDS an envelope, so every backend gets the answer.
         if envelope.budget_s is not None:
             pd["unworked_s"] = envelope.unworked
+
+        # Off the node `to_job_search_point` renders the candidate onto, and off `pipeline_params`
+        # rather than `wire_params`, so no sample's own length reaches a prompt-length term.
+        prompt_nodes = pipeline_schema.prompt_node_names()
+        node_cfg = (pipeline_params or {}).get(prompt_nodes[0]) if prompt_nodes else None
+        if isinstance(node_cfg, dict) and isinstance(node_cfg.get("prompt"), str):
+            pd["target_prompt_chars"] = len(node_cfg["prompt"])
 
         # The bare question, where the dataset declared one distinct from `query` — banked so a
         # JUDGE can read it, since a judge is handed this row and never the `Sample`. Absent on

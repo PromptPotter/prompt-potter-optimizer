@@ -73,24 +73,24 @@ export function SearchpointDrillIn({
                 }
               />
             )}
-            {typeof row.matchedParentAccuracy === "number" && (
+            {typeof row.referenceAccuracy === "number" && (
               <Fact
                 k="vs parent"
-                v={fmtPct1(row.matchedParentAccuracy)}
+                v={fmtPct1(row.referenceAccuracy)}
                 hint="The candidate's PARENT — the origin at round 0, the prior round's winner after — re-scored on the samples THIS candidate measured, and the floor the promotion gate compared it against. Under elimination a candidate may run only part of the round's samples, so the parent's full-set rate is the wrong comparison and would read as a phantom lift."
               />
             )}
-            {typeof row.matchedParentLift === "number" &&
-              typeof row.matchedParentLiftCiLo === "number" &&
-              typeof row.matchedParentLiftCiHi === "number" && (
+            {typeof row.referenceLift === "number" &&
+              typeof row.referenceLiftCiLo === "number" &&
+              typeof row.referenceLiftCiHi === "number" && (
                 <Fact
                   k="lift vs parent"
                   hint="Mean per-cell (candidate − parent) across the cells both measured, Student-t bracketed. Pairing removes the parent's cell-to-cell variation, so this is sharper than the candidate's own mean band."
                   v={
                     <>
-                      {fmtSigned(row.matchedParentLift)} [{fmtSigned(row.matchedParentLiftCiLo)},{" "}
-                      {fmtSigned(row.matchedParentLiftCiHi)}]
-                      {liftSeparates(row.matchedParentLiftCiLo, row.matchedParentLiftCiHi) ? (
+                      {fmtSigned(row.referenceLift)} [{fmtSigned(row.referenceLiftCiLo)},{" "}
+                      {fmtSigned(row.referenceLiftCiHi)}]
+                      {liftSeparates(row.referenceLiftCiLo, row.referenceLiftCiHi) ? (
                         " clears 0"
                       ) : (
                         <span className="l4-eff-flat"> — {NOT_SEPARABLE}</span>
@@ -113,7 +113,7 @@ export function SearchpointDrillIn({
             )}
             <Fact
               k="winner"
-              v={!row.is_winner ? "no" : arms === 1 ? "yes — uncontested" : "yes"}
+              v={!row.is_selected ? "no" : arms === 1 ? "yes — uncontested" : "yes"}
             />
             {/* "measured on", never "cost": the BACKEND bucket alone — judge and optimizer spend
                 carry no candidate. */}

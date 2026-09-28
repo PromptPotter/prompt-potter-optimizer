@@ -8,7 +8,7 @@ PromptPotter is **LLM-driven program evolution** for prompts and pipeline params
 
 **Our setting is the cloud team-online deployment (tier 3), NOT the local-secure one (tier 2)** — treat cloud/team as the default operating context in everything we build ([`deploy-linux/`](deploy-linux/): Cloudflare tunnel + open OIDC signup + a per-account spend ceiling). What shipped and what is in flight: [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
 
-**Origin = the campaign root = C0**, and for a fork the point it branches *from*. An *individual/candidate* is a configuration (both are `OptSearchPoint`). **The general relation is *parent*** — the individual a candidate was mutated from (`RoundParent`): the origin at round 0, the prior winner after it.
+**Origin = the campaign root = C0**, and for a fork the point it branches *from*. An *individual/candidate* is a configuration (both are `OptSearchPoint`). **The general relation is *parent*** — the individual a candidate was mutated from, and each arm's `reference_id`: the origin at round 0, the prior winner after it.
 
 **Fitness is never one fixed number — always ask "under which formula?"** It is formula-relative (**active** / **mask**, picked by a **lens** / **replay**) and mode-relative (`measured` subset vs `all`). Every score — the active fitness, any alternative formula or mode, the hard-sample sort — is computed and **served by the backend; the webapp never recomputes.** Depth: [`docs/architecture.md`](docs/architecture.md) §0.5 (Composite-fitness resolution chain) + [`docs/concepts/scoring-and-memory.md`](docs/concepts/scoring-and-memory.md).
 
@@ -124,7 +124,7 @@ The **front door is a browser chat** — a human-in-the-loop copilot: the operat
 
 Before adding any new concept (class, projection, injection, prompt, field, dict, file), answer these. "I don't know" or "kind of" is a hard block:
 
-- **Reuse before adding.** Does an existing channel/infrastructure already do this? Default **yes** — search/grep first. Ride the ledger / `injection_table()` / `OptSearchPoint` / dispatch hub; **no sidecar**.
+- **Reuse before adding.** Does an existing channel/infrastructure already do this? Default **yes** — search/grep first. Ride the ledger / `injection_table()` / `optimizer_state` / dispatch hub; **no sidecar**.
 - **Map to a §0 bucket.** If it fits none, stop — either §0 is incomplete (update it, separate PR landing first) or this is the wrong PR.
 - **New I/O kind → amend §0 first.** The five are fixed (Persistence, Display, Control-local, Control-remote, Identity). New Control-remote command/event → declare schema in `docs/specs/api-openapi.yaml` / `events-asyncapi.yaml` *before* the handler lands.
 - **Material facts land on disk, human-readable** — never surfaced only via stdout, in-memory state, or `--verbose`. Same for debug-state: if a bug needs an operator-only env to reproduce, the unblocker (mock/fixture/pin) is a separate PR landing first.

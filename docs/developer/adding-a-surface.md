@@ -178,18 +178,19 @@ Contract: [`presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md).
 
 ## 4. A resume / decision checkpoint kind
 
-A replayable or archival decision (`ResumeCheckpointKind` + its gating mode).
+A replayable or archival decision (a checkpoint kind + its gating mode).
 
 **Recipe:**
 
-1. Add the kind to `ResumeCheckpointKind` (`domain/run_records.py`) **and** a gating
+1. Add the kind to the deciding party's enum — `BenchCheckpointKind` or the optimizer's own
+   (`PotterCheckpointKind`), both `domain/run_records.py` — **and** a gating
    entry to `RESUME_CHECKPOINT_GATING` (`application/optimization/resume_and_fork/
    decisions.py` — the gating SoT; the enum and the table live in different files).
 2. If replayable, add it to the replayer; if archival, leave it out.
 3. Emit it through `record_decision` with the typed kind, never a bare string.
 
 **Guards (all import-time, no standing test):** `decisions.py` raises on a
-`ResumeCheckpointKind` member missing from `RESUME_CHECKPOINT_GATING`;
+kind missing from `RESUME_CHECKPOINT_GATING`;
 `replayers.py` raises when a `REPLAYED` kind has no replayer or an `ARCHIVAL` kind
 has one; `cli/commands/_shared.py` asserts the divergence hint lists every kind.
 

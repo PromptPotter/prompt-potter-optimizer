@@ -23,7 +23,7 @@ class Campaign(StrictModel):
     created_at: str
     root_cycle_id: str
     root_content_hash: str = ""
-    optimizer_prompt_hash: str = ""
+    optimizer_manifest_hashes: dict[str, str] = Field(default_factory=dict)
     backend_id: str = ""
     # Connector KIND, FROZEN at mint: a campaign OUTLIVES its dataset dir, so re-pointing a slug
     # must not re-kind a campaign that already measured under the old one.

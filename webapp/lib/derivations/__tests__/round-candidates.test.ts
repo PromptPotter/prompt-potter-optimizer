@@ -111,7 +111,7 @@ describe("roundCandidates — the in-flight round", () => {
   });
 
   it("holds no crown — the election is a round-scoped fit that has not run", () => {
-    expect(row?.is_winner).toBe(false);
+    expect(row?.is_selected).toBe(false);
     expect(row?.theta).toBeNull();
   });
 

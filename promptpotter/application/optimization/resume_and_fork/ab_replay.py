@@ -21,10 +21,11 @@ from promptpotter.application.optimization.resume_and_fork.replayers import (
     ReplayMismatch,
     replay_all_mismatches,
 )
+from promptpotter.application.optimization.task_context import committed_task_context
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.run_records import ResumeCheckpointKind
+from promptpotter.domain.run_records import PotterCheckpointKind
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
@@ -129,7 +130,7 @@ def _make_replay_verdict(
             (
                 str(m.current_outcome)
                 for m in found
-                if m.kind == ResumeCheckpointKind.ROUND_WINNER and m.current_outcome
+                if m.kind == PotterCheckpointKind.ROUND_WINNER and m.current_outcome
             ),
             None,
         )
@@ -177,7 +178,9 @@ def ab_replay_cycle(
     origin_sp_hash = (
         OptSearchPoint.from_prompt_fields(origin.prompt_fields)
         .to_job_search_point(
-            base_pipeline_params=origin.pipeline_params, schema=session.pipeline_schema
+            base_pipeline_params=origin.pipeline_params,
+            schema=session.pipeline_schema,
+            framing=committed_task_context(session.store, session.dataset_name),
         )
         .sp_hash(session.pipeline_schema)
     )
@@ -190,6 +193,7 @@ def ab_replay_cycle(
             dataset_name=session.dataset_name,
             scorer=scorer,
             scorer_id=sc.scorer_id,
+            sample_ids=sc.require_partition().admitted_ids,
             origin_sp_hash=origin_sp_hash,
         ),
     )

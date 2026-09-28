@@ -136,7 +136,7 @@ def _rebank_on_branch(
     minted_at = {(c.round, c.idx): c for c in scan_ledger_candidates(parent_ledger)}
     ledger = CycleEventLog.open(CycleDir(campaign_store.cycle_dir(branch)))
     cb = RunCallbacks(ledger=ledger)
-    # `parent_id` and `source` reach a reader ONLY through the mint record; every other field
+    # `parent_ids` and `source` reach a reader ONLY through the mint record; every other field
     # rides the snapshot (`ledger_scan._SCORED_INCLUDE`). Copied by shared field NAME, so
     # adding one to both models carries it without a third edit here.
     identity = set(CandidateMintedRecord.model_fields) & set(LedgerCandidate.model_fields)
@@ -196,8 +196,6 @@ def _resync_round_headline(t: RoundResult) -> bool:
     t.accuracy = cs.accuracy
     t.composite_fitness = cs.composite_fitness
     t.evaluators = dict(cs.evaluators)
-    t.matched_parent_accuracy = cs.matched_parent_accuracy
-    t.matched_parent_composite = cs.matched_parent_composite
     t.degraded_samples = count_degraded_samples(t.results)
     return True
 
@@ -243,6 +241,7 @@ async def repair_incomplete_rounds(
             sp = cand_osp.to_job_search_point(
                 base_pipeline_params=cs.resolved_pipeline_params,
                 schema=session.pipeline_schema,
+                framing=cycle.framing,
             )
             stamp = MeasuredCandidate(
                 idx=i,
@@ -261,8 +260,7 @@ async def repair_incomplete_rounds(
                     sp,
                     [hole],
                     session,
-                    label="round_repair",
-                    opt_sp=None,
+                    label=stamp.role,
                     axes=cycle.axes,
                     on_sample_scored=None,
                     on_sample_starting=None,
@@ -276,8 +274,7 @@ async def repair_incomplete_rounds(
                 sp,
                 attempted,
                 session,
-                label="round_repair",
-                opt_sp=None,
+                label=stamp.role,
                 axes=cycle.axes,
                 on_sample_scored=None,
                 on_sample_starting=None,
@@ -298,6 +295,7 @@ async def repair_incomplete_rounds(
             t.all_candidate_results[cs.candidate_id] = results
             t.candidate_scores[i] = build_score_report(
                 cand_osp,
+                cs.validation_failures,
                 cs.pipeline_overlay,
                 scored.scores,
                 results,
@@ -369,7 +367,7 @@ async def _rederive_critiques(
     saved = cycle.rounds
     try:
         for rr in drifted:
-            if not rr.critique or rr.round == 0:
+            if not rr.optimizer_state.payload.critique or rr.round == 0:
                 continue
             cycle.rounds = [p for p in saved if p.round < rr.round]
             # `emit_token_usage` stamps from this ContextVar, which outside the round loop
@@ -377,7 +375,7 @@ async def _rederive_critiques(
             token = set_current_round(rr.round)
             try:
                 with graceful(f"round {rr.round} critique re-derivation failed"):
-                    rr.critique = await run_l1_critique(
+                    rr.optimizer_state.payload.critique = await run_l1_critique(
                         cycle, rr, round_num=rr.round, ledger=session.state.ledger
                     )
                     campaign_store.save_round_file(hop, rr)

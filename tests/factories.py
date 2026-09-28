@@ -22,6 +22,12 @@ from collections.abc import Sequence
 from typing import Any
 
 from promptpotter.domain.escalation_signals import ValidationFailure
+from promptpotter.domain.optimizer_state import (
+    POTTER_MANIFEST,
+    L2L3Memory,
+    OptimizerState,
+    PotterRoundState,
+)
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import (
     CycleResult,
@@ -123,6 +129,15 @@ def degradation_health(
     )
 
 
+def optimizer_state(
+    memory: L2L3Memory | None = None, *, parse_failure: str | None = None
+) -> OptimizerState:
+    return OptimizerState(
+        manifest=POTTER_MANIFEST,
+        payload=PotterRoundState(memory=memory or L2L3Memory(), l1_parse_failure=parse_failure),
+    )
+
+
 def round_result(
     rnd: int,
     *,
@@ -141,12 +156,13 @@ def round_result(
     """A closed round, shaped the way the loop actually writes one.
 
     ``parse_failure`` yields ZERO candidates by construction (``l1_generate`` returned
-    ``[]``), so it is modelled on the round — no ``ScoredCandidate`` can carry one.
+    ``[]``), so it is modelled on the round's optimizer state — no ``ScoredCandidate`` can carry
+    one.
 
     ``no_op`` / ``dup`` add COLLAPSED candidates: they ride ``candidate_scores`` beside the
     measured ones but are absent from ``candidates_scored`` and from
-    ``all_candidate_results``, so ``l1_n_no_op`` / ``l1_n_duplicate`` derive to them and
-    the mode-collapse denominator (collapsed + scored) comes out right.
+    ``all_candidate_results``, so ``invariant_collapses`` derives them and the mode-collapse
+    denominator (collapsed + scored) comes out right.
 
     ``collapsed`` makes that many measured candidates answer ONE label to every sample —
     the constant answerer built below. ``cut`` makes them *also* stop
@@ -187,7 +203,8 @@ def round_result(
         "health": degradation_health(
             samples=samples, degraded_rate=degraded_rate, no_result=no_result
         ),
-        "l1_parse_failure": parse_failure,
+        "selected_labels": [],
+        "optimizer_state": optimizer_state(parse_failure=parse_failure),
     }
     return RoundResult(**(base | overrides))
 
@@ -214,12 +231,12 @@ def cycle_result(
     return CycleResult(
         rounds=rounds,
         n_l1_rounds=len(rounds),
-        best_accuracy=0.5,
-        best_round=len(rounds),
+        result_accuracy=0.5,
+        result_round=len(rounds),
         origin_accuracy=origin or 0.0,
         origin_level=origin,
-        round_parent_levels=levels,
-        winner_prompt_fields={},
+        round_levels=levels,
+        result_prompt_fields={},
         stop_reason=stop_reason,
         started_at="2026-01-01T00:00:00Z",
         finished_at="2026-01-01T01:00:00Z",
@@ -243,11 +260,12 @@ def lost_history(
 ) -> list[RoundResult]:
     """The history the repeat detector reads: the parent's round, then one holding a candidate
     that was MEASURED and LOST against it — a candidate is read against the round BEFORE its own.
-    ``matched_parent_accuracy`` is the bar ``acc`` is judged against.
+    ``reference_accuracy`` is the bar ``acc`` is judged against.
 
     Pass ``elimination_context`` to make the loss a CUT instead: the gate inside it decides
     whether the arm was measured at all, and an empty one is a degradation cut, which names none."""
     lost = RoundResult(
+        optimizer_state=optimizer_state(),
         round=round_num,
         label=f"round_{round_num}",
         accuracy=acc,
@@ -255,12 +273,13 @@ def lost_history(
         improved=False,
         prompt_fields={},
         candidates_scored=1,
+        selected_labels=[],
         candidate_scores=[
             scored_candidate(
                 "c0",
                 accuracy=acc,
                 total=total,
-                matched_parent_accuracy=0.5,
+                reference_accuracy=0.5,
                 prompt_fields={field: value},
                 elimination_stopped=elimination_context is not None,
                 elimination_context=elimination_context or {},

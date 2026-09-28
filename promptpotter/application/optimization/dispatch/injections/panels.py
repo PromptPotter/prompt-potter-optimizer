@@ -47,12 +47,8 @@ from promptpotter.domain.candidate_diff import (
 from promptpotter.domain.connector import MeasuredUnit, unit_count, unit_plural
 from promptpotter.domain.escalation_signals import ExplorationBudget
 from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS, PARENT_LEVEL_SE_KEY
-from promptpotter.domain.results import (
-    CritiqueReadout,
-    EliminationGate,
-    RoundResult,
-    ScoredCandidate,
-)
+from promptpotter.domain.optimizer_state import CritiqueReadout
+from promptpotter.domain.results import EliminationGate, RoundResult, ScoredCandidate
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.ruler import ThetaCaveat, theta_caveat
 from promptpotter.domain.scoring import (
@@ -970,11 +966,11 @@ def _edit_row(edit: _Edit, unit: MeasuredUnit) -> str:
     cand = edit.candidate
     mutation = "; ".join(f"{field}: {value[:MEMORY_VALUE_CAP]}" for field, value in edit.changed)
     # `total == 0` is checked BEFORE the paired quote: a never-measured candidate can still carry
-    # a `matched_parent_accuracy` (the parent was scored even though the candidate was not), and
+    # a `reference_accuracy` (the parent was scored even though the candidate was not), and
     # would otherwise render a comparison out of nothing.
     scored = (
-        f"{cand.accuracy:.0%} vs parent {cand.matched_parent_accuracy:.0%}"
-        if cand.total and cand.matched_parent_accuracy is not None
+        f"{cand.accuracy:.0%} vs parent {cand.reference_accuracy:.0%}"
+        if cand.total and cand.reference_accuracy is not None
         else _candidate_fate(cand, unit)
     )
     delta = edit.round.cell_delta(cand.candidate_id)

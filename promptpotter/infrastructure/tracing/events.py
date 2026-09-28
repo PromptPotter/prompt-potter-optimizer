@@ -90,7 +90,7 @@ class PromptVersion:
     lineage_id: str
     rendered_prompt: str
     layer1_fields: dict[str, Any]
-    parent_id: str | None = None
+    parent_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

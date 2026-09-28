@@ -32,13 +32,13 @@ Every optimizer LLM node — `l1_generate`, `l1_critique`, `l2_context`, `l3_pla
 
 | Field | Writer | Reader(s) | Lifetime |
 |-------|--------|-----------|----------|
-| `RoundResult.critique` | L1 critique | L1 generate, L2, L3 (`critique` injection via `bundle.digest.critique`) | per round (lives on the round audit, not OSP) |
-| `OSP.memory.task_context` | operator, at check-in (frozen for the run) | L1 generate (`task_context` injection — on that floor only) | persistent; never overwritten by any layer |
-| `OSP.memory.l1_layout` | L2 | L1 generate (`fill`); L2 (`l1_layout` injection) | persistent (on `L2L3Memory`, copied on adopt) |
-| `OSP.plan` | L3 | L1 generate, L2, L3 (`plan` injection; not on `l1_critique`'s layout) | persistent — never cleared |
-| `OSP.memory.wounds.l3_note` | L3 | L2 (`l3_to_l2_note` injection — L2 template only) | persistent until L3 next fires |
-| `OSP.memory.wounds.l2_guard_breaches` | L2 parser + layout validator | L3 (rendered in the merged `guard_breaches` injection) | persistent until L3 fires |
-| `OSP.memory.wounds.l3_guard_breaches` | L3 parser | L3 next fire (rendered in the merged `guard_breaches` injection) | persistent |
+| `RoundResult.critique` | L1 critique | L1 generate, L2, L3 (`critique` injection via `bundle.digest.critique`) | per round (lives on the round audit, not the memory) |
+| `Cycle.framing` | operator, at check-in (frozen for the run) | L1 generate (`task_context` injection — on that floor only) | persistent; never overwritten by any layer |
+| `Cycle.memory.l1_layout` | L2 | L1 generate (`fill`); L2 (`l1_layout` injection) | persistent (banked per round as `optimizer_state`) |
+| `Cycle.memory.plan` | L3 | L1 generate, L2, L3 (`plan` injection; not on `l1_critique`'s layout) | persistent — never cleared |
+| `Cycle.memory.wounds.l3_note` | L3 | L2 (`l3_to_l2_note` injection — L2 template only) | persistent until L3 next fires |
+| `Cycle.memory.wounds.l2_guard_breaches` | L2 parser + layout validator | L3 (rendered in the merged `guard_breaches` injection) | persistent until L3 fires |
+| `Cycle.memory.wounds.l3_guard_breaches` | L3 parser | L3 next fire (rendered in the merged `guard_breaches` injection) | persistent |
 
 **One renderer per field:** L3 writes `plan`, and every node whose layout places it reads it through the same `_r_plan`. `task_context` is operator-authored framing, frozen for the run and rendered by `_r_task_context`, but no layer writes it. (`L2ContextOutput` explicitly carries neither `task_context` nor `action` — see `dispatch/schemas.py`.) Which node places which panel is `domain/l1_layout.py::NODE_LAYOUTS`.
 

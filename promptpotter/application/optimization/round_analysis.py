@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from promptpotter.application.optimization.pobb.classification import (
+from promptpotter.application.scoring.classification import (
     get_ranked_items,
     ranked_item_keys_from_schema,
 )
@@ -67,7 +67,7 @@ def compute_round_diagnostics(
         trend_description=trend_desc,
         anomalies=anomalies,
         cross_candidate_diff=diff_lines,
-        l1_diversity=float(round_result.l1_yield),
+        l1_diversity=float(round_result.optimizer_state.payload.l1_yield),
         samples=samples,
     )
 

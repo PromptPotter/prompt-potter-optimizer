@@ -533,9 +533,9 @@ def _crowns(cycle_dir: Path) -> dict[int, str]:
     elected at all is absent: neither moved the branch's head, and only the ledger separates
     them from a round that crowned somebody."""
     return {
-        rnd: election.winner_label
+        rnd: election.selected_labels[0]
         for rnd, election in scan_ledger_elections(CycleLayout(cycle_dir).ledger).items()
-        if election.winner_label
+        if election.selected_labels
     }
 
 
@@ -742,7 +742,9 @@ def _reading_row(
     spend = dash.get("spend")
     # The configuration the cycle ran under IS the arm — its hashes are stamped on round 0
     # precisely so a campaign paused before round 1 still names what it measured.
-    hashes = doc.get("optimizer_prompt_hashes")
+    hashes = ((doc.get("optimizer_state") or {}).get("payload") or {}).get(
+        "optimizer_prompt_hashes"
+    )
     # `None` on any backend declaring no measurement identity — every campaign shares that absence,
     # so the arm alone is the whole grouping there.
     instrument = instrument_of(doc.get("pipeline_params"))

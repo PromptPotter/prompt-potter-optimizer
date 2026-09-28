@@ -16,6 +16,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
 )
 from promptpotter.application.optimization.dispatch.schemas import L2_NODE_AXES
 from promptpotter.config.settings import settings
+from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_schema import (
     ModelCapability,
@@ -138,7 +139,17 @@ class CycleListEntry(StrictModel):
         default=RunPhase.DETACHED,
         description="The single run-state value (RunPhase). Computed once by derive_run_phase from lifecycle + control flags + freshness; every picker dot and badge reads this, none re-derive it. 'checkin' wins first (the campaign hasn't run); 'terminal' pairs with `status` for the reason label.",
     )
-    best_accuracy: float | None = None
+    best_accuracy: float | None = Field(
+        default=None,
+        description="The optimizer's own selection score — what it KEPT, read on the rows that "
+        "chose it. Never the headline; `bench_score` is.",
+    )
+    bench_score: BenchScore | None = Field(
+        default=None,
+        description="The headline: the selected result and the origin scored on the held-out "
+        "bench set under the campaign's formula. Null until the cycle ends, and on a campaign "
+        "whose `dataset_split` holds nothing out.",
+    )
     origin_accuracy: float | None = Field(
         default=None,
         description="Round 0's accuracy — the origin's measurement, derived from rounds[] (no stored copy). Null until round 0 lands.",

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.config.paths import benchmark_datasets_root
-from promptpotter.domain.measurement_provenance import grade_run
+from promptpotter.domain.measurement_provenance import RunSource, grade_run
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.store.dataset_access import readable_dataset_rows
 from promptpotter.shared import GSM8K_ANSWER_RE
@@ -281,7 +281,7 @@ def build_dataset_run_data(
     results: list[Any],
     *,
     dataset_name: str | None,
-    source: str = "",
+    source: RunSource,
     pipeline_schema: PipelineSchema,
     human_intervened: bool = False,
 ) -> dict[str, Any]:

@@ -187,6 +187,10 @@ class SpendBook(Projection):
         # own cells itself.
         self._held_usd: dict[TokenUsageKind, float] = {}
         self._held_tokens: dict[TokenUsageKind, int] = {}
+        # What the run keeps back for the bench's pass after the search, so the search stops short
+        # of the ceiling by that much and the pass still fits under it.
+        self.set_aside_usd = 0.0
+        self.set_aside_tokens = 0
         self._seen: TokenUsageRecord | None = None
         # The run's own ledger and round, where a run armed this book. A nested run spends under
         # its ROOT's book — every level of the recursion against one ceiling — and its bills are
@@ -205,6 +209,10 @@ class SpendBook(Projection):
     def _spend(self, usd: float | None, tokens: int) -> None:
         self.usd_spent += usd or 0.0
         self.tokens_spent += tokens
+
+    def set_aside(self, usd: float, tokens: int) -> None:
+        self.set_aside_usd = usd
+        self.set_aside_tokens = tokens
 
     def saw(self, record: TokenUsageRecord) -> bool:
         """Whether ``record`` reached this book through its ledger — asked right after the append."""
@@ -236,11 +244,14 @@ class SpendBook(Projection):
         return self.saw(copy)
 
     def exhausted(self) -> ErrorCategory | None:
-        """The ceiling already reached, if any — by bills, or by sends whose bill never came."""
-        if (cap := self.usd_cap()) is not None and self.usd_spent + self.usd_unreported >= cap:
+        """The ceiling already reached, if any — by bills, by sends whose bill never came, or by
+        what is set aside."""
+        usd_used = self.usd_spent + self.usd_unreported + self.set_aside_usd
+        if (cap := self.usd_cap()) is not None and usd_used >= cap:
             return ErrorCategory.SPEND_CEILING
+        tokens_used = self.tokens_spent + self.tokens_unreported + self.set_aside_tokens
         cap_t = self.tokens_cap()
-        if cap_t is not None and self.tokens_spent + self.tokens_unreported >= cap_t:
+        if cap_t is not None and tokens_used >= cap_t:
             return ErrorCategory.TOKEN_CEILING
         return None
 
@@ -248,12 +259,13 @@ class SpendBook(Projection):
         self, bound: SendBound, beside: TokenUsageKind | None
     ) -> Iterator[tuple[ErrorCategory, int]]:
         if (cap := self.usd_cap()) is not None:
-            held = sum(v for k, v in self._held_usd.items() if k != beside)
+            held = sum(v for k, v in self._held_usd.items() if k != beside) + self.set_aside_usd
             left = cap - self.usd_spent - self.usd_unreported - held
             yield ErrorCategory.SPEND_CEILING, _times(left, bound.usd)
         if (cap_t := self.tokens_cap()) is not None:
             held_t = sum(v for k, v in self._held_tokens.items() if k != beside)
             left_t = cap_t - self.tokens_spent - self.tokens_unreported - held_t
+            left_t -= self.set_aside_tokens
             yield ErrorCategory.TOKEN_CEILING, _times(left_t, bound.tokens)
 
     def fits(self, bound: SendBound, *, beside: TokenUsageKind | None = None) -> int:
@@ -299,15 +311,17 @@ class SpendBook(Projection):
             )
             return (
                 f"{what} may cost up to ${bound.usd:.4f}, and the ${self.usd_cap():.4f} ceiling "
-                f"holds ${self.usd_spent:.4f} spent{unreported} and "
-                f"${sum(self._held_usd.values()):.4f} for calls out"
+                f"holds ${self.usd_spent:.4f} spent{unreported}, "
+                f"${sum(self._held_usd.values()):.4f} for calls out and "
+                f"${self.set_aside_usd:.4f} set aside for the bench"
             )
         if bound.tokens is None:
             return f"{what}: nothing caps its reply, so it cannot run under a token ceiling"
         return (
             f"{what} may use up to {bound.tokens:,} tokens, and the {self.tokens_cap():,}-token "
-            f"ceiling holds {self.tokens_spent:,} spent, {self.tokens_unreported:,} unreported and "
-            f"{sum(self._held_tokens.values()):,} for calls out"
+            f"ceiling holds {self.tokens_spent:,} spent, {self.tokens_unreported:,} unreported, "
+            f"{sum(self._held_tokens.values()):,} for calls out and "
+            f"{self.set_aside_tokens:,} set aside for the bench"
         )
 
     def release(self, bound: SendBound, kind: TokenUsageKind) -> None:

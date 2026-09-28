@@ -34,12 +34,10 @@ interface ScopeSlice {
 interface ScopeState {
   slice: ScopeSlice | null;
   error: string | null;
-  splitTest: number | null;
   order: HardSampleOrder | null;
 }
 
 export interface CellsState extends ScopeSlice {
-  splitTest: number | null;
   order: HardSampleOrder | null;
   isStale: boolean;
   // Consumers MUST render it: a failed read and an empty slice spell `items` the same way.
@@ -57,7 +55,6 @@ const EMPTY_SLICE: ScopeSlice = {
 
 const EMPTY: CellsState = {
   ...EMPTY_SLICE,
-  splitTest: null,
   order: null,
   isStale: false,
   error: null,
@@ -150,7 +147,7 @@ export function useCells(
         if (signal.aborted) return;
         setSlices((prev) => ({
           ...keepUnit(prev, unit),
-          [key]: { slice: sliceFrom(r), error: null, splitTest: r.split_test, order: r.order },
+          [key]: { slice: sliceFrom(r), error: null, order: r.order },
         }));
       } catch (e) {
         if (signal.aborted || !seeding) return;
@@ -161,7 +158,6 @@ export function useCells(
           [key]: {
             slice: gone ? EMPTY_SLICE : null,
             error: gone ? null : e instanceof Error ? e.message : String(e),
-            splitTest: null,
             order: null,
           },
         }));
@@ -199,7 +195,7 @@ export function useCells(
   });
 
   if (!sliceKey) return EMPTY;
-  if (!req) return { ...EMPTY_SLICE, splitTest: null, order: null, isStale: true, error: null };
+  if (!req) return { ...EMPTY_SLICE, order: null, isStale: true, error: null };
   const state = slices[sliceKey];
 
   // In flight: show any slice held for this unit, marked stale, rather than blank the panel.
@@ -209,7 +205,6 @@ export function useCells(
       : undefined;
     return {
       ...(sibling?.slice ?? EMPTY_SLICE),
-      splitTest: sibling?.splitTest ?? null,
       order: sibling?.order ?? null,
       isStale: true,
       error: null,
@@ -218,7 +213,6 @@ export function useCells(
 
   return {
     ...(state.slice ?? EMPTY_SLICE),
-    splitTest: state.splitTest,
     order: state.order,
     isStale: false,
     error: state.error,

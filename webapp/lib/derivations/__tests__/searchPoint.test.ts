@@ -139,7 +139,7 @@ describe("bestObserveTarget — the parent", () => {
         summaryCandidate({
           candidate_id: `r${round}c${i}`,
           label: servedLabel(round, i),
-          is_winner: i === winnerIdx,
+          is_selected: i === winnerIdx,
         }),
       ),
     });
@@ -185,13 +185,13 @@ describe("latestClosedTarget — the newest searchpoint that closed", () => {
           summaryRound({
             round: 1,
             candidates: [
-              summaryCandidate({ candidate_id: "a", label: servedLabel(1, 0), is_winner: true }),
+              summaryCandidate({ candidate_id: "a", label: servedLabel(1, 0), is_selected: true }),
             ],
           }),
           summaryRound({
             round: 2,
             candidates: [
-              summaryCandidate({ candidate_id: "b", label: servedLabel(2, 0), is_winner: true }),
+              summaryCandidate({ candidate_id: "b", label: servedLabel(2, 0), is_selected: true }),
               summaryCandidate({ candidate_id: "c", label: servedLabel(2, 1) }),
             ],
           }),

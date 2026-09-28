@@ -23,10 +23,10 @@ Storage stays four typed lists (+ `l3_note`); **rendering collapses to two owner
 |---|---|---|---|---|
 | **Producer → Nurse** (owner-keyed, not producer-keyed) | L1 → **L1** | L1 → **L1 / OPERATOR** | L2 → L3 | L2 → L3 |
 | **Owner source** | structural (L1's own output) | `RuntimeFailure.owner`: `L1` (rate) · `OPERATOR` (fatal) | (patience event) | structural (layout refusal → L3) |
-| **Detector** | `L1_SCHEMA_COMPLIANCE` (`validators/l1_strict.py`), at `parse_population()` | `DegradationCheck` (`pobb/checks.py`), mid-eval | `escalate_l2` patience (`escalation/firing.py`) | `validate_l1_layout` (post-parse) |
+| **Detector** | `L1_SCHEMA_COMPLIANCE` (`validators/l1_strict.py`), at `parse_population()` | `DegradationCheck` (`scoring/classification.py`), mid-eval | `escalate_l2` patience (`escalation/firing.py`) | `validate_l1_layout` (post-parse) |
 | **Failure record class** | `ValidationFailure` | `RuntimeFailure` | (patience event, no record) | `ValidatorOutcome` |
 | **OSP storage** | `validation_failures` | `runtime_failures` | `cycle.escalation.l2_stall_count` (on the cycle, not the OSP) | `l2_guard_breaches` |
-| **Outer-memory mirror** | none (L2 reads `candidate_scores`) | cumulative on `cycle.opt_sp.memory.wounds.runtime_failures` | none | per-round on the OSP itself |
+| **Outer-memory mirror** | none (L2 reads `candidate_scores`) | cumulative on `cycle.memory.wounds.runtime_failures` | none | per-round on the `CandidateProposal` |
 | **Nurse prompt slot** | `{{l1_wounds}}` | `{{l1_wounds}}` | (whole `l3_plan` template) | `{{guard_breaches}}` |
 | **Renderer** | `_r_l1_wounds` | `_r_l1_wounds` | `_r_l1_wounds` | `_r_guard_breaches` |
 | **Nurse's writeback** | L1 re-proposes a valid override | L1 retunes the node config · or operator trims schema/model | `cycle.opt_sp.plan` | `cycle.opt_sp.plan` |
@@ -65,9 +65,9 @@ A REFUSED L2 layout edit makes `escalate_l2` run `_run_transition(L3, …)` *imm
 
 ## Optimizer-memory state
 
-The fields that travel with each candidate cross-round are `domain/opt_search_point.py::L2L3Memory` — read the roster and each field's lifecycle off the model, which is frozen and cannot drift from itself.
+The fields that travel cross-round are the cycle's `domain/optimizer_state.py::L2L3Memory`, banked on every round document as its `optimizer_state` — read the roster and each field's lifecycle off the model, which cannot drift from itself.
 
-Two that the model cannot tell you. **`wounds.l3_note` is sticky free-text and not a failure record** — L3 sets it to steer L2, and it survives every parent swap (an L1 win as well as an L2/L3 transition) through the `Cycle.adopt` seam's `copy_memory_to`, the only field there with that lifetime. And **the L1 critique is not on `L2L3Memory` at all**: it lives on `RoundResult.critique`, which the dispatch hub's `critique` injection reads through `bundle.digest.critique` (`build_bundle`, off the latest round), the same way per-round trajectory lives on `Cycle.rounds` rather than the OSP.
+Two that the model cannot tell you. **`wounds.l3_note` is sticky free-text and not a failure record** — L3 sets it to steer L2, and it survives every parent swap (an L1 win as well as an L2/L3 transition) and is cleared only when L3 fires again, the only field there with that lifetime. And **the L1 critique is not on `L2L3Memory` at all**: it lives on `RoundResult.critique`, which the dispatch hub's `critique` injection reads through `bundle.digest.critique` (`build_bundle`, off the latest round), the same way per-round trajectory lives on `Cycle.rounds` rather than the memory.
 
 ## The prompt-budget unit (a separate mechanism)
 

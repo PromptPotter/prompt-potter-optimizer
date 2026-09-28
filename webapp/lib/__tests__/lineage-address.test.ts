@@ -14,7 +14,7 @@ const hops = (path: CyclePath) =>
 
 function node(over: Partial<LineageNode> & Pick<LineageNode, "kind" | "id" | "label">): LineageNode {
   return {
-    parent_id: null,
+    parent_ids: [],
     course_label: over.label,
     path: [],
     children: [],
@@ -22,7 +22,7 @@ function node(over: Partial<LineageNode> & Pick<LineageNode, "kind" | "id" | "la
     accuracy: null,
     composite_fitness: null,
     state: "",
-    is_winner: false,
+    is_selected: false,
     theta: null,
     theta_se: null,
     evaluators: {},

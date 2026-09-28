@@ -23,8 +23,10 @@ campaign_config:
   sp_budget_round: 34
   exclude_nodes: []
   pipeline_overlay: {}
+  # The bench set the headline is read on; the search draws only the rest of the bank. An L4
+  # inner cell ignores it — its drawn rows are its whole bank.
   dataset_split:
-    test: 1500
+    bench: 100
   optimization:
     l1_patience: 0
     max_rounds: 5

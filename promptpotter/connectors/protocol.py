@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 
     import httpx
 
+    from promptpotter.infrastructure.store.stores import Stores
+
 
 @dataclass(frozen=True)
 class InProcessWorkload:
@@ -217,16 +219,16 @@ class Connector:
     the server at boot and a run at init; ``None`` checks nothing."""
 
     identity_config: (
-        Callable[[Path, Mapping[str, Any] | None], dict[str, dict[str, Any]]] | None
+        Callable[[Stores, Path, Mapping[str, Any] | None], dict[str, dict[str, Any]]] | None
     ) = None
     """Per-node config entries that are part of MEASUREMENT IDENTITY but not
     wire tunables — folded into ``resolve_pipeline_config_params`` so the
     origin cycle id and the archive's node-config reuse key change whenever
-    the backend's effective revision does. Receives the resolved dataset config
-    dir and the resolved experiment, so a connector can fold dataset-scoped inner
-    behavior into the fingerprint. The canonical user is the in-process ``promptpotter``
-    connector: its backend IS the inner optimizer (optimizer prompt origin +
-    layouts + engine + the inner benchmark's config), so
+    the backend's effective revision does. Receives the stores the dataset resolved
+    through, the resolved dataset config dir and the resolved experiment, so a connector can
+    fold dataset-scoped inner behavior into the fingerprint. The canonical user is the
+    in-process ``promptpotter`` connector: its backend IS the inner optimizer (optimizer
+    prompt origin + layouts + engine + the inner benchmark's config), so
     without this an origin edit silently reuses stale measurements recorded
     under the old behavior. The connector's ``wire_adapter`` must strip these
     reserved keys from the outbound payload. ``None`` = the backend's revision

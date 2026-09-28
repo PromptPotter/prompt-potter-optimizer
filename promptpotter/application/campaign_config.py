@@ -11,6 +11,7 @@ from promptpotter.config.settings import (
     DEFAULT_ORIGIN_BUDGET,
     POBB_DEFAULT_EPSILON,
 )
+from promptpotter.domain.bench import DatasetSplit
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.results import HardSampleOrder, HeadlineMetric
 from promptpotter.domain.strict_model import StrictModel
@@ -495,7 +496,7 @@ class OptimizationConfig(StrictModel):
             "L2/L3 terminate_proposal emission. When True, the "
             "``terminate_capability`` injection renders the stop-the-cycle "
             "instruction into L2 + L3 prompts; a terminate_proposal NAMING A "
-            "REASON raises ``StopReason.ABORT`` and the cycle finalizes HALTED "
+            "REASON raises ``StopReason.OPTIMIZER_ABORT`` and the cycle finalizes HALTED "
             "on the current cycle_id (no fork), while a blank one is ignored "
             "like any volunteered field. The intended user is an unrecoverable "
             "upstream fault — e.g. an evidence-starved enricher (backend quota "
@@ -544,10 +545,6 @@ class OptimizationConfig(StrictModel):
         ),
     )
     mechanisms: MechanismConfig = Field(default_factory=MechanismConfig)
-
-
-class DatasetSplit(StrictModel):
-    test: int = Field(description="Held-out test fold size — not in the bank or the table")
 
 
 class CampaignConfig(StrictModel):
@@ -647,11 +644,12 @@ class CampaignConfig(StrictModel):
         "guessed value makes every campaign on it publish a round count nobody can defend. "
         "DISPLAY config — it moves no gate, no selection and no stop.",
     )
-    # Carries a `Knob`, so the walk STOPS here: the split is one knob, not two.
-    dataset_split: Annotated[DatasetSplit | None, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(
+    # Carries a `Knob`, so the walk STOPS here: the partition is one knob, not three.
+    dataset_split: Annotated[DatasetSplit | None, Knob(Scope.DATA, Estimand.SELECTION)] = Field(
         None,
-        description="Canonical train/test fold sizes for the dashboard footer. "
-        "None when the dataset declares no split.",
+        description="How run init partitions the bank into the search pool every optimizer draw "
+        "reads, the held-out bench set the headline is scored on, and a demo pool. `None` "
+        "holds nothing out: the whole bank is the search pool and there is no bench score.",
     )
 
     # No `Knob` — the walk descends into OptimizationConfig.

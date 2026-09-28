@@ -1636,7 +1636,7 @@ paths:
         are finished on disk under a parent that a positional read cannot name. The ledger
         is the only witness independent of round close.
 
-        The round-CLOSE facts (`is_winner`, `theta`, `cumulative_theta`) come from
+        The round-CLOSE facts (`is_selected`, `theta`, `cumulative_theta`) come from
         `dashboard.json::rounds[]`, the declared projection for them — the ledger genuinely
         does not carry them. A round that never closed reports **no winner** rather than
         promoting its lone candidate.
@@ -1928,8 +1928,9 @@ paths:
         carried the field. `restore` puts them back. `purge-cold` is the only
         step that destroys, and `compact` cannot perform it.
 
-        Applies to `candidate_*` runs only: `origin` and `round_parent` serve
-        the overwhelming majority of cache replays, so they are never touched.
+        Applies to `panel` runs only (a candidate's own walk): `origin` and
+        `parent` serve the overwhelming majority of cache replays, so they are
+        never touched.
         A row carrying `mean_round_delta` keeps its `reasoning_trace` — the L4
         narrative panel gate needs both, and a row with one but not the other
         silently changes which panel the round renders.
@@ -2736,24 +2737,16 @@ components:
         id:
           type: string
           description: Course → the cycle_id. Candidate → the searchpoint id minted at L1/origin.
-        parent_id:
-          type: [string, "null"]
-          x-status: wired-scheduled-for-removal
-          description: |
-            The candidate this node descends from; null only at the true root. A fork and
-            an L4 inner run carry the SAME edge — one resolver reads
-            `fork.from_candidate_id` and `spawned_by`, so a course hangs off a node and
-            needs no lane geometry. Successor `parent_ids`.
         parent_ids:
           type: array
           items: { type: string }
-          x-status: declared-not-wired
           description: |
             Every candidate this node derives from — one for a mutation, several for a
             crossover; empty only at the true root. Lineage is a DAG; this tree view hangs
             the node under `parent_ids[0]`, the declared rule until the surfaces decide how
-            to draw the other edges. A fork or an L4 inner run carries its one edge here
-            exactly as above.
+            to draw the other edges. A fork and an L4 inner run carry their one edge here —
+            one resolver reads `fork.from_candidate_id` and `spawned_by`, so a course hangs
+            off a node and needs no lane geometry.
         label:
           type: string
           description: |
@@ -2792,20 +2785,13 @@ components:
         status:
           type: string
           description: |
-            Candidate → `minted` | `measured`. Never `winner` (that rides `is_winner`):
+            Candidate → `minted` | `measured`. Never `winner` (that rides `is_selected`):
             election is stamped at round close, so an unclosed round HAS no winner and this
             tree declines to invent one. Course → `index.json::status`, the same StopReason
             value `/cycles` serves under this same name. Was `state`, which is what
             `dashboard.json::state` calls the fine-grained ACTIVITY phase — a different axis.
-        is_winner:
-          type: boolean
-          x-status: wired-scheduled-for-removal
-          description: |
-            Elected this round. False throughout a round that never closed — such a round
-            has no winner, and a lone candidate is not promoted to one. Successor `is_selected`.
         is_selected:
           type: boolean
-          x-status: declared-not-wired
           description: |
             In this round's `selected_labels` — the individuals the next round derives
             from. False throughout a round that never closed.
@@ -3113,11 +3099,58 @@ components:
           type: string
           enum: [checkin, running, paused, detached, terminal]
           default: detached
-        best_accuracy: { type: [number, 'null'] }
+        best_accuracy:
+          type: [number, 'null']
+          description: |
+            The optimizer's own selection score — what it KEPT, read on the rows that chose
+            it. Never the headline; `bench_score` is.
         rounds_closed: { type: integer, default: 0 }
         created_at: { type: string, default: '' }
         updated_at: { type: string, default: '' }
         human_intervened: { type: boolean, default: false }
+        bench_score:
+          description: |
+            The headline (`architecture.md` § The bench score is not an optimizer's
+            selection): the selected result and the origin scored on the held-out bench set
+            under the campaign's formula. Null until the cycle ends, and on a campaign whose
+            `dataset_split` holds nothing out.
+          oneOf:
+            - $ref: '#/components/schemas/BenchScore'
+            - type: 'null'
+
+    BenchReading:
+      type: object
+      additionalProperties: false
+      required: [round, sp_hash, accuracy, composite_fitness, ci_lo, ci_hi, n_scored, run_id, stopped]
+      description: One individual scored on the whole bench set under the campaign's formula.
+      properties:
+        round: { type: integer, description: The round whose selection this is; 0 is the origin. }
+        sp_hash: { type: string, description: "The searchpoint scored — the archive's `prompt_fields_id`." }
+        accuracy: { type: [number, 'null'] }
+        composite_fitness: { type: [number, 'null'] }
+        ci_lo: { type: [number, 'null'] }
+        ci_hi: { type: [number, 'null'] }
+        n_scored: { type: integer }
+        run_id: { type: string, description: The archive run its bench rows were filed under. }
+        stopped:
+          type: [string, 'null']
+          description: Why the pass ended before its last bench row; null when it scored every one.
+
+    BenchScore:
+      type: object
+      additionalProperties: false
+      required: [bench_size, origin, selected, lift, lift_ci_lo, lift_ci_hi]
+      properties:
+        bench_size: { type: integer }
+        origin: { $ref: '#/components/schemas/BenchReading' }
+        selected: { $ref: '#/components/schemas/BenchReading' }
+        lift:
+          type: [number, 'null']
+          description: |
+            `selected` over `origin` on the bench rows both scored, paired per row; null below
+            two shared rows, 0.0 where the origin is the selection.
+        lift_ci_lo: { type: [number, 'null'] }
+        lift_ci_hi: { type: [number, 'null'] }
 
     CyclesResponse:
       type: object
@@ -5002,8 +5035,8 @@ components:
         runs_skipped:
           type: integer
           description: |
-            Runs deliberately passed over — an `origin` or `round_parent` label,
-            or a run already carrying a cold payload.
+            Runs deliberately passed over — any label but `panel`, or a run
+            already carrying a cold payload.
         rows_moved: { type: integer, description: Measurement rows whose fields moved. }
         bytes_before: { type: integer }
         bytes_after: { type: integer }

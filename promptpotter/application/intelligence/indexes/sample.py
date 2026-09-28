@@ -28,9 +28,16 @@ class FailureCluster:
 
 class SampleIndex:
     """Per-sample derived view over the archive. ``_seen_runs`` is a delta cursor that SURVIVES the process — the per-run derivation is
-    persisted and replayed — and both paths mutate through :meth:`replay_row` so they cannot drift."""
+    persisted and replayed — and both paths mutate through :meth:`replay_row` so they cannot drift.
 
-    def __init__(self) -> None:
+    *sample_ids* is the reading campaign's search pool, applied at replay so the persisted fold
+    stays whole for every reader: a bench-set row must reach no panel. ``None`` admits all."""
+
+    def __init__(self, *, sample_ids: frozenset[int] | None) -> None:
+        self._admitted = sample_ids
+        # Every id a replayed row introduced, admitted or not — what `ingest_run` derives
+        # `new_samples` against, so the persisted fold does not depend on who wrote it.
+        self._introduced: set[int] = set()
         self._samples: dict[int, Sample] = {}
         self._seen_runs: set[str] = set()
         self._hits: dict[int, list[bool]] = defaultdict(list)
@@ -63,7 +70,7 @@ class SampleIndex:
             sid = item.get("sample_id")
             if sid is None:
                 continue
-            if sid not in self._samples and sid not in seen_new:
+            if sid not in self._introduced and sid not in seen_new:
                 seen_new.add(sid)
                 new_samples.append([sid, item.get("query", ""), item.get("ground_truth", "")])
 
@@ -85,12 +92,16 @@ class SampleIndex:
         """Apply one derived row — the SOLE mutation path, so the live derivation above and
         the on-disk replay cannot drift into disagreeing about what a run contributed."""
         run_id = row.get("run_id") or ""
+        admitted = self._admitted
 
         for sid, query, ground_truth in row.get("new_samples") or []:
-            if sid not in self._samples:
+            self._introduced.add(sid)
+            if sid not in self._samples and (admitted is None or sid in admitted):
                 self.register(Sample(id=sid, query=query, ground_truth=ground_truth))
 
         for sid, hit, degraded, failure_mode in row.get("cells") or []:
+            if admitted is not None and sid not in admitted:
+                continue
             self._hits[sid].append(hit)
             if hit and run_id:
                 self._hit_run_ids[sid].append(run_id)

@@ -6,9 +6,9 @@ issue-router and carries no backend-fault diagnostics. Accumulated evidence of a
 instead routes to L2 as a weak preemptor, bypassing ``l1_patience`` so the loop stops grinding
 dead rounds, and L2 judges recoverability.
 
-``_parse_l2`` coerces and validates the layout and merges ``l1_overrides`` into the mutated OSP;
-``_apply_l2`` installs an accepted layout. A control output fires after the layer's normal output
-is adopted and the exit-phase event emitted.
+``_parse_l2`` coerces and validates the layout and merges ``l1_overrides`` over the cycle's;
+``_apply_l2`` installs both into ``Cycle.memory``. A control output fires after the layer's
+normal output is adopted and the exit-phase event emitted.
 
 What each layer may write, and why the framing is not among it:
 ``application/optimization/CLAUDE.md``."""
@@ -44,7 +44,6 @@ from promptpotter.application.optimization.dispatch.schemas import (
 )
 from promptpotter.application.optimization.escalation.state import NextAction
 from promptpotter.application.optimization.resume_and_fork.decisions import (
-    ResumeCheckpointKind,
     record_decision,
 )
 from promptpotter.application.optimization.validators.l3_output import run_l3_output_validators
@@ -54,11 +53,13 @@ from promptpotter.domain.l1_layout import (
     coerce_l1_layout,
     validate_l1_layout,
 )
-from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.phases import CampaignPhase, PhaseEvent, StopLoop, StopReason, emit_phase
+from promptpotter.domain.opt_search_point import OptSearchPoint, node_source
+from promptpotter.domain.optimizer_state import POTTER_MANIFEST, L2L3Memory
+from promptpotter.domain.phases import PhaseEvent, PotterPhase, StopLoop, StopReason, emit_phase
 from promptpotter.domain.run_records import (
     ConfigOverrides,
     ForkTrigger,
+    PotterCheckpointKind,
     RebaseRequest,
 )
 from promptpotter.domain.validators import ValidatorOutcome
@@ -86,6 +87,9 @@ class TransitionResult:
     ``cycle.rebase_request`` and raises ``StopLoop(REBASED)``, which ``runner.entry`` resolves to a fork."""
 
     opt_sp: OptSearchPoint
+    # The whole post-fire map, or ``None`` when the fire left the cycle's untouched.
+    l1_overrides: dict[str, Any] | None = None
+    plan: str = ""
     l3_note: str = ""
     axis_targeted: str = ""
     l1_layout: L1Layout | None = None
@@ -98,7 +102,7 @@ class TransitionResult:
     terminate_proposal: TerminateProposal | None = None
 
 
-ParseFn = Callable[[Any, OptSearchPoint], TransitionResult]
+ParseFn = Callable[[Any, OptSearchPoint, L2L3Memory], TransitionResult]
 ApplyFn = Callable[["Cycle", TransitionResult, int], None]
 PayloadFn = Callable[["Cycle"], dict[str, Any]]
 ExitFn = Callable[["Cycle", TransitionResult], dict[str, Any]]
@@ -108,24 +112,22 @@ ExitFn = Callable[["Cycle", TransitionResult], dict[str, Any]]
 class LayerStrategy:
     layer_id: Literal["L2", "L3"]
     template_name: str
-    phase: CampaignPhase
+    phase: PotterPhase
     parse: ParseFn
     apply: ApplyFn
     enter_payload_fn: PayloadFn
     exit_payload_fn: ExitFn
 
 
-def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint) -> TransitionResult:
+def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, memory: L2L3Memory) -> TransitionResult:
     # An absent reason is REPORTED, never replaced. The placeholder that stood here read as a
     # sentence L2 had written, so the one surface carrying the fire forward said "refine_strategy
     # transition" whether L2 had diagnosed anything or not — and the empty state survived only as a
     # decimal in `review.md`'s l2_behavior_pass_rate, which is where it was eventually found.
     rationale = truncate(raw.rationale, 80) if raw.rationale else "(no rationale given)"
-    changes: dict[str, Any] = {"changes_description": f"L2: {rationale}"}
-    if raw.l1_overrides:
-        changes["l1_overrides"] = {**opt_sp.memory.l1_overrides, **raw.l1_overrides}
+    overrides = {**memory.l1_overrides, **raw.l1_overrides} if raw.l1_overrides else None
 
-    proposed_layout = coerce_l1_layout(raw.l1_layout, base=opt_sp.memory.l1_layout)
+    proposed_layout = coerce_l1_layout(raw.l1_layout, base=memory.l1_layout)
     layout_outcomes: list[ValidatorOutcome] = []
     accepted_layout: L1Layout | None = None
     layout_refused = False
@@ -133,7 +135,7 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint) -> TransitionResult:
         layout_result = validate_l1_layout(
             proposed_layout,
             spec=NODE_LAYOUTS["l1_generate"],
-            prior_layout=opt_sp.memory.l1_layout,
+            prior_layout=memory.l1_layout,
         )
         layout_outcomes = list(layout_result.outcomes)
         if layout_result.is_valid:
@@ -162,7 +164,12 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint) -> TransitionResult:
         )
 
     return TransitionResult(
-        opt_sp=opt_sp.mutate(source="l2_context", **changes),
+        opt_sp=OptSearchPoint.derive(
+            [opt_sp],
+            source=node_source(POTTER_MANIFEST, "l2_context"),
+            changes_description=f"L2: {rationale}",
+        ),
+        l1_overrides=overrides,
         axis_targeted=raw.axis_targeted,
         l1_layout=accepted_layout,
         l1_layout_refused=layout_refused,
@@ -173,10 +180,12 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint) -> TransitionResult:
 
 
 def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
-    opt_sp = cycle.opt_sp
+    memory = cycle.memory
+    if result.l1_overrides is not None:
+        memory.l1_overrides = result.l1_overrides
     if result.l1_layout is not None:
-        opt_sp.memory.l1_layout = result.l1_layout
-    opt_sp.memory.wounds.l2_guard_breaches = list(result.l2_guard_breaches)
+        memory.l1_layout = result.l1_layout
+    memory.wounds.l2_guard_breaches = list(result.l2_guard_breaches)
     cycle.escalation.record_l2_fired(
         best_composite_fitness=cycle.tracking.best_composite_fitness,
         best_theta=cycle.tracking.best_theta,
@@ -187,7 +196,7 @@ def _l2_enter(cycle: Cycle) -> dict[str, Any]:
     return {
         "l2_round": cycle.escalation.l2_round,
         "l1_stall_count": cycle.escalation.l1_stall_count,
-        "l1_overrides": cycle.opt_sp.memory.l1_overrides,
+        "l1_overrides": cycle.memory.l1_overrides,
         "current_accuracy": cycle.tracking.current_accuracy,
         "best_accuracy": cycle.tracking.best_accuracy,
     }
@@ -202,7 +211,7 @@ def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
         "l2_stall_count": cycle.escalation.l2_stall_count,
         "l2_best_composite_fitness_at_entry": cycle.escalation.l2_best_composite_fitness_at_entry,
         "l2_best_theta_at_entry": cycle.escalation.l2_best_theta_at_entry,
-        "param_changes_count": len(result.opt_sp.memory.l1_overrides),
+        "param_changes_count": len(cycle.memory.l1_overrides),
         "l1_layout_changed": result.l1_layout is not None,
         "changes_description": result.opt_sp.lineage.changes_description,
         "axis_targeted": result.axis_targeted,
@@ -217,7 +226,7 @@ def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
 L2 = LayerStrategy(
     layer_id="L2",
     template_name="l2_context",
-    phase=CampaignPhase.REFINE_STRATEGY,
+    phase=PotterPhase.REFINE_STRATEGY,
     parse=_parse_l2,
     apply=_apply_l2,
     enter_payload_fn=_l2_enter,
@@ -225,10 +234,10 @@ L2 = LayerStrategy(
 )
 
 
-def _parse_l3(raw: L3PlanOutput, opt_sp: OptSearchPoint) -> TransitionResult:
-    new_plan = raw.plan or opt_sp.plan
+def _parse_l3(raw: L3PlanOutput, opt_sp: OptSearchPoint, memory: L2L3Memory) -> TransitionResult:
+    new_plan = raw.plan or memory.plan
     rationale = truncate(raw.rationale, 80) if raw.rationale else "(no rationale given)"
-    failures = run_l3_output_validators({"plan": new_plan}, opt_sp)
+    failures = run_l3_output_validators({"plan": new_plan}, prior_plan=memory.plan)
     if failures:
         logger.warning(
             "L3 output failed %d validator(s): %s",
@@ -236,9 +245,12 @@ def _parse_l3(raw: L3PlanOutput, opt_sp: OptSearchPoint) -> TransitionResult:
             ", ".join(o.validator_id for o in failures),
         )
     return TransitionResult(
-        opt_sp=opt_sp.mutate(
-            plan=new_plan, changes_description=f"L3: {rationale}", source="l3_plan"
+        opt_sp=OptSearchPoint.derive(
+            [opt_sp],
+            changes_description=f"L3: {rationale}",
+            source=node_source(POTTER_MANIFEST, "l3_plan"),
         ),
+        plan=new_plan,
         l3_note=raw.note,
         l3_guard_breaches=failures,
         fork_proposal=raw.fork_proposal,
@@ -247,10 +259,10 @@ def _parse_l3(raw: L3PlanOutput, opt_sp: OptSearchPoint) -> TransitionResult:
 
 
 def _apply_l3(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
-    # Order matters: ``copy_memory_to`` carried the prior l3_note onto the new OSP, and this
-    # overwrite (possibly with ``""``) is the "cleared only when L3 fires again" contract.
-    cycle.opt_sp.memory.wounds.l3_note = result.l3_note
-    cycle.opt_sp.memory.wounds.l3_guard_breaches = list(result.l3_guard_breaches)
+    cycle.memory.plan = result.plan
+    # The overwrite, possibly with ``""``, is the "cleared only when L3 fires again" contract.
+    cycle.memory.wounds.l3_note = result.l3_note
+    cycle.memory.wounds.l3_guard_breaches = list(result.l3_guard_breaches)
     cycle.escalation.record_l3_fired(
         best_composite_fitness=cycle.tracking.best_composite_fitness,
         best_theta=cycle.tracking.best_theta,
@@ -261,7 +273,7 @@ def _l3_enter(cycle: Cycle) -> dict[str, Any]:
     return {
         "l3_round": cycle.escalation.l3_round,
         "l2_stall_count": cycle.escalation.l2_stall_count,
-        "current_plan_preview": str(cycle.opt_sp.plan)[:120],
+        "current_plan_preview": cycle.memory.plan[:120],
     }
 
 
@@ -273,7 +285,7 @@ def _l3_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
         "l3_stall_count": cycle.escalation.l3_stall_count,
         "l3_best_composite_fitness_at_entry": cycle.escalation.l3_best_composite_fitness_at_entry,
         "l3_best_theta_at_entry": cycle.escalation.l3_best_theta_at_entry,
-        "new_plan_preview": str(result.opt_sp.plan)[:120],
+        "new_plan_preview": result.plan[:120],
         "changes_description": result.opt_sp.lineage.changes_description,
     }
     if result.fork_proposal is not None:
@@ -286,7 +298,7 @@ def _l3_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
 L3 = LayerStrategy(
     layer_id="L3",
     template_name="l3_plan",
-    phase=CampaignPhase.MODIFY_PLAN,
+    phase=PotterPhase.MODIFY_PLAN,
     parse=_parse_l3,
     apply=_apply_l3,
     enter_payload_fn=_l3_enter,
@@ -339,7 +351,7 @@ async def _run_transition(
                     injection_silent=tuple(injection_silent_panels(coverage)),
                 ),
             )
-            result = transition.parse(raw, cycle.opt_sp)
+            result = transition.parse(raw, cycle.opt_sp, cycle.memory)
         except OptimizerPromptParseError as parse_err:
             # A refinement that never parsed costs a REFINEMENT, not a MEASUREMENT. Unhandled
             # it kills the cycle — and under L4 that voids a whole outer sample, scoring one
@@ -375,12 +387,11 @@ async def _run_transition(
             return None
 
     # Same adoption seam as an L1 win: identity advances (fresh lineage, parent = the outgoing
-    # parent) and the persistent memory carries forward. The frame surfaces L2/L3 own are
-    # installed by `transition.apply` below, so no `advanced` overlay is passed here.
+    # parent). The frame surfaces L2/L3 own land in `cycle.memory` through `transition.apply`.
     new_opt = result.opt_sp
     cycle.adopt(new_opt)
     cycle.tracking.current_sp = new_opt.to_job_search_point(
-        base_pipeline_params=current_pp, schema=pipeline_schema
+        base_pipeline_params=current_pp, schema=pipeline_schema, framing=cycle.framing
     )
     transition.apply(cycle, result, round_num)
     emit_phase(
@@ -439,7 +450,7 @@ async def _run_transition(
                 severity="error",
                 detail={"layer": transition.layer_id, "reason": reason, "round": round_num},
             )
-            raise StopLoop(StopReason.ABORT)
+            raise StopLoop(StopReason.OPTIMIZER_ABORT)
 
     if result.fork_proposal is not None:
         if not cycle.config.optimization.rebase_capability:
@@ -476,13 +487,12 @@ def _stash_rebase_request(
         )
         return False
 
-    trigger = ForkTrigger.L2_REBASE if layer_id == "L2" else ForkTrigger.L3_REBASE
     unlock = bool(proposal.unlock_schema_field_rename) and not (
         cycle.config.optimization.schema_field_rename
     )
     cycle.rebase_request = RebaseRequest(
         fork_from_round=target_round,
-        trigger=trigger,
+        trigger=ForkTrigger.OPTIMIZER_REBASE,
         reason=str(proposal.reason or f"{layer_id} fork_proposal"),
         issued_by=f"{layer_id}/round_{round_num}",
         config_overrides=ConfigOverrides(schema_field_rename=True) if unlock else None,
@@ -550,7 +560,7 @@ async def escalate_l2(
     l2_inputs, l2_data = _trigger_payload(cycle, round_num, opt.l2_patience, layer="l2")
     record_decision(
         cycle.pending_decisions,
-        ResumeCheckpointKind.L2_ESCALATION_TRIGGER,
+        PotterCheckpointKind.L2_ESCALATION_TRIGGER,
         l2_inputs,
         event.next_action == NextAction.FIRE_L2,
         data=l2_data,
@@ -593,7 +603,7 @@ async def escalate_l2(
     l3_inputs, l3_data = _trigger_payload(cycle, round_num, opt.l3_patience, layer="l3")
     record_decision(
         cycle.pending_decisions,
-        ResumeCheckpointKind.L3_ESCALATION_TRIGGER,
+        PotterCheckpointKind.L3_ESCALATION_TRIGGER,
         l3_inputs,
         event.next_action == NextAction.FIRE_L3,
         data=l3_data,

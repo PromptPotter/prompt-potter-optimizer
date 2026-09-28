@@ -15,6 +15,8 @@ __all__ = [
     "CampaignPhase",
     "DashboardState",
     "PhaseEvent",
+    "PotterDashboardState",
+    "PotterPhase",
     "RunPhase",
     "StopLoop",
     "StopOutcome",
@@ -25,13 +27,19 @@ __all__ = [
 
 
 class CampaignPhase(enum.StrEnum):
+    """The bench's phases. An optimizer's own ride its manifest-scoped enum (``PotterPhase``)."""
+
     INIT = "init"
     ORIGIN = "origin"
-    L1_GENERATE = "l1_generate"
-    L1_SCORE = "l1_score"
+    PROPOSE = "propose"
+    MEASURE = "measure"
+
+
+class PotterPhase(enum.StrEnum):
+    """Potter's controller phases: L2 refines the strategy, L3 modifies the plan."""
+
     REFINE_STRATEGY = "refine_strategy"
     MODIFY_PLAN = "modify_plan"
-    ESCALATION = "escalation"
 
 
 class StopReason(enum.StrEnum):
@@ -45,8 +53,8 @@ class StopReason(enum.StrEnum):
     PANEL_CUT = "panel_cut"
     CRASHED = "crashed"
     DIVERGED = "diverged"
-    ABORT = "escalation_abort"
-    L3_PATIENCE = "l3_patience_exhausted"
+    OPTIMIZER_ABORT = "optimizer_abort"
+    CONVERGED = "converged"
     HARD_CAP = "hard_cap_reached"
     DIAG_COMPLETE = "diag_complete"
     TARGET_HIT = "target_hit"
@@ -113,18 +121,21 @@ class RunPhase(enum.StrEnum):
 
 class DashboardState(enum.StrEnum):
     """The fine-grained ACTIVITY vocabulary (``dashboard.json::state``), orthogonal to
-    :class:`RunPhase`. Declared here because it is a vocabulary the webapp must agree on."""
+    :class:`RunPhase`. Declared here because it is a vocabulary the webapp must agree on. An
+    optimizer's own activities ride its manifest-scoped enum (``PotterDashboardState``)."""
 
     INIT = "init"
     ORIGIN = "origin"
+    PROPOSING = "proposing"
     SCORING = "scoring"
     BETWEEN_SAMPLES = "between_samples"
     BETWEEN_CANDIDATES = "between_candidates"
-    L1_GENERATE = "l1_generate"
+    STOPPED = "stopped"
+
+
+class PotterDashboardState(enum.StrEnum):
     L2_REFINING = "l2_refining"
     L3_REPLANNING = "l3_replanning"
-    ESCALATION = "escalation"
-    STOPPED = "stopped"
 
 
 class StopOutcome(enum.StrEnum):
@@ -162,7 +173,7 @@ class StopReasonInfo(NamedTuple):
 #   - CRASHED / RENDER_ERROR / OPTIMIZER_TIMEOUT are exceptions from anywhere, round included, and
 #     so are PROVIDER_CREDIT and PROVIDER_THROTTLED when an optimizer call is the one refused.
 #   - everything else fires at a round BOUNDARY: `runner/round.py` raises only after
-#     `close_round`, escalation's ABORT/REBASED ride the post-round transition seam,
+#     `close_round`, the optimizer's OPTIMIZER_ABORT/REBASED ride the post-round transition seam,
 #     ORIGIN_GATE runs once round 0 is scored, and DIVERGED is decided at resume before any
 #     round starts.
 #
@@ -193,8 +204,8 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
     StopReason.DIAG_COMPLETE: StopReasonInfo(
         "Diagnostic complete", StopOutcome.SUCCESS, False, False, ""
     ),
-    StopReason.L3_PATIENCE: StopReasonInfo(
-        "Converged (L3 patience)", StopOutcome.SUCCESS, False, False, ""
+    StopReason.CONVERGED: StopReasonInfo(
+        "Optimizer converged", StopOutcome.SUCCESS, False, False, ""
     ),
     StopReason.REBASED: StopReasonInfo("Rebased to fork", StopOutcome.SUCCESS, False, False, ""),
     StopReason.PAUSED: StopReasonInfo(
@@ -213,7 +224,9 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
         "rows name) before `resume`, or "
         "`optimization.panel_gate: off` to elect on the holed panel.",
     ),
-    StopReason.ABORT: StopReasonInfo("Escalation abort", StopOutcome.HALTED, False, False, ""),
+    StopReason.OPTIMIZER_ABORT: StopReasonInfo(
+        "Optimizer abort", StopOutcome.HALTED, False, False, ""
+    ),
     # The two the private or-chain missed: the budget gate stops INSIDE the sample loop. The
     # counter is CUMULATIVE across resume, so a new ceiling must clear what is already spent —
     # the one fact neither label carries and every operator gets wrong once.

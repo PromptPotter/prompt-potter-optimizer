@@ -14,6 +14,7 @@ from promptpotter.application.optimization.resume_and_fork.ab_replay import (
     ab_replay_cycle,
 )
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
+from promptpotter.domain.measurement_provenance import RunSource
 
 if TYPE_CHECKING:
     from promptpotter.domain.cycle_paths import CycleHop
@@ -44,9 +45,7 @@ async def ab_replay_campaign(
     session.campaign_id = hop.campaign_id
     session.state.cycle_id = hop.cycle_id
     campaign_config = resolve_campaign_config(stores, campaign, hop)
-    arm_diagnostic_scoring(
-        session, campaign_config, source=f"ab:{hop.campaign_id}:{hop.cycle_id}", log=log
-    )
+    arm_diagnostic_scoring(session, campaign_config, source=RunSource.AB, log=log)
     return ab_replay_cycle(
         hop,
         session,

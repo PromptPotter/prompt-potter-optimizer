@@ -54,7 +54,7 @@ anything = "my_package.connector:CONNECTOR"
 
 The object named must be a `Connector`; **its `name` field is the registry key**, so the entry-point label is free and a package cannot claim a key its connector does not declare. No edits to `application/campaign_config.py` or `infrastructure/backend.py`. Reference impls: [`connectors/termnorm.py`](../../promptpotter/connectors/termnorm.py), [`connectors/promptpotter.py`](../../promptpotter/connectors/promptpotter.py).
 
-**What a plugin is held to** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md); all three rules are enforced in `connectors/__init__.py` when the table completes, and each raise names its rule. What this page promises is only that they will not tighten within v1.
+**What a plugin is held to** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md); all three rules are enforced when the table completes (`connectors/__init__.py::_validate` and `shared/plugin_registry.py`, the loader every entry-point group shares), and each raise names its rule. What this page promises is only that they will not tighten within v1.
 
 `connector_origins()` maps every registered name to `"built-in"` or `"<distribution>: <module>:<attr>"` (the entry point's *value*, not its label — the label is free, the value is what was imported), so a name that greps to nothing in this tree can still be traced to its package. Audit what is loaded with:
 
@@ -140,7 +140,7 @@ The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no 
 ### Other files
 
 - **`prompts/{node}.yaml`** — 8-field `PromptTemplate` per node. Schema: `domain/opt_search_point.py::PromptTemplate`. Loaded by `application/datasets/prompts.py::load_node_prompt`.
-- **`task_description.md`** — free-form markdown; decomposed at `init` into the `task_context` dict on `OptSearchPoint`.
+- **`task_description.md`** — free-form markdown; decomposed at `init` into the campaign's `task_context` framing (`Cycle.framing`).
 - **`dataset.md`** — operator guide; free-form, not parsed.
 - **`task_context.yaml`** — the committed task framing; written once by the `checkin` decomposition (`application/optimization/task_context.py::decompose_prompt_fields`) or by web ingest at commit, and read free on every later run through `infrastructure/store/dataset_access.py::dataset_task_context_path` on the tenant-first ladder.
 

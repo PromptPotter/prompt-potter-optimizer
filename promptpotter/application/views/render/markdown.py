@@ -152,7 +152,7 @@ def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
         formula,
         # THIS round's matched floor, the same one the terminal compares against — the two
         # printed different Δ for one round while this read the whole-cycle origin composite.
-        parent=rd.matched_parent_composite,
+        parent=rd.reference_composite,
         use_short_names=False,
     )
     if composite_fitness_block:
@@ -249,8 +249,8 @@ def to_markdown(view: LogMdView) -> str:
     if view.final is not None:
         parts.append("## Final Winner")
         parts.append("")
-        parts += _json_block("Prompt fields", view.final.winner_prompt_fields)
-        parts += _json_block("Pipeline params", view.final.winner_pipeline_params)
+        parts += _json_block("Prompt fields", view.final.result_prompt_fields)
+        parts += _json_block("Pipeline params", view.final.result_pipeline_params)
 
     return "\n".join(parts).rstrip() + "\n"
 

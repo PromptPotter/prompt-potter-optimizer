@@ -29,6 +29,8 @@ export type {
   CommandAcceptedBody,
   NodeSearchNarrowing,
   CycleHop,
+  BenchReading,
+  BenchScore,
   CycleListEntry,
   CyclesResponse,
   DatasetItem,

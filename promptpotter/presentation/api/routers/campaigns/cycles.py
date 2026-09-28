@@ -311,7 +311,7 @@ class _Overlay:
                 "children": kids,
                 # The marker sits on the SPINE node — the winner is who the lens would have
                 # replaced, so it is the node the fork would have happened at.
-                "divergence": self.diverged.get(key) if node.is_winner else None,
+                "divergence": self.diverged.get(key) if node.is_selected else None,
                 "divergent": key in self.dimmed,
                 "lens_value": (
                     value_with_mask_applied(node.evaluators, self.criterion)

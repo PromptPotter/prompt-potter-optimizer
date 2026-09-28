@@ -5,7 +5,7 @@ export interface SelectedCandidate {
   candidate_id: string;
   label: string;
   accuracy: number | null;
-  is_winner: boolean;
+  is_selected: boolean;
 }
 
 // `cycleId` is the leaf hop the caller READ its rows from; they carry no cycle of their own.

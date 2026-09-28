@@ -7,8 +7,6 @@ from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.application.views.view_models import (
     AnyView,
     CandidatesGeneratedView,
-    EscalationEnterView,
-    EscalationExitView,
     InitEnterView,
     InitExitView,
     L2RefineEnterView,
@@ -52,7 +50,8 @@ def _render_init_exit(v: InitExitView) -> str:
     obs = "ON" if v.obs_on else "OFF"
     out = [
         f"  {GREEN}✓{RESET} Initialized  origin={fmt_pct(v.origin_acc)}  "
-        f"cycle={v.cycle_id_short}  samples={v.samples}  obs={obs}"
+        f"cycle={v.cycle_id_short}  samples={v.samples}  bench={v.bench_samples} held out  "
+        f"obs={obs}"
     ]
     parts: list[str] = []
     if v.task_context_keys:
@@ -146,7 +145,7 @@ def _render_round_complete(v: RoundCompleteView) -> str:
                     s.composite_fitness,
                     s.accuracy,
                     s.theta,
-                    is_winner=s.label == v.winner_label,
+                    is_selected=s.label == v.winner_label,
                     is_partial=bool(s.partial_reason),
                 ),
                 reverse=True,
@@ -167,8 +166,8 @@ def _render_round_complete(v: RoundCompleteView) -> str:
     # A winner that stopped short gets no "(was …)" clause rather than the full-set rate:
     # subtracting a full panel from a prefix accuracy publishes lift nobody measured.
     versus = (
-        f"was {v.matched_parent_accuracy:.1%}, {_fmt_delta(v.delta)}"
-        if v.matched_parent_accuracy is not None and v.delta is not None
+        f"was {v.reference_accuracy:.1%}, {_fmt_delta(v.delta)}"
+        if v.reference_accuracy is not None and v.delta is not None
         else "no matched parent — winner stopped before covering the panel"
     )
 
@@ -210,31 +209,13 @@ def _render_round_complete(v: RoundCompleteView) -> str:
             v.winner_composite_fitness,
             v.winner_evaluators,
             formula,
-            parent=v.matched_parent_composite,
+            parent=v.reference_composite,
             use_short_names=bool(v.composite_fitness_formula_short),
         ):
             out.append(f"  {line}")
 
     if crit := v.l1_critique_text.replace("\n", " ").strip():
         out.append(f"  {CYAN}L1 Critique:{RESET} {crit}")
-    return "\n".join(out)
-
-
-def _render_escalation_enter(v: EscalationEnterView) -> str:
-    extras = [f"{wt}: {count} occurrences" for wt, count in v.warning_types.items()]
-    return "\n" + _node_block(
-        "ESCALATION",
-        f"{YELLOW}Degraded: {v.degraded_rate:.0%} of samples{RESET}",
-        *extras,
-        label_right=f"{v.check_name} → {v.target}",
-    )
-
-
-def _render_escalation_exit(v: EscalationExitView) -> str:
-    if not v.classifications:
-        return ""
-    out = [f"  {CYAN}Warning classifications:{RESET}"]
-    out.extend(f"    {wt}: {status}" for wt, status in v.classifications)
     return "\n".join(out)
 
 
@@ -312,10 +293,6 @@ def to_text(view: AnyView) -> str:
             return _render_candidates_generated(view)
         case RoundCompleteView():
             return _render_round_complete(view)
-        case EscalationEnterView():
-            return _render_escalation_enter(view)
-        case EscalationExitView():
-            return _render_escalation_exit(view)
         case L2RefineEnterView():
             return _render_l2_refine_enter(view)
         case L2RefineExitView():

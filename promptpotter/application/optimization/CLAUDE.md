@@ -25,7 +25,7 @@ Mechanism lives at its definition site — the `l1/generate.py` and `escalation/
 
 ## Cycle stop conditions
 
-Boundary stops are `max_rounds` and its opt-in measurement-driven twin `OptimizationConfig.lives` — "hearts", +1 per improving round, −1 per stall, banked, stop at 0 → `LIVES_EXHAUSTED`. It banks `improved` alone, where the stall counter also requires `RoundResult.separable`, so an inseparable winner spends patience but not a life. Two more sit in the rule set and the FSM, neither a layer's doing: `objective_exhausted` → `STOP_PERFECT`, and `l3_patience` spent → `STOP_L3_PATIENCE`. **The only stop a LAYER authors is `terminate_proposal`** (→ `StopReason.ABORT`, § The layer-control channel) — deterministic rules route and never diagnose, so no rule is a layer's exit.
+Boundary stops are `max_rounds` and its opt-in measurement-driven twin `OptimizationConfig.lives` — "hearts", +1 per improving round, −1 per stall, banked, stop at 0 → `LIVES_EXHAUSTED`. It banks `improved` alone, where the stall counter also requires `RoundResult.separable`, so an inseparable winner spends patience but not a life. Two more sit in the rule set and the FSM, neither a layer's doing: `objective_exhausted` → `STOP_PERFECT`, and `l3_patience` spent → `STOP_L3_PATIENCE`. **The only stop a LAYER authors is `terminate_proposal`** (→ `StopReason.OPTIMIZER_ABORT`, § The layer-control channel) — deterministic rules route and never diagnose, so no rule is a layer's exit.
 
 ## The ladder's DEPTH is a knob, and it is a real suppression
 
@@ -55,7 +55,7 @@ Fires on L1 stall (default), yield drought (`l2_axis_yield_drought`), or evidenc
 
 ## L3 — what `l3_plan` may write
 
-Fires only on L2 stall. Produces a **strategic replan** — what L2 and L1 should do with the levers they hold, escalation policy, which axes are in scope — written to `OptSearchPoint.plan` and read by **every** prompt, so it is the frame inside which both L2 and L1 operate. It heals L2 on layout HARD-validator failures or repeated cross-field issues — L2 thrashing within the plan.
+Fires only on L2 stall. Produces a **strategic replan** — what L2 and L1 should do with the levers they hold, escalation policy, which axes are in scope — written to `Cycle.memory.plan` and read by **every** prompt, so it is the frame inside which both L2 and L1 operate. It heals L2 on layout HARD-validator failures or repeated cross-field issues — L2 thrashing within the plan.
 
 **Firing is rarer still than L2**: a fire signals the cycle's plan was wrong, not that one variant missed. If L3 fires repeatedly inside one cycle the plan-space itself is exhausted, and it should terminate rather than replan again.
 

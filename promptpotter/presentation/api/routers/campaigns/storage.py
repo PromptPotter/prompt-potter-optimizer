@@ -26,7 +26,7 @@ _CONNECTOR_ROUND_KEYS = (
     "results",
     "all_candidate_results",
     "overlap_results",
-    "parent_results",
+    "reference_results",
 )
 
 # Loop's four leaves, then the full six (top-level Connector / Loop / Dataset flattened).

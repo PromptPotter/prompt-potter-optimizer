@@ -14,8 +14,6 @@ __all__ = [
     "AnyView",
     "CandidatesGeneratedView",
     "DigestStatusView",
-    "EscalationEnterView",
-    "EscalationExitView",
     "FinalWinnerView",
     "ForkSummaryView",
     "HardSamplesView",
@@ -106,6 +104,7 @@ class InitExitView:
     origin_acc: float | None
     cycle_id_short: str
     samples: int
+    bench_samples: int
     obs_on: bool
     # Count of origin per-sample measurements — the live dashboard's
     # ``origin.samples`` field. Carried on the view so the dashboard projection
@@ -183,8 +182,8 @@ class ScoreEntry:
     # The origin as this row's comparison floor. ``None`` unless the row covered the origin's
     # whole panel — a prefix rate is decided by where PoBB stopped the candidate, not by its
     # answers (`scoring/metrics.py::matched_parent_stats`) — which is NOT the same as 0.0.
-    matched_parent_accuracy: float | None = None
-    matched_parent_composite: float | None = None
+    reference_accuracy: float | None = None
+    reference_composite: float | None = None
     # What this row was RANKED on: ``None`` outside the election fit, and for every row while the
     # ruler is cold. A table printing accuracy alone can seat a winner it has no column able to
     # explain. The blocked LIFT and its interval are deliberately not here — the terminal's Δ
@@ -212,7 +211,7 @@ class RoundCompleteView:
     winner_evaluators: dict[str, float]
     winner_total: int
     improved: bool
-    # ``None`` alongside ``matched_parent_accuracy`` — there is no Δ without a floor.
+    # ``None`` alongside ``reference_accuracy`` — there is no Δ without a floor.
     delta: float | None
     p_value: float | None
     # The round's outcome in the numbers that decided it — see ``RoundResult.verdict_reason``.
@@ -230,8 +229,8 @@ class RoundCompleteView:
     # different sample basis and would read as lift the winner never earned.
     # No default: the one builder resolves it, and a ``0.0`` sitting here would render
     # "was 0.0%" on any round whose payload lacked the key.
-    matched_parent_accuracy: float | None
-    matched_parent_composite: float | None = None
+    reference_accuracy: float | None
+    reference_composite: float | None = None
     # WHICH number headlines the verdict line. Carried rather than read from config at render
     # time: a knob resolved in the renderer is one the disk round-trip cannot reproduce.
     headline_metric: HeadlineMetric = "accuracy"
@@ -239,19 +238,6 @@ class RoundCompleteView:
     # to accuracy — a cold θ is logit-accuracy on the arm's own subset, so headlining it dresses a
     # subset-relative number as the difficulty-adjusted one.
     ability_theta: float | None = None
-
-
-@dataclass(frozen=True)
-class EscalationEnterView:
-    check_name: str
-    target: str
-    degraded_rate: float
-    warning_types: dict[str, int]
-
-
-@dataclass(frozen=True)
-class EscalationExitView:
-    classifications: tuple[tuple[str, str], ...]
 
 
 @dataclass(frozen=True)
@@ -343,7 +329,7 @@ class RoundDigestView:
     # `per_round_resubset` it read draw difficulty as candidate lift and printed a different Δ
     # from the terminal for the same round. ``None`` where the round matched nothing, and there
     # is no fallback to the cycle origin: that is a different sample basis, not a default.
-    matched_parent_composite: float | None = None
+    reference_composite: float | None = None
     # The subset-invariant series and the scale it was read on, so a reader can see a round
     # scored mostly off that scale. Mirrors ``RoundResult``.
     ability: AbilityReading | None = None
@@ -378,8 +364,8 @@ class HardSamplesView:
 
 @dataclass(frozen=True)
 class FinalWinnerView:
-    winner_prompt_fields: dict[str, Any]
-    winner_pipeline_params: dict[str, Any]
+    result_prompt_fields: dict[str, Any]
+    result_pipeline_params: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -413,8 +399,6 @@ AnyView = (
     | RoundStartView
     | CandidatesGeneratedView
     | RoundCompleteView
-    | EscalationEnterView
-    | EscalationExitView
     | L2RefineEnterView
     | L2RefineExitView
     | PlanEnterView

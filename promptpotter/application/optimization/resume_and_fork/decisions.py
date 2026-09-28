@@ -6,7 +6,13 @@ from __future__ import annotations
 import enum
 from typing import Any, Protocol
 
-from promptpotter.domain.run_records import ResumeCheckpointKind, ResumeCheckpointRecord
+from promptpotter.domain.run_records import (
+    RESUME_CHECKPOINT_KINDS,
+    BenchCheckpointKind,
+    PotterCheckpointKind,
+    ResumeCheckpointKind,
+    ResumeCheckpointRecord,
+)
 
 __all__ = [
     "RESUME_CHECKPOINT_GATING",
@@ -25,14 +31,14 @@ class GatingMode(enum.StrEnum):
     ARCHIVAL = "archival"
 
 
-# Single source of truth for which kinds are divergence-gated. Every
-# ``ResumeCheckpointKind`` member MUST appear here exactly once. ``REPLAYED`` kinds
+# Single source of truth for which kinds are divergence-gated. Every kind, the bench's and
+# potter's, MUST appear here exactly once. ``REPLAYED`` kinds
 # also need a registered replayer (see :mod:`.replayers`); ``ARCHIVAL``
 # kinds must NOT have one.
 RESUME_CHECKPOINT_GATING: dict[ResumeCheckpointKind, GatingMode] = {
-    ResumeCheckpointKind.ROUND_WINNER: GatingMode.REPLAYED,
-    ResumeCheckpointKind.ELIMINATION_CUT: GatingMode.REPLAYED,
-    ResumeCheckpointKind.LEADER_LOCK_IN: GatingMode.REPLAYED,
+    PotterCheckpointKind.ROUND_WINNER: GatingMode.REPLAYED,
+    PotterCheckpointKind.ELIMINATION_CUT: GatingMode.REPLAYED,
+    PotterCheckpointKind.LEADER_LOCK_IN: GatingMode.REPLAYED,
     # A layer trigger is a FOLD over the cycle's escalation history, not a function of
     # one round's measurements — the counter bumps once per escalation *request*, resets
     # on every fire, and compares against the best-at-entry snapshot taken at the last
@@ -42,8 +48,8 @@ RESUME_CHECKPOINT_GATING: dict[ResumeCheckpointKind, GatingMode] = {
     # ran. Their scorer-dependence is entirely mediated by `improved`, hence by the round
     # measurements — which ARE replayed above, so a scorer change that would move a
     # trigger already shows up as a winner/cut divergence in the same round.
-    ResumeCheckpointKind.L2_ESCALATION_TRIGGER: GatingMode.ARCHIVAL,
-    ResumeCheckpointKind.L3_ESCALATION_TRIGGER: GatingMode.ARCHIVAL,
+    PotterCheckpointKind.L2_ESCALATION_TRIGGER: GatingMode.ARCHIVAL,
+    PotterCheckpointKind.L3_ESCALATION_TRIGGER: GatingMode.ARCHIVAL,
     # Panel coverage re-derives INVARIANTLY under everything replay varies, so replaying it
     # could only ever confirm itself. Replay re-runs the SCORER over stored rows, and
     # rescoring never turns an errored row into a measured one — the hole count is a fact
@@ -55,23 +61,21 @@ RESUME_CHECKPOINT_GATING: dict[ResumeCheckpointKind, GatingMode] = {
     # recovers a holed round is ``repair_incomplete_rounds``, which re-measures the cells
     # and then forces this walk so the kinds that CAN move are re-derived against the
     # repaired rows.
-    ResumeCheckpointKind.PANEL_COVERAGE: GatingMode.ARCHIVAL,
+    PotterCheckpointKind.PANEL_COVERAGE: GatingMode.ARCHIVAL,
     # Fork is observable from the parent's history (the FORK_CUT record in
     # the parent ledger names the new cycle id and the offset that the
     # fork inherits from). It's archival because the fork's identity is
     # downstream of the divergence-checked decisions, not part of the
     # gating itself — replaying it can't re-derive a different fork.
-    ResumeCheckpointKind.FORK_CUT: GatingMode.ARCHIVAL,
+    BenchCheckpointKind.FORK_CUT: GatingMode.ARCHIVAL,
 }
 
 
 # Adding a kind without choosing REPLAYED/ARCHIVAL is a programming error;
 # fail at import rather than at first replay attempt.
-_unmapped = [k for k in ResumeCheckpointKind if k not in RESUME_CHECKPOINT_GATING]
+_unmapped = [k for k in RESUME_CHECKPOINT_KINDS if k not in RESUME_CHECKPOINT_GATING]
 if _unmapped:
-    raise RuntimeError(
-        f"ResumeCheckpointKind members missing from RESUME_CHECKPOINT_GATING: {_unmapped}"
-    )
+    raise RuntimeError(f"Checkpoint kinds missing from RESUME_CHECKPOINT_GATING: {_unmapped}")
 del _unmapped
 
 

@@ -31,7 +31,7 @@ interface Ctx {
 const SelectionCtx = createContext<Ctx | null>(null);
 
 // Keyed on the VIEWED LEAF hop, the cycle the inspector, samples panes and round file re-root to.
-// NOT restored from view memory: a `SelectedCandidate` carries `is_winner` and `accuracy`, and a
+// NOT restored from view memory: a `SelectedCandidate` carries `is_selected` and `accuracy`, and a
 // restored one is a measurement claim the operator would read as current.
 export function SelectionProvider({
   cycleId,

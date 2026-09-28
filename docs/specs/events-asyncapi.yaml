@@ -482,7 +482,7 @@ components:
             - layer_parse_failure
             # The round measured cleanly and still resolved nothing: no arm's
             # blocked lift over the parent excluded 0
-            # (`ScoredCandidate.matched_parent_lift_ci_*`). The round's numbers
+            # (`ScoredCandidate.reference_lift_ci_*`). The round's numbers
             # are real and its winner is the best of what it saw — but the
             # panel cannot tell that winner from the parent, so the point
             # estimate must not be read as a result. Distinct from every kind
@@ -553,14 +553,9 @@ components:
             The searchpoint id (`IndividualLineage.id`) minted with this
             candidate. **Re-minted per run**, so a resume/rewind re-mints the
             same `(round, idx)` under a NEW id — join on `label`, not on this.
-        parent_id:
-          type: [string, 'null']
-          x-status: wired-scheduled-for-removal
-          description: The individual this candidate was mutated from; null at the origin. Successor `parent_ids`.
         parent_ids:
           type: array
           items: { type: string, minLength: 1 }
-          x-status: declared-not-wired
           description: |
             Every individual this candidate was derived from — one for a
             mutation, several for a crossover; empty at the origin.
@@ -595,14 +590,9 @@ components:
         round:
           type: integer
           minimum: 0
-        winner_label:
-          type: string
-          x-status: wired-scheduled-for-removal
-          description: The one elected label; empty when the round held. Successor `selected_labels`.
         selected_labels:
           type: array
           items: { type: string, minLength: 1 }
-          x-status: declared-not-wired
           description: |
             The individuals the next round derives from — one for potter, a
             population or a front for a peer; empty when the round held.
@@ -616,10 +606,9 @@ components:
             properties:
               reference_id:
                 type: string
-                x-status: declared-not-wired
                 description: |
                   The individual this arm's lift is read against, over the cells
-                  it touched. Successor of the `matched_parent_*` floor.
+                  it touched.
         timestamp:
           type: string
           format: date-time

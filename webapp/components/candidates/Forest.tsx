@@ -41,7 +41,7 @@ export interface CladogramCtx {
   channels: readonly CladogramChannel[];
   // The family is cut to this channel's extent; `null` draws the whole family.
   clip: CladogramAnchor | null;
-  // Candidate ids (the space `parent_id` speaks) whose config was edited, plus descendants.
+  // Candidate ids (the space `parent_ids` speaks) whose config was edited, plus descendants.
   invalidated?: ReadonlySet<string>;
 }
 

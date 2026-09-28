@@ -1,6 +1,6 @@
 """Per-candidate lifecycle, opened before its round's scoring phase and concluded when the phase
 decides it: validation-skip (synthetic 0, no eval), cache-replay (no backend calls), and full eval
-classified into SCORED / LEADER_LOCKED / ESCALATED."""
+classified into SCORED / LEADER_LOCKED."""
 
 from __future__ import annotations
 
@@ -19,14 +19,13 @@ from promptpotter.application.optimization.l1.score.signal_effect import (
 )
 from promptpotter.application.optimization.pobb.checks import PoBBCheck
 from promptpotter.application.optimization.resume_and_fork.decisions import (
-    ResumeCheckpointKind,
     ResumeCheckpointRecord,
     record_decision,
 )
 from promptpotter.application.scoring.search_point_scorer import close_walk, open_walk
-from promptpotter.domain.escalation_signals import EscalationSignal, RuntimeFailure
-from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.results import ScoredCandidate, candidate_label
+from promptpotter.domain.escalation_signals import RuntimeFailure
+from promptpotter.domain.results import CandidateProposal, ScoredCandidate, candidate_label
+from promptpotter.domain.run_records import PotterCheckpointKind
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
 from promptpotter.shared.instrument import MeasuredCandidate, MeasurementRole
@@ -41,20 +40,19 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class CandidateRunResult:
-    """One candidate's full lifecycle output. ``runtime_failure`` is the CALLER's signal to append to the wounds: this
-    function cannot mutate them, because the searchpoint is shared with other paths."""
+    """One candidate's full lifecycle output. ``runtime_failure`` is the CALLER's signal to append to the proposal's
+    failures: this function cannot mutate them, because the proposal is shared with other paths."""
 
     outcome: CandidateOutcome
     report: ScoredCandidate
     results: list[QueryMeasurement] = field(default_factory=list)
     runtime_failure: RuntimeFailure | None = None
-    escalation_signal: EscalationSignal | None = None
 
 
 def open_candidate(
     *,
     idx: int,
-    opt_sp_c: OptSearchPoint,
+    proposal: CandidateProposal,
     candidate_sp: JobSearchPoint,
     cycle: Cycle,
     dataset: list[Sample],
@@ -62,7 +60,6 @@ def open_candidate(
     round_num: int,
     callbacks: RunCallbacks,
     checks: list[StopRule],
-    l1_diversity: float,
 ) -> Walk | None:
     """The candidate's walk, or ``None`` when it fails validation and is never measured.
 
@@ -71,19 +68,18 @@ def open_candidate(
     edits still ran, so its score stands and the wound rides along as routed signal (``l1_wounds``),
     not a synthetic-0. Every other failure (forbidden axis, type mismatch, out-of-enum value) is a
     genuinely invalid program and still nukes it."""
-    if fatal_validation_failures(opt_sp_c):
+    opt_sp_c = proposal.opt_sp
+    if fatal_validation_failures(proposal.validation_failures):
         return None
     return open_walk(
         candidate_sp,
         dataset,
         cycle.session,
-        label=f"candidate_{idx}",
+        label=MeasurementRole.PANEL,
         on_sample_scored=partial(callbacks.on_sample_scored, idx, n_total),
         on_sample_starting=partial(callbacks.on_sample_started, idx, n_total),
         checks=checks,
         axes=cycle.axes,
-        l1_diversity=l1_diversity,
-        opt_sp=opt_sp_c,
         # Who this pass measures, handed to the gateway rather than bound here — every re-entrant
         # asker declares its own, so none can inherit this one. The L4 recursion reads it to stamp
         # an inner campaign's provenance; the connector seam carries only the RUN's workload and
@@ -100,7 +96,7 @@ def open_candidate(
 def conclude_candidate(
     *,
     idx: int,
-    opt_sp_c: OptSearchPoint,
+    proposal: CandidateProposal,
     candidate_sp: JobSearchPoint,
     walk: Walk | None,
     pipeline_overlay: dict[str, Any] | None,
@@ -111,12 +107,12 @@ def conclude_candidate(
     decisions: list[ResumeCheckpointRecord] | None,
     candidate_scores: list[ScoredCandidate],
     round_num: int,
-    l1_diversity: float,
 ) -> CandidateRunResult:
     """A decided candidate through the three-exit-path lifecycle, before the next candidate takes a
     cell — its registration as a prior is what that candidate's checks read. ``candidate_sp`` is
     built ONCE by the caller and shared with the in-flight dashboard seed, so the origin⊕delta
     merge happens at a single site."""
+    opt_sp_c = proposal.opt_sp
     label = candidate_label(round_num, idx)
     resolved_pipeline_params = candidate_sp.config_params
     # Off `candidate_sp` — the SAME object the gateway hands `build_dataset_run_data`, so the id
@@ -130,6 +126,7 @@ def conclude_candidate(
             results=[],
             report=build_score_report(
                 opt_sp_c,
+                proposal.validation_failures,
                 pipeline_overlay,
                 INVALID_SCORES,
                 [],
@@ -139,7 +136,6 @@ def conclude_candidate(
                 run_id=None,
                 resolved_pipeline_params=resolved_pipeline_params,
                 invalid=True,
-                l1_diversity=l1_diversity,
             ),
         )
 
@@ -166,6 +162,7 @@ def conclude_candidate(
 
     report = build_score_report(
         opt_sp_c,
+        proposal.validation_failures,
         pipeline_overlay,
         scored.scores,
         results,
@@ -179,7 +176,6 @@ def conclude_candidate(
         elimination_context=effect.elim_context,
         degradation_context=effect.degradation_context,
         new_runtime_failure=effect.runtime_failure,
-        l1_diversity=l1_diversity,
     )
 
     # Decorate elim_ctx with prior label when the leader was a prior
@@ -207,7 +203,7 @@ def conclude_candidate(
         inputs_ref, data = effect.elimination_decision
         record_decision(
             decisions,
-            ResumeCheckpointKind.ELIMINATION_CUT,
+            PotterCheckpointKind.ELIMINATION_CUT,
             inputs_ref,
             True,
             data=data,
@@ -217,28 +213,18 @@ def conclude_candidate(
         inputs_ref, data = effect.leader_lock_decision
         record_decision(
             decisions,
-            ResumeCheckpointKind.LEADER_LOCK_IN,
+            PotterCheckpointKind.LEADER_LOCK_IN,
             inputs_ref,
             True,
             data=data,
             round=round_num,
         )
 
-    residual = (
-        None if (effect.elimination_stopped or effect.leader_locked_loose or not signal) else signal
-    )
-    if effect.leader_locked:
-        outcome = CandidateOutcome.LEADER_LOCKED
-    elif residual is not None:
-        outcome = CandidateOutcome.ESCALATED
-    else:
-        outcome = CandidateOutcome.SCORED
     return CandidateRunResult(
-        outcome=outcome,
+        outcome=CandidateOutcome.LEADER_LOCKED if effect.leader_locked else CandidateOutcome.SCORED,
         results=results,
         report=report,
         runtime_failure=effect.runtime_failure,
-        escalation_signal=residual if outcome == CandidateOutcome.ESCALATED else None,
     )
 
 

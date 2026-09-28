@@ -1,12 +1,11 @@
-"""Soft signals on L3-parsed output; the HARD layout validators live in ``domain.l1_layout``. Outcomes append to
-``opt_sp.l3_guard_breaches`` and surface to L3's next fire as self-healing evidence."""
+"""Soft signals on L3-parsed output; the HARD layout validators live in ``domain.l1_layout``. Outcomes land in
+``Cycle.memory.wounds.l3_guard_breaches`` and surface to L3's next fire as self-healing evidence."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
 
-from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome, run_validators
 
 PLAN_LENGTH_FLOOR_CHARS = 60
@@ -28,15 +27,13 @@ def _check_plan_length_floor(source_output: Mapping[str, Any], **_: Any) -> Vali
 def _check_plan_verbatim_repeat(
     source_output: Mapping[str, Any],
     *,
-    opt_sp: OptSearchPoint | None = None,
+    prior_plan: str,
     **_: Any,
 ) -> ValidatorOutcome | None:
-    if opt_sp is None:
-        return None
     new_plan = source_output.get("plan")
     if not isinstance(new_plan, str) or not new_plan.strip():
         return None
-    prev = (opt_sp.plan or "").strip()
+    prev = prior_plan.strip()
     if not prev or new_plan.strip() != prev:
         return None
     return ValidatorOutcome(
@@ -65,9 +62,10 @@ L3_OUTPUT_VALIDATORS: tuple[LLMOutputValidator, ...] = (
 
 def run_l3_output_validators(
     source_output: Mapping[str, Any],
-    opt_sp: OptSearchPoint,
+    *,
+    prior_plan: str,
 ) -> list[ValidatorOutcome]:
-    return run_validators(L3_OUTPUT_VALIDATORS, source_output, opt_sp)
+    return run_validators(L3_OUTPUT_VALIDATORS, source_output, prior_plan=prior_plan)
 
 
 __all__ = [

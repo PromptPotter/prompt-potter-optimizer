@@ -64,7 +64,7 @@ def scenario_spine(cycle: MaskCycle, criterion: RoundScorer | str | None) -> lis
         election = masked_election(rnd, criterion, standing.evaluators, standing.accuracy)
         elected = by_id.get(election.winner_id) if election.winner_id else None
         scenario_winner = elected if elected is not None else standing
-        crowned = next((c for c in rnd.candidates if c.is_winner), None)
+        crowned = next((c for c in rnd.candidates if c.is_selected), None)
         recorded = crowned if crowned is not None else standing
         steps.append(ScenarioStep(rnd.round, scenario_winner.candidate_id, recorded.candidate_id))
         if scenario_winner.candidate_id != recorded.candidate_id:

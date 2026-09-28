@@ -26,11 +26,11 @@ export interface CandidateRow {
   meanFitnessCiHi: number | null;
   // Never render the point estimate without its interval: one spanning 0 means the round could not
   // separate it from its parent. `null` below two shared cells.
-  matchedParentLift: number | null;
-  matchedParentLiftCiLo: number | null;
-  matchedParentLiftCiHi: number | null;
+  referenceLift: number | null;
+  referenceLiftCiLo: number | null;
+  referenceLiftCiHi: number | null;
   evaluators: Record<string, number>;
-  is_winner: boolean;
+  is_selected: boolean;
   n_samples: number | null;
   n_expected: number | null;
   // `null` on a course, which has no measured panel.
@@ -49,8 +49,8 @@ export interface ElectedRow extends CandidateRow {
   cache_read_tokens: number | null;
   // Under elimination `accuracy` is not comparable to the origin's full-set rate; this is what the
   // promotion gate used. `null` outside the election fit.
-  matchedParentAccuracy: number | null;
-  matchedParentComposite: number | null;
+  referenceAccuracy: number | null;
+  referenceComposite: number | null;
   // While true, `accuracy`/`composite` are `INVALID_SCORES`' synthetic 0.0: never render either as
   // a rate, since a rejection is not a zero score.
   invalid: boolean;

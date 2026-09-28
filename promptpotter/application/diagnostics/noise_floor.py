@@ -17,9 +17,11 @@ from promptpotter.application.initialization.loop_start import (
     diagnostic_trace,
 )
 from promptpotter.application.initialization.wiring import init_services
+from promptpotter.application.optimization.task_context import committed_task_context
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import (
     DiagnosticRunRecord,
@@ -100,11 +102,15 @@ async def measure_noise_floor(
 
     log_fn = log or (lambda *_a, **_k: None)
     pipeline_params = arm_diagnostic_scoring(
-        session, campaign_config, source=f"noise_floor:{hop.campaign_id}", log=log_fn
+        session, campaign_config, source=RunSource.NOISE_FLOOR, log=log_fn
     )
 
     schema = session.pipeline_schema
-    jsp = opt_sp.to_job_search_point(pipeline_params, schema=schema)
+    jsp = opt_sp.to_job_search_point(
+        pipeline_params,
+        schema=schema,
+        framing=committed_task_context(stores, campaign.dataset_name),
+    )
     scoring_set = [s for s in session.samples if s.id in sample_ids]
     if not scoring_set:
         raise NoiseFloorError(
@@ -131,14 +137,9 @@ async def measure_noise_floor(
                     scoring_set,
                     session,
                     label=f"noise_floor_{i}",
-                    # ONE fixed config re-scored k times: the spread between runs IS the measurement,
-                    # and an opt_sp-aware term is identical across all k, so it can only add a
-                    # constant offset to a band that exists to isolate backend noise.
-                    opt_sp=None,
                     measured=None,
                     on_sample_scored=lambda *_a, **_k: None,
                     on_sample_starting=lambda *_a, **_k: None,
-                    source=f"noise_floor:{hop.campaign_id}:C0:{i}",
                     force_fresh=True,
                 ),
             )

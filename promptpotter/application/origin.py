@@ -25,12 +25,14 @@ from promptpotter.application.pipeline_resolve import (
 from promptpotter.application.runner.campaign_ids import build_origin_cycle_id
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.application.scoring.search_point_scorer import score_search_point
+from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.opt_search_point import IndividualLineage, OptSearchPoint
+from promptpotter.domain.measurement_provenance import RunSource
+from promptpotter.domain.opt_search_point import ORIGIN_SOURCE, IndividualLineage, OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, emit_phase
 from promptpotter.domain.pipeline_overlay import overlay_is_locked_axis_only
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.results import RoundParent, ScoredCandidate, candidate_label
+from promptpotter.domain.results import ReferenceReading, ScoredCandidate, candidate_label
 from promptpotter.domain.run_records import CandidateMintedRecord, CycleSeed
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
@@ -66,7 +68,7 @@ async def rescore_parent(
     *,
     callbacks: RunCallbacks,
     force_fresh: bool = False,
-) -> RoundParent:
+) -> ReferenceReading:
     """Score the round's parent on THIS round's ``scoring_set``, so election compares on the SAME
     samples. Without it ``matched_parent_stats`` intersects disjoint sets and returns a fake floor."""
 
@@ -77,11 +79,7 @@ async def rescore_parent(
         tr.current_sp,
         scoring_set,
         session,
-        label="round_parent",
-        # One half of a PAIRED diff: both sides must sit on the same vacuous fallback or the
-        # delta reads a prompt-length difference as a behaviour difference. `l1_diversity` is
-        # withheld for the same reason — it keeps its 1.0 vacuous default.
-        opt_sp=None,
+        label=MeasurementRole.PARENT,
         axes=cycle.axes,
         # Ticked, not silenced. This is the LONGEST phase of a held round — the parent walks the
         # whole panel while the candidates stopped wherever PoBB cut them — so a silenced one
@@ -108,13 +106,14 @@ async def rescore_parent(
             len(scoring_set),
             scored.stopped,
         )
-    return RoundParent(
+    return ReferenceReading(
         opt_sp=cycle.opt_sp,
         results=cast("list[dict[str, Any]]", scored.results),
         # The gateway's OWN answer — never re-run `compute_composite_fitness` over the same
         # rows, which drops the evaluator namespace on the way.
         report=build_score_report(
             cycle.opt_sp,
+            (),
             None,
             scored.scores,
             scored.results,
@@ -130,11 +129,13 @@ async def rescore_parent(
 
 class CampaignOrigin(NamedTuple):
     """The scored origin. ``report`` is C0's measurement in the one shape every individual's takes —
-    the same object deposited on the ledger, so round 0's row cannot be a second computation."""
+    the same object deposited on the ledger, so round 0's row cannot be a second computation.
+    ``framing`` is the campaign's, read once here and frozen for the run."""
 
     resolved_origin: OptSearchPoint | None
     report: ScoredCandidate
     origin_results: list[Any] | None
+    framing: TaskDecomposition
 
 
 def try_inherit_fork_origin(
@@ -142,6 +143,7 @@ def try_inherit_fork_origin(
     seed: CycleSeed | None,
     *,
     resolved_origin: OptSearchPoint,
+    framing: TaskDecomposition,
 ) -> CampaignOrigin | None:
     """Inherit an operator fork's C0 from its branch-point candidate — a no-edit fork or a
     model/provider-only steer. Re-scoring would re-roll a different number and the lineage would jump."""
@@ -200,8 +202,8 @@ def try_inherit_fork_origin(
         origin_acc,
         len(inherited_results),
     )
-    # The OSP object, not a prompt-field dict, so the inherited C0 keeps its
-    # lineage(source=seed.origin_source) — same shape the re-score path produces.
+    # The OSP object, not a prompt-field dict, so the inherited C0 keeps the lineage the seed
+    # stamped — same shape the re-score path produces.
     return CampaignOrigin(
         resolved_origin=resolved_origin,
         # The branch-point candidate's whole report, re-identified onto this fork's C0:
@@ -211,6 +213,7 @@ def try_inherit_fork_origin(
             update={"candidate_id": resolved_origin.lineage.id, "label": candidate_label(0, 0)}
         ),
         origin_results=inherited_results,
+        framing=framing,
     )
 
 
@@ -225,7 +228,6 @@ def resolve_origin_opt_search_point(
     prompt_node_names: list[str] | None = None,
     dataset_dir: Path | None = None,
     *,
-    task_context: TaskDecomposition,
     seed: CycleSeed | None = None,
 ) -> OptSearchPoint:
     """Resolve the origin OptSearchPoint by precedence: a seed with non-empty prompt fields wins
@@ -238,7 +240,7 @@ def resolve_origin_opt_search_point(
             seed.origin_prompt_fields,
             lineage=IndividualLineage(
                 changes_description=_SEED_ORIGIN_LINEAGE[seed.origin_source],
-                source=seed.origin_source,
+                source=ORIGIN_SOURCE,
             ),
         )
     elif dataset_dir is not None and names and has_dataset_prompts(dataset_dir):
@@ -251,7 +253,7 @@ def resolve_origin_opt_search_point(
                 template.prompt_field_dict(),
                 lineage=IndividualLineage(
                     changes_description=(f"Origin from {dataset_dir}/prompts/ ({node_name})"),
-                    source="origin",
+                    source=ORIGIN_SOURCE,
                 ),
             )
             break
@@ -260,15 +262,10 @@ def resolve_origin_opt_search_point(
         origin = OptSearchPoint(
             lineage=IndividualLineage(
                 changes_description="Origin (no prompt node active — param-only optimization)",
-                source="origin",
+                source=ORIGIN_SOURCE,
             ),
         )
 
-    # The framing RENDERS — `_field_value` splices up/downstream around `problem_description` —
-    # and `build_origin_cycle_id` hashes exactly that render, so an origin resolved without it
-    # is a different prompt from the one the run scores. Stamped here on every branch, never by
-    # the callers: each attached its own and identity read a prompt the run never measured.
-    origin.memory.task_context = task_context
     return origin
 
 
@@ -286,12 +283,14 @@ async def establish_campaign_origin(
     resolved_origin = resolve_origin_opt_search_point(
         prompt_node_names=session.pipeline_schema.prompt_node_names(),
         dataset_dir=session.dataset_config_dir,
-        # The SAME read identity uses. Handed the framing instead, this seam could be given a
-        # value the cycle id never saw.
-        task_context=committed_task_context(session.store, session.dataset_name),
         seed=seed,
     )
-    inherited = try_inherit_fork_origin(session, seed, resolved_origin=resolved_origin)
+    # The SAME read identity uses. Handed the framing instead, this seam could be given a value
+    # the cycle id never saw.
+    framing = committed_task_context(session.store, session.dataset_name)
+    inherited = try_inherit_fork_origin(
+        session, seed, resolved_origin=resolved_origin, framing=framing
+    )
     if inherited is not None:
         return inherited
 
@@ -308,6 +307,7 @@ async def establish_campaign_origin(
             # is the no-evidence marker, where a bare 0.0 reads as a real floor of zero.
             report=build_score_report(
                 resolved_origin,
+                (),
                 None,
                 INVALID_SCORES,
                 [],
@@ -318,6 +318,7 @@ async def establish_campaign_origin(
                 run_id=None,
             ),
             origin_results=None,
+            framing=framing,
         )
 
     pipeline_schema = session.pipeline_schema
@@ -334,6 +335,7 @@ async def establish_campaign_origin(
     sp = resolved_origin.to_job_search_point(
         base_pipeline_params=session.pipeline_params,
         schema=pipeline_schema,
+        framing=framing,
     )
     # populate_session_scoring overwrites scoring/source; loop repopulates before round 1.
     populate_session_scoring(
@@ -344,7 +346,7 @@ async def establish_campaign_origin(
         scorer_id=spec.scorer_id,
         headline_metric=campaign_config.headline_metric,
         judge_specs=campaign_config.judges,
-        source="origin",
+        source=RunSource.ORIGIN,
     )
 
     # ci=0/ct=1 ⇒ dashboard ticks per-sample during origin like L1.
@@ -357,10 +359,10 @@ async def establish_campaign_origin(
                 round=0,
                 idx=0,
                 candidate_id=resolved_origin.lineage.id,
-                parent_id=resolved_origin.lineage.parent_id,
+                parent_ids=list(resolved_origin.lineage.parent_ids),
                 label=candidate_label(0, 0),
                 changes_description=resolved_origin.lineage.changes_description,
-                source=resolved_origin.lineage.source or "origin",
+                source=resolved_origin.lineage.source,
             )
         )
 
@@ -387,11 +389,7 @@ async def establish_campaign_origin(
                 sp,
                 scoring_set,
                 session,
-                label="Origin",
-                # The reference every later delta is taken against, so it sits on the same
-                # vacuous fallback as the matched floor above — an opt_sp-aware composite here
-                # is one no candidate's matched floor shares.
-                opt_sp=None,
+                label=MeasurementRole.ORIGIN,
                 measured=None,
                 force_fresh=attempt > 0,
                 on_sample_starting=partial(listener.on_sample_started, 0, 1),
@@ -406,6 +404,7 @@ async def establish_campaign_origin(
         # and what round 0's row is built from — never re-derive either from these rows.
         report = build_score_report(
             resolved_origin,
+            (),
             None,
             scored.scores,
             scored.results,
@@ -423,6 +422,7 @@ async def establish_campaign_origin(
         resolved_origin=resolved_origin,
         report=report,
         origin_results=scored.results,
+        framing=framing,
     )
 
 
@@ -454,18 +454,24 @@ def prospective_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) 
             schema,
             judges=cfg.judges,
             experiment=experiment_outside_run(dataset_dir),
+            stores=stores,
             workspace=stores.base_dir,
         )
         opt_sp = resolve_origin_opt_search_point(
             prompt_node_names=schema.prompt_node_names(),
             dataset_dir=dataset_dir,
-            task_context=committed_task_context(stores, dataset_name),
         )
         items = resolve_dataset_items(stores, dataset_name)
         if not items:
             return None
-        samples = [Sample(**it) for it in items]
-        return build_origin_cycle_id(opt_sp, schema, samples, base_pp).removeprefix("cycle_")
+        search = partition_bank([Sample(**it) for it in items], cfg.dataset_split).search
+        return build_origin_cycle_id(
+            opt_sp,
+            schema,
+            list(search),
+            base_pp,
+            framing=committed_task_context(stores, dataset_name),
+        ).removeprefix("cycle_")
     except (
         OSError,
         ValueError,

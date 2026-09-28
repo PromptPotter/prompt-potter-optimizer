@@ -28,6 +28,7 @@ from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import (
     DiagnosticRunRecord,
@@ -131,7 +132,6 @@ def _resolve_origin_searchpoint(
     opt_sp = resolve_origin_opt_search_point(
         prompt_node_names=session.pipeline_schema.prompt_node_names(),
         dataset_dir=session.dataset_config_dir,
-        task_context=committed_task_context(stores, session.dataset_name),
         seed=seed,
     )
     # C0's overlay is the seed's, read where the runner reads it; an L1 proposal carries its own.
@@ -201,7 +201,7 @@ async def verify_candidate(
     campaign_config = validate_campaign_config(campaign.config)
     log_fn = log or (lambda *_a, **_k: None)
     pipeline_params = arm_diagnostic_scoring(
-        session, campaign_config, source=f"verify:{hop.campaign_id}:{label}", log=log_fn
+        session, campaign_config, source=RunSource.VERIFY, log=log_fn
     )
 
     opt_sp, pipeline_overlay = (
@@ -216,7 +216,11 @@ async def verify_candidate(
     effective_pipeline_params = (
         merge_pipeline_params(pipeline_params, pipeline_overlay, schema) or {}
     )
-    jsp = opt_sp.to_job_search_point(effective_pipeline_params, schema=schema)
+    jsp = opt_sp.to_job_search_point(
+        effective_pipeline_params,
+        schema=schema,
+        framing=committed_task_context(stores, session.dataset_name),
+    )
     node_configs = schema.node_configs(effective_pipeline_params)
     predicate: dict[str, dict[str, Any]] = dict(node_configs)
     config_hash = schema.sp_hash(effective_pipeline_params)
@@ -228,7 +232,10 @@ async def verify_candidate(
         dataset_name=campaign.dataset_name,
     )
     measured_ids = {m.sample_id for m in prior}
-    unmeasured = [s for s in session.samples if s.id not in measured_ids]
+    # The search pool alone: `verify_on_saturation` runs inside the loop, so a bench row it
+    # measured would be a bench row the loop decided on.
+    search = session.scoring.require_partition().search
+    unmeasured = [s for s in search if s.id not in measured_ids]
     if not unmeasured:
         return VerifyOutcome(dataset_name=campaign.dataset_name, already_measured=len(measured_ids))
 
@@ -268,14 +275,9 @@ async def verify_candidate(
                 picked,
                 session,
                 label="verify",
-                # `verify` replays a RECORDED config against fresh samples; the optimizer state
-                # that produced it is not in scope here, and the workspace side it is compared
-                # against (`compute_composite_fitness` below) has none either.
-                opt_sp=None,
                 measured=None,
                 on_sample_scored=lambda *_a, **_k: None,
                 on_sample_starting=lambda *_a, **_k: None,
-                source=f"verify:{hop.campaign_id}:{label}",
             ),
         )
 
@@ -292,14 +294,7 @@ async def verify_candidate(
 
     if session.scoring.scorer is not None:
         rescore_results(cast("list[dict[str, Any]]", workspace_qms), session.scoring.scorer)
-    workspace_scores = compute_composite_fitness(
-        workspace_qms,
-        schema,
-        # The source campaign's side of this comparison has no opt_sp either (see the
-        # `score_search_point` call above) — a lift read across two different bases is not
-        # a lift.
-        opt_sp=None,
-    )
+    workspace_scores = compute_composite_fitness(workspace_qms, schema)
 
     workspace_n = len(workspace_qms)
     # Same rule as the source side above: `compute_accuracy` returns None on no scoreable rows,

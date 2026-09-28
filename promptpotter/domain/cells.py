@@ -216,11 +216,6 @@ class CellsResponse(StrictModel):
     name: str
     scope: HeatmapScope
     row_count: int
-    split_test: int | None = Field(
-        default=None,
-        description="Declared held-out test fold size (not materialized). The training-bank "
-        "size is `row_count` above.",
-    )
     order: HardSampleOrder = Field(
         description="The key `samples` are ranked by — the request's `order` when it named one, "
         "else the dataset's `CampaignConfig.hard_sample_order`. Echoed so a client that sent "

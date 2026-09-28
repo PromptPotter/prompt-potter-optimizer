@@ -33,8 +33,9 @@ from promptpotter.application.scoring.search_point_scorer import _replayable_on
 from promptpotter.connectors import harbor
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
-from promptpotter.domain.measurement_provenance import grade_run
+from promptpotter.domain.measurement_provenance import RunSource, grade_run
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.optimizer_state import L2L3Memory
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     SCHEMA_TOGGLE_PARAM,
@@ -43,7 +44,7 @@ from promptpotter.domain.pipeline_schema import (
 )
 from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
 from promptpotter.domain.sample import Sample, sample_key
-from promptpotter.domain.search_point import JobSearchPoint
+from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.infrastructure.projections.live_dashboard.projection import (
     LiveDashboardProjection,
 )
@@ -178,14 +179,18 @@ def test_sp_hash_is_not_recoverable_from_the_stripped_config() -> None:
         ],
     )
     opt_sp = OptSearchPoint(persona="Expert", instruction="Solve it.")
-    sp = opt_sp.to_job_search_point(base_pipeline_params={}, schema=schema)
+    sp = opt_sp.to_job_search_point(
+        base_pipeline_params={}, schema=schema, framing=TaskDecomposition()
+    )
     assert sp.render(), "the point that runs carries the rendered prompt in its node config"
 
     stripped = JobSearchPoint(pipeline_params=sp.config_params, prompt_fields=sp.prompt_fields)
     assert stripped.sp_hash(schema) != sp.sp_hash(schema)
     assert not stripped.render(), "and the stripped twin reaches the backend with no prompt"
 
-    restored = opt_sp.to_job_search_point(base_pipeline_params=sp.config_params, schema=schema)
+    restored = opt_sp.to_job_search_point(
+        base_pipeline_params=sp.config_params, schema=schema, framing=TaskDecomposition()
+    )
     assert restored.sp_hash(schema) == sp.sp_hash(schema)
 
 
@@ -350,35 +355,6 @@ def test_inner_campaign_id_separates_two_candidates_and_is_stable() -> None:
     )
 
 
-def test_adopt_advances_identity_and_carries_the_wound_ledger():
-    """The single adoption seam (``Cycle.adopt``) — used for an L1 win and an L2/L3
-    transition alike — must ADVANCE lineage to the new parent (parent = the outgoing
-    one) while CARRYING the outgoing parent's persistent memory: the wound ledger and
-    L2's l1_layout. ``mutate`` deliberately resets those two on a child, so a seam that
-    forgets to carry them silently drops the failures the search already paid to discover
-    — no error, the next round just re-invites the mistake.
-    """
-    from promptpotter.application.optimization.cycle import Cycle
-
-    parent = OptSearchPoint(persona="Expert", instruction="Rank.")
-    parent.memory.wounds.l3_note = "prior failure ledger"
-    # An L1 winner is a `mutate` child: it resets wounds.
-    winner = parent.mutate(source="l1_generate", changes_description="try X")
-    assert winner.memory.wounds.l3_note == ""  # the reset adopt must repair
-    prior_id = parent.lineage.id
-
-    cyc = object.__new__(Cycle)
-    cyc.opt_sp = parent
-    cyc.adopt(winner)
-
-    # Identity advanced to the winner, parented on the outgoing parent.
-    assert cyc.opt_sp is winner
-    assert cyc.opt_sp.lineage.id == winner.lineage.id
-    assert cyc.opt_sp.lineage.parent_id == prior_id
-    # The wound ledger carried forward (would be silently lost without copy_memory_to).
-    assert cyc.opt_sp.memory.wounds.l3_note == "prior failure ledger"
-
-
 def test_judge_identity_moves_the_searchpoint_hash() -> None:
     """Swapping a judge, its models, its rubric, or the TERM it is read under re-cuts the key.
 
@@ -402,7 +378,14 @@ def test_judge_identity_moves_the_searchpoint_hash() -> None:
     def sp_hash(judges: dict[str, JudgeSpec]) -> str:
         return schema.sp_hash(
             resolve_pipeline_config_params(
-                active, {}, None, schema, judges=judges, experiment=None, workspace=None
+                active,
+                {},
+                None,
+                schema,
+                judges=judges,
+                experiment=None,
+                stores=None,
+                workspace=None,
             )
         )
 
@@ -874,13 +857,51 @@ def test_the_provenance_sink_cannot_move_the_merge_it_observes(tmp_path: Path) -
     overlay = {"llm_only": {"model": "campaign-model"}}
     sink: dict[str, dict[str, str]] = {}
     plain = resolve_pipeline_config_params(
-        ["llm_only"], overlay, tmp_path, schema, experiment=None, workspace=None
+        ["llm_only"], overlay, tmp_path, schema, experiment=None, stores=None, workspace=None
     )
     observed = resolve_pipeline_config_params(
-        ["llm_only"], overlay, tmp_path, schema, experiment=None, workspace=None, provenance=sink
+        ["llm_only"],
+        overlay,
+        tmp_path,
+        schema,
+        experiment=None,
+        stores=None,
+        workspace=None,
+        provenance=sink,
     )
     assert plain == observed
     assert sink["llm_only"] == {"model": "campaign", "temperature": "dataset"}
+
+
+def test_the_inner_benchmark_is_one_directory_to_identity_and_run(built_stores: Any) -> None:
+    """A tenant copy of the inner benchmark is what the L4 fingerprint hashes AND what an inner
+    cell runs. Resolved apart, outer rows are keyed on one config and measured on another, and a
+    banked cell replays under a benchmark it never ran — every number plausible."""
+    from promptpotter.connectors.promptpotter import _identity_config
+    from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
+    from promptpotter.infrastructure.store.stores import build_stores
+
+    outer = Path(__file__).resolve().parents[1] / "datasets" / "promptpotter-self"
+    panel = {
+        "inner_benchmark": "innerbench",
+        "inner_benchmark_config": {"n_samples_per_inner_round": 4, "max_inner_rounds": 2},
+        "tasks": [{"id": "seed-0"}],
+    }
+    install = built_stores.benchmarks_root / "innerbench"
+    write_yaml(install / "pipeline.yaml", {"nodes": {"llm_only": {"config": {"model": "a"}}}})
+    before = _identity_config(built_stores, outer, panel)
+
+    tenant_copy = built_stores.tenant_datasets.dataset_dir("innerbench")
+    write_yaml(tenant_copy / "pipeline.yaml", {"nodes": {"llm_only": {"config": {"model": "b"}}}})
+    assert _identity_config(built_stores, outer, panel) != before, "identity hashed the wrong tier"
+
+    sandbox = build_stores(
+        built_stores.identity,
+        projects_root=built_stores.base_dir / ".inner" / "cell",
+        benchmarks_root=built_stores.benchmarks_root,
+        shared_root=built_stores.shared_root,
+    )
+    assert readable_dataset_dir(sandbox, "innerbench") == tenant_copy, "the cell ran another tier"
 
 
 # 2. Replay eligibility — which banked row may be served back
@@ -995,16 +1016,16 @@ def test_provenance_grade_separates_deliberate_from_connector() -> None:
     schema = _StubSchema([_StubNode("token_matching", False), _StubNode("llm_only", True)])
     llm_batch = [{"pipeline_data": {"terminal_node": "llm_only"}}]
     connector_batch = [{"pipeline_data": {"terminal_node": "token_matching"}}]
-    assert grade_run("optimization_loop", llm_batch, schema).grade == "A"
-    assert grade_run("origin", llm_batch, schema).grade == "A"
-    assert grade_run("", connector_batch, schema).grade == "C"
+    assert grade_run(RunSource.OPTIMIZATION_LOOP, llm_batch, schema).grade == "A"
+    assert grade_run(RunSource.ORIGIN, llm_batch, schema).grade == "A"
+    assert grade_run(RunSource.VERIFY, connector_batch, schema).grade == "C"
     # one signal but not both → middling, never confused with a clean A
-    assert grade_run("origin", connector_batch, schema).grade == "B"
-    assert grade_run("", llm_batch, schema).grade == "B"
+    assert grade_run(RunSource.ORIGIN, connector_batch, schema).grade == "B"
+    assert grade_run(RunSource.VERIFY, llm_batch, schema).grade == "B"
     # A babysat run (a human edited an engine-locked value, ADR-0005) is forced to
     # C even on the otherwise-clean-A path — else a tainted point reused as clean
     # would silently bias the digest/L4 the same way connector noise does.
-    prov = grade_run("optimization_loop", llm_batch, schema, human_intervened=True)
+    prov = grade_run(RunSource.OPTIMIZATION_LOOP, llm_batch, schema, human_intervened=True)
     assert prov.grade == "C" and prov.human_intervened is True
 
 
@@ -1171,7 +1192,7 @@ def test_unscoreable_cells_counts_holes_but_not_stops_or_deprecated_rows() -> No
     (``domain/results_health.py``), so a recovered retry is an ordinary scored row and never needs
     this protection — which stays, for samples that really did come back empty.
     """
-    from promptpotter.application.optimization.pobb.classification import is_deprecated
+    from promptpotter.application.scoring.classification import is_deprecated
     from promptpotter.config.settings import NO_RESULT
     from promptpotter.domain.results import unscoreable_cells
 
@@ -1218,14 +1239,6 @@ def test_unscoreable_cells_counts_holes_but_not_stops_or_deprecated_rows() -> No
 # 3. Contamination of a scored prompt
 
 
-def test_render_does_not_leak_l3_plan_into_target_prompt() -> None:
-    """L3's plan reaches L1/L2/L3 prompts via ``_r_plan`` only — never via
-    ``render``. A leak would silently score a plan-contaminated target prompt."""
-    sentinel = "REVISED_OPTIMIZATION_FRAMEWORK_PLAN_SENTINEL"
-    opt_sp = OptSearchPoint(persona="Expert", instruction="Solve.", plan=sentinel)
-    assert sentinel not in opt_sp.render()
-
-
 def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing() -> None:
     """The panel IS the text L1 replaces, so whatever it shows comes back as the raw field. Showing
     a SPLICED ``problem_description`` therefore returns the operator's context inside it, and the
@@ -1241,23 +1254,22 @@ def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing() -> 
         _r_rendered_prompt,
         _r_task_context,
     )
-    from promptpotter.domain.opt_search_point import L2L3Memory
+    from promptpotter.domain.optimizer_state import L2L3Memory
     from promptpotter.domain.round_diagnostics import RoundDiagnostics
-    from promptpotter.domain.search_point import TaskDecomposition
 
     upstream = "Raw invoice text is provided directly as the input column."
+    framing = TaskDecomposition(
+        upstream_context=upstream,
+        downstream_context="The assigned code books a ledger entry.",
+    )
     opt_sp = OptSearchPoint(
         persona="You assign Swiss account codes.",
         problem_description="Assign the four-digit account code for the invoice.",
-        memory=L2L3Memory(
-            task_context=TaskDecomposition(
-                upstream_context=upstream,
-                downstream_context="The assigned code books a ledger entry.",
-            )
-        ),
     )
     bundle = InjectionBundle(
         opt_sp=opt_sp,
+        memory=L2L3Memory(),
+        framing=framing,
         pipeline_schema=None,
         cycle_slice=CycleSlice(
             round_num=1,
@@ -1278,10 +1290,11 @@ def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing() -> 
         if label.startswith("[")
     }
     # A generator that replaces every field with exactly what it was shown changes nothing.
-    assert opt_sp.mutate(**shown).render() == opt_sp.render()
+    rewritten = OptSearchPoint.derive([opt_sp], source="potter:l1_generate", **shown)
+    assert rewritten.render_target(framing) == opt_sp.render_target(framing)
     # The framing still reaches the target prompt, and L1 still sees it — as context, not as the
     # field it is being asked to rewrite. Dropping either half trades this bug for a blinder one.
-    assert upstream in opt_sp.render()
+    assert upstream in opt_sp.render_target(framing)
     assert upstream in "".join(i.text for i in _r_task_context(bundle))
 
 
@@ -1310,7 +1323,7 @@ def test_earned_blocks_gate_on_credible_lift_and_task_fit() -> None:
             composite_fitness=comp,
             total=10,
             prompt_fields={**parent, **fields},  # RESOLVED fields, parent + this candidate's change
-            matched_parent_composite=0.50,
+            reference_composite=0.50,
             mean_fitness_ci_lo=ci_lo,
             mean_fitness_ci_hi=ci_lo + 0.1,
         ).model_dump()
@@ -1445,6 +1458,51 @@ def test_repeat_marker_reads_the_idea_not_the_field_it_was_written_into() -> Non
     ), "field-name tokens leaked into the idea fingerprint"
 
 
+def test_no_held_out_row_reaches_a_round_panel_or_an_archive_view() -> None:
+    """The headline is read on the bench set, so a bench or demo row the optimizer ever sees makes
+    it grade its own exam — and nothing says so: every number renders, only higher.
+
+    Two roads in. The round's panel is drawn from the search pool, so the partition must never hand
+    a held-out row to it. And the archive is filed by DATASET: once the bench measures its rows they
+    sit beside the search's, so an archive view the optimizer reads must drop them — the sample
+    index is the one that puts a row's QUERY TEXT into the generator's prompt.
+    """
+    from promptpotter.application.intelligence.exploration import (
+        Observation,
+        select_round_subset,
+    )
+    from promptpotter.application.intelligence.indexes.sample import SampleIndex
+    from promptpotter.domain.bench import DatasetSplit, partition_bank
+
+    bank = [Sample(id=i, query=f"claim {i}", ground_truth="TRUE") for i in range(60)]
+    split = DatasetSplit(bench=12, demo=6)
+    part = partition_bank(bank, split)
+    held = {s.id for s in (*part.bench, *part.demo)}
+    assert (len(part.bench), len(part.demo), len(part.search)) == (12, 6, 42)
+    assert held.isdisjoint(s.id for s in part.search)
+    # A row's CONTENT holds it out, not its slot: the same bank in another order agrees.
+    assert {s.id for s in partition_bank(bank[::-1], split).bench} == {s.id for s in part.bench}
+
+    # Archive evidence naming every held-out cell cannot pull one into the panel.
+    contaminating = [Observation("bench_arm", sid, 0.0) for sid in held]
+    panel = select_round_subset(list(part.search), contaminating, 20)
+    assert held.isdisjoint(s.id for s in panel)
+
+    index = SampleIndex(sample_ids=part.admitted_ids)
+    for n in range(12):
+        index.ingest_run(
+            {
+                "run_id": f"bench_{n}",
+                "measurements": [
+                    {"sample_id": sid, "query": f"claim {sid}", "fitness": 0.0} for sid in held
+                ],
+            }
+        )
+    assert not index.rare_hit_samples() and not index.records(), (
+        "a held-out row reached the index the optimizer's panels read"
+    )
+
+
 # 4. The searchpoint's param surface
 
 
@@ -1559,9 +1617,11 @@ def test_a_held_prompt_field_is_neither_offered_nor_accepted() -> None:
     parent = OptSearchPoint(persona="Expert", instruction="Solve.")
 
     def forbidden(updates: dict[str, str]) -> list[str]:
-        cp = CandidateProposal(opt_sp=parent.mutate(**updates))
-        [opt_sp], _ = parse_population([cp], parent, None, schema)
-        failures = opt_sp.memory.wounds.validation_failures
+        cp = CandidateProposal(
+            opt_sp=OptSearchPoint.derive([parent], source="potter:l1_generate", **updates)
+        )
+        parse_population([cp], parent, None, schema, runtime_failures=[])
+        failures = cp.validation_failures
         return [f.axis for f in failures if f.reason == "forbidden_axis"]
 
     assert forbidden({"persona": "Pirate", "instruction": "Solve fast."}) == [f"{node}.persona"]
@@ -2009,7 +2069,13 @@ def test_a_swapped_model_starts_at_its_own_effort_floor(tmp_path: Path) -> None:
 
     def effort(overlay: dict[str, Any]) -> object:
         params = resolve_pipeline_config_params(
-            ["llm_only"], overlay, tmp_path, schema, experiment=None, workspace=workspace
+            ["llm_only"],
+            overlay,
+            tmp_path,
+            schema,
+            experiment=None,
+            stores=None,
+            workspace=workspace,
         )
         return params["llm_only"].get("reasoning_effort")
 
@@ -2315,9 +2381,8 @@ def test_evidence_channel_clips_are_visible_and_tail_preserving(
         _edges_at_line,
     )
     from promptpotter.application.optimization.dispatch.schemas import L1CritiqueOutput
-    from promptpotter.domain.opt_search_point import L2L3Memory
+    from promptpotter.domain.optimizer_state import L2L3Memory
     from promptpotter.domain.round_diagnostics import RoundDiagnostics
-    from promptpotter.domain.search_point import TaskDecomposition
 
     # (1) over-cap priority_fix clips at a word boundary WITH a visible marker.
     long_fix = "thinking_style: add verification - addresses " + "pattern word " * 40
@@ -2346,9 +2411,9 @@ def test_evidence_channel_clips_are_visible_and_tail_preserving(
     # author can act on it (`TaskDecomposition.check_budget`).
     long_field = "data_characteristics: " + "pattern word " * 30
     bundle = InjectionBundle(
-        opt_sp=OptSearchPoint(
-            memory=L2L3Memory(task_context=TaskDecomposition(key_challenges=long_field))
-        ),
+        opt_sp=OptSearchPoint(),
+        memory=L2L3Memory(),
+        framing=TaskDecomposition(key_challenges=long_field),
         pipeline_schema=None,
         cycle_slice=CycleSlice(
             round_num=1,
@@ -2511,6 +2576,8 @@ def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
     )
     bundle = InjectionBundle(
         opt_sp=OptSearchPoint(),
+        memory=L2L3Memory(),
+        framing=TaskDecomposition(),
         pipeline_schema=schema,
         cycle_slice=CycleSlice(
             round_num=1,
@@ -2579,7 +2646,8 @@ def test_a_solved_cell_the_edits_keep_losing_reaches_the_critique_and_the_genera
             cid,
             accuracy=2 / 3,
             total=3,
-            matched_parent_accuracy=2 / 3,
+            reference_id="parent",
+            reference_accuracy=2 / 3,
             prompt_fields={"instruction": f"{opening} {added}"},
         )
 
@@ -2587,7 +2655,7 @@ def test_a_solved_cell_the_edits_keep_losing_reaches_the_critique_and_the_genera
     latest = round_result(
         1,
         prompt_fields=parent_fields,
-        parent_results=parent_rows,
+        reference_results={"parent": parent_rows},
         candidate_scores=[
             edit("C1.1", "Validate every inferred rule against held-out rows."),
             edit("C1.2", "Confirm that every range passed to COUNTIFS shares one shape."),
@@ -2599,6 +2667,8 @@ def test_a_solved_cell_the_edits_keep_losing_reaches_the_critique_and_the_genera
     )
     bundle = InjectionBundle(
         opt_sp=OptSearchPoint(),
+        memory=L2L3Memory(),
+        framing=TaskDecomposition(),
         pipeline_schema=None,
         cycle_slice=CycleSlice(
             round_num=1,
@@ -2714,17 +2784,17 @@ def test_a_round_missing_its_critique_is_re_sent_before_the_generator_reads() ->
 
     # A round that HAS one is never re-sent — the skip must stay free.
     kept = round_result(1, results=rows)
-    kept.critique = {"priority_fix": "already here"}
+    kept.optimizer_state.payload.critique = {"priority_fix": "already here"}
     cycle = _cycle(kept)
     calls: list[int] = []
     with patch.object(critique_mod, "run_l1_critique", side_effect=AssertionError("re-sent")):
         asyncio.run(critique_mod.ensure_prior_critique(cycle))
-    assert kept.critique == {"priority_fix": "already here"}
+    assert kept.optimizer_state.payload.critique == {"priority_fix": "already here"}
 
     # A round MISSING one is re-sent, and the result lands on disk — or the next resume pays for
     # a call this one already made, and the round file keeps saying the generator had no steer.
     bare = round_result(1, results=rows)
-    bare.critique = None
+    bare.optimizer_state.payload.critique = None
     cycle = _cycle(bare)
 
     async def _distil(*_a: object, **_k: object) -> dict[str, str]:
@@ -2734,12 +2804,12 @@ def test_a_round_missing_its_critique_is_re_sent_before_the_generator_reads() ->
     with patch.object(critique_mod, "run_l1_critique", side_effect=_distil):
         asyncio.run(critique_mod.ensure_prior_critique(cycle))
     assert calls == [1]
-    assert bare.critique == {"priority_fix": "distilled late"}
+    assert bare.optimizer_state.payload.critique == {"priority_fix": "distilled late"}
     cycle.session.store.campaigns.save_round_file.assert_called_once()
 
     # A transient failure is re-sent, not surrendered to: the second attempt carries the round.
     flaky = round_result(1, results=rows)
-    flaky.critique = None
+    flaky.optimizer_state.payload.critique = None
     cycle = _cycle(flaky)
     tries: list[int] = []
 
@@ -2752,12 +2822,12 @@ def test_a_round_missing_its_critique_is_re_sent_before_the_generator_reads() ->
     with patch.object(critique_mod, "run_l1_critique", side_effect=_second_time):
         asyncio.run(critique_mod.ensure_prior_critique(cycle))
     assert len(tries) == 2
-    assert flaky.critique == {"priority_fix": "arrived on the re-send"}
+    assert flaky.optimizer_state.payload.critique == {"priority_fix": "arrived on the re-send"}
 
     # Exhausting the re-sends HALTS. A round whose generator would run with an empty MANDATORY
     # panel is a compromised decision point, and spending a full panel on it is the waste.
     blind = round_result(1, results=rows)
-    blind.critique = None
+    blind.optimizer_state.payload.critique = None
     cycle = _cycle(blind)
     seen: list[dict[str, object]] = []
     attempts: list[int] = []
@@ -3901,7 +3971,9 @@ def test_a_judge_term_cannot_take_a_name_that_already_measures_something() -> No
             build_evaluators({term: JudgeSpec(name="sealqa", stages=[stage])})
 
 
-def test_a_grader_that_raises_never_costs_the_cell_it_graded() -> None:
+def test_a_grader_that_raises_never_costs_the_cell_it_graded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A grading is cheap; the cell it reads is not. No failure in a judge may spend the second.
 
     ``ask`` never raising covers the provider. It does not cover anything else thrown inside
@@ -3914,7 +3986,7 @@ def test_a_grader_that_raises_never_costs_the_cell_it_graded() -> None:
 
     from factories import measurement
 
-    from promptpotter.judges import JUDGES, build_evaluators
+    from promptpotter import judges
     from promptpotter.judges.protocol import Judge, JudgeSpec, JudgeStage
 
     async def _explode(_spec: Any, _result: Any) -> Any:
@@ -3926,7 +3998,7 @@ def test_a_grader_that_raises_never_costs_the_cell_it_graded() -> None:
         predicted="Paris",
         pipeline_data={"reasoning_trace": "read the source"},
     )
-    JUDGES["_raises"] = Judge(
+    broken = Judge(
         name="_raises",
         version="1",
         description="d",
@@ -3936,13 +4008,11 @@ def test_a_grader_that_raises_never_costs_the_cell_it_graded() -> None:
         to_score={"X": 1.0},
         needs_gold=False,
     )
-    try:
-        (ev,) = build_evaluators(
-            {"answer_ok": JudgeSpec(name="_raises", stages=[JudgeStage(model="m", provider="p")])}
-        )
-        score = asyncio.run(ev.compute(result=row, schema=None))
-    finally:
-        del JUDGES["_raises"]
+    monkeypatch.setattr(judges, "get", lambda _name: broken)
+    (ev,) = judges.build_evaluators(
+        {"answer_ok": JudgeSpec(name="_raises", stages=[JudgeStage(model="m", provider="p")])}
+    )
+    score = asyncio.run(ev.compute(result=row, schema=None))
 
     assert score is None, "a judge's own bug was banked as a graded score"
     assert row["pipeline_data"], "the paid backend measurement was discarded with the grading"

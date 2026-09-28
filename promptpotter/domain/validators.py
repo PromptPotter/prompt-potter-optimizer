@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from promptpotter.domain.escalation_signals import EscalationSignal
-    from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
 
@@ -35,11 +34,11 @@ class LLMOutputValidator:
 def run_validators(
     validators: tuple[LLMOutputValidator, ...],
     source_output: Mapping[str, Any],
-    opt_sp: OptSearchPoint,
+    **context: Any,
 ) -> list[ValidatorOutcome]:
     outcomes: list[ValidatorOutcome] = []
     for validator in validators:
-        outcome = validator.run(source_output, opt_sp=opt_sp)
+        outcome = validator.run(source_output, **context)
         if outcome is not None:
             outcomes.append(outcome)
     return outcomes

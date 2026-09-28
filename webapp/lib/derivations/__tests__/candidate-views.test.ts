@@ -6,7 +6,7 @@ function node(
   over: Partial<LineageNode> & Pick<LineageNode, "kind" | "id" | "label">,
 ): LineageNode {
   return {
-    parent_id: null,
+    parent_ids: [],
     course_label: over.label,
     path: [],
     children: [],
@@ -15,7 +15,7 @@ function node(
     composite_fitness: null,
     status: "",
     election_held: true,
-    is_winner: false,
+    is_selected: false,
     theta: null,
     theta_se: null,
     evaluators: {},
@@ -61,12 +61,12 @@ function live(over: Partial<DashboardCandidate> & Pick<DashboardCandidate, "labe
     theta_se: null,
     mean_fitness_ci_lo: null,
     mean_fitness_ci_hi: null,
-    matched_parent_accuracy: null,
-    matched_parent_composite: null,
-    matched_parent_lift: null,
-    matched_parent_lift_ci_lo: null,
-    matched_parent_lift_ci_hi: null,
-    is_winner: false,
+    reference_accuracy: null,
+    reference_composite: null,
+    reference_lift: null,
+    reference_lift_ci_lo: null,
+    reference_lift_ci_hi: null,
+    is_selected: false,
     ...over,
   } as DashboardCandidate;
 }
@@ -103,7 +103,7 @@ describe("the half choice — tree unless it holds no measurement", () => {
       inflightByLabel: new Map([
         [
           "C1.1",
-          live({ label: "C1.1", accuracy: 0.4, theta: 0.9, is_winner: true, scored_samples: 8 }),
+          live({ label: "C1.1", accuracy: 0.4, theta: 0.9, is_selected: true, scored_samples: 8 }),
         ],
       ]),
     });
@@ -112,7 +112,7 @@ describe("the half choice — tree unless it holds no measurement", () => {
       source: "inflight",
       accuracy: 0.4,
       theta: 0.9,
-      is_winner: true,
+      is_selected: true,
       n_samples: 8,
     });
   });
@@ -160,7 +160,7 @@ describe("course bars carry no verdict", () => {
       overlapAccuracy: null,
       overlapN: null,
       // A run is not a scored row, so no promotion gate ever judged it against a parent.
-      matchedParentLift: null,
+      referenceLift: null,
       // A run is not a round, so it has no election to be pending on.
       electionPending: false,
     });
@@ -189,7 +189,7 @@ describe("a picked sample set moves the overlap bars, and nothing else", () => {
       composite_fitness: 0.65,
       cached_samples: 4,
       scored_samples: 12,
-      matched_parent_lift: 0.09,
+      reference_lift: 0.09,
       sample_set_accuracy: 0.5,
       sample_set_n: 6,
     }),
@@ -204,7 +204,7 @@ describe("a picked sample set moves the overlap bars, and nothing else", () => {
       composite: 0.65,
       cached_samples: 4,
       n_samples: 12,
-      matchedParentLift: 0.09,
+      referenceLift: 0.09,
       // The one bar that moves — the SERVED re-score over the picked cells.
       overlapAccuracy: 0.5,
       overlapN: 6,
@@ -283,17 +283,17 @@ it("carries the election's lift verdict straight off the tree", () => {
         label: "C1.1",
         round: 1,
         accuracy: 0.6,
-        matched_parent_lift: 0.12,
-        matched_parent_lift_ci_lo: 0.04,
-        matched_parent_lift_ci_hi: 0.2,
+        reference_lift: 0.12,
+        reference_lift_ci_lo: 0.04,
+        reference_lift_ci_hi: 0.2,
       }),
     ]),
   });
   // Served, never differenced here — `accuracy` minus anything is not this number.
   expect(views[0]).toMatchObject({
-    matchedParentLift: 0.12,
-    matchedParentLiftCiLo: 0.04,
-    matchedParentLiftCiHi: 0.2,
+    referenceLift: 0.12,
+    referenceLiftCiLo: 0.04,
+    referenceLiftCiHi: 0.2,
   });
 });
 
@@ -322,6 +322,6 @@ it("says an uncrowned bar has not been judged yet, off the SERVED election flag"
       node({ kind: "candidate", id: "b", label: "C1.2", round: 1, accuracy: 0.4, election_held: true }),
     ]),
   });
-  // A round that HELD reads exactly like one still scoring on `is_winner` alone.
+  // A round that HELD reads exactly like one still scoring on `is_selected` alone.
   expect(views.map((v) => v.electionPending)).toEqual([true, false]);
 });

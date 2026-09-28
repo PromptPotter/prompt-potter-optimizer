@@ -11,7 +11,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.optimization.resume_and_fork.decisions import (
-    ResumeCheckpointKind,
     record_decision,
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
@@ -24,6 +23,7 @@ from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import (
     FORK_DIRECTION,
     UNATTRIBUTED_OPERATOR,
+    BenchCheckpointKind,
     ForkDirection,
     ForkSpec,
     ForkTrigger,
@@ -82,7 +82,7 @@ def _fork_sibling_setup(
     with graceful("FORK_CUT decision append failed"):
         record_decision(
             CycleEventLog.open(CycleDir(parent_dir)),
-            ResumeCheckpointKind.FORK_CUT,
+            BenchCheckpointKind.FORK_CUT,
             {"from_round": from_round},
             new_cycle_id,
             data=record_data,
@@ -130,8 +130,7 @@ def _next_diag_sibling_id(
 _REBASE_TRIGGERS = frozenset(
     {
         ForkTrigger.SCORING_DIVERGENCE,
-        ForkTrigger.L2_REBASE,
-        ForkTrigger.L3_REBASE,
+        ForkTrigger.OPTIMIZER_REBASE,
         ForkTrigger.OPERATOR_REWIND,
     }
 )

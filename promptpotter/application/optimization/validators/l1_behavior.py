@@ -3,11 +3,8 @@
 
 from __future__ import annotations
 
-import contextlib
 import re
 from typing import Any
-
-from pydantic import ValidationError
 
 from promptpotter.application.optimization.dispatch.injections.layer_state import (
     HELD_PROMPT_FIELD_MARK,
@@ -24,7 +21,6 @@ from promptpotter.application.optimization.validators.behavior_base import (
 )
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.candidate_diff import variant_prose_written
-from promptpotter.domain.l1_layout import L1Layout
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
 
 __all__ = [
@@ -286,18 +282,10 @@ def run_all_checks(round_dict: dict[str, Any], ctx: ValidatorContext) -> list[Ch
 
 
 def _round_citable_fields(ctx: ValidatorContext) -> tuple[str, ...]:
-    """The same derivation that built the round's citation menu, replayed off the round-start OSP.
-    Falls open to every citable panel when the snapshot carries no layout."""
-    memory = ctx.opt_sp.get("memory") or {}
-    raw = memory.get("l1_layout") if isinstance(memory, dict) else None
-    # A COMPLETE stored layout, NOT an edit — the snapshot names every slot — so it is parsed as
-    # one. Routing it through `coerce_l1_layout` reads it as a `{panel: slot}` edit, which a dump
-    # of per-slot lists is not, and every round then falls open to the whole citable registry.
-    if isinstance(raw, dict) and raw:
-        with contextlib.suppress(ValidationError):
-            return citable_fields(
-                L1Layout.model_validate(raw), exploration_budget=ctx.exploration_budget
-            )
+    """The same derivation that built the round's citation menu, replayed off the layout the
+    round's optimizer state banked. Falls open to every citable panel when none was banked."""
+    if ctx.l1_layout is not None:
+        return citable_fields(ctx.l1_layout, exploration_budget=ctx.exploration_budget)
     return tuple(
         sorted([n for n, i in injection_table().items() if i.citable] + [STALL_EXPLORATION])
     )

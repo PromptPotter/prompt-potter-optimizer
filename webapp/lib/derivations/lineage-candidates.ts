@@ -85,7 +85,7 @@ export function selectedCandidateOf(
     candidate_id: node.id,
     label: node.course_label,
     accuracy,
-    is_winner: node.is_winner,
+    is_selected: node.is_selected,
   };
 }
 
@@ -145,5 +145,5 @@ export function nodeOverlays(
 // A badge, never the name.
 export function cutFromLabel(node: LineageNode, siblings: readonly LineageNode[]): string | null {
   if (node.course_kind === null) return null;
-  return siblings.find((s) => s.id === node.parent_id)?.label ?? null;
+  return siblings.find((s) => s.id === node.parent_ids[0])?.label ?? null;
 }

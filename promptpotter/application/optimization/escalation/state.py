@@ -7,7 +7,7 @@ import enum
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from promptpotter.domain.phases import CampaignPhase, StopReason
+from promptpotter.domain.phases import PotterPhase, StopReason
 from promptpotter.domain.run_records import CycleRecord, PhaseRecord, view_fields
 
 if TYPE_CHECKING:
@@ -28,7 +28,7 @@ class NextAction(enum.StrEnum):
 
 _NEXT_ACTION_TO_STOP: dict[NextAction, StopReason] = {
     NextAction.STOP_PERFECT: StopReason.PERFECT,
-    NextAction.STOP_L3_PATIENCE: StopReason.L3_PATIENCE,
+    NextAction.STOP_L3_PATIENCE: StopReason.CONVERGED,
     NextAction.STOP_LIVES: StopReason.LIVES_EXHAUSTED,
 }
 
@@ -347,7 +347,7 @@ class EscalationFSM:
                 compared=int(record.payload["electable_count"]) > 0,
                 separable=None if sep is None else bool(sep),
             )
-        elif record.phase == CampaignPhase.REFINE_STRATEGY and record.event == "exit":
+        elif record.phase == PotterPhase.REFINE_STRATEGY and record.event == "exit":
             escalation_state = view_fields(record)
             self._l1_stall_count = 0
             self._l2_round = int(escalation_state["l2_round"])
@@ -357,7 +357,7 @@ class EscalationFSM:
             )
             l2_theta = escalation_state["l2_best_theta_at_entry"]
             self._l2_best_theta_at_entry = None if l2_theta is None else float(l2_theta)
-        elif record.phase == CampaignPhase.MODIFY_PLAN and record.event == "exit":
+        elif record.phase == PotterPhase.MODIFY_PLAN and record.event == "exit":
             escalation_state = view_fields(record)
             best_comp = float(escalation_state["l3_best_composite_fitness_at_entry"])
             l3_theta = escalation_state["l3_best_theta_at_entry"]

@@ -14,6 +14,8 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
 __all__ = [
+    "RESUME_CHECKPOINT_KINDS",
+    "BenchCheckpointKind",
     "CandidateMintedRecord",
     "CommandAckRecord",
     "CommandRecord",
@@ -31,6 +33,7 @@ __all__ = [
     "LedgerCandidate",
     "LedgerRoundClose",
     "PhaseRecord",
+    "PotterCheckpointKind",
     "ResumeCheckpointKind",
     "ResumeCheckpointRecord",
     "RoundWarningKind",
@@ -44,14 +47,28 @@ __all__ = [
 ]
 
 
-class ResumeCheckpointKind(enum.StrEnum):
+class BenchCheckpointKind(enum.StrEnum):
+    """The bench's own decisions. An optimizer's ride its manifest-scoped enum."""
+
+    FORK_CUT = "fork_cut"
+
+
+class PotterCheckpointKind(enum.StrEnum):
+    """Decisions potter's members take: its selector, its eliminator (PoBB), its controller."""
+
     ROUND_WINNER = "round_winner"
     ELIMINATION_CUT = "elimination_cut"
     LEADER_LOCK_IN = "leader_lock_in"
     PANEL_COVERAGE = "panel_coverage"
     L2_ESCALATION_TRIGGER = "l2_escalation_trigger"
     L3_ESCALATION_TRIGGER = "l3_escalation_trigger"
-    FORK_CUT = "fork_cut"
+
+
+ResumeCheckpointKind = BenchCheckpointKind | PotterCheckpointKind
+RESUME_CHECKPOINT_KINDS: tuple[ResumeCheckpointKind, ...] = (
+    *BenchCheckpointKind,
+    *PotterCheckpointKind,
+)
 
 
 class ResumeCheckpointRecord(StrictModel):
@@ -394,8 +411,7 @@ class ForkTrigger(enum.StrEnum):
     OPERATOR_DIAG = "operator_diag"
     OPERATOR_REWIND = "operator_rewind"
     OPERATOR_STEERED = "operator_steered"
-    L2_REBASE = "l2_rebase"
-    L3_REBASE = "l3_rebase"
+    OPTIMIZER_REBASE = "optimizer_rebase"
     SCORING_DIVERGENCE = "scoring_divergence"
 
 
@@ -434,8 +450,7 @@ FORK_DIRECTION: dict[ForkTrigger, ForkDirection] = {
     # Each retargets the active pointer and abandons the tail it cut from. The parent keeps
     # that tail as the record of what ran; the run is elsewhere now.
     ForkTrigger.OPERATOR_REWIND: ForkDirection.SUPERSEDE,
-    ForkTrigger.L2_REBASE: ForkDirection.SUPERSEDE,
-    ForkTrigger.L3_REBASE: ForkDirection.SUPERSEDE,
+    ForkTrigger.OPTIMIZER_REBASE: ForkDirection.SUPERSEDE,
     ForkTrigger.SCORING_DIVERGENCE: ForkDirection.SUPERSEDE,
 }
 
@@ -455,8 +470,7 @@ MintKind = Literal["session", "divergent_resume", "user_fork", "auto_rebase"]
 
 MINT_KIND_FOR_TRIGGER: dict[ForkTrigger, MintKind] = {
     ForkTrigger.SCORING_DIVERGENCE: "divergent_resume",
-    ForkTrigger.L2_REBASE: "auto_rebase",
-    ForkTrigger.L3_REBASE: "auto_rebase",
+    ForkTrigger.OPTIMIZER_REBASE: "auto_rebase",
     ForkTrigger.OPERATOR_DIAG: "user_fork",
     ForkTrigger.OPERATOR_STEERED: "user_fork",
     ForkTrigger.OPERATOR_REWIND: "user_fork",
@@ -513,8 +527,9 @@ class CycleSeed(StrictModel):
     origin_source: str = Field(
         default="",
         description=(
-            "C0 lineage provenance — 'fork_seed' | 'campaign_origin'; empty when the "
-            "seed carries no origin (an L2/L3 rebase replays its own)."
+            "Which act seeded C0 — 'fork_seed' | 'campaign_origin', naming its lineage's "
+            "`changes_description`; empty when the seed carries no origin (an L2/L3 rebase "
+            "replays its own)."
         ),
     )
 
@@ -537,7 +552,7 @@ class CandidateMintedRecord(StrictModel):
     round: int
     idx: int
     candidate_id: str
-    parent_id: str | None = None
+    parent_ids: list[str] = Field(default_factory=list)
     label: str
     changes_description: str = ""
     source: str = ""
@@ -559,7 +574,7 @@ class LedgerCandidate(StrictModel):
     round: int
     idx: int
     candidate_id: str
-    parent_id: str | None = None
+    parent_ids: list[str] = Field(default_factory=list)
     label: str
     changes_description: str = ""
     source: str = ""
@@ -600,11 +615,13 @@ class LedgerFit(LedgerAbility):
     else, because the matched-parent floor is decided once, at the election, and never moves after
     it. Two models would put the same two fields under two names and let them drift."""
 
-    matched_parent_accuracy: float | None = None
-    matched_parent_composite: float | None = None
-    matched_parent_lift: float | None = None
-    matched_parent_lift_ci_lo: float | None = None
-    matched_parent_lift_ci_hi: float | None = None
+    # The individual this arm's lift is read against, over the cells it touched.
+    reference_id: str | None = None
+    reference_accuracy: float | None = None
+    reference_composite: float | None = None
+    reference_lift: float | None = None
+    reference_lift_ci_lo: float | None = None
+    reference_lift_ci_hi: float | None = None
 
 
 class LedgerRoundClose(StrictModel):
@@ -670,22 +687,22 @@ class ElectionRecord(StrictModel):
     ``fit`` is here for the same reason the crown is, and the argument that once kept it out —
     "already addressable in ``rounds/round_NNNN.json``" — is what this record now answers: that
     document is not addressable until the round CLOSES, two LLM calls after the election stamped
-    it, and every live surface reads in that gap. Keyed by LABEL, like ``winner_label`` and like
-    ``LedgerRoundClose.abilities``, because a resume re-mints candidate ids.
+    it, and every live surface reads in that gap. Keyed by LABEL, like ``selected_labels`` and
+    like ``LedgerRoundClose.abilities``, because a resume re-mints candidate ids.
 
-    ``winner_label`` empty = the round HELD; round 0 crowns the ``C0`` it adopted.
+    ``selected_labels`` empty = the round HELD; round 0 selects the ``C0`` it adopted.
 
-    **θ and ``matched_parent_*`` do NOT belong here, and the shape invites re-proposing both.** θ is
+    **θ and ``reference_*`` do NOT belong here, and the shape invites re-proposing both.** θ is
     RESTAMPED when the ruler warms, so it stays on ``round:complete``, which every close re-reads;
     only the crown never moves, and only the crown belongs on a record that does not replay.
-    ``matched_parent_*`` is not merely unservable here but unwanted — nothing plots a floor on a
+    ``reference_*`` is not merely unservable here but unwanted — nothing plots a floor on a
     bar."""
 
     model_config = ConfigDict(frozen=True)
 
     record_type: Literal["election"] = "election"
     round: int
-    winner_label: str = ""
+    selected_labels: list[str] = Field(default_factory=list)
     fit: dict[str, LedgerFit] = Field(default_factory=dict)
     # In-memory-only carrier for the live ``RoundResult``, the ``PhaseRecord.live_round_result``
     # shape and rationale: the round's OWN readings (``overlap``, the verdict, the electable count,

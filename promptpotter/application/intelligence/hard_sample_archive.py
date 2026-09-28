@@ -84,6 +84,7 @@ def build_archive_observations(
     dataset_name: str | None,
     scorer: CellScorer,
     scorer_id: str,
+    sample_ids: frozenset[int] | None,
     origin_sp_hash: str | None = None,
 ) -> list[Observation]:
     """Measurement store → ``Observation`` triples. **The candidate is the SEARCHPOINT, not the run** — keying on
@@ -92,7 +93,10 @@ def build_archive_observations(
     **The archive stores MEASUREMENTS; the grade is the READING campaign's** — *scorer* is required
     for the same reason ``ab_replay`` rescores its origin rows. Pooling each row's stamped-at-write
     worth builds one scale out of several formulas, so arm B is measured against arm A's δ, and a
-    stored grade cannot answer a ``per_cell`` declared after the row was banked."""
+    stored grade cannot answer a ``per_cell`` declared after the row was banked.
+
+    *sample_ids* is the reading campaign's search pool: the archive is filed by dataset, so a row of
+    that campaign's bench set sits here too and must reach no ruler it selects on. ``None`` reads all."""
     obs: list[Observation] = []
     sigs = archive_queries.run_signatures(stores)
     entries = archive_queries.list_runs(stores, dataset_name=dataset_name)
@@ -110,6 +114,7 @@ def build_archive_observations(
             for sample_id, response in _run_cells(
                 stores, run_id, sigs.get(run_id), scorer=scorer, scorer_id=scorer_id
             )
+            if sample_ids is None or sample_id in sample_ids
         )
     return dedup_observations(obs)
 
@@ -129,6 +134,7 @@ def build_archive_hard_samples_artifact(
             dataset_name=dataset_name,
             scorer=scorer,
             scorer_id=scorer_id,
+            sample_ids=None,
         ),
         cycle_id=None,
         top_k_candidates=top_k_candidates,

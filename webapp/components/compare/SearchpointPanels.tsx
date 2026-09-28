@@ -1,6 +1,6 @@
 "use client";
 // What the selected searchpoints ARE, side by side. Configuration is SERVED resolved (`SubjectReading.config`);
-// ancestry walks `parent_id` on the one served tree (`webapp/CLAUDE.md`), never a second read.
+// ancestry walks `parent_ids[0]` on the one served tree (`webapp/CLAUDE.md`), never a second read.
 
 import { useMemo, useState } from "react";
 import type { Evidence, LineageNode, SubjectReading } from "@/lib/api";
@@ -321,7 +321,7 @@ function buildSpines(
     while (cursor && !seen.has(cursor.id)) {
       seen.add(cursor.id);
       chain.unshift(cursor);
-      cursor = cursor.parent_id ? nodes.get(cursor.parent_id) : undefined;
+      cursor = cursor.parent_ids[0] ? nodes.get(cursor.parent_ids[0]) : undefined;
     }
     // Keyed on the chain's ROOT, so the longer chain of a shared origin wins.
     const rootId = chain[0]?.id ?? s.candidate_id;

@@ -3,7 +3,7 @@ one mutator here, and the render functions read these fields verbatim."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -158,21 +158,21 @@ class RoundBuffer:
             if stamped is not None:
                 scores.update(stamped.model_dump(exclude_none=True))
 
-    def mark_winner(self, winner_label: str) -> None:
-        """Crown the elected candidate from the ``ElectionRecord`` — the crown's OWN record, at its
-        own coordinate. Every other slot is re-stamped ``False`` in the same pass, so a re-fire
-        cannot leave a stale crown beside the new one.
+    def mark_selected(self, selected_labels: Sequence[str]) -> None:
+        """Mark the selection from the ``ElectionRecord`` — its OWN record, at its own coordinate.
+        Every other slot is re-stamped ``False`` in the same pass, so a re-fire cannot leave a
+        stale mark beside the new one.
 
         Matched on ``label``, which is what that record carries and why: a resume re-mints
         candidate ids, so the id is not stable across one. Within a round the label is the canonical
-        ``C{round}.{n}`` and unique, so this is an identity match, not the prose one
-        ``is_round_winner`` warns off — ``changes_description`` is the prose, and it can repeat.
+        ``C{round}.{n}`` and unique — never ``changes_description``, which is prose and can repeat.
 
-        A HELD round crowns nobody, and the record says so by carrying an EMPTY label rather than
-        the retained parent's, which belongs to no slot of this round."""
+        A HELD round selects nobody, and the record says so by carrying NO label rather than the
+        retained parent's, which belongs to no slot of this round."""
+        chosen = set(selected_labels)
         for entry in self.candidates.values():
             label = str((entry.get("scores") or {}).get("label") or "")
-            entry["is_winner"] = bool(winner_label) and label == winner_label
+            entry["is_selected"] = label in chosen
 
     def update_p_best(
         self,

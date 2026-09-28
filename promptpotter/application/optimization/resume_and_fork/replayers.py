@@ -11,10 +11,10 @@ from promptpotter.application.intelligence.exploration import graded_response
 from promptpotter.application.optimization.resume_and_fork.decisions import (
     RESUME_CHECKPOINT_GATING,
     GatingMode,
-    ResumeCheckpointKind,
 )
 from promptpotter.application.scoring.selection import elect_round_winner, elimination_p_best
 from promptpotter.domain.results import EliminationGate, RoundResult
+from promptpotter.domain.run_records import PotterCheckpointKind
 from promptpotter.domain.scoring import is_answer_collapsed
 
 if TYPE_CHECKING:
@@ -65,14 +65,11 @@ Replayer = Callable[[ReplayContext, dict[str, Any], dict[str, Any]], Any]
 def _iter_mismatches(ctx: ReplayContext) -> Iterator[ReplayMismatch]:
     round_data = ctx.round_data
     for rec in ctx.decisions:
-        try:
-            kind = ResumeCheckpointKind(rec["kind"])
-        except ValueError:
-            # Not a known checkpoint kind — corrupt/foreign decision record; skip (no mismatch).
-            continue
+        # An ARCHIVAL kind, or a kind no replayer knows, is recorded and never replayed.
+        kind = str(rec["kind"])
         fn = REPLAYERS.get(kind)
         if fn is None:
-            continue  # valid kind, but ARCHIVAL gating — recorded, never replayed
+            continue
 
         try:
             current = fn(ctx, rec["inputs_ref"], rec["data"])
@@ -88,7 +85,7 @@ def _iter_mismatches(ctx: ReplayContext) -> Iterator[ReplayMismatch]:
             )
             yield ReplayMismatch(
                 round_num=round_data.round,
-                kind=f"replay_error:{kind.value}",
+                kind=f"replay_error:{kind}",
                 recorded_outcome=rec.get("outcome"),
                 current_outcome=f"{type(exc).__name__}: {exc}",
                 inputs_ref=dict(rec.get("inputs_ref") or {}),
@@ -240,10 +237,10 @@ def _replay_leader_lock_in(
 
 # ``RESUME_CHECKPOINT_GATING`` enumerates the kinds; the assertion below
 # fails import if any REPLAYED kind has no replayer here.
-REPLAYERS: dict[ResumeCheckpointKind, Replayer] = {
-    ResumeCheckpointKind.ROUND_WINNER: _replay_round_winner,
-    ResumeCheckpointKind.ELIMINATION_CUT: _replay_elimination_cut,
-    ResumeCheckpointKind.LEADER_LOCK_IN: _replay_leader_lock_in,
+REPLAYERS: dict[str, Replayer] = {
+    PotterCheckpointKind.ROUND_WINNER: _replay_round_winner,
+    PotterCheckpointKind.ELIMINATION_CUT: _replay_elimination_cut,
+    PotterCheckpointKind.LEADER_LOCK_IN: _replay_leader_lock_in,
 }
 
 # REPLAYERS must register a replayer for exactly the REPLAYED kinds — both

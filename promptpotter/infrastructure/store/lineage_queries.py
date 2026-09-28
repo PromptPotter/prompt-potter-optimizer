@@ -72,10 +72,11 @@ class LineageNode(StrictModel):
     id: str = Field(
         description="Course: the cycle_id. Candidate: the searchpoint id minted at L1/origin."
     )
-    parent_id: str | None = Field(
-        default=None,
-        description="The candidate this node descends from; null only at the true root. A "
-        "course carries the same edge its own C0 carries.",
+    parent_ids: list[str] = Field(
+        default_factory=list,
+        description="Every candidate this node derives from — one for a mutation, several for a "
+        "crossover; empty only at the true root. Lineage is a DAG; this tree hangs the node "
+        "under `parent_ids[0]`. A course carries the same edge its own C0 carries.",
     )
     label: str = Field(
         description="`C{round}.{n}` on the campaign's ONE timeline: this course's own "
@@ -119,7 +120,7 @@ class LineageNode(StrictModel):
     status: str = Field(
         default="",
         description="Candidate: minted | measured | invalid — never 'winner' (that rides "
-        "`is_winner`). `invalid` was rejected before it cost a sample, so it carries no "
+        "`is_selected`). `invalid` was rejected before it cost a sample, so it carries no "
         "accuracy: its stored 0.0 is synthetic and reads as getting every answer wrong. "
         "Course: `index.json::status`, the same StopReason value `/cycles` serves under this "
         "same name. Not `dashboard.json::state`, which names the fine-grained ACTIVITY "
@@ -127,13 +128,13 @@ class LineageNode(StrictModel):
     )
     election_held: bool = Field(
         default=False,
-        description="This candidate's ROUND has held its election. The complement `is_winner` "
+        description="This candidate's ROUND has held its election. The complement `is_selected` "
         "cannot supply: a round that HELD crowned nobody, so every bar in it reads "
-        "`is_winner: false` exactly as a round still scoring does — and only this says whether "
+        "`is_selected: false` exactly as a round still scoring does — and only this says whether "
         "an uncrowned bar lost or has not been judged yet. False on a course, which is not a "
         "round, and on a round halted before it stood (a holed panel).",
     )
-    is_winner: bool = Field(
+    is_selected: bool = Field(
         default=False,
         description="Elected this round. Stamped at the ELECTION, which is the last thing "
         "scoring does — so it lands a whole `l1_critique` call before the round closes, and a "
@@ -161,7 +162,7 @@ class LineageNode(StrictModel):
     )
     mean_fitness_ci_lo: float | None = None
     mean_fitness_ci_hi: float | None = None
-    matched_parent_lift: float | None = Field(
+    reference_lift: float | None = Field(
         default=None,
         description="The candidate's blocked lift over the floor it was JUDGED against — the "
         "origin restricted to the cells this candidate actually measured — with its 95% "
@@ -171,8 +172,8 @@ class LineageNode(StrictModel):
         "not separate this candidate from its parent. `None` below two shared cells, outside "
         "the election fit, and on any round that has not elected yet.",
     )
-    matched_parent_lift_ci_lo: float | None = None
-    matched_parent_lift_ci_hi: float | None = None
+    reference_lift_ci_lo: float | None = None
+    reference_lift_ci_hi: float | None = None
     scored_samples: int | None = None
     expected_samples: int | None = None
     cached_samples: int | None = Field(
@@ -379,13 +380,13 @@ class _RoundFacts(NamedTuple):
     quantities as one band."""
 
     election_held: bool = False
-    is_winner: bool = False
+    is_selected: bool = False
     theta: float | None = None
     theta_se: float | None = None
     theta_caveat: ThetaCaveat | None = None
-    matched_parent_lift: float | None = None
-    matched_parent_lift_ci_lo: float | None = None
-    matched_parent_lift_ci_hi: float | None = None
+    reference_lift: float | None = None
+    reference_lift_ci_lo: float | None = None
+    reference_lift_ci_hi: float | None = None
 
 
 def _round_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[str, _RoundFacts]:
@@ -405,11 +406,7 @@ def _round_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[s
         if election is None and close is None:
             continue
         # A HELD round adopted the parent, which is not among these — so nobody is crowned.
-        won = (
-            election is not None
-            and bool(election.winner_label)
-            and cand.label == election.winner_label
-        )
+        won = election is not None and cand.label in election.selected_labels
         fit = (election.fit.get(cand.label) if election is not None else None) or LedgerFit()
         # The close WINS where it answers: it re-reads θ on every close, which is the channel
         # round 0's warm-ruler restamp arrives on. Everywhere else the two agree — same
@@ -419,13 +416,13 @@ def _round_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[s
         )
         out[cand.candidate_id] = _RoundFacts(
             election_held=election is not None,
-            is_winner=won,
+            is_selected=won,
             theta=ability.theta,
             theta_se=ability.theta_se,
             theta_caveat=ability.theta_caveat,
-            matched_parent_lift=fit.matched_parent_lift,
-            matched_parent_lift_ci_lo=fit.matched_parent_lift_ci_lo,
-            matched_parent_lift_ci_hi=fit.matched_parent_lift_ci_hi,
+            reference_lift=fit.reference_lift,
+            reference_lift_ci_lo=fit.reference_lift_ci_lo,
+            reference_lift_ci_hi=fit.reference_lift_ci_hi,
         )
     return out
 
@@ -598,7 +595,7 @@ def _retired_by(
 def _is_replay(node: LineageNode) -> bool:
     """A ``C0`` that descends from a candidate IS that candidate re-run, so it merges into what it
     replays. Structural, not a convention: only a fork's origin has a parent, because it borrows."""
-    return node.label == "C0" and node.parent_id is not None
+    return node.label == "C0" and bool(node.parent_ids)
 
 
 def _empty_attempt(course: LineageNode, *, cut_from: str, round_: int) -> LineageNode:
@@ -607,7 +604,7 @@ def _empty_attempt(course: LineageNode, *, cut_from: str, round_: int) -> Lineag
     return course.model_copy(
         update={
             "kind": "candidate",
-            "parent_id": cut_from,
+            "parent_ids": [cut_from],
             "round": round_,
             "accuracy": None,
             "children": [],
@@ -644,7 +641,7 @@ def _contributions(
             cand.model_copy(
                 update={
                     # The replay is gone, so an attempt off it would dangle.
-                    "parent_id": cut_from if cand.parent_id in replay_ids else cand.parent_id,
+                    "parent_ids": [cut_from if p in replay_ids else p for p in cand.parent_ids],
                     # The ⑂ stamp — a fork is not a node, so its identity lives here.
                     "course_kind": course.course_kind,
                     "trigger": course.trigger,
@@ -734,7 +731,7 @@ def _candidate_node(
     return LineageNode(
         kind="candidate",
         id=cand.candidate_id,
-        parent_id=cand.parent_id,
+        parent_ids=list(cand.parent_ids),
         label=cand.label,
         # Equal here; they diverge only where the fold renumbers a contribution.
         course_label=cand.label,
@@ -749,15 +746,15 @@ def _candidate_node(
         # second one to prefer over it.
         mean_fitness_ci_lo=cand.mean_fitness_ci_lo,
         mean_fitness_ci_hi=cand.mean_fitness_ci_hi,
-        matched_parent_lift=close.matched_parent_lift,
-        matched_parent_lift_ci_lo=close.matched_parent_lift_ci_lo,
-        matched_parent_lift_ci_hi=close.matched_parent_lift_ci_hi,
+        reference_lift=close.reference_lift,
+        reference_lift_ci_lo=close.reference_lift_ci_lo,
+        reference_lift_ci_hi=close.reference_lift_ci_hi,
         scored_samples=cand.scored_samples,
         expected_samples=cand.expected_samples,
         cached_samples=cand.cached_samples,
         election_held=close.election_held,
         # A RETIRED candidate wears no crown — the branch re-asks that election.
-        is_winner=close.is_winner and retired_by is None,
+        is_selected=close.is_selected and retired_by is None,
         theta=close.theta,
         theta_se=close.theta_se,
         theta_caveat=close.theta_caveat,
@@ -859,7 +856,7 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Lin
     return LineageNode(
         kind="course",
         id=leaf.cycle_id,
-        parent_id=edge_id or (candidates[0].parent_id if candidates else None),
+        parent_ids=[edge_id] if edge_id else (list(candidates[0].parent_ids) if candidates else []),
         label=leaf.cycle_id,
         # Nothing folds a course onto another timeline, so its two labels are one fact.
         course_label=leaf.cycle_id,

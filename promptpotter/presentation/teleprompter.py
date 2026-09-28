@@ -162,10 +162,10 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
     ) -> Any:
         """Run one campaign over *trainset* and return *student* with the winning prompt applied.
 
-        ``valset`` is accepted for contract parity and deliberately unused: PromptPotter holds out
-        no set of its own — PoBB prunes on the training rows and the caller evaluates the returned
-        program however they already do. Taking it and ignoring it silently would be the wrong
-        shape, so it is named here instead."""
+        ``valset`` is accepted for contract parity and deliberately unused: the campaign this
+        writes declares no ``dataset_split``, so the whole trainset is the search pool, no bench
+        score is taken, and the caller evaluates the returned program on its own held-out rows.
+        Taking it and ignoring it silently would be the wrong shape, so it is named here instead."""
         rows = samples_from_dicts([{"query": _query_of(ex), "ground_truth": ""} for ex in trainset])
         program = DspyProgram(
             student=student,
@@ -197,7 +197,7 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
 
         if stop_reason_outcome(result.stop_reason) is not StopOutcome.SUCCESS:
             return student
-        # The winner comes off the ARTIFACT, never off `CycleResult.winner_prompt_fields`: that is
+        # The winner comes off the ARTIFACT, never off `CycleResult.result_prompt_fields`: that is
         # the wire-side projection and flattens few-shot examples into a rendered block a
         # `PromptTemplate` rejects outright — a crash that waits for the first winner carrying
         # demonstrations and lands after the whole campaign is paid for.

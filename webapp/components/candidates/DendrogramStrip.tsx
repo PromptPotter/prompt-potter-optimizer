@@ -41,7 +41,7 @@ export const DendrogramStrip = memo(function DendrogramStrip({
           round: v.round,
           label: v.label,
           candidate_id: v.candidate_id,
-          is_winner: v.is_winner,
+          is_selected: v.is_selected,
           is_fork: forkKeys.has(v.key),
         })),
       [views, forkKeys],

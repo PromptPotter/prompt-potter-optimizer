@@ -489,6 +489,161 @@
         "title": "BackendResponse",
         "type": "object"
       },
+      "BenchReading": {
+        "additionalProperties": false,
+        "description": "One individual scored on the whole bench set under the campaign's formula.",
+        "properties": {
+          "accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy"
+          },
+          "ci_hi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Hi"
+          },
+          "ci_lo": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Lo"
+          },
+          "composite_fitness": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Under the campaign's formula — the number the headline reads.",
+            "title": "Composite Fitness"
+          },
+          "n_scored": {
+            "title": "N Scored",
+            "type": "integer"
+          },
+          "round": {
+            "description": "The round whose selection this is; 0 is the origin.",
+            "title": "Round",
+            "type": "integer"
+          },
+          "run_id": {
+            "description": "The archive run its bench rows were filed under.",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "sp_hash": {
+            "description": "The searchpoint scored — the archive's `prompt_fields_id`.",
+            "title": "Sp Hash",
+            "type": "string"
+          },
+          "stopped": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the pass ended before its last bench row — a spend ceiling, a skip — or `None` when it scored every one.",
+            "title": "Stopped"
+          }
+        },
+        "required": [
+          "round",
+          "sp_hash",
+          "accuracy",
+          "composite_fitness",
+          "ci_lo",
+          "ci_hi",
+          "n_scored",
+          "run_id",
+          "stopped"
+        ],
+        "title": "BenchReading",
+        "type": "object"
+      },
+      "BenchScore": {
+        "additionalProperties": false,
+        "description": "The headline: the selection and the origin, scored on a bench set no optimizer node read.",
+        "properties": {
+          "bench_size": {
+            "title": "Bench Size",
+            "type": "integer"
+          },
+          "lift": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`selected` over `origin` on the bench rows both scored, paired per row; `None` below two shared rows, and 0.0 where the origin is the selection.",
+            "title": "Lift"
+          },
+          "lift_ci_hi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lift Ci Hi"
+          },
+          "lift_ci_lo": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lift Ci Lo"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/BenchReading"
+          },
+          "selected": {
+            "$ref": "#/components/schemas/BenchReading"
+          }
+        },
+        "required": [
+          "bench_size",
+          "origin",
+          "selected",
+          "lift",
+          "lift_ci_lo",
+          "lift_ci_hi"
+        ],
+        "title": "BenchScore",
+        "type": "object"
+      },
       "Body_ingest_dataset_api_v1_datasets_ingest_post": {
         "properties": {
           "file": {
@@ -1505,18 +1660,6 @@
             "title": "Scope",
             "type": "string"
           },
-          "split_test": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Declared held-out test fold size (not materialized). The training-bank size is `row_count` above.",
-            "title": "Split Test"
-          },
           "total_hits": {
             "title": "Total Hits",
             "type": "integer"
@@ -1844,6 +1987,17 @@
             "title": "Backend Id",
             "type": "string"
           },
+          "bench_score": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BenchScore"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The headline: the selected result and the origin scored on the held-out bench set under the campaign's formula. Null until the cycle ends, and on a campaign whose `dataset_split` holds nothing out."
+          },
           "best_accuracy": {
             "anyOf": [
               {
@@ -1853,6 +2007,7 @@
                 "type": "null"
               }
             ],
+            "description": "The optimizer's own selection score — what it KEPT, read on the rows that chose it. Never the headline; `bench_score` is.",
             "title": "Best Accuracy"
           },
           "campaign_id": {
@@ -3407,7 +3562,7 @@
           },
           "election_held": {
             "default": false,
-            "description": "This candidate's ROUND has held its election. The complement `is_winner` cannot supply: a round that HELD crowned nobody, so every bar in it reads `is_winner: false` exactly as a round still scoring does — and only this says whether an uncrowned bar lost or has not been judged yet. False on a course, which is not a round, and on a round halted before it stood (a holed panel).",
+            "description": "This candidate's ROUND has held its election. The complement `is_selected` cannot supply: a round that HELD crowned nobody, so every bar in it reads `is_selected: false` exactly as a round still scoring does — and only this says whether an uncrowned bar lost or has not been judged yet. False on a course, which is not a round, and on a round halted before it stood (a holed panel).",
             "title": "Election Held",
             "type": "boolean"
           },
@@ -3457,10 +3612,10 @@
             "title": "Id",
             "type": "string"
           },
-          "is_winner": {
+          "is_selected": {
             "default": false,
             "description": "Elected this round. Stamped at the ELECTION, which is the last thing scoring does — so it lands a whole `l1_critique` call before the round closes, and a round still running its optimizer calls already reports its winner. False where no election has been held (still scoring, or halted on a holed panel) and on a round that held: those two are told apart by the election record, not by this flag.",
-            "title": "Is Winner",
+            "title": "Is Selected",
             "type": "boolean"
           },
           "kind": {
@@ -3512,40 +3667,6 @@
             ],
             "title": "Lives Cap"
           },
-          "matched_parent_lift": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The candidate's blocked lift over the floor it was JUDGED against — the origin restricted to the cells this candidate actually measured — with its 95% interval. The election's own verdict, and the only comparable answer to 'by how much': under `per_round_resubset` a bare difference of two accuracies is the luckiest draw minus the fullest one. An interval spanning 0 means the round could not separate this candidate from its parent. `None` below two shared cells, outside the election fit, and on any round that has not elected yet.",
-            "title": "Matched Parent Lift"
-          },
-          "matched_parent_lift_ci_hi": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Matched Parent Lift Ci Hi"
-          },
-          "matched_parent_lift_ci_lo": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Matched Parent Lift Ci Lo"
-          },
           "mean_fitness_ci_hi": {
             "anyOf": [
               {
@@ -3580,17 +3701,13 @@
             "description": "This course's round-0 score. A course that has only run its origin has this and no `best_accuracy`, so reading only `best` blanks its bar.",
             "title": "Origin Accuracy"
           },
-          "parent_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The candidate this node descends from; null only at the true root. A course carries the same edge its own C0 carries.",
-            "title": "Parent Id"
+          "parent_ids": {
+            "description": "Every candidate this node derives from — one for a mutation, several for a crossover; empty only at the true root. Lineage is a DAG; this tree hangs the node under `parent_ids[0]`. A course carries the same edge its own C0 carries.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Parent Ids",
+            "type": "array"
           },
           "path": {
             "description": "THE address, root → leaf: the course this node belongs to. A candidate a fork contributed carries the FORK's path, so selecting it re-roots onto that fork.",
@@ -3599,6 +3716,40 @@
             },
             "title": "Path",
             "type": "array"
+          },
+          "reference_lift": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The candidate's blocked lift over the floor it was JUDGED against — the origin restricted to the cells this candidate actually measured — with its 95% interval. The election's own verdict, and the only comparable answer to 'by how much': under `per_round_resubset` a bare difference of two accuracies is the luckiest draw minus the fullest one. An interval spanning 0 means the round could not separate this candidate from its parent. `None` below two shared cells, outside the election fit, and on any round that has not elected yet.",
+            "title": "Reference Lift"
+          },
+          "reference_lift_ci_hi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Lift Ci Hi"
+          },
+          "reference_lift_ci_lo": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Lift Ci Lo"
           },
           "round": {
             "anyOf": [
@@ -3666,7 +3817,7 @@
           },
           "status": {
             "default": "",
-            "description": "Candidate: minted | measured | invalid — never 'winner' (that rides `is_winner`). `invalid` was rejected before it cost a sample, so it carries no accuracy: its stored 0.0 is synthetic and reads as getting every answer wrong. Course: `index.json::status`, the same StopReason value `/cycles` serves under this same name. Not `dashboard.json::state`, which names the fine-grained ACTIVITY phase — a different axis, and one word may not serve both.",
+            "description": "Candidate: minted | measured | invalid — never 'winner' (that rides `is_selected`). `invalid` was rejected before it cost a sample, so it carries no accuracy: its stored 0.0 is synthetic and reads as getting every answer wrong. Course: `index.json::status`, the same StopReason value `/cycles` serves under this same name. Not `dashboard.json::state`, which names the fine-grained ACTIVITY phase — a different axis, and one word may not serve both.",
             "title": "Status",
             "type": "string"
           },
@@ -4742,7 +4893,7 @@
       },
       "PairwiseComparison": {
         "additionalProperties": false,
-        "description": "One unordered pair, blocked on the cells BOTH subjects scored — pairing removes cell\ndifficulty instead of carrying it as noise, which is the same reason ``matched_parent_lift``\npairs rather than differencing two means.\n\n``a`` precedes ``b`` in the roster's oldest-first order, so ``median_shift = b - a`` has one\nreading across the whole table. The interval and both p-values are ``None`` below two shared\ncells: nothing was tested there, which a ``1.0`` would misreport as a test that found nothing.\n\nThe test is EXACT (``exact_paired_reading``), never Student-t: at the widths a panel runs, a t\np can sit below what any exact test on that many pairs is able to return, which is resolution\ntaken from the assumed tail rather than from the cells. ``EvidencePower.exact_p_floor`` says\nwhich verdicts the width can reach at all, before a cell is spent.",
+        "description": "One unordered pair, blocked on the cells BOTH subjects scored — pairing removes cell\ndifficulty instead of carrying it as noise, which is the same reason ``reference_lift``\npairs rather than differencing two means.\n\n``a`` precedes ``b`` in the roster's oldest-first order, so ``median_shift = b - a`` has one\nreading across the whole table. The interval and both p-values are ``None`` below two shared\ncells: nothing was tested there, which a ``1.0`` would misreport as a test that found nothing.\n\nThe test is EXACT (``exact_paired_reading``), never Student-t: at the widths a panel runs, a t\np can sit below what any exact test on that many pairs is able to return, which is resolution\ntaken from the assumed tail rather than from the cells. ``EvidencePower.exact_p_floor`` says\nwhich verdicts the width can reach at all, before a cell is spent.",
         "properties": {
           "ci_hi": {
             "anyOf": [

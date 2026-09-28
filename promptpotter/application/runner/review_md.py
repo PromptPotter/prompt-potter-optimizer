@@ -6,6 +6,7 @@ that silently shadowed the first, so the file's one externally-called function w
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from promptpotter.application.optimization.l1.stats import L1Stats, compute_l1_stats
@@ -23,6 +24,7 @@ from promptpotter.application.views.render.optimizer_prompt_text import (
     fmt_pct,
     format_l1_critique_for_prompt,
 )
+from promptpotter.domain.bench import BenchReading, BenchScore
 from promptpotter.domain.escalation_signals import exploration_budget
 from promptpotter.domain.phases import STOP_REASON_INFO, StopReason
 from promptpotter.domain.results import (
@@ -32,7 +34,6 @@ from promptpotter.domain.results import (
     RoundResult,
     ScoredCandidate,
     candidate_label,
-    is_round_winner,
     overlap_series,
     round_clocks,
 )
@@ -75,6 +76,7 @@ def render_review_md(
     halt = _halt_info(index, rounds)
     parts: list[str] = []
     parts += _render_header(index, final, stats, halt)
+    parts += _render_bench(final)
     # Counted here and not read off `final`: this renders at every round close, long before
     # finalize banks a `final` block. Only the minutes need the banked clock.
     clocks = round_clocks(rounds, accuracy_ceiling=accuracy_ceiling)
@@ -154,14 +156,13 @@ def _compute_behavior_per_round(
             l1_out.append([])
             l2_out.append([])
             continue
-        opt_sp = round_data.opt_sp
         ctx = ValidatorContext(
             round_num=round_num,
             prior_rounds=list(prior_audits),
-            opt_sp=opt_sp.model_dump() if opt_sp else {},
+            l1_layout=round_data.optimizer_state.payload.memory.l1_layout,
             context_object=context_object,
             exploration_budget=budget,
-            peaked_axes=frozenset(round_data.axis_memory_peaked),
+            peaked_axes=frozenset(round_data.optimizer_state.payload.axis_memory_peaked),
         )
         l1_out.append(run_all_checks(audit, ctx))
         l2_out.append(run_all_l2_checks(audit, ctx))
@@ -176,7 +177,7 @@ def _halt_info(index: dict[str, Any], rounds: list[RoundResult]) -> dict[str, st
     """The cycle's terminal health story, or ``None`` when it ended cleanly. Gated on the cycle's
     TERMINAL state, never on a critical round in history that L2 then self-healed away."""
     stop_reason = (index.get("stop_reason") or "").strip()
-    terminated = "yes" if stop_reason == StopReason.ABORT else ""
+    terminated = "yes" if stop_reason == StopReason.OPTIMIZER_ABORT else ""
     last_health: DegradationHealth | None = None
     last_critical: DegradationHealth | None = None
     for r in rounds:
@@ -244,6 +245,58 @@ def _render_header(
                 parts.append(f"- `{name}`: `{short}`")
         parts.append("")
     return parts
+
+
+def _bench_line(name: str, reading: BenchReading, bench_size: int) -> str:
+    band = (
+        ""
+        if reading.ci_lo is None or reading.ci_hi is None
+        else f" (95% {reading.ci_lo:.3f} to {reading.ci_hi:.3f})"
+    )
+    value = "—" if reading.composite_fitness is None else f"{reading.composite_fitness:.3f}"
+    stopped = f", stopped: {reading.stopped}" if reading.stopped else ""
+    return (
+        f"- {name} (round {reading.round}): **{value}**{band} · accuracy "
+        f"{fmt_pct(reading.accuracy)} · {reading.n_scored}/{bench_size} rows{stopped}"
+    )
+
+
+def _render_bench(final: dict[str, Any]) -> list[str]:
+    """The headline, above everything the optimizer measured on the rows that chose its winner.
+    Silent while the cycle runs; once it ends, an absent score is said rather than left blank."""
+    if not final:
+        return []
+    if final.get("bench") is None:
+        return [
+            "## Bench score — the headline",
+            "",
+            "None: the campaign's `dataset_split` holds nothing out, or the cycle stopped before "
+            "its selection could be graded.",
+            "",
+        ]
+    bench = BenchScore.model_validate(final["bench"])
+    lift = (
+        "—"
+        if bench.lift is None
+        else f"{bench.lift:+.3f}"
+        + (
+            ""
+            if bench.lift_ci_lo is None or bench.lift_ci_hi is None
+            else f" (95% {bench.lift_ci_lo:+.3f} to {bench.lift_ci_hi:+.3f})"
+        )
+    )
+    return [
+        "## Bench score — the headline",
+        "",
+        f"On {bench.bench_size} held-out rows no optimizer node read, under the campaign's "
+        "formula. Every number below this section is the optimizer's own, read on the rows that "
+        "chose its winner.",
+        "",
+        _bench_line("selected", bench.selected, bench.bench_size),
+        _bench_line("origin", bench.origin, bench.bench_size),
+        f"- lift, paired per row: **{lift}**",
+        "",
+    ]
 
 
 def _render_stats_block(
@@ -425,21 +478,15 @@ def _render_round(
             parts.append(f"- verdict: {round_data.verdict_reason}")
     if schema_repair_retries:
         parts.append(f"- schema_repair_retries: {schema_repair_retries}")
-    parts += _render_l1_inputs(opt_sp, lineage)
+    parts += _render_l1_inputs(lineage)
     parts += _render_check_checklist(checks)
     parts += _render_variants_table(audit, round_data, scored=not is_peek)
     parts += _render_critique(round_data)
     return parts
 
 
-def _render_l1_inputs(opt_sp: dict[str, Any], lineage: dict[str, Any]) -> list[str]:
+def _render_l1_inputs(lineage: dict[str, Any]) -> list[str]:
     parts: list[str] = ["", "**L1 inputs**", ""]
-    tc = (opt_sp.get("memory") or {}).get("task_context") or {}
-    if isinstance(tc, dict) and tc:
-        keys = ", ".join(sorted(k for k, v in tc.items() if v))
-        parts.append(f"- task_context fields: {keys or '_(empty)_'}")
-    else:
-        parts.append("- task_context: _(empty)_")
     src = (lineage.get("source") or "").strip()
     if src:
         parts.append(f"- lineage source: `{src}`")
@@ -483,7 +530,7 @@ def _render_variants_table(
             changes = (v.get("changes_description") or "").replace("|", "\\|").strip()[:80]
             evidence = _fmt_evidence_cell(v.get("evidence_grounding"))
             label = candidate_label(round_data.round, i)
-            cells = _score_cells(by_label.get(label), round_data.winner_id)
+            cells = _score_cells(by_label.get(label), round_data.selected_labels)
             parts.append(f"| `{label}` | {cells} | {evidence} | {changes} |")
     else:
         parts.append("| cand_id | changes | derived_axes | evidence |")
@@ -497,24 +544,24 @@ def _render_variants_table(
     return parts
 
 
-def _score_cells(c: ScoredCandidate | None, winner_id: str) -> str:
+def _score_cells(c: ScoredCandidate | None, selected_labels: Sequence[str]) -> str:
     """``—`` only where there genuinely is no number — a variant the round never scored, one
     outside the election fit, or one sharing under two cells with its parent, where ``None`` is
     deliberate: a 0.0 there reads as a measurement.
 
-    The ``won`` column is the ELECTED id, and the margin beside it is the θ-lift with its
+    The ``won`` column is the round's SELECTION, and the margin beside it is the θ-lift with its
     interval. Both replace a composite Δ and a ``✓`` derived from it — which is not the election
     rule and carried no interval, so the glyph read as a verdict the round had not made."""
     if c is None:
         return "— | — | — | — | —"
     theta = "—" if c.theta is None else f"{c.theta:+.3f}"
-    lo, hi = c.matched_parent_lift_ci_lo, c.matched_parent_lift_ci_hi
+    lo, hi = c.reference_lift_ci_lo, c.reference_lift_ci_hi
     lift = (
-        f"{c.matched_parent_lift:+.3f} [{lo:+.3f}, {hi:+.3f}]"
-        if c.matched_parent_lift is not None and lo is not None and hi is not None
+        f"{c.reference_lift:+.3f} [{lo:+.3f}, {hi:+.3f}]"
+        if c.reference_lift is not None and lo is not None and hi is not None
         else "—"
     )
-    won = "✓" if is_round_winner(c.candidate_id, winner_id) else "·"
+    won = "✓" if c.label in selected_labels else "·"
     return f"`{c.composite_fitness:.4f}` | {fmt_pct(c.accuracy)} | {theta} | {lift} | {won}"
 
 
@@ -531,7 +578,7 @@ def _fmt_evidence_cell(raw: object) -> str:
 
 
 def _render_critique(round_data: RoundResult) -> list[str]:
-    critique = format_l1_critique_for_prompt(round_data.critique).strip()
+    critique = format_l1_critique_for_prompt(round_data.optimizer_state.payload.critique).strip()
     if not critique:
         return []
     quoted = critique.replace("\n", "\n> ")

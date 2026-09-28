@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.datasets.loaders import build_dataset_run_data
-from promptpotter.application.optimization.pobb.classification import is_deprecated
+from promptpotter.application.scoring.classification import is_deprecated
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.query_loop import QueryLoopState, Walk, run_walks
@@ -33,7 +33,6 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
     from promptpotter.application.scoring.query_loop import QueryLoopResult
-    from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
@@ -268,14 +267,12 @@ async def score_search_point(
     label: str,
     on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None,
     on_sample_starting: Callable[[str, int, int, int, int, int | None], None] | None,
-    source: str = "",
     axes: AxisIndex | None = None,
-    opt_sp: OptSearchPoint | None,
     measured: MeasuredCandidate | None,
     force_fresh: bool = False,
 ) -> ScoredWalk:
-    """One search point scored on ``dataset``, alone in its phase. ``opt_sp``, ``measured`` and the
-    two per-sample callbacks are required keywords with NO default — each decides what the numbers
+    """One search point scored on ``dataset``, alone in its phase. ``measured`` and the two
+    per-sample callbacks are required keywords with NO default — each decides what the numbers
     MEAN, and the signature is the only enforcement."""
     walk = open_walk(
         search_point,
@@ -284,9 +281,7 @@ async def score_search_point(
         label=label,
         on_sample_scored=on_sample_scored,
         on_sample_starting=on_sample_starting,
-        source=source,
         axes=axes,
-        opt_sp=opt_sp,
         measured=measured,
         force_fresh=force_fresh,
     )
@@ -302,30 +297,29 @@ def open_walk(
     label: str,
     on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None,
     on_sample_starting: Callable[[str, int, int, int, int, int | None], None] | None,
-    source: str = "",
     checks: Sequence[StopRule] = (),
     axes: AxisIndex | None = None,
-    l1_diversity: float = 1.0,
-    opt_sp: OptSearchPoint | None,
     measured: MeasuredCandidate | None,
     force_fresh: bool = False,
 ) -> Walk:
     """A walk ready to be driven by :func:`run_walks` and closed by :func:`close_walk`. Writes
     nothing: the run's log opens at its first row, so a walk that is never taken leaves no trace."""
-    assert session.scoring.scorer is not None, "session.scoring.scorer required for scoring"
+    source = session.source
+    assert session.scoring.scorer is not None and source is not None, (
+        "populate_session_scoring arms the scorer and the run source before any scoring"
+    )
     store = session.store
     backend_id = session.backend_id
     pipeline_schema = session.pipeline_schema
-    source = source or session.source
 
     content_hash = search_point.content_hash(dataset)
-    safe_label = label.lower().replace(" ", "_")
-    # The FULL hash, not a second cut of it. `label` is a round-local position (`c1.1`, `origin`)
-    # that every campaign re-mints, so the hash is the only thing telling two runs apart — and at
-    # 8 hex it was 32 bits carrying that alone. A collision does not raise: `append_run` folds
-    # last-wins per `m:{sample_id}`, so both searchpoints' measurements merge into one run file and
-    # the archive reports a configuration that did not produce them.
-    run_id = f"{safe_label}_{content_hash}"
+    run_label = str(label)
+    # The FULL hash, not a second cut of it. `label` names WHY the pass ran (`panel`, `origin`),
+    # which every campaign repeats, so the hash is the only thing telling two runs apart. A
+    # collision does not raise: `append_run` folds last-wins per `m:{sample_id}`, so both
+    # searchpoints' measurements merge into one run file and the archive reports a configuration
+    # that did not produce them.
+    run_id = f"{run_label}_{content_hash}"
 
     cached_sample_results, deprecated_samples, dataset_sample_ids = _resolve_prior_cache(
         search_point,
@@ -354,12 +348,7 @@ def open_walk(
         `running_scores`, so the number a live surface shows converging is the one the round banks
         — never a second fold. `build_score_report` READS the band from here rather than
         re-deriving it: one estimator, so the whisker converges with the bar it brackets."""
-        scores = compute_composite_fitness(
-            rows,
-            pipeline_schema,
-            opt_sp=opt_sp,
-            l1_diversity=l1_diversity,
-        )
+        scores = compute_composite_fitness(rows, pipeline_schema)
         ci_lo, ci_hi = mean_fitness_ci(rows)
         return {**scores, "mean_fitness_ci_lo": ci_lo, "mean_fitness_ci_hi": ci_hi}
 
@@ -383,7 +372,7 @@ def open_walk(
         merged = merge_with_unprocessed_priors(results, prior_tail)
         run_data = build_dataset_run_data(
             run_id,
-            safe_label,
+            run_label,
             content_hash,
             search_point,
             scores,

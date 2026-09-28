@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 from collections.abc import Mapping
 from functools import partial
-from importlib.metadata import entry_points
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.scoring.evaluators import Evaluator, validate_campaign_evaluator
@@ -13,6 +13,7 @@ from promptpotter.judges.grounding import ANSWER_GROUNDING, EVIDENCE_RETRIEVAL
 from promptpotter.judges.protocol import Judge, JudgeSpec
 from promptpotter.judges.simpleqa import SEALQA, SIMPLEQA
 from promptpotter.shared.errors import CellSendRefusedError
+from promptpotter.shared.plugin_registry import load_registry, lookup
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +25,10 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ENTRY_POINT_GROUP",
-    "JUDGES",
-    "JUDGE_ORIGINS",
     "build_evaluators",
     "get",
+    "judge_origins",
+    "registered",
 ]
 # The protocol TYPES are deliberately absent: import them from `promptpotter.judges.protocol`,
 # the same rule `infrastructure/store/__init__.py` holds. Re-exporting them here would give every
@@ -37,20 +38,13 @@ ENTRY_POINT_GROUP = "promptpotter.judges"
 """Published: a third party ships a judge by declaring this group and touches nothing here.
 Renaming it un-registers every plugin at once."""
 
-_BUILTIN: dict[str, Judge] = {
-    "simpleqa": SIMPLEQA,
-    "sealqa": SEALQA,
-    "evidence_retrieval": EVIDENCE_RETRIEVAL,
-    "answer_grounding": ANSWER_GROUNDING,
-}
+_BUILTIN: tuple[Judge, ...] = (SIMPLEQA, SEALQA, EVIDENCE_RETRIEVAL, ANSWER_GROUNDING)
 
 
-def _validate(key: str, j: Any, origin: str) -> Judge:
-    where = f"judge {key!r} ({origin})"
+def _validate(j: object, origin: str) -> Judge:
     if not isinstance(j, Judge):
-        raise TypeError(f"{where}: expected a Judge, got {type(j).__name__}.")
-    if j.name != key:
-        raise ValueError(f"{where}: registered under {key!r} but names itself {j.name!r}.")
+        raise TypeError(f"[{origin}] resolved to {type(j).__name__}, not a Judge.")
+    where = f"judge {j.name!r} [{origin}]"
     if not j.version:
         raise ValueError(
             f"{where}: declares no version. Identity folds the rubric hash too, but a judge whose "
@@ -77,48 +71,23 @@ def _validate(key: str, j: Any, origin: str) -> Judge:
     return j
 
 
-def _load() -> tuple[dict[str, Judge], dict[str, str]]:
-    judges: dict[str, Judge] = {}
-    origins: dict[str, str] = {}
-    for key, j in _BUILTIN.items():
-        judges[key] = _validate(key, j, "built-in")
-        origins[key] = "built-in"
-
-    for ep in entry_points(group=ENTRY_POINT_GROUP):
-        dist = getattr(getattr(ep, "dist", None), "name", "?")
-        origin = f"{dist}: {ep.value}"
-        try:
-            loaded = ep.load()
-        except Exception as exc:
-            # Fatal, never skipped: skipping trades a loud error naming the package for
-            # `judge 'x' not registered` at mint time, with nothing pointing at the cause.
-            raise RuntimeError(
-                f"judge entry point {ep.name!r} ({origin}) failed to import: {exc}"
-            ) from exc
-        if ep.name in _BUILTIN:
-            raise RuntimeError(
-                f"judge entry point {ep.name!r} ({origin}) shadows a built-in. Which object "
-                f"answers a built-in key is not a third party's call."
-            )
-        if ep.name in judges:
-            raise RuntimeError(
-                f"judge {ep.name!r} declared twice ({origins[ep.name]} and {origin})."
-            )
-        judges[ep.name] = _validate(ep.name, loaded, origin)
-        origins[ep.name] = origin
-    return judges, origins
+@functools.cache
+def _load() -> tuple[Mapping[str, Judge], Mapping[str, str]]:
+    return load_registry(ENTRY_POINT_GROUP, ((__name__, j) for j in _BUILTIN), _validate)
 
 
-JUDGES, JUDGE_ORIGINS = _load()
-"""``JUDGE_ORIGINS`` is the audit surface — a plugin's name is not greppable in this tree, so the
-distribution behind every registered key is recorded, ours included."""
+def registered() -> Mapping[str, Judge]:
+    return _load()[0]
+
+
+def judge_origins() -> Mapping[str, str]:
+    """The audit surface — a plugin's name is not greppable in this tree, so the distribution
+    behind every registered key is recorded, ours included."""
+    return _load()[1]
 
 
 def get(name: str) -> Judge:
-    if name not in JUDGES:
-        known = ", ".join(f"{k} ({JUDGE_ORIGINS[k]})" for k in sorted(JUDGES))
-        raise KeyError(f"judge {name!r} not registered. Known: {known or '(none)'}")
-    return JUDGES[name]
+    return lookup(ENTRY_POINT_GROUP, _load(), name)
 
 
 async def _compute(

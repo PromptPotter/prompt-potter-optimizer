@@ -82,7 +82,7 @@ def make_scoring_verdict(criterion: RoundScorer | str | None) -> Verdict:
         # Round 0 holds no election, so there is nothing it could have decided differently.
         if rnd.round == 0:
             return VerdictOutcome(diverged=False)
-        recorded_winner = next((c.candidate_id for c in rnd.candidates if c.is_winner), None)
+        recorded_winner = next((c.candidate_id for c in rnd.candidates if c.is_selected), None)
         election = masked_election(rnd, criterion, rnd.parent_evaluators, rnd.parent_accuracy)
         if not election.decidable:
             return VerdictOutcome(diverged=False)

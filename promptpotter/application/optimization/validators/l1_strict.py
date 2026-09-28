@@ -9,13 +9,13 @@ consulting the schema at all are `l1_invariants.py`."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from promptpotter.application.optimization.dispatch.llm_call import prompts as _opt_prompts
 from promptpotter.application.pipeline_resolve import missing_template_vars
 from promptpotter.config.prompt_blocks import prompt_blocks
-from promptpotter.domain.escalation_signals import ValidationFailure
+from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
 from promptpotter.domain.l1_layout import NODE_LAYOUTS
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, OptSearchPoint, PromptTemplate
 from promptpotter.domain.pipeline_overlay import node_config_items
@@ -261,21 +261,19 @@ L1_PROMPT_FIELDS_OPEN: LLMOutputValidator = LLMOutputValidator(
 def _check_l1_config_in_runtime_failures(
     source_output: Mapping[str, Any],
     *,
-    opt_sp: OptSearchPoint | None = None,
+    runtime_failures: Sequence[RuntimeFailure],
     pipeline_params: Mapping[str, Any] | None = None,
     **_: Any,
 ) -> ValidatorOutcome | None:
-    """Sibling-fork inheritance populates ``runtime_failures`` from prior cycles' terminal wounds,
-    so this fires even on round 1 of a fresh fork.
+    """Reads the CYCLE's runtime wounds, which sibling-fork inheritance populates from prior
+    cycles' terminal wounds, so this fires even on round 1 of a fresh fork.
 
     A wound convicts a ``(responder, param, value)``, never a value on its own — keyed on the value
     alone it strikes legal cells out of the search, since one endpoint's 400 says nothing about the
     next model's. ``WHO_ANSWERS_KEYS`` is the responder identity the wound PANEL already filters on
     (``injections/wounds.py``), so enforcement and prose convict the same thing."""
-    if not source_output or opt_sp is None:
-        return None
-    failures_list = list(opt_sp.memory.wounds.runtime_failures)
-    if not failures_list:
+    failures_list = list(runtime_failures)
+    if not source_output or not failures_list:
         return None
     merged = pipeline_params or {}
     out_failures: list[ValidationFailure] = []

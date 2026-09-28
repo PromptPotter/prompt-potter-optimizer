@@ -25,7 +25,7 @@ ComparabilityReason = Literal["one_ruler", "rulers_differ", "ruler_unstamped", "
 
 class PairwiseComparison(StrictModel):
     """One unordered pair, blocked on the cells BOTH subjects scored — pairing removes cell
-    difficulty instead of carrying it as noise, which is the same reason ``matched_parent_lift``
+    difficulty instead of carrying it as noise, which is the same reason ``reference_lift``
     pairs rather than differencing two means.
 
     ``a`` precedes ``b`` in the roster's oldest-first order, so ``median_shift = b - a`` has one

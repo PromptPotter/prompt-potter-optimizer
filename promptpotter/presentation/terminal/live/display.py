@@ -280,7 +280,7 @@ class LiveDisplay(Projection):
         rr = record.live_round_result
         if rr is None or not (reason := rr.verdict_reason):
             return
-        crown = record.winner_label or "nobody"
+        crown = ", ".join(record.selected_labels) or "nobody"
         self._write(f"  {GREEN}✓ elected {crown}{RESET} {DIM}— {reason}{RESET}")
         if series := overlap_series(rr.overlap):
             self._write(f"  {DIM}overlap ({series}){RESET}")
@@ -357,18 +357,16 @@ class LiveDisplay(Projection):
         # under no round marker.
         if event.phase == CampaignPhase.ORIGIN and event.event == "enter":
             self._write("\n" + _round_rule("ROUND 0 — ORIGIN", "C0 · campaign root"))
-        if event.phase == CampaignPhase.L1_SCORE and event.event == "enter":
+        if event.phase == CampaignPhase.MEASURE and event.event == "enter":
             self._write("\n" + _node_top("SCORE"))
         if view is not None and (rendered := to_text(view)):
             self._write(rendered)
         apply_phase(self._core, event, view)
-        if event.phase == CampaignPhase.L1_GENERATE and event.event == "enter":
+        if event.phase == CampaignPhase.PROPOSE and event.event == "enter":
             self._round_best_key = None
             self._round_best_acc = None
             self._round_best_label = None
             self._round_started_at = time.monotonic()
-        if event.phase == CampaignPhase.ESCALATION and event.event == "exit":
-            self.sample_counter = 0
         # Resume-rewind rebuild needs the live ``env``/``state`` objects, which exist only on
         # the direct in-memory callback path — ``PhaseRecord.data`` is ``exclude=True`` and
         # reaches no disk. On the ledger path ``env`` is absent and the display rebuilds from
@@ -526,7 +524,7 @@ class LiveDisplay(Projection):
                 self._fmt_round_leader(
                     label,
                     float(acc),
-                    scores.get("matched_parent_lift"),
+                    scores.get("reference_lift"),
                     float(comp) if isinstance(comp, int | float) else None,
                 )
             )
@@ -540,7 +538,7 @@ class LiveDisplay(Projection):
         carries a θ and nobody is crowned, so the key degrades to the composite it always was.
         The θ-ordered scoreboard prints at round close, once the election has fit one.
 
-        The Δ is the SERVED ``matched_parent_lift``, absent until round close stamps it: recomputed
+        The Δ is the SERVED ``reference_lift``, absent until round close stamps it: recomputed
         here it crowns whichever arm was cut earliest."""
         key = scoreboard_rank_key(composite, acc)
         new_round_max = self._round_best_key is None or key > self._round_best_key
@@ -598,7 +596,7 @@ class LiveDisplay(Projection):
                 round_result.composite_fitness,
                 dict(round_result.evaluators),
                 formula_short or formula_full,
-                parent=round_result.matched_parent_composite,
+                parent=next((s.reference_composite for s in round_result.selected_scores), None),
                 use_short_names=bool(formula_short),
             ):
                 self._write(_node_line(line))

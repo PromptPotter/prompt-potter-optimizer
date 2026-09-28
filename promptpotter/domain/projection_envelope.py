@@ -128,7 +128,9 @@ NON_ACTIVITY_KINDS: frozenset[ProjectionKind] = frozenset(
 RAY_PAYLOAD_FIELDS: dict[ProjectionKind, frozenset[str]] = {
     # The attempt as it was proposed. `changes_description` is the prose the round document
     # and the tree both carry, and it is the largest thing on this record.
-    "candidate_minted": frozenset({"round", "idx", "candidate_id", "parent_id", "label", "source"}),
+    "candidate_minted": frozenset(
+        {"round", "idx", "candidate_id", "parent_ids", "label", "source"}
+    ),
     # WHO fired WHAT. `payload` is the command's arguments (a steer carries whole prompt
     # fields) and `idempotency_key` is transport.
     "command": frozenset({"command_id", "kind", "issued_by_user_id"}),

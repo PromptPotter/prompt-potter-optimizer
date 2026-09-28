@@ -1,5 +1,5 @@
-// Which searchpoints stand ON a changed one, so a drawing withdraws their numbers. Walks served
-// `parent_id` across forks: a change where a branch left invalidates the branch too.
+// Which searchpoints stand ON a changed one, so a drawing withdraws their numbers. Walks every
+// served `parent_ids` edge across forks: a change where a branch left invalidates the branch too.
 
 import type { LineageNode } from "@/lib/api";
 
@@ -14,8 +14,10 @@ export function descendantsOf(
   // would stop at every fork.
   const kids = new Map<string, string[]>();
   const visit = (node: LineageNode): void => {
-    if (node.kind === "candidate" && node.parent_id) {
-      kids.set(node.parent_id, [...(kids.get(node.parent_id) ?? []), node.id]);
+    if (node.kind === "candidate") {
+      for (const parent of node.parent_ids) {
+        kids.set(parent, [...(kids.get(parent) ?? []), node.id]);
+      }
     }
     for (const child of node.children) visit(child);
   };

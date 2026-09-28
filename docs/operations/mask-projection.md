@@ -57,7 +57,7 @@ is what `ab` does and what a polled tree read cannot. Ask the lens which rounds 
 replaying; ask `ab` whether the run would have moved.
 
 `?samples=<id,id,…>` composes with a `score:` lens: re-score over just those samples, on **both
-sides** — the arms off their own rows, the parent off the round's `parent_results` — or the bar
+sides** — the arms off their own rows, the parent off the round's `reference_results` — or the bar
 stays at its full-set value while every challenger moves, and a round flips on nothing but that.
 A round that banked no parent panel is undecidable on a subset, never judged against a carried
 one. No lens and no samples is the raw read.

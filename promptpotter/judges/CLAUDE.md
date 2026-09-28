@@ -200,11 +200,12 @@ field docs, not here.
 
 ## Registering one
 
-**A connector's rules, deliberately** — the `promptpotter.judges` entry-point group, one
-`_validate` over both, no plugin shadowing a built-in, a broken plugin fatal, `JUDGE_ORIGINS` as
-the audit surface. A built-in is a `_BUILTIN` row rather than a walked module because one module
-declares several judges; the table builds at import, the exception
-[`../application/CLAUDE.md`](../application/CLAUDE.md) § Subpackages owns. The reasoning, and the
+**A connector's rules, deliberately, through the one loader** (`shared/plugin_registry.py`) — the
+`promptpotter.judges` entry-point group, one `_validate` over both, the judge's own `name` as its
+key, no plugin shadowing a built-in, a broken plugin fatal, `judge_origins()` as the audit surface.
+A built-in is a `_BUILTIN` row rather than a walked module because one module declares several
+judges; the table completes where the connector table does
+([`../application/CLAUDE.md`](../application/CLAUDE.md) § Subpackages). The reasoning, and the
 trusted-code boundary, are owned by [`../connectors/CLAUDE.md`](../connectors/CLAUDE.md) §§
 Registering a connector · A connector is trusted code.
 

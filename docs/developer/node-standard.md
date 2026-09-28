@@ -159,7 +159,7 @@ backend pipeline, which declares none of the four types, passes both untouched.
 
 ## How the prediction is read
 
-The per-sample `predicted` value is the **head of the terminal ranker's output** — not a fixed key. `terminal_ranking(result, schema)` (`promptpotter/application/optimization/pobb/classification.py`) walks the schema **in reverse** for the last node with `node_role ∈ {ranker, candidate_source}` that wrote its `pipeline_key`, and `sample_measurement.py` takes the head of that list (shape-agnostic via `extract_item_label`). So:
+The per-sample `predicted` value is the **head of the terminal ranker's output** — not a fixed key. `terminal_ranking(result, schema)` (`promptpotter/application/scoring/classification.py`) walks the schema **in reverse** for the last node with `node_role ∈ {ranker, candidate_source}` that wrote its `pipeline_key`, and `sample_measurement.py` takes the head of that list (shape-agnostic via `extract_item_label`). So:
 
 - a pipeline ending at `token_matching` (a `candidate_source`) yields its `candidate_ranking`;
 - a pipeline ending at `llm_ranking` / `llm_only` (a `ranker`) yields its `final_ranking`.

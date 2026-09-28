@@ -120,7 +120,7 @@ def mean_ci_t(values: list[float], alpha: float = 0.05) -> tuple[float, float, f
 
     Not a second spelling of ``mean_ci``, which stays z because it is pinned to the persisted ``noise_floor_ci_*`` fields. This
     is for a READ that brackets a handful of cells, where the two quantiles are not interchangeable: at 6 cells t is 2.571
-    against z's 1.96, so the normal understates the interval by a third. It is the bracket ``matched_parent_lift`` and the
+    against z's 1.96, so the normal understates the interval by a third. It is the bracket ``reference_lift`` and the
     edit ranking already use, so a campaign interval and a paired difference beside it cannot disagree about zero.
 
     ``None`` below two values: one reading has no spread, and a bracket drawn from it is a fiction."""

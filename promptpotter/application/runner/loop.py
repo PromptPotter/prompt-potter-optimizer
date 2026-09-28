@@ -21,7 +21,6 @@ from promptpotter.application.runner.generation_only import run_generation_only_
 from promptpotter.application.runner.inner.ruler import refresh_inner_rulers
 from promptpotter.application.runner.origin_gate import run_origin_gate
 from promptpotter.application.runner.round import (
-    close_round,
     emit_origin_round,
     escalate_or_stop,
     persist_round,
@@ -34,10 +33,8 @@ from promptpotter.application.runner.termination import (
     run_stop_reason,
 )
 from promptpotter.domain.phases import (
-    CampaignPhase,
     RunPhase,
     StopReason,
-    emit_phase,
 )
 from promptpotter.domain.run_records import ErrorRecord, PhaseRecord
 from promptpotter.domain.sample import Sample
@@ -131,8 +128,6 @@ async def run_round_loop(
                 declare_run_phase(session, RunPhase.PAUSED)
                 return StopReason.PAUSED, None
 
-            # Full bank — execute_round's adaptive queue mechanism narrows it to sp_budget_round per round.
-            round_scoring_data = session.scoring.scoring_set
             round_checks = session.scoring.degradation_checks
 
             logger.debug(
@@ -168,7 +163,7 @@ async def run_round_loop(
             round_result = await execute_round(
                 cycle,
                 round_num,
-                round_scoring_data,
+                dataset,
                 cb,
                 degradation_checks=round_checks,
                 is_final_round=is_final_round,
@@ -184,28 +179,6 @@ async def run_round_loop(
 
             if cycle.axes and len(cycle.rounds) >= 2:
                 cycle.axes.record_flips_from_rounds(cycle.rounds, round_num)
-
-            if round_result.escalation_signal:
-                signal = round_result.escalation_signal
-                emit_phase(
-                    cb.on_phase,
-                    CampaignPhase.ESCALATION,
-                    "enter",
-                    round=round_num,
-                    check_name=signal.check_name,
-                    target=signal.target,
-                    degraded_rate=signal.check_result.get("degraded_rate"),
-                    warning_types=signal.check_result.get("warning_types"),
-                )
-                await close_round(cycle, round_result, round_num, session, cb)
-                if session.state.cycle_id:
-                    session.store.campaigns.delete_round_candidates(
-                        session.hop,
-                        round_num + 1,
-                    )
-                emit_phase(cb.on_phase, CampaignPhase.ESCALATION, "exit", round=round_num)
-                round_num += 1
-                continue
 
             await post_round(
                 cycle,

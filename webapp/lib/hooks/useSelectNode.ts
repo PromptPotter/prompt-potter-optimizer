@@ -1,6 +1,6 @@
 "use client";
 // ONE gesture: pick a served tree node — navigate to it and inspect it. Every writer of a node
-// selection goes through here, so none can invent its `accuracy` / `is_winner`.
+// selection goes through here, so none can invent its `accuracy` / `is_selected`.
 
 import { useCallback } from "react";
 import { useSelection } from "@/lib/SelectionContext";

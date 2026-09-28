@@ -46,7 +46,7 @@ export function runSummary(dash: DashboardSnapshot | null): RunSummary | null {
     rounds: closed.length,
     championLabel: target?.courseLabel ?? null,
     accuracy: champion?.accuracy ?? null,
-    parentAccuracy: champion?.matched_parent_accuracy ?? null,
+    parentAccuracy: champion?.reference_accuracy ?? null,
     abilityDelta,
     usedUsd: readSpend(dash).usedUsd,
     changes: champion?.changes_description ?? "",

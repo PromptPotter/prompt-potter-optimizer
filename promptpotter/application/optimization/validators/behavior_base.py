@@ -13,6 +13,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from promptpotter.domain.l1_layout import L1Layout
+
 __all__ = ["CheckFn", "CheckResult", "ValidatorContext"]
 
 
@@ -30,7 +32,7 @@ class ValidatorContext:
 
     round_num: int
     prior_rounds: list[dict[str, Any]] = field(default_factory=list)
-    opt_sp: dict[str, Any] = field(default_factory=dict)
+    l1_layout: L1Layout | None = None
     context_object: list[str] = field(default_factory=list)
     exploration_budget: str | None = None
     # Axes the round-start AxisIndex flagged as ``peaked``. Used by

@@ -52,7 +52,7 @@ export const TimeRay = memo(function TimeRay() {
   if (!viewedPath || (!loaded && steps.length === 0)) return null;
 
   // A step on another course's ledger returns this course to its head — its offset means nothing
-  // here. A candidate resolves off the served tree: a ray item cannot supply `accuracy`/`is_winner`.
+  // here. A candidate resolves off the served tree: a ray item cannot supply `accuracy`/`is_selected`.
   const onStep = (step: RayStep): void => {
     const elsewhere = step.pathKey !== rootKey;
     setAt(elsewhere ? null : step.offset);

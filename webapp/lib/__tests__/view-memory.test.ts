@@ -59,7 +59,7 @@ describe("viewMemoryCodec", () => {
 
   it("stores no measurement — every persisted field is an id, a flag, or a UI key", () => {
     // A restored view never renders a number read as current: `ScoringInspector` renders
-    // `is_winner`, so only the navigation axis is remembered.
+    // `is_selected`, so only the navigation axis is remembered.
     const keys = Object.keys(emptyView()).sort();
     expect(keys).toEqual(
       [

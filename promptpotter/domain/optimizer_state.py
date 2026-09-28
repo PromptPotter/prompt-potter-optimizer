@@ -1,0 +1,137 @@
+"""An optimizer's own working state, which rides the round document and never the individual.
+
+The bench persists it as ``RoundResult.optimizer_state``, restores it from there on resume and
+fork, and reads nothing inside ``payload``."""
+
+from __future__ import annotations
+
+from typing import Any, Literal, TypedDict
+
+from pydantic import Field
+
+from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
+from promptpotter.domain.l1_layout import L1Layout, default_l1_layout
+from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.validators import ValidatorOutcome
+
+__all__ = [
+    "L1_PARSE_FAILURE_CHARGED",
+    "L1_PARSE_FAILURE_MALFORMED",
+    "L1_PARSE_FAILURE_TOOLING",
+    "L1_PARSE_FAILURE_WRONG_TYPE",
+    "POTTER_MANIFEST",
+    "CritiqueReadout",
+    "L2L3Memory",
+    "OptimizerState",
+    "PotterRoundState",
+    "WoundChannels",
+]
+
+PotterManifest = Literal["potter"]
+POTTER_MANIFEST: PotterManifest = "potter"
+
+# The reasons `PotterRoundState.l1_parse_failure` can carry. Opposite kinds of evidence, so no
+# reader may treat the field as a bool:
+#   MALFORMED  — schema-noncompliant output. The optimizer prompt's fault; charge it.
+#   WRONG_TYPE — decoded cleanly but as another model, so the fault is the schema it asked
+#                for, not the transport. Charged like MALFORMED.
+#   TOOLING    — empty/truncated content. Missing data, not a verdict: charging it scores
+#                provider flakiness as a bad mutation, so the round must be EXCLUDED.
+L1_PARSE_FAILURE_MALFORMED = "optimizer_prompt_parse_failure"
+L1_PARSE_FAILURE_WRONG_TYPE = "optimizer_prompt_unexpected_type"
+L1_PARSE_FAILURE_TOOLING = "l1_provider_empty_response"
+# The reasons a CHARGING reader may hold against the optimizer prompt. Asked as this predicate,
+# never as `is not None` — that is the bool the block above forbids, and it reads TOOLING as a
+# verdict the round never reached. A ROUTING reader is a different question and may ask either.
+L1_PARSE_FAILURE_CHARGED: frozenset[str] = frozenset(
+    {L1_PARSE_FAILURE_MALFORMED, L1_PARSE_FAILURE_WRONG_TYPE}
+)
+
+
+class CritiqueReadout(TypedDict, total=False):
+    """A domain-local mirror, so a round file round-trips without the optimization layer's
+    schema in scope; the optimizer node's full Pydantic shape stays in ``dispatch/schemas.py``."""
+
+    priority_fix: str
+    suggested_axes: list[str]
+    failure_highlights: list[str]
+
+
+class WoundChannels(StrictModel):
+    """Four wound streams + sticky L3 note; rendered by dispatch-hub injections."""
+
+    l3_note: str = ""
+    validation_failures: list[ValidationFailure] = Field(default_factory=list)
+    runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
+    l2_guard_breaches: list[ValidatorOutcome] = Field(default_factory=list)
+    l3_guard_breaches: list[ValidatorOutcome] = Field(default_factory=list)
+
+
+class L2L3Memory(StrictModel):
+    """Potter's persistent frame, carried across every adoption.
+
+    The surfaces its escalation layers author: L2 writes most; L3 writes ``plan``,
+    ``wounds.l3_note`` and ``wounds.l3_guard_breaches``; the dispatch-hub injections read all of
+    it."""
+
+    wounds: WoundChannels = Field(
+        default_factory=WoundChannels,
+        description=(
+            "Four wound streams (validation/runtime/l2-guard/l3-guard) + "
+            "sticky L3 note. Rendered by dispatch-hub injections; absorbed "
+            "by L2 next round."
+        ),
+    )
+    l1_layout: L1Layout = Field(
+        default_factory=default_l1_layout,
+        description=(
+            "L2-authored ordered list of injection slots that "
+            "``DispatchHub.fill`` walks to compose the L1 optimizer prompt. "
+            "L2's primary lever for changing what evidence L1 sees."
+        ),
+    )
+    l1_overrides: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "L1 optimizer prompt overrides keyed by the surface field name "
+            "(``persona``, ``instruction``, …). L2 writes here to nudge L1 "
+            "without rewriting the shared optimizer prompt."
+        ),
+    )
+    plan: str = Field(
+        default="",
+        description=(
+            "Strategic frame written by ``l3_plan`` and read by every layer "
+            "next round; persistent until the next L3 fire. Empty until L3 "
+            "fires for the first time."
+        ),
+    )
+
+
+class PotterRoundState(StrictModel):
+    """Potter's payload: the memory the round ended on and the readouts only potter reads."""
+
+    memory: L2L3Memory
+    # Feedback FOR the next round's `l1_generate`, distilled after this round's scoring.
+    critique: CritiqueReadout | None = None
+    # STORED, not derived: a fact about GENERATION, fixed before any candidate has a score.
+    l1_yield: float = 1.0
+    # Why this round's L1 output was unparseable (zero candidates), or None. The round owns it:
+    # a parse failure yields no candidate to charge. One of the three constants above.
+    l1_parse_failure: str | None = None
+    # AxisIndex's peaked set at close, persisted because AxisIndex is not reconstructable from
+    # the round file alone and the review writer's `evidence_grounding_present` check needs it.
+    axis_memory_peaked: list[str] = Field(default_factory=list)
+    # Which prompts of potter's manifest produced this round, per node — the only thing that can
+    # answer "was this round produced by the optimizer I am holding now?" once the process exited.
+    # Resume diverges at the FIRST round that disagrees. Empty on a generation-only round.
+    # IDENTITY, NOT A FIRE RECORD — every node is named on every round, including ones that never
+    # run. Which node RAN, and what each panel cost it, is the ledger's `llm_call`.
+    optimizer_prompt_hashes: dict[str, str] = Field(default_factory=dict)
+
+
+class OptimizerState(StrictModel):
+    """``{manifest, payload}`` — the one envelope every optimizer's state rides."""
+
+    manifest: PotterManifest
+    payload: PotterRoundState

@@ -21,7 +21,7 @@ function spine(
         round: r.round,
         label: r.round === 0 ? "C0" : `C${r.round}.${i + 1}`,
         candidate_id: `r${r.round}_${i}`,
-        is_winner: r.winner === i,
+        is_selected: r.winner === i,
         is_fork: false,
       });
     }
@@ -65,7 +65,7 @@ describe("dendrogram", () => {
     ]);
     const g = dendrogram(rows, centers(rows.length));
 
-    const r1Winner = rows.findIndex((r) => r.round === 1 && r.is_winner);
+    const r1Winner = rows.findIndex((r) => r.round === 1 && r.is_selected);
     const b3 = g.brackets.find((b) => b.round === 3);
     const b2 = g.brackets.find((b) => b.round === 2);
 
@@ -87,7 +87,7 @@ describe("dendrogram", () => {
     const g = dendrogram(rows, centers(rows.length));
 
     // R2, R3, R4 all fan from R1's winner: three nested brackets, three rows.
-    const r1Winner = rows.find((r) => r.round === 1 && r.is_winner)!;
+    const r1Winner = rows.find((r) => r.round === 1 && r.is_selected)!;
     for (const b of g.brackets.filter((x) => x.round >= 2)) {
       expect(b.parentKey).toBe(r1Winner.key);
     }
@@ -153,7 +153,7 @@ describe("dendrogram", () => {
 
     expect(g.brackets.find((b) => b.round === 0)).toBeUndefined();
     expect(g.brackets.map((b) => b.round)).toEqual([1, 2]);
-    const r1Winner = rows.find((r) => r.round === 1 && r.is_winner)!;
+    const r1Winner = rows.find((r) => r.round === 1 && r.is_selected)!;
     expect(g.brackets.find((b) => b.round === 2)?.parentKey).toBe(r1Winner.key);
   });
 
@@ -169,7 +169,7 @@ describe("dendrogram", () => {
         round: 1,
         label: "f·ab",
         candidate_id: "cy_ab",
-        is_winner: false,
+        is_selected: false,
         is_fork: true,
       },
     ];

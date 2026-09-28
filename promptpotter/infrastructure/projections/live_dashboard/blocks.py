@@ -164,12 +164,12 @@ def build_candidate_rows(buffer: RoundBuffer) -> list[DashboardCandidate]:
                 theta=served.get("theta"),
                 theta_se=served.get("theta_se"),
                 theta_caveat=served.get("theta_caveat"),
-                matched_parent_accuracy=served.get("matched_parent_accuracy"),
-                matched_parent_composite=served.get("matched_parent_composite"),
-                matched_parent_lift=served.get("matched_parent_lift"),
-                matched_parent_lift_ci_lo=served.get("matched_parent_lift_ci_lo"),
-                matched_parent_lift_ci_hi=served.get("matched_parent_lift_ci_hi"),
-                is_winner=bool(cand.get("is_winner")),
+                reference_accuracy=served.get("reference_accuracy"),
+                reference_composite=served.get("reference_composite"),
+                reference_lift=served.get("reference_lift"),
+                reference_lift_ci_lo=served.get("reference_lift_ci_lo"),
+                reference_lift_ci_hi=served.get("reference_lift_ci_hi"),
+                is_selected=bool(cand.get("is_selected")),
             )
         )
     return rows

@@ -199,7 +199,7 @@ def _scoreboard(
             s.composite_fitness,
             s.accuracy,
             s.theta,
-            is_winner=s.label == winner_label,
+            is_selected=s.label == winner_label,
             is_partial=bool(s.partial_reason),
         ),
         reverse=True,
@@ -222,7 +222,7 @@ def _scoreboard(
         ci_str = fmt_ci(s.mean_fitness_ci_lo, s.mean_fitness_ci_hi, spec="{:.1%}")
         # A row whose matched floor genuinely scored 0.0 keeps its 0.0 — `or` cannot tell
         # that from absence.
-        row_parent = s.matched_parent_accuracy
+        row_parent = s.reference_accuracy
         delta = acc - row_parent if row_parent is not None and acc is not None else None
         delta_str = f"{delta:+.1%}" if delta is not None and abs(delta) >= 0.001 else "---"
         aborted = s.escalation_aborted

@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from typing import Literal
 
 from promptpotter.application.optimization.validators.behavior_base import CheckResult
-from promptpotter.domain.results import L1_PARSE_FAILURE_CHARGED, RoundResult
+from promptpotter.domain.opt_search_point import node_source
+from promptpotter.domain.optimizer_state import L1_PARSE_FAILURE_CHARGED, POTTER_MANIFEST
+from promptpotter.domain.results import RoundResult
 
 __all__ = ["L1Stats", "compute_l1_stats"]
 
@@ -45,7 +47,9 @@ def compute_l1_stats(
     stagnation_max = _max_stagnation_streak(top_lifts)
     behavior_pass_rate = _behavior_pass_rate(behavior_results)
     l2_behavior_pass_rate = _behavior_pass_rate(l2_behavior_results or [])
-    l2_fires = sum(1 for r in rounds if _round_source(r) == "l2_context")
+    l2_fires = sum(
+        1 for r in rounds if _round_source(r) == node_source(POTTER_MANIFEST, "l2_context")
+    )
     round_1_verdict = _compute_round_1_verdict(
         rounds,
         round_1_behavior=behavior_results[0] if behavior_results else [],
@@ -71,7 +75,7 @@ def _compute_round_1_verdict(
     if not rounds:
         return "unknown"
 
-    parse_failure = rounds[0].l1_parse_failure
+    parse_failure = rounds[0].optimizer_state.payload.l1_parse_failure
     if parse_failure in L1_PARSE_FAILURE_CHARGED:
         return "broken"
     # The remaining reason is TOOLING — an empty or truncated provider response. This verdict is
@@ -98,7 +102,7 @@ def _mean_yield_rate(rounds: list[RoundResult]) -> float | None:
     fall short of."""
     if not rounds:
         return None
-    return sum(r.l1_yield for r in rounds) / len(rounds)
+    return sum(r.optimizer_state.payload.l1_yield for r in rounds) / len(rounds)
 
 
 def _top_lifts(rounds: list[RoundResult], origin_composite_fitness: float | None) -> list[float]:

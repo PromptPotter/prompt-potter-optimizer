@@ -1,4 +1,4 @@
-// Was a crown EARNED? The server stamps `is_winner` on the round's parent, so a single-arm round
+// Was a crown EARNED? The server stamps `is_selected` on the round's parent, so a single-arm round
 // (round 0 always) crowns with nobody to beat. One predicate for every surface that draws a crown.
 
 export function roundSizes(

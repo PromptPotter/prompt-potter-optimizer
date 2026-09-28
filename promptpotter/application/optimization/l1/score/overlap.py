@@ -44,7 +44,7 @@ async def measure_overlap(
     Usually one member pays — the arm this round crowned, on the panel cells it had not sat. A
     second one pays only where it predates the panel it is now read on, and then only once.
     """
-    if not round_result.winner_id:
+    if round_result.opt_sp is None:
         return
     # The line INCLUDING this round: on a HELD round the subject is the retained parent, whose
     # coverage this round's parent re-score just widened, and on a won round it is the new arm.
@@ -126,17 +126,16 @@ async def _measure_gaps(
         len(samples),
     )
     scored = await score_search_point(
-        step.opt_sp.to_job_search_point(base_pipeline_params=step.pipeline_params, schema=schema),
+        step.opt_sp.to_job_search_point(
+            base_pipeline_params=step.pipeline_params, schema=schema, framing=cycle.framing
+        ),
         samples,
         cycle.session,
         # One run per (member, gap set) in the archive, so the pass is identifiable on disk and
         # a re-run of the same round replays it free rather than paying twice.
-        label="line_overlap",
-        # Vacuous by design, and this is the whole quarantine in two arguments. `opt_sp=None`
-        # puts every searchpoint-aware evaluator on its fallback — the pass publishes a RATE, so
-        # a composite is not wanted. `axes=None` withholds the AxisIndex: ingesting here would
-        # feed `axis_memory`, which is an optimizer panel, from rows one arm alone paid for.
-        opt_sp=None,
+        label=MeasurementRole.OVERLAP,
+        # The quarantine: ingesting into the AxisIndex would feed `axis_memory`, an optimizer
+        # panel, from rows one arm alone paid for.
         axes=None,
         on_sample_scored=None,
         on_sample_starting=None,

@@ -3,12 +3,12 @@ import { descendantsOf } from "../lineage-descendants";
 import type { LineageNode } from "@/lib/api";
 
 // A missed descendant fails SILENTLY: a channel keeps rendering a measurement an edit invalidated.
-// Pinned: a losing arm nothing was built on, and a FORK reachable by `parent_id` alone.
+// Pinned: a losing arm nothing was built on, and a FORK reachable by `parent_ids` alone.
 
 function node(
   over: Partial<LineageNode> & Pick<LineageNode, "kind" | "id">,
 ): LineageNode {
-  return { children: [], parent_id: null, ...over } as unknown as LineageNode;
+  return { children: [], parent_ids: [], ...over } as unknown as LineageNode;
 }
 
 // One campaign: root course c0 with C0 → (R1.1 winner, R1.2 loser) → R2.1 under the winner, plus a
@@ -19,13 +19,13 @@ function family(): LineageNode {
     id: "cyc_root",
     children: [
       node({ kind: "candidate", id: "C0" }),
-      node({ kind: "candidate", id: "R1.1", parent_id: "C0" }),
-      node({ kind: "candidate", id: "R1.2", parent_id: "C0" }),
-      node({ kind: "candidate", id: "R2.1", parent_id: "R1.1" }),
+      node({ kind: "candidate", id: "R1.1", parent_ids: ["C0"] }),
+      node({ kind: "candidate", id: "R1.2", parent_ids: ["C0"] }),
+      node({ kind: "candidate", id: "R2.1", parent_ids: ["R1.1"] }),
       node({
         kind: "course",
         id: "cyc_fork",
-        children: [node({ kind: "candidate", id: "F1.1", parent_id: "R1.1" })],
+        children: [node({ kind: "candidate", id: "F1.1", parent_ids: ["R1.1"] })],
       }),
     ],
   });
@@ -33,7 +33,7 @@ function family(): LineageNode {
 
 describe("descendantsOf", () => {
   it("takes the whole line under an edited point, across a fork", () => {
-    // The fork left at R1.1, so its candidate descends from it — reachable by `parent_id` alone.
+    // The fork left at R1.1, so its candidate descends from it — reachable by `parent_ids` alone.
     expect([...descendantsOf(family(), ["R1.1"])].sort()).toEqual(["F1.1", "R1.1", "R2.1"]);
   });
 
@@ -57,8 +57,8 @@ describe("descendantsOf", () => {
       kind: "course",
       id: "c",
       children: [
-        node({ kind: "candidate", id: "A", parent_id: "B" }),
-        node({ kind: "candidate", id: "B", parent_id: "A" }),
+        node({ kind: "candidate", id: "A", parent_ids: ["B"] }),
+        node({ kind: "candidate", id: "B", parent_ids: ["A"] }),
       ],
     });
     expect([...descendantsOf(cyclic, ["A"])].sort()).toEqual(["A", "B"]);

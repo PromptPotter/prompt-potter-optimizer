@@ -25,7 +25,7 @@ class MaskCandidate(StrictModel):
     # "n of N": a candidate that never ran some chosen samples, or errored on them, reads a
     # smaller n, and `accuracy` beside it is the mean over exactly these.
     n_scored: int = 0
-    is_winner: bool = False
+    is_selected: bool = False
     is_eligible: bool = True
     # Which PoBB gate cut this candidate's measurement early, if any — an ``EliminationGate``
     # value, or ``None`` (ran to completion). The abort verdict reads this; the scoring verdict

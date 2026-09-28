@@ -336,14 +336,14 @@ export const FitnessChart = memo(function FitnessChart({
 
   // The LAST crowned bar, not `findIndex`: every advancing round has a winner and the first is C0.
   const parentIdx = useMemo(() => {
-    for (let i = views.length - 1; i >= 0; i--) if (views[i]?.is_winner) return i;
+    for (let i = views.length - 1; i >= 0; i--) if (views[i]?.is_selected) return i;
     return null;
   }, [views]);
 
   // The served lift, claimed only where its 95% interval excludes 0.
   const crown = useMemo(() => {
     const v = parentIdx == null ? undefined : views[parentIdx];
-    const { matchedParentLift: lift, matchedParentLiftCiLo: lo, matchedParentLiftCiHi: hi } =
+    const { referenceLift: lift, referenceLiftCiLo: lo, referenceLiftCiHi: hi } =
       v ?? {};
     if (lift == null || lo == null || hi == null || (lo <= 0 && hi >= 0)) return "";
     return ` ${fmtSigned(lift, 2)}`;
@@ -481,9 +481,9 @@ export const FitnessChart = memo(function FitnessChart({
             if (typeof ciLo === "number" && typeof ciHi === "number") {
               lines.push(`95% CI [${ciLo.toFixed(3)}, ${ciHi.toFixed(3)}]`);
             }
-            const lift = views[idx]?.matchedParentLift;
-            const lLo = views[idx]?.matchedParentLiftCiLo;
-            const lHi = views[idx]?.matchedParentLiftCiHi;
+            const lift = views[idx]?.referenceLift;
+            const lLo = views[idx]?.referenceLiftCiLo;
+            const lHi = views[idx]?.referenceLiftCiHi;
             if (lift != null && lLo != null && lHi != null) {
               const flat = liftSeparates(lLo, lHi) ? "" : ` — ${NOT_SEPARABLE}`;
               lines.push(

@@ -3,7 +3,7 @@ from __future__ import annotations
 import enum
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import ConfigDict, Field
 
@@ -70,7 +70,7 @@ class EscalationSignal:
 # validator that WRITES these reasons (`validators/l1_strict.py`) and `RoundResult`, which
 # DERIVES its collapse counts by reading them back off `candidate_scores`. Left in the
 # application layer, the domain side could not name the set it counts without an upward import.
-INVARIANT_REASONS: frozenset[str] = frozenset(
+INVARIANT_REASONS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
     {"no_op_variant", "duplicate_variant", "repeat_variant"}
 )
 

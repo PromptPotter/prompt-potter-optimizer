@@ -15,6 +15,7 @@ from promptpotter.application.pipeline_resolve import (
     resolved_dataset_name,
 )
 from promptpotter.application.runner.campaign_ids import build_origin_cycle_id, mint_campaign_id
+from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.inner_origin import instrument_of
 from promptpotter.domain.run_records import CycleSeed
@@ -74,19 +75,25 @@ def resolve_cycle_plan(
     origin = resolve_origin_opt_search_point(
         prompt_node_names=schema.prompt_node_names(),
         dataset_dir=session.dataset_config_dir,
-        # PURE read, and the reason identity can hold the framing at all: check-in commits
-        # `task_context.yaml` before anything asks for an id, so the id can hash the prompt the
-        # run will actually score. A decomposition cannot happen here — it needs a cycle to bill,
-        # which is the thing being computed.
-        task_context=committed_task_context(session.store, session.dataset_name),
         seed=_campaign_origin_seed(origin_override),
     )
     return CyclePlan(
         pipeline_params=pipeline_params,
         origin=origin,
         # Config-aware identity: the overlay-merged params (connector model/config included) AND
-        # the origin's framing, so the id reflects the same render the measurement key does.
-        cycle_id=build_origin_cycle_id(origin, schema, dataset, pipeline_params),
+        # the campaign's framing, so the id reflects the same render the measurement key does —
+        # over the rows the search draws, which `run_optimization` partitions the same way.
+        cycle_id=build_origin_cycle_id(
+            origin,
+            schema,
+            list(partition_bank(dataset, campaign_config.dataset_split).search),
+            pipeline_params,
+            # PURE read, and the reason identity can hold the framing at all: check-in commits
+            # `task_context.yaml` before anything asks for an id, so the id can hash the prompt
+            # the run will actually score. A decomposition cannot happen here — it needs a cycle
+            # to bill, which is the thing being computed.
+            framing=committed_task_context(session.store, session.dataset_name),
+        ),
     )
 
 

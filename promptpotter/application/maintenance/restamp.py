@@ -43,7 +43,7 @@ from promptpotter.application.views.view_models import (
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.phases import CampaignPhase, RunPhase
+from promptpotter.domain.phases import PotterPhase, RunPhase
 from promptpotter.domain.results import DiagnosticRunRecord, RoundResult
 from promptpotter.domain.run_records import CycleRecord
 from promptpotter.domain.scoring import ledger_sample_view
@@ -330,8 +330,8 @@ _ANCHOR_KEYS: frozenset[str] = frozenset(ViewContext().ledger_anchors())
 _L2_EXIT_VIEW_KEYS: frozenset[str] = frozenset(L2RefineExitView.__dataclass_fields__)
 _PLAN_EXIT_VIEW_KEYS: frozenset[str] = frozenset(PlanExitView.__dataclass_fields__)
 _EXIT_VIEW_KEYS: dict[str, frozenset[str]] = {
-    CampaignPhase.REFINE_STRATEGY: _L2_EXIT_VIEW_KEYS,
-    CampaignPhase.MODIFY_PLAN: _PLAN_EXIT_VIEW_KEYS,
+    PotterPhase.REFINE_STRATEGY: _L2_EXIT_VIEW_KEYS,
+    PotterPhase.MODIFY_PLAN: _PLAN_EXIT_VIEW_KEYS,
 }
 # Rewrite only a cycle nothing is appending to. A live producer holds `_next_offset`, and every
 # `sequence`/`offset` join (the SSE tail, the family ray) is that line index — renumber under one

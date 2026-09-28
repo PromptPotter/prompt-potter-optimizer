@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.pobb.classification import is_deprecated, scoreable_rows
+from promptpotter.application.scoring.classification import is_deprecated, scoreable_rows
 from promptpotter.application.scoring.evaluators import (
     compute_accuracy,
     materialize_round_values,
@@ -24,7 +24,6 @@ from promptpotter.application.scoring.row_diagnostics import count_degraded_samp
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import QueryMeasurement, RoundScorer
 
@@ -38,8 +37,6 @@ __all__ = [
 def _compute_accuracy(results: list[QueryMeasurement]) -> dict[str, Any]:
     """``total`` is the EVIDENCE denominator: scoreable rows only. An errored or deprecated row
     carries no verdict, so neither belongs in the denominator a rate is read against."""
-    # Lazy: scoring → optimization circular.
-
     deprecated = sum(1 for r in results if is_deprecated(r))
     scoreable = scoreable_rows(results)
     total = len(scoreable)
@@ -83,19 +80,11 @@ def _channel_means(scoreable: list[QueryMeasurement]) -> dict[str, float]:
 def compute_composite_fitness(
     results: list[QueryMeasurement],
     pipeline_schema: PipelineSchema,
-    *,
-    opt_sp: OptSearchPoint | None,
-    l1_diversity: float = 1.0,
 ) -> dict[str, Any]:
-    """``opt_sp=None`` puts every searchpoint-aware evaluator on its vacuous fallback, and ``l1_diversity`` defaults to 1.0
-    for the same reason: 0.0 would score the two halves of one delta on different bases.
-
-    The composite is the MEAN of what each cell was worth — ``rescore_results`` already evaluated
+    """The composite is the MEAN of what each cell was worth — ``rescore_results`` already evaluated
     the campaign's formula once per row, so this folds rather than re-scores. That is what puts a
     cost or reliability term on θ: this number and the one every θ is fit on are the same
     per-cell value, read at two scopes instead of two formulas at one scope."""
-    # Lazy: scoring → optimization circular.
-
     base = _compute_accuracy(results)
     scoreable = scoreable_rows(results)
     evaluator_values = materialize_round_values(pipeline_schema, results)
@@ -103,9 +92,6 @@ def compute_composite_fitness(
     # rather than a second spelling of it. That makes the mask the PROJECTION of the elected
     # formula, exact only where it is linear (`operations/mask-projection.md`).
     evaluator_values.update(_channel_means(scoreable))
-    # A batch property, not a per-result derivation, so it names nothing the composite can read:
-    # REPORTING and the read-side mask only.
-    evaluator_values["l1_diversity"] = float(l1_diversity)
 
     if not scoreable:
         # No measurement — an operator skip at query 0/N, a round whose every sample was excluded,
@@ -127,26 +113,12 @@ def compute_composite_fitness(
             )
         composite_fitness = sum(float(r["objective"]) for r in scoreable) / len(scoreable)
 
-    # OptSP-layer counts for display and the validation-failure short-circuit.
-    runtime_failure_count = 0
-    validation_failure_count = 0
-    if opt_sp is not None:
-        runtime_failure_count = len(opt_sp.memory.wounds.runtime_failures)
-        validation_failure_count = len(opt_sp.memory.wounds.validation_failures)
-
-    if validation_failure_count > 0:
-        composite_fitness = 0.0
-
-    degraded = count_degraded_samples(results)
-
     return {
         **base,
         **evaluator_values,
         "evaluators": dict(evaluator_values),
         "composite_fitness": composite_fitness,
-        "degraded_samples": degraded,
-        "validation_failure_count": validation_failure_count,
-        "runtime_failure_count": runtime_failure_count,
+        "degraded_samples": count_degraded_samples(results),
     }
 
 
@@ -164,12 +136,7 @@ def matched_parent_stats(
     # `compute_composite_fitness` already spreads `_compute_accuracy` into its result —
     # calling it again here was a second `is_deprecated` walk over the same rows for the same
     # numbers, and a second place for the two to disagree.
-    composite = compute_composite_fitness(
-        parent_results,
-        pipeline_schema,
-        opt_sp=None,
-        l1_diversity=1.0,
-    )
+    composite = compute_composite_fitness(parent_results, pipeline_schema)
     return {key: composite[key] for key in ("accuracy", "total", "composite_fitness")}
 
 

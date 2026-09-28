@@ -12,7 +12,6 @@ from promptpotter.application.intelligence.indexes.axis import AxisIndex
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.dispatch.llm_call.prompts import get_optimizer_schema
 from promptpotter.application.optimization.escalation.state import EscalationFSM
-from promptpotter.application.optimization.pobb.checks import build_degradation_checks
 from promptpotter.application.optimization.resume_and_fork.resume import (
     resume_with_divergence_check,
 )
@@ -20,9 +19,12 @@ from promptpotter.application.pipeline_resolve import configure_and_apply_pipeli
 from promptpotter.application.preflight import check_model_reasoning_floors, run_preflight_checks
 from promptpotter.application.runner.campaign_ids import cycle_config_identity
 from promptpotter.application.runner.inner.spawn_context import retarget_inner_spawn
+from promptpotter.application.scoring.classification import build_degradation_checks
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.scoring.formula import compile_scorer, split_scoring_block
+from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopLoop, emit_phase
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.scoring import all_verifier_graded
@@ -93,6 +95,7 @@ def init_cycle(
     # connector only NAMES (a Harbor dataset version) can move under its name, and every read of
     # this campaign after today must see what it measured rather than what the registry now says.
     store.write_resolved_experiment(hop, session.backend_client.workload.experiment)
+    store.write_bank_partition(hop, session.scoring.require_partition())
     # Beside the declaration and on the same cadence: the declaration says which keys exist, this
     # says which the optimizer MOVES and whether the model can even see them. The connector owns
     # the channel, so it is read off the client rather than assumed.
@@ -137,7 +140,7 @@ def populate_session_scoring(
     scorer_id: str,
     headline_metric: HeadlineMetric = "accuracy",
     judge_specs: Mapping[str, JudgeSpec],
-    source: str = "optimization_loop",
+    source: RunSource,
 ) -> None:
     """Attach scoring + obs to *session* in place (step 2 of run init).
     Requires ``init_services`` already ran; ``scoring_formula`` and ``scorer_id`` both resolved from
@@ -169,7 +172,7 @@ def arm_diagnostic_scoring(
     session: Session,
     campaign_config: CampaignConfig,
     *,
-    source: str,
+    source: RunSource,
     log: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Resolve the pipeline and arm the scorer for a verb that scores OUTSIDE the runner —
@@ -177,10 +180,6 @@ def arm_diagnostic_scoring(
 
     ``obs=None`` is what makes these one thing rather than four copies of three calls: the runner
     arms its own scoring with a live ``ObservabilityBridge``, and a diagnostic has none to give.
-
-    ``source`` is required here though :func:`populate_session_scoring` defaults it. ``ab`` was the
-    one caller that omitted it, so its replays stamped the session ``optimization_loop`` — the
-    provenance of the run being replayed rather than of the replay.
 
     A verb run inside a campaign — the saturation ``verify`` — spends under that run's book; one
     run on its own gets a book for its task, which no ceiling binds yet."""
@@ -201,6 +200,7 @@ def arm_diagnostic_scoring(
         judge_specs=campaign_config.judges,
         source=source,
     )
+    session.scoring.partition = partition_bank(session.samples, campaign_config.dataset_split)
     return pipeline_params
 
 
@@ -287,12 +287,11 @@ async def _emit_preflight_and_init_session(
             "floor and would emit zero content:\n  - " + "\n  - ".join(floor_violations)
         )
 
-    resolved = origin.resolved_origin
     preflight_warnings = run_preflight_checks(
         config,
         dataset,
         target_models,
-        task_context=resolved.memory.task_context.to_dict() if resolved else None,
+        task_context=origin.framing.to_dict(),
     )
     for w in preflight_warnings:
         logger.warning("preflight[%s]: %s — %s", w.code, w.title, w.detail)
@@ -322,13 +321,14 @@ def _build_and_start_cycle(
 
     if origin.resolved_origin is None:
         raise ValueError("origin.resolved_origin is required; run origin scoring first.")
-    # resolved_origin is the resolved origin OptSearchPoint (lineage + memory intact) — use it
-    # directly; no re-roundtrip through from_prompt_fields, which would drop the lineage.
+    # resolved_origin is the resolved origin OptSearchPoint (lineage intact) — use it directly; no
+    # re-roundtrip through from_prompt_fields, which would drop the lineage.
     resolved_origin = origin.resolved_origin
     cycle = Cycle.start(
         resolved_origin,
         origin.report,
         schema=session.pipeline_schema,
+        framing=origin.framing,
         origin_results=origin.origin_results,
         session=session,
         config=config,
@@ -337,7 +337,7 @@ def _build_and_start_cycle(
     # session.pipeline_params (overlay-merged) makes origin JSP + cycle-id sensitive to overlay edits.
     base_pp = session.pipeline_params or session.pipeline_schema.to_pipeline_params()
     origin_jsp = resolved_origin.to_job_search_point(
-        base_pipeline_params=base_pp, schema=session.pipeline_schema
+        base_pipeline_params=base_pp, schema=session.pipeline_schema, framing=origin.framing
     )
     resolved_cycle_id, resumed_from_round = init_cycle(
         session,
@@ -383,6 +383,7 @@ def _start_observability_and_scoring(
         scorer_id=scorer_id,
         headline_metric=config.headline_metric,
         judge_specs=config.judges,
+        source=RunSource.OPTIMIZATION_LOOP,
     )
     return tracing_campaign_id, obs
 
@@ -440,6 +441,7 @@ def _finalize_loop_state(
         scorer=session.scoring.scorer,
         scorer_id=session.scoring.scorer_id,
         dataset_name=session.dataset_name,
+        sample_ids=session.scoring.require_partition().admitted_ids,
     )
 
     if resolved_cycle_id:
@@ -451,8 +453,6 @@ def _finalize_loop_state(
         # already stamped with it.
         cycle.persist_ruler()
     session.state.tracing_campaign_id = tracing_campaign_id
-    # Full train split = bank; per-round adaptive queue mechanism narrows to ``sp_budget_round``.
-    session.scoring.scoring_set = list(dataset)
     session.scoring.degradation_checks = build_degradation_checks(config)
     session.state.resumed_from_round = resumed_from_round
 

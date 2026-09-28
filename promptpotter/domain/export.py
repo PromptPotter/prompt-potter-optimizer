@@ -5,10 +5,12 @@ from typing import Any
 
 from pydantic import ConfigDict
 
+from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import AbilityReading
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.strict_model import StrictModel
 
 EXPORT_ARTIFACT_VERSION = 1
@@ -47,9 +49,9 @@ class ExportMeasurement(StrictModel):
     n: int
     # ``None`` on a round that crowned nobody, and on the origin round, whose lift over itself is
     # not a measurement. A consumer reading a lift must be able to tell "zero" from "not asked".
-    matched_parent_lift: float | None = None
-    matched_parent_lift_ci_lo: float | None = None
-    matched_parent_lift_ci_hi: float | None = None
+    reference_lift: float | None = None
+    reference_lift_ci_lo: float | None = None
+    reference_lift_ci_hi: float | None = None
     # Subset-invariant ability, with the δ scale it was read on — an exported θ naming no ruler
     # is a level nothing outside this cycle can be compared against. ``None`` when never fit.
     ability: AbilityReading | None = None
@@ -73,19 +75,23 @@ class PromptExport(StrictModel):
     # The rows, order-independent (``shared/hashing.py::dataset_hash``). An exported fitness is
     # only as trustworthy as the identity of what it was measured on.
     dataset_hash: str
-    # The optimizer manifest that produced this prompt — a different one is a different search.
-    optimizer_prompt_hash: str
+    # The optimizer manifests that produced this prompt — a different one is a different search.
+    optimizer_manifest_hashes: dict[str, str]
     stop_reason: str
     finished_at: str
-    # Named fields, restored by ``template()``. Carries ``few_shot_examples`` structured and
-    # ``plan``, because this is the round document's dict — NOT ``CycleResult.winner_prompt_fields``,
-    # which is the wire-side projection and has already flattened the examples to a rendered block.
+    # Named fields, restored by ``template()``. Carries ``few_shot_examples`` structured, because
+    # this is the round document's dict — NOT ``CycleResult.result_prompt_fields``, which is the
+    # wire-side projection and has already flattened the examples to a rendered block.
     prompt_fields: dict[str, Any]
     # The other half of what this project evolves: the node config the winner ran under, minus
     # each node's rendered ``prompt`` (that is ``prompt_fields`` rendered, and one artifact does
     # not carry a fact twice). Model and provider ride here.
     tuned_params: dict[str, dict[str, Any]]
+    # The optimizer's own reading of its selection, on the rows that chose it — not an estimate.
     measurement: ExportMeasurement
+    # The deployment estimate: the same prompt on a bench set no optimizer node read. `None` where
+    # the campaign holds nothing out, or the cycle ended before its selection could be graded.
+    bench: BenchScore | None
 
     def template(self) -> PromptTemplate:
         """The winning prompt as the type the rest of this package passes around."""
@@ -118,12 +124,14 @@ def build_prompt_export(
     cycle_id: str,
     dataset_name: str,
     dataset_hash: str,
-    optimizer_prompt_hash: str,
+    optimizer_manifest_hashes: dict[str, str],
     stop_reason: str,
     finished_at: str,
     formula: str | None,
     origin_accuracy: float | None,
     origin_composite_fitness: float | None,
+    framing: TaskDecomposition,
+    bench: BenchScore | None,
 ) -> PromptExport:
     """Project the round that crowned the winner into the artifact.
 
@@ -132,10 +140,11 @@ def build_prompt_export(
     That is the whole special-casing: one round shape in, values that differ, no second path.
     """
     fields = dict(winner.prompt_fields)
+    selected = next(iter(winner.selected_scores), None)
     # The operator's framing splices into `problem_description` at render, so the stored fields
     # alone re-render a prompt nothing was scored on.
     if winner.opt_sp is not None and (
-        spliced := dict(winner.opt_sp.render_fields()).get("problem_description")
+        spliced := dict(winner.opt_sp.target_fields(framing)).get("problem_description")
     ):
         fields["problem_description"] = spliced
     return PromptExport(
@@ -146,7 +155,7 @@ def build_prompt_export(
         cycle_id=cycle_id,
         dataset_name=dataset_name,
         dataset_hash=dataset_hash,
-        optimizer_prompt_hash=optimizer_prompt_hash,
+        optimizer_manifest_hashes=optimizer_manifest_hashes,
         stop_reason=stop_reason,
         finished_at=finished_at,
         prompt_fields=fields,
@@ -157,13 +166,14 @@ def build_prompt_export(
             composite_fitness=winner.composite_fitness,
             accuracy=winner.accuracy,
             n=winner.total,
-            matched_parent_lift=winner.matched_parent_lift,
-            matched_parent_lift_ci_lo=winner.matched_parent_lift_ci_lo,
-            matched_parent_lift_ci_hi=winner.matched_parent_lift_ci_hi,
+            reference_lift=selected.reference_lift if selected else None,
+            reference_lift_ci_lo=selected.reference_lift_ci_lo if selected else None,
+            reference_lift_ci_hi=selected.reference_lift_ci_hi if selected else None,
             ability=winner.ability,
             origin_accuracy=origin_accuracy,
             origin_composite_fitness=origin_composite_fitness,
         ),
+        bench=bench,
     )
 
 

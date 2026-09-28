@@ -52,7 +52,7 @@ export interface DendroRow {
   round: number;
   label: string;
   candidate_id: string;
-  is_winner: boolean;
+  is_selected: boolean;
   is_fork: boolean;
 }
 
@@ -80,8 +80,8 @@ export function dendrogram(
       candidateId: r.candidate_id,
       round: r.round,
       label: r.label,
-      isWinner: r.is_winner,
-      isElected: wasElected(r.is_winner, sizes.get(r.round) ?? 1),
+      isWinner: r.is_selected,
+      isElected: wasElected(r.is_selected, sizes.get(r.round) ?? 1),
       isFork: r.is_fork,
       i,
       xf: centers[i]!,

@@ -55,12 +55,12 @@ export interface DashboardCandidate {
   theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
   mean_fitness_ci_lo: number | null;
   mean_fitness_ci_hi: number | null;
-  matched_parent_accuracy: number | null;
-  matched_parent_composite: number | null;
-  matched_parent_lift: number | null;
-  matched_parent_lift_ci_lo: number | null;
-  matched_parent_lift_ci_hi: number | null;
-  is_winner: boolean;
+  reference_accuracy: number | null;
+  reference_composite: number | null;
+  reference_lift: number | null;
+  reference_lift_ci_lo: number | null;
+  reference_lift_ci_hi: number | null;
+  is_selected: boolean;
 }
 
 /** One scored sample as `dashboard.json` serves it — the rule `DashboardCandidate` states, */
@@ -132,12 +132,12 @@ export interface RoundSummaryCandidate {
   theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
   mean_fitness_ci_lo: number | null;
   mean_fitness_ci_hi: number | null;
-  matched_parent_accuracy: number | null;
-  matched_parent_composite: number | null;
-  matched_parent_lift: number | null;
-  matched_parent_lift_ci_lo: number | null;
-  matched_parent_lift_ci_hi: number | null;
-  is_winner: boolean;
+  reference_accuracy: number | null;
+  reference_composite: number | null;
+  reference_lift: number | null;
+  reference_lift_ci_lo: number | null;
+  reference_lift_ci_hi: number | null;
+  is_selected: boolean;
   is_leading: boolean;
 }
 
@@ -332,11 +332,12 @@ export interface ScoredCandidate {
   runtime_failures: RuntimeFailure[];
   elimination_context: unknown;
   degradation_context: unknown;
-  matched_parent_accuracy: number | null;
-  matched_parent_composite: number | null;
-  matched_parent_lift: number | null;
-  matched_parent_lift_ci_lo: number | null;
-  matched_parent_lift_ci_hi: number | null;
+  reference_id: string | null;
+  reference_accuracy: number | null;
+  reference_composite: number | null;
+  reference_lift: number | null;
+  reference_lift_ci_lo: number | null;
+  reference_lift_ci_hi: number | null;
   theta: number | null;
   theta_se: number | null;
   theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
@@ -354,17 +355,17 @@ export interface ScoreboardRow {
   total: number;
   escalation_aborted: boolean;
   invalid: boolean;
-  matched_parent_accuracy: number | null;
-  matched_parent_composite: number | null;
+  reference_accuracy: number | null;
+  reference_composite: number | null;
   mean_fitness_ci_lo: number | null;
   mean_fitness_ci_hi: number | null;
   theta: number | null;
   theta_se: number | null;
   theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
-  matched_parent_lift: number | null;
-  matched_parent_lift_ci_lo: number | null;
-  matched_parent_lift_ci_hi: number | null;
-  is_winner: boolean;
+  reference_lift: number | null;
+  reference_lift_ci_lo: number | null;
+  reference_lift_ci_hi: number | null;
+  is_selected: boolean;
 }
 
 /** An input/output pair used as a few-shot demonstration. */
@@ -385,10 +386,13 @@ export interface EvidenceGrounding {
 /** Identity + provenance — set once at creation, never mutated. */
 export interface IndividualLineage {
   id: string;
-  parent_id: string | null;
+  /** Every individual this one derives from — one for a mutation, several for a
+   * crossover; empty at the origin. A tree view hangs it under
+   * `parent_ids[0]`. */
+  parent_ids: string[];
   changes_description: string;
-  /** 'origin' / 'l1_generate' / 'l2_context' / 'l3_plan' / 'fork_seed' /
-   * 'campaign_origin'. */
+  /** `{manifest}:{node}` of the node that proposed it (`potter:l1_generate`);
+   * `origin` for an individual the bench minted. */
   source: string;
   evidence_grounding: EvidenceGrounding | null;
 }
@@ -410,7 +414,7 @@ export interface L1Layout {
   problem_description: string[];
 }
 
-/** The candidate's persistent frame — the three surfaces the escalation layers author */
+/** Potter's persistent frame, carried across every adoption. */
 export interface L2L3Memory {
   /** Four wound streams (validation/runtime/l2-guard/l3-guard) + sticky L3 note.
    * Rendered by dispatch-hub injections; absorbed by L2 next round. */
@@ -419,17 +423,33 @@ export interface L2L3Memory {
    * compose the L1 optimizer prompt. L2's primary lever for changing what
    * evidence L1 sees. */
   l1_layout: L1Layout;
-  /** Per-individual L1 optimizer prompt overrides keyed by the surface field name
-   * (``persona``, ``instruction``, …). L2 writes here to nudge L1 without
-   * rewriting the shared optimizer prompt. */
+  /** L1 optimizer prompt overrides keyed by the surface field name (``persona``,
+   * ``instruction``, …). L2 writes here to nudge L1 without rewriting the
+   * shared optimizer prompt. */
   l1_overrides: Record<string, unknown>;
-  /** Operator-authored task framing, frozen for the run: no layer's wire schema
-   * declares a field of it. ``upstream_context`` / ``downstream_context``
-   * splice around ``problem_description`` at render time. */
-  task_context: unknown;
+  /** Strategic frame written by ``l3_plan`` and read by every layer next round;
+   * persistent until the next L3 fire. Empty until L3 fires for the first
+   * time. */
+  plan: string;
 }
 
-/** Optimizer working state: prompt fields + lineage + L2/L3 memory. */
+/** Potter's payload: the memory the round ended on and the readouts only potter reads. */
+export interface PotterRoundState {
+  memory: L2L3Memory;
+  critique: unknown | null;
+  l1_yield: number;
+  l1_parse_failure: string | null;
+  axis_memory_peaked: string[];
+  optimizer_prompt_hashes: Record<string, string>;
+}
+
+/** ``{manifest, payload}`` — the one envelope every optimizer's state rides. */
+export interface OptimizerState {
+  manifest: 'potter';
+  payload: PotterRoundState;
+}
+
+/** The individual: prompt structure + lineage. */
 export interface OptSearchPoint {
   persona: string;
   task_intent: string;
@@ -438,12 +458,7 @@ export interface OptSearchPoint {
   thinking_style: string;
   answer_format: string;
   few_shot_examples: FewShotExample[];
-  /** Strategic frame written by ``l3_plan`` and read by every layer next round;
-   * persistent until the next L3 fire. Empty until L3 fires for the first
-   * time. */
-  plan: string;
   lineage: IndividualLineage;
-  memory: L2L3Memory;
 }
 
 /** Per-round outcome — and the round document itself. */
@@ -461,45 +476,29 @@ export interface RoundResult {
   not_attempted: number;
   unscored: number;
   deprecated: number;
-  escalation_signal: unknown | null;
-  matched_parent_accuracy: number | null;
-  matched_parent_composite: number | null;
-  matched_parent_lift: number | null;
-  matched_parent_lift_ci_lo: number | null;
-  matched_parent_lift_ci_hi: number | null;
   separable: boolean | null;
   ability: AbilityReading | null;
   prompt_fields: Record<string, unknown>;
   pipeline_params: Record<string, unknown> | null;
-  parent_accuracy: number | null;
   results: Record<string, unknown>[];
   all_candidate_results: Record<string, Record<string, unknown>[]>;
-  parent_results: Record<string, unknown>[];
+  reference_results: Record<string, Record<string, unknown>[]>;
   candidates_scored: number;
   electable_count: number;
   candidate_scores: ScoredCandidate[];
+  selected_labels: string[];
   evaluators: Record<string, number>;
-  l1_yield: number;
-  l1_parse_failure: string | null;
   overlap: OverlapReading | null;
   overlap_results: Record<string, Record<string, unknown>[]>;
   diagnostics: unknown | null;
-  critique: unknown | null;
   health: DegradationHealth | null;
   opt_sp: OptSearchPoint | null;
-  axis_memory_peaked: string[];
-  optimizer_prompt_hashes: Record<string, string>;
+  optimizer_state: OptimizerState;
   status: string;
   round_id: string;
-  /** Variants whose mutation was empty against the parent. */
-  l1_n_no_op: number;
-  /** Variants sig-equal to a sibling in the SAME population. */
-  l1_n_duplicate: number;
-  /** Variants re-proposing an idea an EARLIER round measured and lost. */
-  l1_n_repeat: number;
-  /** Rank-ordered display table — the crown first, then θ, then composite.
+  /** Rank-ordered display table — the selection first, then θ, then composite.
    * Derived, never stored: it cannot drift from `candidate_scores` the way a
-   * hand-built twin could. On a warm round rank 1 IS the winner, by
+   * hand-built twin could. On a warm round rank 1 IS the selection, by
    * construction; on a cold one no row carries a θ and the order falls back
    * to the composite it always had. */
   scoreboard: ScoreboardRow[];
@@ -624,7 +623,7 @@ export interface LiveDashboardState {
   session_id: string;
   at_offset: number;
   langfuse_trace_url: string | null;
-  state: 'init' | 'origin' | 'scoring' | 'between_samples' | 'between_candidates' | 'l1_generate' | 'l2_refining' | 'l3_replanning' | 'escalation' | 'stopped';
+  state: 'init' | 'origin' | 'proposing' | 'scoring' | 'between_samples' | 'between_candidates' | 'stopped' | 'l2_refining' | 'l3_replanning';
   state_since: string;
   declared_phase: 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
   run_phase: 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
@@ -767,9 +766,6 @@ export interface CellsResponse {
   name: string;
   scope: 'cycle' | 'campaign' | 'dataset';
   row_count: number;
-  /** Declared held-out test fold size (not materialized). The training-bank size is
-   * `row_count` above. */
-  split_test: number | null;
   /** The key `samples` are ranked by — the request's `order` when it named one,
    * else the dataset's `CampaignConfig.hard_sample_order`. Echoed so a client
    * that sent no override can label what it is showing without guessing the
@@ -967,6 +963,37 @@ export interface SpawnedBy {
   task: string;
 }
 
+/** One individual scored on the whole bench set under the campaign's formula. */
+export interface BenchReading {
+  /** The round whose selection this is; 0 is the origin. */
+  round: number;
+  /** The searchpoint scored — the archive's `prompt_fields_id`. */
+  sp_hash: string;
+  accuracy: number | null;
+  /** Under the campaign's formula — the number the headline reads. */
+  composite_fitness: number | null;
+  ci_lo: number | null;
+  ci_hi: number | null;
+  n_scored: number;
+  /** The archive run its bench rows were filed under. */
+  run_id: string;
+  /** Why the pass ended before its last bench row — a spend ceiling, a skip — or
+   * `None` when it scored every one. */
+  stopped: string | null;
+}
+
+/** The headline: the selection and the origin, scored on a bench set no optimizer node read. */
+export interface BenchScore {
+  bench_size: number;
+  origin: BenchReading;
+  selected: BenchReading;
+  /** `selected` over `origin` on the bench rows both scored, paired per row; `None`
+   * below two shared rows, and 0.0 where the origin is the selection. */
+  lift: number | null;
+  lift_ci_lo: number | null;
+  lift_ci_hi: number | null;
+}
+
 export interface CycleListEntry {
   /** Campaign the cycle belongs to */
   campaign_id: string;
@@ -992,7 +1019,13 @@ export interface CycleListEntry {
    * this, none re-derive it. 'checkin' wins first (the campaign hasn't run);
    * 'terminal' pairs with `status` for the reason label. */
   run_phase: 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
+  /** The optimizer's own selection score — what it KEPT, read on the rows that
+   * chose it. Never the headline; `bench_score` is. */
   best_accuracy: number | null;
+  /** The headline: the selected result and the origin scored on the held-out bench
+   * set under the campaign's formula. Null until the cycle ends, and on a
+   * campaign whose `dataset_split` holds nothing out. */
+  bench_score: BenchScore | null;
   /** Round 0's accuracy — the origin's measurement, derived from rounds[] (no
    * stored copy). Null until round 0 lands. */
   origin_accuracy: number | null;
@@ -1432,9 +1465,11 @@ export interface LineageNode {
   kind: 'course' | 'candidate';
   /** Course: the cycle_id. Candidate: the searchpoint id minted at L1/origin. */
   id: string;
-  /** The candidate this node descends from; null only at the true root. A course
-   * carries the same edge its own C0 carries. */
-  parent_id: string | null;
+  /** Every candidate this node derives from — one for a mutation, several for a
+   * crossover; empty only at the true root. Lineage is a DAG; this tree hangs
+   * the node under `parent_ids[0]`. A course carries the same edge its own C0
+   * carries. */
+  parent_ids: string[];
   /** `C{round}.{n}` on the campaign's ONE timeline: this course's own candidates
    * keep their minted label; an attempt a fork contributed takes the next
    * free index of its round, by mint time — UNLESS the cut superseded, where
@@ -1471,19 +1506,19 @@ export interface LineageNode {
   accuracy: number | null;
   composite_fitness: number | null;
   /** Candidate: minted | measured | invalid — never 'winner' (that rides
-   * `is_winner`). `invalid` was rejected before it cost a sample, so it
+   * `is_selected`). `invalid` was rejected before it cost a sample, so it
    * carries no accuracy: its stored 0.0 is synthetic and reads as getting
    * every answer wrong. Course: `index.json::status`, the same StopReason
    * value `/cycles` serves under this same name. Not `dashboard.json::state`,
    * which names the fine-grained ACTIVITY phase — a different axis, and one
    * word may not serve both. */
   status: string;
-  /** This candidate's ROUND has held its election. The complement `is_winner`
+  /** This candidate's ROUND has held its election. The complement `is_selected`
    * cannot supply: a round that HELD crowned nobody, so every bar in it reads
-   * `is_winner: false` exactly as a round still scoring does — and only this
-   * says whether an uncrowned bar lost or has not been judged yet. False on a
-   * course, which is not a round, and on a round halted before it stood (a
-   * holed panel). */
+   * `is_selected: false` exactly as a round still scoring does — and only
+   * this says whether an uncrowned bar lost or has not been judged yet. False
+   * on a course, which is not a round, and on a round halted before it stood
+   * (a holed panel). */
   election_held: boolean;
   /** Elected this round. Stamped at the ELECTION, which is the last thing scoring
    * does — so it lands a whole `l1_critique` call before the round closes,
@@ -1491,7 +1526,7 @@ export interface LineageNode {
    * False where no election has been held (still scoring, or halted on a
    * holed panel) and on a round that held: those two are told apart by the
    * election record, not by this flag. */
-  is_winner: boolean;
+  is_selected: boolean;
   /** Difficulty-adjusted Rasch ability the election ranked on — what explains a
    * lower-accuracy winner. Null outside the round's election fit. */
   theta: number | null;
@@ -1515,9 +1550,9 @@ export interface LineageNode {
    * spanning 0 means the round could not separate this candidate from its
    * parent. `None` below two shared cells, outside the election fit, and on
    * any round that has not elected yet. */
-  matched_parent_lift: number | null;
-  matched_parent_lift_ci_lo: number | null;
-  matched_parent_lift_ci_hi: number | null;
+  reference_lift: number | null;
+  reference_lift_ci_lo: number | null;
+  reference_lift_ci_hi: number | null;
   scored_samples: number | null;
   expected_samples: number | null;
   /** Of `scored_samples`, how many were replayed from the MeasurementArchive rather
@@ -2093,8 +2128,9 @@ export interface CycleSeed {
    * campaign-from-origin seed. */
   optimizer_narrowing: Record<string, NodeSearchNarrowing>;
   config_overrides: ConfigOverrides;
-  /** C0 lineage provenance — 'fork_seed' | 'campaign_origin'; empty when the seed
-   * carries no origin (an L2/L3 rebase replays its own). */
+  /** Which act seeded C0 — 'fork_seed' | 'campaign_origin', naming its lineage's
+   * `changes_description`; empty when the seed carries no origin (an L2/L3
+   * rebase replays its own). */
   origin_source: string;
 }
 
@@ -2108,7 +2144,10 @@ export interface OriginGateDecisionPayload {
 export type RunPhase = 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
 
 // The fine-grained activity axis, `dashboard.json::state` (domain/phases.py::DashboardState).
-export type DashboardState = 'init' | 'origin' | 'scoring' | 'between_samples' | 'between_candidates' | 'l1_generate' | 'l2_refining' | 'l3_replanning' | 'escalation' | 'stopped';
+export type DashboardState = 'init' | 'origin' | 'proposing' | 'scoring' | 'between_samples' | 'between_candidates' | 'stopped';
+
+// Potter's own activities on that axis (domain/phases.py::PotterDashboardState).
+export type PotterDashboardState = 'l2_refining' | 'l3_replanning';
 
 // Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).
 export type CommandKind = 'archive-campaign' | 'cancel-queued-run' | 'change-run-limits' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-campaign-label' | 'set-concurrent-cycles' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'unarchive-campaign' | 'verify-candidate';
@@ -2126,11 +2165,11 @@ export const STOP_REASON_LABELS: Record<string, string> = {
   'lives_exhausted': 'Out of lives',
   'hard_cap_reached': 'Round cap',
   'diag_complete': 'Diagnostic complete',
-  'l3_patience_exhausted': 'Converged (L3 patience)',
+  'converged': 'Optimizer converged',
   'rebased_to_fork': 'Rebased to fork',
   'paused': 'Paused',
   'panel_cut': 'Panel cut by a declared bound',
-  'escalation_abort': 'Escalation abort',
+  'optimizer_abort': 'Optimizer abort',
   'spend_budget': 'Spend budget reached',
   'token_budget': 'Token budget reached',
   'origin_gate': 'Origin gate (unhealthy origin)',
@@ -2172,11 +2211,11 @@ export const STOP_REASON_OUTCOMES: Record<string, StopOutcome> = {
   'lives_exhausted': 'success',
   'hard_cap_reached': 'success',
   'diag_complete': 'success',
-  'l3_patience_exhausted': 'success',
+  'converged': 'success',
   'rebased_to_fork': 'success',
   'paused': 'paused',
   'panel_cut': 'paused',
-  'escalation_abort': 'halted',
+  'optimizer_abort': 'halted',
   'spend_budget': 'halted',
   'token_budget': 'halted',
   'origin_gate': 'halted',

@@ -36,16 +36,16 @@ function liftsOf(rounds: RoundSummary[]): Lift[] {
     const c = leadingArm(r);
     if (
       !c ||
-      c.matched_parent_lift === null ||
-      c.matched_parent_lift_ci_lo === null ||
-      c.matched_parent_lift_ci_hi === null
+      c.reference_lift === null ||
+      c.reference_lift_ci_lo === null ||
+      c.reference_lift_ci_hi === null
     )
       continue;
     out.push({
       round: r.round,
-      lift: c.matched_parent_lift,
-      lo: c.matched_parent_lift_ci_lo,
-      hi: c.matched_parent_lift_ci_hi,
+      lift: c.reference_lift,
+      lo: c.reference_lift_ci_lo,
+      hi: c.reference_lift_ci_hi,
       label: c.label,
       separable: r.separable,
     });

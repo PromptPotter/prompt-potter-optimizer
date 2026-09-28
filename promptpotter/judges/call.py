@@ -37,11 +37,8 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
 
-from promptpotter.application.optimization.dispatch.llm_call.heartbeat import (
-    heartbeat,
-    waiting_on,
-)
 from promptpotter.config.settings import NO_RESULT
+from promptpotter.infrastructure.llm.heartbeat import heartbeat, waiting_on
 from promptpotter.infrastructure.llm.registry import get_llm_client
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.spend_book import CallLabel

@@ -50,7 +50,6 @@ class CandidateOutcome(StrEnum):
     SKIPPED_VALIDATION = "skipped_validation"
     SCORED = "scored"
     LEADER_LOCKED = "leader_locked"
-    ESCALATED = "escalated"
 
 
 @dataclass(frozen=True)

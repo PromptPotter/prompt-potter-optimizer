@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-from promptpotter.application.optimization.pobb.classification import is_deprecated, scoreable_rows
+from promptpotter.application.scoring.classification import is_deprecated, scoreable_rows
 from promptpotter.application.scoring.formula.compiler import CELL_INTRINSIC_NAMES
 from promptpotter.domain.pipeline_schema import NodeType
 from promptpotter.domain.scoring import (

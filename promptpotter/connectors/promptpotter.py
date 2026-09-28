@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -14,6 +15,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
 )
 from promptpotter.application.runner.inner import ruler
 from promptpotter.application.runner.inner.spawn import inner_cell_envelope_s, run_inner_cycle
+from promptpotter.application.runner.inner.tasks import InnerTasks
 from promptpotter.application.scoring import metrics, selection
 from promptpotter.config.prompt_blocks import block_library
 from promptpotter.connectors.protocol import Connector, InProcessWorkload
@@ -24,6 +26,10 @@ from promptpotter.domain.l4.proxies import INNER_RESULT_KEY, OUTER_PROXY_KEYS
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import stable_hash
+from promptpotter.infrastructure.store.dataset_access import (
+    DatasetAccessError,
+    readable_dataset_dir,
+)
 from promptpotter.infrastructure.store.io import read_yaml, read_yaml_optional
 from promptpotter.shared.hashing import module_source_digest
 
@@ -33,6 +39,8 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     import httpx
+
+    from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +120,7 @@ def _check_prompt_closure() -> None:
 
 
 def _identity_config(
-    dataset_dir: Path, inner_tasks: Mapping[str, Any] | None
+    stores: Stores, dataset_dir: Path, inner_tasks: Mapping[str, Any] | None
 ) -> dict[str, dict[str, Any]]:
     """The inner optimizer's effective-revision fingerprint: what the inner optimizer nodes resolve
     to, the per-node layouts, the panel and estimator source, and the inner benchmark's own config.
@@ -127,12 +135,13 @@ def _identity_config(
     # `config` only, deliberately. `available_models` is a permission list and
     # `optimizer.param_allowed_values` bounds what L1 may PROPOSE — neither changes what the
     # origin does, so widening either must not void a panel that cost an hour to measure.
-    # The benchmark resolves as a sibling of the outer dataset dir, which is how every layout
-    # ships it (repo `datasets/`, staged `assets/benchmarks/`, tenant root); an unresolvable
-    # one hashes as ``None``, which is a distinct input from any real config rather than a
-    # silent match.
+    # The benchmark resolves through `readable_dataset_dir`, the dir the spawn runs and the ruler
+    # grades; an unresolvable one hashes as ``None``, a distinct input from any real config.
     benchmark = inner_tasks.get("inner_benchmark")
-    benchmark_dir = dataset_dir.parent / str(benchmark) if benchmark else None
+    benchmark_dir: Path | None = None
+    if benchmark:
+        with contextlib.suppress(DatasetAccessError):
+            benchmark_dir = readable_dataset_dir(stores, str(benchmark))
     inner_pipeline = read_yaml_optional(benchmark_dir / "pipeline.yaml") if benchmark_dir else None
     inner_campaign = read_yaml_optional(benchmark_dir / "campaign.yaml") if benchmark_dir else None
     inner_spec = {
@@ -215,18 +224,21 @@ class PromptPotterSession:
 # ---------------------------------------------------------------------------
 
 
+def _resolve_panel(panel: Mapping[str, Any]) -> dict[str, Any]:
+    """The panel through its type, ``axes:`` already expanded into ``tasks:``. Only what was
+    declared survives the dump, so a field that gains a default re-keys no banked cell."""
+    return InnerTasks.model_validate(panel).model_dump(mode="json", exclude_unset=True)
+
+
 def _extract_experiment(
     experiment_data: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Inner-benchmark tasks → ``(queries, index_terms)``. **There is no label to match in L4** —
     the cell is graded by ``compute_outer_proxies``, so ``ground_truth`` is ``None`` and says so."""
-    tasks = experiment_data.get("tasks", [])
-    queries: list[dict[str, Any]] = []
-    for t in tasks:
-        tid = t.get("id")
-        if not tid:
-            continue
-        queries.append({"query": tid, "ground_truth": None, "source_pin": dict(t)})
+    queries = [
+        {"query": t["id"], "ground_truth": None, "source_pin": dict(t)}
+        for t in experiment_data["tasks"]
+    ]
     return queries, []
 
 
@@ -267,6 +279,7 @@ CONNECTOR = Connector(
     # The outer "samples" are the inner tasks — read from this file in the dataset
     # config dir and fed through ``extract_experiment`` at init (no CSV table).
     experiment_file="inner_tasks.yaml",
+    resolve_experiment=_resolve_panel,
     identity_config=_identity_config,
     completion_check=_check_prompt_closure,
 )

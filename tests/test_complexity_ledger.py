@@ -113,7 +113,22 @@ LEDGER_BASELINE = {
     # per-sample dot series deleted from `archive_queries.py`) and `application/scoring/cells.py`
     # (one cell assembled into its trace at read time). A cell had three shapes and an opaque `ord`
     # string encoding its candidate; the browser rebuilt it per surface, four renderings of a row.
-    "modules": 361,
+    # +1: `domain/optimizer_state.py` — the `{manifest, payload}` envelope a round carries and
+    # potter's typed payload under it. It is what takes L2/L3 memory and the plan OFF the
+    # individual; neither `opt_search_point.py` (the individual) nor `results.py` (the round) can
+    # host a type both import without re-coupling state to the individual.
+    # +1: `shared/plugin_registry.py` — the one entry-point loader. Connectors and judges each held a
+    # hand copy of it (built-ins, then plugins, no shadowing, a broken plugin fatal) and the two
+    # had already drifted on label format and key rule; optimizer node implementations are the
+    # third group. In `shared/` because no one of the three groups owns the others.
+    # +1: `domain/bench.py` — the bank's partition into search pool, bench set and demo pool, and
+    # the one pure function every seam that draws or hashes the search pool calls. It folds into
+    # no neighbour: `sample.py` is one row, `campaign_config.py` may import no rows at all, and the
+    # identity, the runner and the diagnostics each partitioning by hand is three rules to align.
+    # +1: `application/runner/bench.py` — the bench's pass and the headline it composes. Apart from
+    # `entry.py` because the pass is a unit a later optimizer's bench reuses whole, and apart from
+    # `scoring/` because it is orchestration: it picks rows, a spend bucket and when to grade.
+    "modules": 365,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     "init_files": 53,
@@ -128,7 +143,7 @@ LEDGER_BASELINE = {
     # one; `Estimand.GATE` because it decides what counts as a correct answer.
     # +1: `CampaignConfig.accuracy_ceiling` — the accuracy a best-reachable prompt would score on
     # this dataset at this model, which `rounds_to_ceiling` counts rounds against. It folds into no
-    # neighbour: `dataset_split` is a fold SIZE and `headline_metric` picks which existing number
+    # neighbour: `dataset_split` partitions the bank and `headline_metric` picks which existing number
     # renders, while this one is a claim no code can derive — only the dataset owner holds it, and
     # the clock reported nothing on any benchmark until a field existed to say it. `Scope.POLICY` /
     # `Estimand.DISPLAY`: it moves no gate, no selection and no stop.
@@ -159,7 +174,9 @@ LEDGER_BASELINE = {
     # -1: `TASK_CONTEXT_OVERRIDES` — the L1 context slot it keyed is gone; target text has one
     # carrier, `prompt_fields_updates`.
     "settings_const": 13,
-    "opt_search_point_fields": 39,
+    # -24: `memory` (wounds, l1_layout, l1_overrides, task_context and the wound subtree) and
+    # `plan` left the individual — optimizer state rides `optimizer_state`, framing the campaign.
+    "opt_search_point_fields": 15,
     # +1: `theta_caveat` on `ScoredCandidate` and `ScoreboardRow` — the per-ARM half of
     # `ThetaCaveat`, so a floor-pinned arm's θ is disclaimed on the row it invalidates rather
     # than only on the round's scale reading. A served state, not a derived one: the rows a
@@ -205,7 +222,15 @@ LEDGER_BASELINE = {
     # one. The walk rebuilds each model now; nothing was added.
     # +1: `ScoredCandidate.run_id` — the archive run a report's rows were filed under, which makes
     # `(run_id, sample_id)` a cell's address. `sp_hash` names the configuration, not the reading.
-    "cycle_result_fields": 231,
+    # -5: the round envelope is optimizer-neutral. Potter's readouts (critique, L1 yield and parse
+    # failure, axis peaks, prompt hashes) moved under `optimizer_state.payload`, counted there once;
+    # the round-level parent floor, the winner id/label and `escalation_signal` (never set: every
+    # escalation target stops the arm or locks the leader) left for `selected_labels`, and each arm
+    # names its own `reference_id`.
+    # +22: `CycleResult.bench` — the headline, a `BenchScore` of two `BenchReading`s and the paired
+    # lift. Folds into no round field: every one of those is read on the rows that chose the
+    # winner, and this is the one reading taken on rows no optimizer node saw.
+    "cycle_result_fields": 248,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
@@ -217,7 +242,10 @@ LEDGER_BASELINE = {
     # know which fields a nested description dict named; one key per path names its own.
     # -1: `evidence/read.py::_coerce_state(raw: Any)` is GONE with the overlay-keyed edit identity
     # it existed to canonicalise. `sp_hash` is a stamped string, so nothing coerces a nested dict.
-    "any_params": 48,
+    # -1: `L2L3Memory._coerce_task_context(v: Any)` — the framing no longer rides the memory.
+    # -1: `judges/__init__.py::_validate(j: Any)` takes `object` like the connector validator,
+    # the signature `shared/plugin_registry.py::load_registry` asks of every group.
+    "any_params": 46,
     # +1: `results.py::is_floor_pinned(rows: Sequence[Mapping[str, Any]])`, the same signature as
     # `measured_cells` and `is_answer_collapsed` beside it — a round row read off disk is a plain
     # mapping, so a narrower annotation here would be a claim the callers cannot honour.
@@ -253,7 +281,9 @@ LEDGER_BASELINE = {
     # node config already is, served as the panel's Details tab.
     # -2: `TaskDecomposition.merge(overrides)` and `CandidateProposal.prompt_fields_updates` — the
     # context slot's only writer, and a copy of the delta the child OSP already carries.
-    "domain_any_maps": 89,
+    # -1: `TaskDecomposition.coerce(v: … | dict[str, Any] | None)` — its one caller was the
+    # memory's field validator, and the framing no longer rides the memory.
+    "domain_any_maps": 88,
     "models_lax": 3,
     "prompt_string_fields": 6,
     "injections": 32,
@@ -454,7 +484,21 @@ LEDGER_BASELINE = {
     # +1: four readers disagreed whether "" was an edit, so a blank L1 answer skipped the repair
     # re-ask and was scored as an arm. Both boundaries now read one
     # `candidate_delta`, pinned by test_numerics § 9.
-    "test_functions": 204,
+    # -2: adoption carrying the wound ledger and the plan never leaking into the target render —
+    # both are structural now: memory is the cycle's and the plan is not a field of the individual.
+    # +1: a tenant copy of the inner benchmark hashed into the L4 fingerprint by one path and run
+    # by an inner cell through another, so outer rows replay under a config never run
+    # (test_integrity § 1).
+    # +1: deepening a rebased inner cell reopened its retired root, and the outer round scored a
+    # trajectory other than the one banked (test_resume).
+    # +1: a bench or demo row reaching a round's panel or an archive view the optimizer reads
+    # lets it grade its own exam — every number renders, only higher (test_integrity § 3).
+    # +1: a search free to spend the whole ceiling leaves the bench pass refused, so a campaign
+    # ending on its budget reports no headline (test_numerics § 10).
+    # +1: a prompt-length term read off the interpolated prompt charges each cell for its own
+    # query, so arms on different subsets rank by the cells they drew; read without the shots it
+    # exempts what CAPO's term prices. Every number renders (test_numerics § 2).
+    "test_functions": 207,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -544,7 +588,12 @@ LEDGER_BASELINE = {
     # per-sample aggregates and `DashboardCandidate.run_id`, NET of the deleted
     # `DatasetPreviewResponse` / `MeasurementSeriesResponse` / `SampleSeries` / `MeasurementDot`:
     # two reads that had to be kept aligned by index become one.
-    "served_fields": 645,
+    # -1: `CellsResponse.split_test` — a declared fold size nothing materialized, served only to
+    # print a footer. The bank's real partition is `bank_partition.json`, per cycle.
+    # +16: `CycleListEntry.bench_score` with `BenchScore` and `BenchReading` — the headline on the
+    # read the sidebar already makes. `best_accuracy` beside it is the optimizer's own reading on
+    # the rows that chose it, so one field cannot carry both without grading a search by itself.
+    "served_fields": 660,
 }
 
 

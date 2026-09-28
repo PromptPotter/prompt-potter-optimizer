@@ -174,7 +174,7 @@ function targetAt(
 export function bestObserveTarget(dash: DashboardSnapshot | null): ObserveTarget | null {
   const rounds = sortedRounds(dash).filter(roundHasCandidates).reverse();
   for (const r of rounds) {
-    const idx = r.candidates.findIndex((c) => c.is_winner);
+    const idx = r.candidates.findIndex((c) => c.is_selected);
     const w = idx >= 0 ? r.candidates[idx] : null;
     if (!w?.candidate_id) continue;
     return targetAt(

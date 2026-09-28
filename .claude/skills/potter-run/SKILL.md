@@ -79,7 +79,7 @@ owned by `/potter-self`.
 | `pause` | Ask a RUNNING cycle to stop at its next checkpoint — resumable, and the same dispatcher verb the webapp control fires. This is the HALT this skill keeps asking for. |
 | `verify` | Re-score one candidate on more samples and record the result WITHOUT touching the cycle. The sanctioned way to settle a candidate — never re-ask a cell it already answered. |
 | `evidence` | Read any set of campaigns together: roster, comparability, replicates, the variance split, resolving power, and (behind `--ranking`) which edits beat their own origin. Zero spend, writes nothing. |
-| `compact-archive <mode>` | Reclaim the measurement archive: `inventory` COUNTS it first — runs, cells, bytes and replay rate by dataset, label and age, and the read that sizes every other mode. Then `compact` moves the fields nothing reads out of candidate runs into a gzip store beside them, `restore` puts them back, `purge-cold` deletes that store. Dry-run by default; `--dataset` scopes it. `origin` / `round_parent` runs are never touched. **`purge-cold --apply` is the one irreversible verb in this table** — the rows it drops are paid LLM spend. Refuses outright while any cycle can still append. |
+| `compact-archive <mode>` | Reclaim the measurement archive: `inventory` COUNTS it first — runs, cells, bytes and replay rate by dataset, label and age, and the read that sizes every other mode. Then `compact` moves the fields nothing reads out of candidate runs into a gzip store beside them, `restore` puts them back, `purge-cold` deletes that store. Dry-run by default; `--dataset` scopes it. `origin` / `parent` runs are never touched. **`purge-cold --apply` is the one irreversible verb in this table** — the rows it drops are paid LLM spend. Refuses outright while any cycle can still append. |
 
 **Every ending now states its own next verb** (`STOP_REASON_INFO::next_step`), so read the run's
 readout rather than a ladder here. What it cannot tell you is the two ways a raise silently fails:
@@ -172,12 +172,12 @@ against a parent that also wins those rows it carries no information.
 ruler — `headline_metric` is DISPLAY config, never what the gate compares. They can legitimately
 disagree without either being broken. Read both, name both.
 
-**A number can be set by where you STOPPED — ask what CHOSE the rows.** `matched_parent_*` strata
+**A number can be set by where you STOPPED — ask what CHOSE the rows.** `reference_*` strata
 are defined by the *parent's own* grades, so on a truncated prefix the score is fixed by
 construction rather than by the data (one HIT-stratum slot every 4th position ⇒ a cut arm reports
 `⌊n/4⌋/n`). `scoring/metrics.py::matched_parent_stats` now returns `None` unless the candidate
 measured every cell its parent did, so a cut arm reports where it stopped plus its θ, never a standing.
-**A `matched_parent_accuracy` on a row whose `scored_samples < expected_samples` is a pre-fix
+**A `reference_accuracy` on a row whose `scored_samples < expected_samples` is a pre-fix
 artifact — do not quote it, and do not compare it across arms.**
 
 What the ordering does **not** do is starve the posterior — `p_best` moves across most of the

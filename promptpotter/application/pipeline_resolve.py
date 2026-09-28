@@ -169,6 +169,7 @@ def resolve_pipeline_config_params(
     judges: Mapping[str, JudgeSpec] | None = None,
     *,
     experiment: Mapping[str, Any] | None,
+    stores: Stores | None,
     workspace: Path | None,
     base_config: Mapping[str, Any] | None = None,
     provenance: MutableMapping[str, dict[str, ParamSource]] | None = None,
@@ -191,6 +192,7 @@ def resolve_pipeline_config_params(
         active,
         dataset_dir,
         schema,
+        stores=stores,
         judges=judges,
         experiment=experiment,
         provenance=provenance,
@@ -320,6 +322,7 @@ def apply_identity_layer(
     dataset_dir: Path | None,
     schema: PipelineSchema,
     *,
+    stores: Stores | None,
     judges: Mapping[str, JudgeSpec] | None,
     experiment: Mapping[str, Any] | None,
     provenance: MutableMapping[str, dict[str, ParamSource]] | None = None,
@@ -327,11 +330,8 @@ def apply_identity_layer(
     # Identity contributions LAST and unoverridable: what a measurement was taken UNDER that no
     # operator wrote — the connector's and the judges', ONE channel, or a second place a fact can
     # enter the archive key.
-    identity = {
-        node: cfg
-        for node, cfg in _identity_contributions(dataset_dir, experiment, judges, active).items()
-        if node in active
-    }
+    contributions = _identity_contributions(stores, dataset_dir, experiment, judges, active)
+    identity = {node: cfg for node, cfg in contributions.items() if node in active}
     if identity:
         pipeline_params = apply_node_overlay(
             pipeline_params, identity, schema, source="identity", provenance=provenance
@@ -354,6 +354,7 @@ def experiment_outside_run(dataset_dir: Path | None) -> Mapping[str, Any] | None
 
 
 def _identity_contributions(
+    stores: Stores | None,
     dataset_dir: Path | None,
     experiment: Mapping[str, Any] | None,
     judges: Mapping[str, JudgeSpec] | None,
@@ -370,7 +371,9 @@ def _identity_contributions(
     if dataset_dir is not None:
         connector = _dataset_connector(dataset_dir)
         if connector is not None and connector.identity_config is not None:
-            out.update(connector.identity_config(dataset_dir, experiment))
+            if stores is None:
+                raise ValueError(f"{dataset_dir}: its connector's identity needs the stores")
+            out.update(connector.identity_config(stores, dataset_dir, experiment))
     if judges and active:
         # Attached to the TERMINAL step: a judge grades the pipeline's answer, and that is the
         # node the answer comes out of. Any stable node would move the hash, but this one says
@@ -825,6 +828,7 @@ def resolve_pipeline_for_draft(
         m.active,
         None,
         m.filtered,
+        stores=None,
         judges=m.cfg.judges,
         experiment=None,
         provenance=m.provenance,
@@ -880,6 +884,7 @@ def resolve_pipeline_for_campaign(
         m.active,
         m.dataset_dir,
         m.filtered,
+        stores=stores,
         judges=m.cfg.judges,
         # WHAT THE ADDRESSED CYCLE MEASURED, on the preference `_campaign_merge` reads the
         # declaration by and for a sharper reason: this feeds the instrument fingerprint, so
@@ -1059,6 +1064,7 @@ def configure_and_apply_pipeline(
         filtered,
         judges=campaign_config.judges,
         experiment=session.backend_client.workload.experiment,
+        stores=session.store,
         workspace=session.store.base_dir,
     )
 

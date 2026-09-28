@@ -149,7 +149,7 @@ export interface RayHead {
   target: CyclePath | null;
 }
 
-/** Every long await heartbeats (`dispatch/llm_call/heartbeat.py`), so a wedged run reads `running`
+/** Every long await heartbeats (`infrastructure/llm/heartbeat.py`), so a wedged run reads `running`
  *  forever. `wedged` is display-only (I6); a held `gate` heartbeats with no progress legitimately. */
 export function rayHead(
   steps: readonly RayStep[],

@@ -100,7 +100,7 @@ export function fitnessTrend(
         ? r.ability.theta
         : null,
     // Every arm of one round measured the same draw.
-    n: r.candidates.find((c) => c.is_winner)?.scored_samples ?? null,
+    n: r.candidates.find((c) => c.is_selected)?.scored_samples ?? null,
   }));
   const best: number[] = [];
   let runningBest = 0;

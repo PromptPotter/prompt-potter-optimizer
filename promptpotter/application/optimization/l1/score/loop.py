@@ -10,7 +10,6 @@ from promptpotter.application.optimization.l1.score.candidate import (
     conclude_candidate,
     open_candidate,
 )
-from promptpotter.application.optimization.l1.score.signal_effect import CandidateOutcome
 from promptpotter.application.optimization.pobb.checks import (
     PoBBCheck,
     PoBBConfig,
@@ -53,17 +52,11 @@ async def score_population(
     pobb_config: PoBBConfig,
     round_num: int = 0,
     decisions: list[ResumeCheckpointRecord] | None = None,
-    l1_diversity: float = 1.0,
-) -> tuple[
-    dict[str, list[QueryMeasurement]],
-    list[ScoredCandidate],
-    EscalationSignal | None,
-]:
+) -> tuple[dict[str, list[QueryMeasurement]], list[ScoredCandidate]]:
     n = len(population)
 
     all_candidate_results: dict[str, list[QueryMeasurement]] = {}
     candidate_scores: list[ScoredCandidate] = []
-    escalation_signal: EscalationSignal | None = None
 
     def _pobb_backfill(sp: JobSearchPoint, sample: Sample, prior_id: str) -> Backfill:
         """Measure a PRIOR on one cell for paired fill-in — so it fires NO per-sample display
@@ -73,11 +66,7 @@ async def score_population(
             sp,
             [sample],
             cycle.session,
-            label="pobb_backfill",
-            # A backfill catches a PRIOR up on a sample the current candidate reached; it
-            # feeds the paired posterior, not that prior's own report. Its opt_sp-aware
-            # evaluators would describe optimizer state from the round it was scored in.
-            opt_sp=None,
+            label=MeasurementRole.BACKFILL,
             axes=cycle.axes,
             on_sample_scored=None,
             on_sample_starting=None,
@@ -153,17 +142,18 @@ async def score_population(
         opt_sp_c.to_job_search_point(
             base_pipeline_params=effective_pipeline_params[idx],
             schema=cycle.session.pipeline_schema,
+            framing=cycle.framing,
         )
         for idx, opt_sp_c in enumerate(population)
     ]
     skips = _skips_on_record(cycle.session.state.ledger, round_num)
     walks: list[Walk | None] = []
-    for idx, opt_sp_c in enumerate(population):
+    for idx in range(n):
         # The candidates before this one that are still being walked may yet become priors.
         ahead = _PriorsAhead(elim_check, list(zip(ids, walks, strict=False)))
         walk = open_candidate(
             idx=idx,
-            opt_sp_c=opt_sp_c,
+            proposal=proposals[idx],
             candidate_sp=sps[idx],
             cycle=cycle,
             dataset=dataset,
@@ -171,7 +161,6 @@ async def score_population(
             round_num=round_num,
             callbacks=callbacks,
             checks=[*(degradation_checks or []), ahead],
-            l1_diversity=l1_diversity,
         )
         if walk is not None:
             walk.skip_at = skips.get(ids[idx])
@@ -202,11 +191,10 @@ async def score_population(
         )
 
     def on_decided(idx: int) -> bool:
-        nonlocal escalation_signal
-        opt_sp_c = population[idx]
+        proposal = proposals[idx]
         cr_result = conclude_candidate(
             idx=idx,
-            opt_sp_c=opt_sp_c,
+            proposal=proposal,
             candidate_sp=sps[idx],
             walk=walks[idx],
             pipeline_overlay=proposals[idx].pipeline_overlay or None,
@@ -217,26 +205,18 @@ async def score_population(
             decisions=decisions,
             candidate_scores=candidate_scores,
             round_num=round_num,
-            l1_diversity=l1_diversity,
         )
         all_candidate_results[ids[idx]] = cr_result.results
         if cr_result.runtime_failure is not None:
-            opt_sp_c.memory.wounds.runtime_failures = [
-                *opt_sp_c.memory.wounds.runtime_failures,
-                cr_result.runtime_failure,
-            ]
+            proposal.runtime_failures = [*proposal.runtime_failures, cr_result.runtime_failure]
         candidate_scores.append(cr_result.report)
         callbacks.on_candidate_scored(idx, n, cr_result.report.model_dump())
-
-        if cr_result.outcome == CandidateOutcome.ESCALATED:
-            escalation_signal = cr_result.escalation_signal
-            return True  # true degradation — abort remaining candidates
         return False
 
     await run_walks(
         walks, cycle.session, backfills=elim_check, on_turn=on_turn, on_decided=on_decided
     )
-    return all_candidate_results, candidate_scores, escalation_signal
+    return all_candidate_results, candidate_scores
 
 
 def _skips_on_record(ledger: CycleEventLog | None, round_num: int) -> dict[str, int]:

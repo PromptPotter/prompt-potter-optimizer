@@ -147,7 +147,7 @@ def _parent(
     every arm's row-derivable evaluators on the selected cells while the carried scalars stay at
     their full-set values, so every challenger moves and the bar it must clear does not. A round
     could flip for no reason but the mask's asymmetry, and it renders exactly like a real
-    divergence. Re-derived from ``parent_results`` — the parent's own rows on THIS round's
+    divergence. Re-derived from ``reference_results`` — the parent's own rows on THIS round's
     subset — instead.
 
     A round with no such rows cannot answer on a subset at all — round 0 has no parent. Empty
@@ -156,7 +156,12 @@ def _parent(
     """
     if samples is None:
         return carried
-    rows = [r for r in round_file["parent_results"] if r.get("sample_id") in samples]
+    rows = [
+        r
+        for reference in round_file["reference_results"].values()
+        for r in reference
+        if r.get("sample_id") in samples
+    ]
     if not rows or not carried[0]:
         return ({}, None)
     # The snapshot supplies the schema/opt_sp-bound names, the rows the derivable ones — the same
@@ -182,7 +187,7 @@ def _mask_candidate(
         evaluators=evaluators,
         accuracy=accuracy,
         n_scored=n_scored,
-        is_winner=bool(winner_label) and sc.label == winner_label,
+        is_selected=bool(winner_label) and sc.label == winner_label,
         is_eligible=_mask_eligible(sc, rows),
         abort=_abort_contributor(sc),
     )
@@ -222,7 +227,7 @@ def load_mask_record(
         edges[cid] = _cycle_edge(index)
         decisions[cid] = scan_ledger_decisions(CycleLayout(cdir).ledger) if with_replay else {}
         crowns[cid] = {
-            rnd: election.winner_label
+            rnd: next(iter(election.selected_labels), "")
             for rnd, election in scan_ledger_elections(CycleLayout(cdir).ledger).items()
         }
         by_round: dict[int, dict[str, Any]] = {}
@@ -292,7 +297,7 @@ def load_mask_record(
                     decisions=decisions.get(cid, {}).get(rn, []),
                 )
             )
-            winner = next((c for c in candidates if c.is_winner and c.evaluators), None)
+            winner = next((c for c in candidates if c.is_selected and c.evaluators), None)
             if winner is not None:
                 carried = (dict(winner.evaluators), winner.accuracy)
             winner_at[(cid, rn)] = carried

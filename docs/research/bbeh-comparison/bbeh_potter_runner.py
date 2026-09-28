@@ -122,13 +122,13 @@ async def run_bbeh_campaign(
         if stop_reason_outcome(cycle_result.stop_reason) is not StopOutcome.SUCCESS:
             return None
 
-        # The winner comes off the ARTIFACT, not off `CycleResult.winner_prompt_fields`: that one
+        # The winner comes off the ARTIFACT, not off `CycleResult.result_prompt_fields`: that one
         # is the wire-side projection and carries a rendered `few_shot_block`, which
         # `PromptTemplate` rejects outright (`extra="forbid"`) — a crash that waits for the first
         # winner with demonstrations and lands after the whole campaign is paid for.
         export = session.store.campaigns.read_export(session.hop)
-        winner_pipeline_params = cycle_result.winner_pipeline_params
-        train_acc = cycle_result.best_accuracy
+        result_pipeline_params = cycle_result.result_pipeline_params
+        train_acc = cycle_result.result_accuracy
 
         print(f"\n{'=' * 60}")
         print("PER-TASK TEST EVALUATION")
@@ -136,15 +136,15 @@ async def run_bbeh_campaign(
 
         per_task_results: dict[str, Record] = {}
         # Outside the run, so under a book of its own: every cell is still admitted and metered.
-        bound = await cell_bound(session, winner_pipeline_params or {})
-        billed = cell_billing(session.pipeline_schema, winner_pipeline_params or {})
+        bound = await cell_bound(session, result_pipeline_params or {})
+        billed = cell_billing(session.pipeline_schema, result_pipeline_params or {})
         with spending_under(unbounded_spend_book()):
             for i, task in enumerate(tasks, start=1):
                 test_items = test_norm_by_task[task]
                 hits = 0
                 for ex in test_items:
                     resp = await session.backend_client.run_query(
-                        ex.query, pipeline_params=winner_pipeline_params, bound=bound, billed=billed
+                        ex.query, pipeline_params=result_pipeline_params, bound=bound, billed=billed
                     )
                     ranking = resp.get("data", {}).get("final_ranking") or []
                     predicted = ranking[0].get("candidate", "") if ranking else ""

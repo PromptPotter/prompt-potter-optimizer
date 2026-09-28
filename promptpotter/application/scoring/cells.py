@@ -420,8 +420,8 @@ def _page_cells(
 
 
 def _dataset_hard_sample_order(stores: Stores, name: str) -> HardSampleOrder:
-    """The campaign default for this dataset, read off the same authored `campaign.yaml` the
-    `dataset_split` footer reads. Absent file ⇒ the field default."""
+    """The campaign default for this dataset, read off its authored `campaign.yaml`. Absent
+    file ⇒ the field default."""
     campaign_path = dataset_campaign_path(readable_dataset_dir(stores, name))
     if not campaign_path.is_file():
         return "info_gain"
@@ -455,7 +455,6 @@ def measurement_log(
     ``samples`` and ``candidates`` shrink to the ones holding a kept cell, so a preset (one
     candidate, one round) serves exactly its own rows. *descend* is the decoded L4 tail below
     the root hop ``(campaign_id, cycle_id)``; empty reads the root store."""
-    dataset_dir = readable_dataset_dir(stores, name)
     page = _resolve_leaderboard_page(
         stores,
         name=name,
@@ -535,20 +534,11 @@ def measurement_log(
             mean_fitness=sum(graded) / len(graded) if graded else None,
         )
 
-    # Held-out test fold from campaign config — display-only; never materialized. Read off
-    # the typed knob (`CampaignConfig.dataset_split`), not a raw-dict re-parse.
-    campaign_path = dataset_campaign_path(dataset_dir)
-    declared = (
-        load_dataset_campaign_config(campaign_path).dataset_split
-        if campaign_path.is_file()
-        else None
-    )
     graded_all = _graded(kept)
     return CellsResponse(
         name=page.raw["name"],
         scope=scope,
         row_count=len(sample_lookup),
-        split_test=declared.test if declared else None,
         order=page.order,
         samples=[_item(sid) for sid in ranked],
         candidates=candidates,

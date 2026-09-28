@@ -14,8 +14,11 @@ from promptpotter.application.pipeline_resolve import resolved_dataset_name
 from promptpotter.application.run_observers import build_campaign_emitter
 from promptpotter.application.runner.campaign_ids import mint_campaign_id, mint_checkin_cycle_id
 from promptpotter.config.settings import APP_VERSION
+from promptpotter.domain.bench import BankPartition
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.measurement_provenance import RunSource
+from promptpotter.domain.optimizer_state import POTTER_MANIFEST
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import HeadlineMetric
 from promptpotter.domain.sample import Sample
@@ -58,7 +61,7 @@ class ScorerSetup:
     # subset-relative accuracy, which is the one reading `per_round_resubset` makes
     # unsafe (`knobs.py::headline_subset_relative_under_resubset`).
     headline_metric: HeadlineMetric = "accuracy"
-    scoring_set: list[Sample] = field(default_factory=list)
+    partition: BankPartition | None = None
     degradation_checks: list[StopRule] = field(default_factory=list)
     judges: tuple[Evaluator, ...] = ()
     """The campaign's LLM-as-judge graders, already built into ``per_sample`` evaluators — one per
@@ -75,6 +78,13 @@ class ScorerSetup:
                 "session.scoring.scorer is unset — populate_session_scoring must run first."
             )
         return self.scorer
+
+    def require_partition(self) -> BankPartition:
+        """``None`` means neither ``run_optimization`` nor ``arm_diagnostic_scoring`` split the
+        bank, so any draw here could reach the bench set."""
+        if self.partition is None:
+            raise RuntimeError("session.scoring.partition is unset — the bank was never split.")
+        return self.partition
 
 
 @dataclass
@@ -127,7 +137,7 @@ class Session:
     state: CycleSnapshot = field(default_factory=CycleSnapshot)
     scoring: ScorerSetup = field(default_factory=ScorerSetup)
 
-    source: str = ""
+    source: RunSource | None = None
     # This cycle was babysat — an operator directly edited an engine-owned/locked
     # value (ADR-0005). Read from the cycle index at init; forces every run
     # this cycle scores to grade C (excluded from digest / reuse / L4).
@@ -240,7 +250,6 @@ def auto_mint_session(
     session_id = mint_session_id()
     now = utcnow_iso()
     dataset_name = resolved_dataset_name(session, campaign_config)
-    optimizer_hash = combined_optimizer_prompt_hash()
     validate_path_component(hop.campaign_id)
     root_cycle = hop.cycle_id
 
@@ -269,7 +278,7 @@ def auto_mint_session(
             created_at=now,
             root_cycle_id=root_cycle,
             root_content_hash=target_hash,
-            optimizer_prompt_hash=optimizer_hash,
+            optimizer_manifest_hashes={POTTER_MANIFEST: combined_optimizer_prompt_hash()},
             backend_id=session.backend_id,
             backend_type=backend_type_of_dataset(session.store, dataset_name),
             owner_user_id=str(session.identity.user_id),
@@ -393,7 +402,7 @@ def finalize_checkin_to_active(
         hop.campaign_id,
         {
             "root_content_hash": target_hash,
-            "optimizer_prompt_hash": combined_optimizer_prompt_hash(),
+            "optimizer_manifest_hashes": {POTTER_MANIFEST: combined_optimizer_prompt_hash()},
             "backend_id": session.backend_id,
             # Re-read rather than trusted from the skeleton: the check-in wrote the slug's
             # `pipeline.yaml` between the two, and the operator may have picked a different

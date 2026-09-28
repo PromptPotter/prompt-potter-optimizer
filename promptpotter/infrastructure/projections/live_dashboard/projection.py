@@ -8,7 +8,14 @@ from typing import TYPE_CHECKING, Any, cast
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RoundSummary
-from promptpotter.domain.phases import CampaignPhase, DashboardState, PhaseEvent, RunPhase
+from promptpotter.domain.phases import (
+    CampaignPhase,
+    DashboardState,
+    PhaseEvent,
+    PotterDashboardState,
+    PotterPhase,
+    RunPhase,
+)
 from promptpotter.domain.results import (
     HeadlineMetric,
     best_round_on_shared_cells,
@@ -98,43 +105,42 @@ logger = logging.getLogger(__name__)
 _DASHBOARD_DEBOUNCE_S = 0.25
 
 
-# L1_SCORE absent: driven by sample_started / sample_scored.
+# MEASURE absent: driven by sample_started / sample_scored.
 # The VALUES are the sole declaration of the `dashboard.json::state` vocabulary — keep them
 # typed, or the webapp mirrors bare strings against no source. The key stays `str` because
-# `PhaseEvent.phase` is wider than `CampaignPhase`.
-_PHASE_TO_STATE: dict[str, DashboardState] = {
+# `PhaseEvent.phase` is wider than either phase enum.
+_PHASE_TO_STATE: dict[str, DashboardState | PotterDashboardState] = {
     CampaignPhase.INIT: DashboardState.INIT,
     CampaignPhase.ORIGIN: DashboardState.ORIGIN,
-    CampaignPhase.L1_GENERATE: DashboardState.L1_GENERATE,
-    CampaignPhase.REFINE_STRATEGY: DashboardState.L2_REFINING,
-    CampaignPhase.MODIFY_PLAN: DashboardState.L3_REPLANNING,
-    CampaignPhase.ESCALATION: DashboardState.ESCALATION,
+    CampaignPhase.PROPOSE: DashboardState.PROPOSING,
+    PotterPhase.REFINE_STRATEGY: PotterDashboardState.L2_REFINING,
+    PotterPhase.MODIFY_PLAN: PotterDashboardState.L3_REPLANNING,
 }
 
 
 # Which optimizer node each activity state is the work OF — the served `active_node`. TOTAL
 # over `DashboardState`, asserted below: an omitted member reads as "nothing running" rather
 # than failing, so a new state must name its node here instead of silently meaning idle.
-_STATE_TO_NODE: dict[DashboardState, str | None] = {
+_STATE_TO_NODE: dict[DashboardState | PotterDashboardState, str | None] = {
     DashboardState.INIT: "checkin",
     DashboardState.ORIGIN: "checkin",
     DashboardState.SCORING: "l1_score",
     DashboardState.BETWEEN_SAMPLES: "l1_score",
     DashboardState.BETWEEN_CANDIDATES: "l1_score",
-    DashboardState.L1_GENERATE: "l1_generate",
-    DashboardState.L2_REFINING: "l2_context",
-    DashboardState.L3_REPLANNING: "l3_plan",
-    # The post-round escalation gate is the critique's own work.
-    DashboardState.ESCALATION: "l1_critique",
+    DashboardState.PROPOSING: "l1_generate",
+    PotterDashboardState.L2_REFINING: "l2_context",
+    PotterDashboardState.L3_REPLANNING: "l3_plan",
     # The one honest `None`: a stopped cycle is running nothing.
     DashboardState.STOPPED: None,
 }
 
-if set(_STATE_TO_NODE) != set(DashboardState):
+_ALL_STATES = {*DashboardState, *PotterDashboardState}
+if set(_STATE_TO_NODE) != _ALL_STATES:
     raise RuntimeError(
-        "_STATE_TO_NODE must cover every DashboardState — a missing member reads as "
-        f"'nothing running': {set(DashboardState) - set(_STATE_TO_NODE)}"
+        "_STATE_TO_NODE must cover every activity state — a missing member reads as "
+        f"'nothing running': {_ALL_STATES - set(_STATE_TO_NODE)}"
     )
+del _ALL_STATES
 
 
 def _bank_call(spend: SpendRollup, record: TokenUsageRecord, usd: float | None) -> None:
@@ -377,7 +383,7 @@ class LiveDashboardProjection(Projection):
 
     # -- State transitions ----------------------------------------------------
 
-    def _set_state(self, name: DashboardState) -> None:
+    def _set_state(self, name: DashboardState | PotterDashboardState) -> None:
         self.state.state = name
         self.state.state_since = utcnow_iso()
 
@@ -544,7 +550,7 @@ class LiveDashboardProjection(Projection):
     def _handle_election(self, record: ElectionRecord) -> None:
         """The crown, from the record that IS the crown. It was read off ``L1_SCORE:exit``'s view
         instead, which cannot reach round 0 — the origin is ADOPTED rather than elected, runs no
-        ``l1_score`` phase, and so folded with ``is_winner`` false on the one arm it has. The
+        ``l1_score`` phase, and so folded with ``is_selected`` false on the one arm it has. The
         election record fires for round 0 too, saying exactly that it adopted ``C0``.
 
         Two channels for one fact, and this is the one with its own record. ``Projection`` had no
@@ -554,7 +560,7 @@ class LiveDashboardProjection(Projection):
         readings — because the alternative carrier is ``rounds[]`` at the close, two LLM calls
         later. The round-level stamp is guarded on the live handle: a REPLAY carries none, and the
         round file it would fall back on does not exist yet at this offset."""
-        self._buffer.mark_winner(record.winner_label)
+        self._buffer.mark_selected(record.selected_labels)
         self._buffer.stamp_fit(record.fit)
         if (rr := record.live_round_result) is not None:
             self._buffer.stamp_overlap(rr.overlap)
@@ -733,7 +739,7 @@ class LiveDashboardProjection(Projection):
             # are WIRING (`run_limits`): they were declared at launch, and this record arrives
             # after the whole origin has already scored.
             self.patience_max = int(view.get("patience") or 0)
-        elif event.phase == CampaignPhase.L1_GENERATE and event.event == "enter":
+        elif event.phase == CampaignPhase.PROPOSE and event.event == "enter":
             s.degraded_count = 0
             # Rewind/fork-in-place clamp: drop rounds this run will overwrite. Sole clamp
             # writer; `round:display` is the sole growth site.

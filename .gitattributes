@@ -3,6 +3,9 @@
 # `git diff --exit-code` run on Linux, and only a local `core.autocrlf` hides it.
 * text=auto
 
+# A generator writes LF and its gate compares bytes, so its output is LF in every checkout.
+*.generated.* text eol=lf
+
 # Shell scripts must stay LF — CRLF breaks the `#!` shebang on Linux deploy boxes.
 *.sh text eol=lf
 

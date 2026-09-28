@@ -74,7 +74,7 @@ function groupRounds(cands: readonly LineageNode[]): Map<number, LineageNode[]> 
 
 // NO first-candidate fallback: a held or never-closed round crowned nobody.
 function pickWinner(cands: readonly LineageNode[]): LineageNode | null {
-  return cands.find((c) => c.is_winner) ?? null;
+  return cands.find((c) => c.is_selected) ?? null;
 }
 
 export function expandedLaneSpan(cands: readonly LineageNode[]): number {
@@ -269,8 +269,8 @@ function placedNode(
     // Not lane key + id: a fork-contributed candidate carries the fork's path.
     candKey: nodeKeyOf(cand),
     candidateId: cand.id,
-    isWinner: cand.is_winner,
-    isElected: wasElected(cand.is_winner, roundSize),
+    isWinner: cand.is_selected,
+    isElected: wasElected(cand.is_selected, roundSize),
     isExpanded,
     isLastInLane: false,
     courseKind: l.course.course_kind ?? "root",

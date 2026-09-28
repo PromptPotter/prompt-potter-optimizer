@@ -11,7 +11,7 @@ from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import DashboardCandidate, RoundSummary
-from promptpotter.domain.phases import DashboardState, RunPhase
+from promptpotter.domain.phases import DashboardState, PotterDashboardState, RunPhase
 from promptpotter.domain.results import HeadlineMetric, OverlapReading
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
@@ -173,7 +173,7 @@ class LiveDashboardState(StrictModel):
     # None when Langfuse is disabled.
     langfuse_trace_url: str | None = None
 
-    state: DashboardState = DashboardState.INIT
+    state: DashboardState | PotterDashboardState = DashboardState.INIT
     state_since: str
 
     # The runner's DECLARATION of the coarse lifecycle+control axis, made via control

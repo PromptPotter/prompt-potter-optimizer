@@ -196,26 +196,26 @@ class DashboardCandidate(StrictModel):
     # go by gating rather than by evidence.
     mean_fitness_ci_lo: float | None = None
     mean_fitness_ci_hi: float | None = None
-    # The floor this candidate was JUDGED against (`ScoredCandidate.matched_parent_*`): the
+    # The floor this candidate was JUDGED against (`ScoredCandidate.reference_*`): the
     # origin restricted to the samples it actually measured. Served because `accuracy` alone is
     # unreadable under elimination — a PoBB-locked candidate beat something that is NOT the
     # origin's full-set rate. `None` unless the candidate covered the origin's panel, since a
     # prefix rate is set by where PoBB stopped it.
-    matched_parent_accuracy: float | None = None
-    matched_parent_composite: float | None = None
+    reference_accuracy: float | None = None
+    reference_composite: float | None = None
     # The blocked lift over that floor and its interval — the one number saying whether this
     # candidate beat the origin or the panel merely wobbled, and the one the L4 outer level
     # reads. Same scale as `mean_fitness_ci_*`, sharper on the same rows because pairing cancels
     # the origin's cell-to-cell variation. `None` below two shared cells, which at a one-cell
     # panel is every round and is the honest reading rather than a missing feature.
-    matched_parent_lift: float | None = None
-    matched_parent_lift_ci_lo: float | None = None
-    matched_parent_lift_ci_hi: float | None = None
+    reference_lift: float | None = None
+    reference_lift_ci_lo: float | None = None
+    reference_lift_ci_hi: float | None = None
     # On the BASE, because the election is not a closing act: `elect_round_winner` runs at the
     # end of SCORING, two LLM calls before the round closes, and the live row is the only
     # surface that can say so then. `False` until it lands, and on every row of a round that
     # held none — never a claim that this candidate lost.
-    is_winner: bool = False
+    is_selected: bool = False
 
 
 class RoundSummaryCandidate(DashboardCandidate):
@@ -227,9 +227,9 @@ class RoundSummaryCandidate(DashboardCandidate):
     accuracy: float | None
     composite_fitness: float
     expected_samples: int
-    is_winner: bool
+    is_selected: bool
     # The arm this round's READING is taken off, and the same one `RoundSummary.panel_precision`
-    # is measured on (`round_summary.py::_leading_arm`). Distinct from `is_winner`, which says the
+    # is measured on (`round_summary.py::_leading_arm`). Distinct from `is_selected`, which says the
     # election CROWNED it: a held round crowns nothing and its reading still comes off one arm.
     # Served because the tie-break a reader would reach for — argmax on `composite_fitness` —
     # cannot apply `is_electable`, so it hangs the lift interval off a collapsed arm the election
@@ -291,5 +291,5 @@ class RoundSummary(StrictModel):
     # How sharply the L4 panel's cells were measured against how far apart they landed — the
     # monitoring read saying which lever the round's spread calls for. ``None`` on any non-L4
     # round: an ordinary sample is graded and carries no error bar to decompose. The VERDICT is
-    # not here; it rides `candidates[].matched_parent_lift*` like every other level's.
+    # not here; it rides `candidates[].reference_lift*` like every other level's.
     panel_precision: PanelPrecision | None = None

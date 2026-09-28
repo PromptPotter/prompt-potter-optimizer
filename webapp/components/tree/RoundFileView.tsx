@@ -32,18 +32,17 @@ export function RoundFileView({ doc, raw }: Props) {
   const [showRaw, setShowRaw] = useState(false);
   const results = (doc.results ?? []) as ResultRow[];
   const scoreboard = doc.scoreboard ?? [];
-  // The label must say matched vs full-set: an unlabelled parent figure beside a subset accuracy
-  // reads as a lift nothing measured.
-  const matched = typeof doc.matched_parent_accuracy === "number" ? doc.matched_parent_accuracy : null;
-  const parentShown = matched ?? (typeof doc.parent_accuracy === "number" ? doc.parent_accuracy : null);
-  const parentLabel = matched != null ? "matched parent" : "parent, full set";
+  // The selected arm's own matched floor: a round that held selected nobody and shows none.
+  const selectedLabels = doc.selected_labels ?? [];
+  const selected = (doc.candidate_scores ?? []).find((c) => selectedLabels.includes(c.label));
+  const matched = typeof selected?.reference_accuracy === "number" ? selected.reference_accuracy : null;
 
   return (
     <div className="round-file-view">
       <div className="round-file-summary">
         <div className="round-file-summary-row">
           <Badge className="round-file-badge">round {doc.round ?? "—"}</Badge>
-          <span>accuracy {fmtPct1(doc.accuracy)} {parentShown != null && (<span className="round-file-dim"><Term content={matched != null ? "The parent — the origin at round 0, the prior round's winner after — re-scored on the samples this round's winner measured. The floor the promotion gate used." : "The parent's full-set rate. This round carries no matched floor, so it is not directly comparable to a partially-scored winner."}>({parentLabel} {fmtPct1(parentShown)})</Term></span>)}</span>
+          <span>accuracy {fmtPct1(doc.accuracy)} {matched != null && (<span className="round-file-dim"><Term content="The parent — the origin at round 0, the prior round's winner after — re-scored on the samples this round's winner measured. The floor the promotion gate used.">(matched parent {fmtPct1(matched)})</Term></span>)}</span>
           <span>composite {fmtNum(doc.composite_fitness)}</span>
           <span>n {doc.total ?? "—"}</span>
           {typeof doc.ability?.theta === "number" && (
@@ -84,8 +83,8 @@ export function RoundFileView({ doc, raw }: Props) {
                     <td>{fmtPct1(s.accuracy)}</td>
                     <td>{fmtNum(s.composite_fitness)}</td>
                     <td>{fmtSigned(s.theta, 3)}</td>
-                    <td>{fmtLift(s.matched_parent_lift, s.matched_parent_lift_ci_lo, s.matched_parent_lift_ci_hi)}</td>
-                    <td>{s.is_winner ? <span className="pass">win</span> : ""}</td>
+                    <td>{fmtLift(s.reference_lift, s.reference_lift_ci_lo, s.reference_lift_ci_hi)}</td>
+                    <td>{s.is_selected ? <span className="pass">win</span> : ""}</td>
                   </tr>
                 ))}
               </tbody>

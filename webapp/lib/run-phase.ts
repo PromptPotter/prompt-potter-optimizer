@@ -1,4 +1,9 @@
-import type { DashboardState, RunPhase, StopOutcome } from "@/lib/api/types.generated";
+import type {
+  DashboardState,
+  PotterDashboardState,
+  RunPhase,
+  StopOutcome,
+} from "@/lib/api/types.generated";
 import {
   STOP_REASON_LABELS,
   STOP_REASON_NEXT_STEPS,
@@ -32,7 +37,7 @@ function isRunPhase(v: string | null | undefined): v is RunPhase {
 }
 
 // `gate` holds a live process; `paused` has exited; `detached` means the producer is DEAD, since
-// the in-flight heartbeat (`dispatch/llm_call/heartbeat.py`) keeps every live cycle fresh.
+// the in-flight heartbeat (`infrastructure/llm/heartbeat.py`) keeps every live cycle fresh.
 const HAS_PRODUCER: Record<RunPhase, boolean> = {
   running: true,
   gate: true,
@@ -123,22 +128,22 @@ export function stopReasonNextStep(reason: string | null | undefined): string {
 
 // The pause affordance's word for `dashboard.json::state`; `null` = nothing worth naming, so the
 // caller's generic phrase reads instead.
-const PHASE_PAUSE_LABEL: Record<DashboardState, string | null> = {
+type ActivityState = DashboardState | PotterDashboardState;
+const PHASE_PAUSE_LABEL: Record<ActivityState, string | null> = {
   origin: "scoring origin",
   scoring: "scoring samples",
   between_samples: "scoring samples",
   between_candidates: "scoring samples",
-  l1_generate: "generating candidates",
+  proposing: "generating candidates",
   l2_refining: "refining strategy",
   l3_replanning: "replanning",
-  escalation: "escalating",
   init: "starting up",
   stopped: null,
 };
 
 export function phasePauseLabel(state: string | null | undefined): string {
   const named = state && state in PHASE_PAUSE_LABEL
-    ? PHASE_PAUSE_LABEL[state as DashboardState]
+    ? PHASE_PAUSE_LABEL[state as ActivityState]
     : null;
   return named || "the current round";
 }

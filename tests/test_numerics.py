@@ -10,6 +10,7 @@ validators that score a proposal's conformance. Every assertion is wrong-reveal
 from __future__ import annotations
 
 import asyncio
+import types
 from pathlib import Path
 from typing import Any
 
@@ -33,14 +34,18 @@ from promptpotter.application.mask.record import (
     MaskRound,
     SpineCycle,
 )
+from promptpotter.application.optimization.l1.population import (
+    build_score_report,
+    fatal_validation_failures,
+)
 from promptpotter.application.optimization.pobb.checks import (
     PoBBCheck,
     PoBBConfig,
 )
-from promptpotter.application.optimization.pobb.classification import terminal_ranking
 from promptpotter.application.optimization.validators.l1_invariants import (
     detect_invariants,
 )
+from promptpotter.application.scoring.classification import DegradationCheck, terminal_ranking
 from promptpotter.application.scoring.formula import (
     ScoringFormulaError,
     compile_scorer,
@@ -54,18 +59,16 @@ from promptpotter.application.scoring.metrics import (
     compute_composite_fitness,
     matched_parent_stats,
 )
+from promptpotter.application.scoring.sample_measurement import measure_sample
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.escalation_signals import (
     EscalationTarget,
     ValidationFailure,
 )
-from promptpotter.domain.opt_search_point import (
-    L2L3Memory,
-    OptSearchPoint,
-    WoundChannels,
-)
+from promptpotter.domain.opt_search_point import FewShotExample, OptSearchPoint
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import (
+    NodePromptInfo,
     NodeType,
     ObservationMapping,
     PipelineNode,
@@ -87,7 +90,9 @@ from promptpotter.domain.ruler import (
 )
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import extract_item_label
-from promptpotter.domain.search_point import JobSearchPoint
+from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
+from promptpotter.infrastructure.backend import BackendClient
+from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
 from promptpotter.shared import extract_gsm8k_number
 from promptpotter.shared.errors import RulerCoverageError
 from promptpotter.shared.statistics import (
@@ -98,6 +103,7 @@ from tests.factories import (
     lost_history,
     measurement,
     measurements,
+    optimizer_state,
     round_result,
     scored_candidate,
 )
@@ -354,7 +360,7 @@ def test_an_unmeasured_term_is_never_scored_as_zero() -> None:
     # The floor is the COMPOSITE's alone. ``accuracy`` beside it stays absent, because the two
     # answer different questions: one is the elected quantity and needs a value to be ordered
     # against, the other is a RATE and a rate over nothing is not 0%.
-    empty = compute_composite_fitness([], _single_node_schema(), opt_sp=None)
+    empty = compute_composite_fitness([], _single_node_schema())
     assert empty["composite_fitness"] == 0.0
     assert empty["accuracy"] is None
     assert empty["total"] == 0
@@ -364,7 +370,7 @@ def test_an_unmeasured_term_is_never_scored_as_zero() -> None:
     # one that times out throughout used to report itself as having driven the inner loop to 0%.
     errored = _result_min("ERROR", "a") | {"error": "boom", "error_category": "UNKNOWN"}
     del errored["fitness"], errored["hit"]
-    all_errored = compute_composite_fitness([errored], _single_node_schema(), opt_sp=None)
+    all_errored = compute_composite_fitness([errored], _single_node_schema())
     assert all_errored["accuracy"] is None
     assert all_errored["composite_fitness"] == 0.0
     assert all_errored["total"] == 0
@@ -521,31 +527,27 @@ def test_composite_fitness_matches_default_formula():
     # block, not folded into fitness.
     schema = _single_node_schema()
     results = [_eval_result(score=1.0, total_time=100), _eval_result(score=0.0, total_time=200)]
-    scored = compute_composite_fitness(results, schema, opt_sp=None)
+    scored = compute_composite_fitness(results, schema)
     assert scored["composite_fitness"] == pytest.approx(scored["accuracy"], abs=1e-9)
     assert scored["composite_fitness"] == pytest.approx(0.5, abs=1e-4)
 
 
-def test_composite_fitness_zeroed_on_validation_failure():
-    # A REAL OptSearchPoint, not a namespace stub. The stub carried a bare `object()`
-    # where a `ValidationFailure` goes and had no `render()` — it only ever type-checked
-    # because `compute_composite_fitness(opt_sp: Any)` accepted anything, and production
-    # code grew a `hasattr(opt_sp, "render")` guard to tolerate it. The type is the contract.
-    opt_sp = OptSearchPoint(
-        memory=L2L3Memory(
-            wounds=WoundChannels(
-                validation_failures=[
-                    ValidationFailure(
-                        axis="llm_only.model", value="bad", allowed=[], reason="forbidden_axis"
-                    )
-                ]
-            )
-        )
+def test_a_hallucinated_node_candidate_keeps_its_score() -> None:
+    """``hallucinated_node`` is the one NON-fatal validation failure: the phantom edit is stripped
+    and the real edits ran, so the candidate is measured and its score stands. Zeroed, it reads as
+    an arm that scored nothing and silently loses a round it may have won."""
+    wound = ValidationFailure(
+        axis="ghost.temperature", value="0.3", allowed=[], reason="hallucinated_node"
     )
-    scored = compute_composite_fitness(
-        [_eval_result(score=1.0)], _single_node_schema(), opt_sp=opt_sp
+    assert fatal_validation_failures([wound]) == []
+
+    rows = [_eval_result(score=1.0)]
+    scores = compute_composite_fitness(rows, _single_node_schema())
+    report = build_score_report(
+        OptSearchPoint(), [wound], None, scores, rows, rows, label="C1.1", sp_hash="", run_id=None
     )
-    assert scored["composite_fitness"] == 0.0
+    assert report.composite_fitness == 1.0
+    assert report.validation_failures == [wound]
 
 
 def test_a_correct_but_costly_cell_is_a_HIT_everywhere_it_is_thresholded() -> None:
@@ -586,6 +588,77 @@ def test_a_correct_but_costly_cell_is_a_HIT_everywhere_it_is_thresholded() -> No
     order = build_round_order({1: 1.0, 2: 0.0}, None, [1, 2])
     assert set(order) == {1, 2}
     assert not is_hit(0.4), "guard: the composite really is below the hit threshold"
+
+
+async def test_a_prompt_length_term_prices_the_template_not_the_sample() -> None:
+    """CAPO's length penalty, ``fitness - 0.05 * len(prompt) / len(longest initial prompt)``, as a
+    ``per_cell`` formula over the ``target_prompt_chars`` channel ``measure_sample`` stamps.
+
+    Silent both ways it can go wrong. Read off the INTERPOLATED prompt, the penalty charges each
+    cell for its own query, so arms on different subsets are ranked by which cells they drew; read
+    without the few-shot block, it exempts the shots the term exists to price."""
+    schema = PipelineSchema(
+        name="capo",
+        nodes=[
+            PipelineNode(
+                name="solve", node_type=NodeType.NONE, tunes_llm=False, prompt_info=NodePromptInfo()
+            )
+        ],
+    )
+    origin = OptSearchPoint(instruction="Answer {{query}}.")
+    shots = [{"input": "2+2", "output": "4"}, {"input": "3+3", "output": "6"}]
+    candidate = OptSearchPoint(instruction="Answer {{query}}.", few_shot_examples=shots)
+    longest_initial = len(origin.render())
+    wire_prompts: list[str] = []
+
+    async def _answer(_workload: Any, _query: str, payload: dict[str, Any]) -> dict[str, Any]:
+        wire_prompts.append(payload["params"]["solve"]["prompt"])
+        return {"data": {"answer": "4", "step_tokens": {}}}
+
+    session = types.SimpleNamespace(
+        pipeline_schema=schema,
+        state=types.SimpleNamespace(ledger=None),
+        backend_client=BackendClient(
+            "http://unused",
+            wire_adapter=lambda query, params: {"query": query, "params": params},
+            session=types.SimpleNamespace(),  # type: ignore[arg-type]
+            execution="in_process",
+            in_process_run=_answer,
+            workload=types.SimpleNamespace(),  # type: ignore[arg-type]
+            prompt_delivery=types.SimpleNamespace(),  # type: ignore[arg-type]
+            answer_key="answer",
+        ),
+        scoring=types.SimpleNamespace(
+            scorer=compile_scorer(
+                "label_match(predicted, ground_truth)",
+                f"fitness - 0.05 * target_prompt_chars / {longest_initial}",
+                verifier_graded=False,
+            ),
+            judges=(),
+        ),
+    )
+
+    async def _objectives(sp: OptSearchPoint, queries: list[str]) -> list[float]:
+        params = sp.to_job_search_point(
+            {}, schema=schema, framing=TaskDecomposition()
+        ).pipeline_params
+        rows = [
+            await measure_sample(Sample(id=i, query=q, ground_truth="4"), session, params)  # type: ignore[arg-type]
+            for i, q in enumerate(queries)
+        ]
+        assert [r["pipeline_data"]["target_prompt_chars"] for r in rows] == [
+            len(sp.render())
+        ] * len(rows)
+        return [r["objective"] for r in rows]
+
+    with spending_under(unbounded_spend_book()):
+        assert await _objectives(origin, ["2+2"]) == [pytest.approx(0.95)]
+        scored = await _objectives(candidate, ["1+3", "a much longer query, " * 20 + "1+3"])
+
+    assert len(set(map(len, wire_prompts[1:]))) == 2, "guard: the two cells' wire prompts differ"
+    ratio = len(candidate.render()) / longest_initial
+    assert ratio > 1.5, "guard: the shots are inside the length"
+    assert scored == [pytest.approx(1.0 - 0.05 * ratio)] * 2
 
 
 def test_an_archive_row_is_graded_by_the_reading_scorer_not_its_stamp(monkeypatch) -> None:
@@ -634,6 +707,7 @@ def test_an_archive_row_is_graded_by_the_reading_scorer_not_its_stamp(monkeypatc
         dataset_name="d",
         scorer=CellScorer(fitness=lambda r: r["fitness"], objective=lambda r: r["fitness"]),
         scorer_id="under-test",
+        sample_ids=None,
     )
 
     assert [o.response for o in obs] == [1.0, 1.0], (
@@ -1188,12 +1262,11 @@ def test_the_bar_is_what_the_parent_can_do_not_the_draw_that_crowned_it() -> Non
     )
 
     def won(*, se: float | None, electable: int) -> RoundResult:
-        """A round that crowned ``w`` over ``electable`` arms. ``winner_id`` is read off
-        ``prompt_fields['lineage']``, which is where the live election stamps it."""
+        """A round that selected ``w`` over ``electable`` arms."""
         return round_result(
             1,
             electable_count=electable,
-            prompt_fields={"lineage": {"id": "w"}},
+            selected_labels=["w"],
             candidate_scores=[scored_candidate("w", theta=0.5, theta_se=se)],
         )
 
@@ -1214,7 +1287,7 @@ def test_the_bar_is_what_the_parent_can_do_not_the_draw_that_crowned_it() -> Non
     # and the default ``electable_count`` of 0 clamps into that same safe end, never inventing
     # a correction for a round that never recorded how many arms it had.
     assert parent_selection_bias([won(se=0.9, electable=1)]) == 0.0
-    assert parent_selection_bias([round_result(1, prompt_fields={"lineage": {"id": "w"}})]) == 0.0
+    assert parent_selection_bias([round_result(1, selected_labels=["c0"])]) == 0.0
     # Monotone in k, and CLAMPED past the table's end rather than extrapolated or IndexError-ing
     # on a round this loop does not produce.
     by_k = [parent_selection_bias([won(se=1.0, electable=k)]) for k in range(1, 7)]
@@ -1775,7 +1848,6 @@ def test_a_fatal_row_ends_a_candidate_on_one_sighting_and_an_advisory_never_does
 
     The rate arm is the same fact one step slower: only genuinely-deprecated rows count toward the
     threshold, so an arm at 2/6 advisory survives while 3/6 fatal does not."""
-    from promptpotter.application.optimization.pobb.checks import DegradationCheck
 
     def warn(kind: str) -> dict:
         return {
@@ -1824,7 +1896,6 @@ def test_no_walk_is_cut_before_the_horizon_it_launched_under() -> None:
     "the next cell" would be sound and would buy no look-ahead at all."""
     import random
 
-    from promptpotter.application.optimization.pobb.checks import DegradationCheck
     from promptpotter.domain.sample import Sample
 
     n = 10
@@ -2110,7 +2181,7 @@ def test_the_panel_is_calibrated_to_the_arm_in_the_race_not_the_archive_best() -
 
 
 def test_panel_precision_names_the_lever_the_panel_needs() -> None:
-    # A candidate's `matched_parent_lift` interval is computed from the spread of the per-cell
+    # A candidate's `reference_lift` interval is computed from the spread of the per-cell
     # diffs and nothing else, so it cannot distinguish two opposite problems: cells that each
     # measured themselves badly, versus cells that genuinely disagree. They take opposite levers —
     # sharpen the instrument, or widen the panel/candidates — and the operator picks from these two
@@ -2183,8 +2254,8 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
     re-score widens the parent's coverage; the panel is the ORIGIN's own cells and does not move,
     so a late member is topped up onto it rather than narrowing it for everyone before it; and a
     member is a CONFIGURATION — the RENDERED target prompt, not the six fields and not a lineage
-    id. An L2/L3 transition re-mints the parent's OSP from the same fields, and `task_context`
-    moves the render without moving the fields; either one mistaken puts two individuals' cells
+    id. An L2/L3 transition re-mints the parent's OSP from the same fields, and few-shot examples
+    move the render without moving the fields; either one mistaken puts two individuals' cells
     inside one bar, at a rate neither of them scored.
     """
     from promptpotter.domain.opt_search_point import IndividualLineage, OptSearchPoint
@@ -2204,14 +2275,14 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
         )
 
     def rnd(
-        n: int, cid: str, label: str, instruction: str, *ids: int, upstream: str = ""
+        n: int, cid: str, label: str, instruction: str, *ids: int, shot: str = ""
     ) -> RoundResult:
-        # `instruction` and `upstream` BOTH make the configuration here — the second only
-        # through the render, which is the whole point.
+        # `instruction` and `shot` BOTH make the configuration here — the second only through
+        # the render, which is the whole point.
         osp = OptSearchPoint(
             instruction=instruction,
             lineage=IndividualLineage(id=cid),
-            memory={"task_context": {"upstream_context": upstream}},
+            few_shot_examples=[FewShotExample(input=shot, output="x")] if shot else [],
         )
         return RoundResult(
             round=n,
@@ -2219,11 +2290,13 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
             accuracy=0.5,
             total=len(ids),
             improved=n > 0,
-            prompt_fields={**osp.prompt_field_dict(), "lineage": osp.lineage.model_dump()},
+            prompt_fields=osp.prompt_field_dict(),
             results=rows(*ids),
             candidates_scored=1,
             candidate_scores=[scored(cid, label)],
+            selected_labels=[],
             opt_sp=osp,
+            optimizer_state=optimizer_state(),
         )
 
     # C0 on 1..6; round 1 HELD (C0 re-scored on 7,8); round 2 crowned C2.1 on 5,6,7,9; round 3
@@ -2239,10 +2312,10 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
     # and keeps C2.1's label rather than appearing beside it as an unnamed twin.
     assert [(s.candidate_id, s.label) for s in line] == [("c0", "C0"), ("w2", "C2.1")]
 
-    # A round-4 winner carrying C2.1's six fields verbatim and an emptied `task_context` is a
-    # DIFFERENT individual: it runs a shorter prompt. Folded in, it would take C2.1's label and
+    # A round-4 winner carrying C2.1's six fields verbatim and a few-shot example is a
+    # DIFFERENT individual: it runs a longer prompt. Folded in, it would take C2.1's label and
     # bar, and its rows would overwrite C2.1's on every cell they share.
-    ctx = parent_line([*history, rnd(4, "w4", "C4.1", "edited", 5, 6, 7, upstream="framing")])
+    ctx = parent_line([*history, rnd(4, "w4", "C4.1", "edited", 5, 6, 7, shot="framing")])
     assert [s.candidate_id for s in ctx] == ["c0", "w2", "w4"]
     # The held round WIDENED the parent rather than replacing it — without that, 7 and 8 are
     # lost and cell 7 could never join the set below.
@@ -2405,7 +2478,7 @@ def test_a_scenario_chain_stops_where_the_record_parts() -> None:
             evaluators={"accuracy": acc, "mean_latency_s": latency},
             accuracy=acc,
             n_scored=4,
-            is_winner=winner,
+            is_selected=winner,
         )
 
     origin = cand("c0", 0.50, 1.0)
@@ -2646,7 +2719,7 @@ def test_compute_proxies_is_one_exact_mean_over_the_parent_levels() -> None:
     # that ran the budget out, and an inverse-variance pool would weight the cell that measured
     # LEAST the most. SILENT: the panel would report a tighter CI it never earned, and buy its
     # confidence from the arms that did the least work.
-    se_kw = {"origin_level_se": 0.20, "round_parent_level_ses": [0.30, 0.40]}
+    se_kw = {"origin_level_se": 0.20, "round_level_ses": [0.30, 0.40]}
     padded = cycle_result(
         [0.30, 0.60], 0.30, [round_result(i) for i in (1, 2)], round_budget=4, **se_kw
     )
@@ -2671,7 +2744,7 @@ def test_compute_proxies_is_one_exact_mean_over_the_parent_levels() -> None:
         0.30,
         [round_result(i) for i in (1, 2)],
         round_budget=4,
-        round_parent_level_ses=[0.30, 0.40],
+        round_level_ses=[0.30, 0.40],
     )
     assert mean_parent_level_se(no_origin_se) == pytest.approx(0.35)
 
@@ -2793,7 +2866,9 @@ def _parent() -> OptSearchPoint:
 
 
 def _child(parent: OptSearchPoint, **changes) -> CandidateProposal:
-    return CandidateProposal(opt_sp=parent.mutate(**changes))
+    return CandidateProposal(
+        opt_sp=OptSearchPoint.derive([parent], source="potter:l1_generate", **changes)
+    )
 
 
 # The two strings differ in wording and, in the tests below, in the FIELD they are written
@@ -2828,7 +2903,7 @@ def test_the_two_collapse_kinds_are_counted_apart_in_one_population():
     stats = detect_invariants([clone, first, twin, novel], parent, {})
 
     def reasons(p) -> list[str]:
-        return [vf.reason for vf in p.opt_sp.memory.wounds.validation_failures]
+        return [vf.reason for vf in p.validation_failures]
 
     assert reasons(clone) == ["no_op_variant"]
     assert reasons(twin) == ["duplicate_variant"]
@@ -2867,7 +2942,8 @@ def test_a_blank_answer_is_no_edit_at_either_boundary():
     assert edit.prompt_fields_updates == {"instruction": "Rank with care."}
 
     restated = CandidateProposal(
-        opt_sp=parent.mutate(), pipeline_overlay={"llm_only": {"temperature": 0.0}}
+        opt_sp=OptSearchPoint.derive([parent], source="potter:l1_generate"),
+        pipeline_overlay={"llm_only": {"temperature": 0.0}},
     )
     stats = detect_invariants([restated, _child(parent, persona="Pirate")], parent, parent_params)
     assert (stats.l1_n_no_op, stats.l1_n_duplicate) == (1, 0)
@@ -2890,10 +2966,10 @@ def test_a_reproposed_idea_is_rejected_even_when_rewritten_into_another_field():
 
     stats = detect_invariants(proposals, parent, {}, prior)
 
-    reasons = [vf.reason for vf in proposals[0].opt_sp.memory.wounds.validation_failures]
+    reasons = [vf.reason for vf in proposals[0].validation_failures]
     assert "repeat_variant" in reasons, "a rewritten re-proposal must still be caught"
-    assert "round 1" in proposals[0].opt_sp.memory.wounds.validation_failures[0].value
-    assert proposals[1].opt_sp.memory.wounds.validation_failures == [], "unrelated idea survives"
+    assert "round 1" in proposals[0].validation_failures[0].value
+    assert proposals[1].validation_failures == [], "unrelated idea survives"
     assert stats.l1_n_repeat == 1
 
     # THE THREE QUIET ARMS, beside the fire case because that is what stops one of them going
@@ -2901,7 +2977,7 @@ def test_a_reproposed_idea_is_rejected_even_when_rewritten_into_another_field():
     # the SAME rewrite against a different history.
     def repeats_caught(history, *proposals) -> int:
         stats = detect_invariants(list(proposals), parent, {}, history)
-        assert not any(p.opt_sp.memory.wounds.validation_failures for p in proposals)
+        assert not any(p.validation_failures for p in proposals)
         return stats.l1_n_repeat
 
     # (1) EVERY proposal repeats. Rejecting them all hands PoBB an empty population and the
@@ -2964,38 +3040,42 @@ def test_parse_population_flags_dropped_optimizer_prompt_port():
     parent = _parent()
     base_problem_description = base_optimizer_template("l1_generate").problem_description
     dropped = CandidateProposal(
-        opt_sp=parent.mutate(),
+        opt_sp=OptSearchPoint.derive([parent], source="potter:l1_generate"),
         pipeline_overlay={"l1_generate": {"problem_description": "Read the panels."}},
     )
     intact = CandidateProposal(
-        opt_sp=parent.mutate(),
+        opt_sp=OptSearchPoint.derive([parent], source="potter:l1_generate"),
         pipeline_overlay={
             "l1_generate": {"problem_description": base_problem_description + " Be terse."}
         },
     )
-    inherits_broken = CandidateProposal(opt_sp=parent.mutate(persona="Strict"))
+    inherits_broken = CandidateProposal(
+        opt_sp=OptSearchPoint.derive([parent], source="potter:l1_generate", persona="Strict")
+    )
 
-    opt_sp_list, _ = parse_population(
+    parse_population(
         [dropped, intact],
         parent,
         pipeline_params=None,
         schema=schema,
+        runtime_failures=[],
     )
-    inherited_list, _ = parse_population(
+    parse_population(
         [inherits_broken],
         parent,
         pipeline_params={"l1_generate": {"problem_description": "Panels without ports."}},
         schema=schema,
+        runtime_failures=[],
     )
 
-    dropped_failures = opt_sp_list[0].memory.wounds.validation_failures
+    dropped_failures = dropped.validation_failures
     # Selected rather than asserted whole: the subject here is the severed port, and a short
     # replacement can carry a gutting reason alongside it.
     (port,) = [vf for vf in dropped_failures if vf.reason == "dropped_mandatory_placeholder"]
     assert port.axis == "l1_generate.prompt"
     assert "citable_fields" in port.value
-    assert opt_sp_list[1].memory.wounds.validation_failures == []
-    assert [vf.reason for vf in inherited_list[0].memory.wounds.validation_failures] == [
+    assert intact.validation_failures == []
+    assert [vf.reason for vf in inherits_broken.validation_failures] == [
         "dropped_mandatory_placeholder"
     ]
 
@@ -3596,3 +3676,28 @@ def test_a_panel_holed_by_a_declared_bound_is_not_advised_to_resume() -> None:
     info = STOP_REASON_INFO[StopReason.PANEL_CUT]
     assert info.outcome is StopOutcome.PAUSED
     assert info.next_step != STOP_REASON_INFO[StopReason.PAUSED].next_step
+
+
+def test_the_search_stops_short_by_what_the_bench_pass_costs() -> None:
+    """The headline is the selection graded on the bench set AFTER the search, under the ONE
+    ceiling the run was admitted at. A search that may spend all of it leaves the pass refused, and
+    every campaign that ends on its budget — the common ending — reports no headline at all.
+
+    Silent: the rounds all render and the refusal lands after the last one. Unrecoverable: the
+    money that would have graded the selection went to one more candidate nobody will grade."""
+    from promptpotter.infrastructure.llm.spend_book import SendBound, SpendBook
+    from promptpotter.shared.errors import ErrorCategory
+
+    book = SpendBook(usd_cap=lambda: 1.0, tokens_cap=lambda: 10_000, usd_spent=0.6)
+    book.set_aside(0.3, 2_000)
+    send = SendBound(input_tokens=100, output_tokens=100, usd=0.2)
+    # $0.60 spent + $0.30 kept for the pass: a $0.20 send no longer fits the search.
+    assert book.fits(send) == 0
+    book.usd_spent = 0.7
+    assert book.exhausted() is ErrorCategory.SPEND_CEILING, "the round boundary must stop too"
+    # Released for the pass itself, the same ceiling admits it.
+    book.set_aside(0.0, 0)
+    assert book.exhausted() is None and book.fits(send) == 1
+    # Tokens are held back on the same terms, so a token-capped run keeps the pass too.
+    book.set_aside(0.0, 9_900)
+    assert book.fits(send) == 0

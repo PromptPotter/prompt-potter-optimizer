@@ -1,18 +1,13 @@
-"""Mid-round elimination — DegradationCheck (fatal/rate) + PoBBCheck (Russo 2016 stop rule)."""
+"""Mid-round elimination — PoBBCheck (Russo 2016 stop rule)."""
 
 from __future__ import annotations
 
 import asyncio
-from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.intelligence.exploration import graded_response
-from promptpotter.application.optimization.pobb.classification import (
-    extract_warning_types,
-    is_deprecated,
-)
 from promptpotter.application.scoring.selection import (
     elimination_p_best,
     elimination_p_best_bounds,
@@ -20,14 +15,11 @@ from promptpotter.application.scoring.selection import (
 from promptpotter.config.settings import NO_RESULT, POBB_DEFAULT_EPSILON
 from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
 from promptpotter.domain.results import EliminationGate
-from promptpotter.domain.results_health import classify_result
 from promptpotter.domain.scoring import is_answer_collapsed
-from promptpotter.domain.validators import StopRule
 from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.statistics import discordant_counts
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.domain.ruler import DeltaRuler
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
@@ -52,78 +44,6 @@ def _graded(rows: Iterable[QueryMeasurement]) -> dict[str, float]:
 
 def _eliminate(name: str, check_result: dict[str, Any]) -> EscalationSignal:
     return EscalationSignal(name, EscalationTarget.ELIMINATE_CANDIDATE, check_result)
-
-
-class DegradationCheck:
-    """Fatal-classification fast-path (one sighting ends candidate) + rate-based check."""
-
-    name = "degradation"
-
-    def __init__(
-        self, threshold: float = 0.4, min_samples: int = 3, *, fatal_fastpath: bool = True
-    ) -> None:
-        self.threshold = threshold
-        self.min_samples = min_samples
-        self.fatal_fastpath = fatal_fastpath
-
-    def check(self, results: list[QueryMeasurement]) -> EscalationSignal | None:
-        if self.fatal_fastpath and results:
-            classification = classify_result(results[-1])
-            fatal = classification.dominant_fatal
-            if fatal is not None:
-                n = len(results)
-                return _eliminate(
-                    self.name,
-                    {
-                        "degraded_rate": 1.0,
-                        "degraded_count": n,
-                        "total_scored": n,
-                        "warning_types": dict.fromkeys(classification.fatal_codes, 1),
-                        "dominant_warning": fatal,
-                        "fatal": True,
-                    },
-                )
-
-        n = len(results)
-        if n < self.min_samples:
-            return None
-        # Count only genuinely-deprecated samples (fatal + infra/truncation) toward
-        # elimination — NOT advisory transients. A non-fatal advisory warning (e.g.
-        # web_search:low_document_count, which fires whenever fewer than max_sites docs
-        # are gathered) must not eliminate a candidate that is otherwise scoring well;
-        # classification.py is explicit that low-document-count is not a deprecation.
-        degraded = sum(1 for r in results if is_deprecated(r))
-        rate = degraded / n
-        if rate < self.threshold:
-            return None
-
-        wtypes: Counter[str] = Counter()
-        for r in results:
-            wtypes.update(extract_warning_types(r))
-        dominant = max(wtypes, key=wtypes.get) if wtypes else "unknown"  # type: ignore[arg-type]
-        return _eliminate(
-            self.name,
-            {
-                "degraded_rate": rate,
-                "degraded_count": degraded,
-                "total_scored": n,
-                "warning_types": dict(wtypes),
-                "dominant_warning": dominant,
-            },
-        )
-
-    def earliest_stop(
-        self,
-        results: list[QueryMeasurement],
-        upcoming: Sequence[tuple[Sample, QueryMeasurement | None]],
-    ) -> int | None:
-        """The RATE alone — the fatal fast-path fires on one row's content."""
-        degraded = sum(1 for r in results if is_deprecated(r))
-        for m, (_, row) in enumerate(upcoming, start=len(results) + 1):
-            degraded += row is None or is_deprecated(row)
-            if m >= self.min_samples and degraded / m >= self.threshold:
-                return m
-        return None
 
 
 @dataclass(frozen=True)
@@ -512,20 +432,6 @@ class PoBBCheck:
         return None
 
 
-def build_degradation_checks(config: CampaignConfig) -> list[StopRule]:
-    """Per-sample checks (degradation). PoBBCheck is built by the runner."""
-    opt = config.optimization
-    checks: list[StopRule] = []
-    if opt.degradation_threshold > 0:
-        checks.append(
-            DegradationCheck(
-                threshold=opt.degradation_threshold,
-                fatal_fastpath=opt.mechanisms.elimination.degradation_fatal_fastpath,
-            )
-        )
-    return checks
-
-
 def build_elimination_check(
     config: PoBBConfig,
     *,
@@ -544,10 +450,8 @@ def build_elimination_check(
 
 
 __all__ = [
-    "DegradationCheck",
     "PoBBCheck",
     "PoBBConfig",
     "PoBBSnapshot",
-    "build_degradation_checks",
     "build_elimination_check",
 ]

@@ -460,8 +460,8 @@ def build_parser() -> argparse.ArgumentParser:
         "A measurement row is paid LLM spend, so `compact` never drops a field — "
         "it moves `hit`/`scored`/`objective` plus pipeline_data's `reasoning_trace`, "
         "`result_ranking`, `final_ranking` and `total_time`, and stamps the run header with what "
-        "left. `origin` and `round_parent` runs are never touched: they serve the overwhelming "
-        "majority of cache replays. Refuses while any cycle can still append. Dry-run by default; "
+        "left. Only `panel` runs (a candidate's own walk) are touched: `origin` and `parent` "
+        "serve the overwhelming majority of cache replays. Refuses while any cycle can still append. Dry-run by default; "
         "`purge-cold --apply` is the ONE irreversible step. Pure disk work, zero spend.",
     )
     p_compact.add_argument(

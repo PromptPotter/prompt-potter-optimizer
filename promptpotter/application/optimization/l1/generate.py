@@ -1,12 +1,12 @@
 """Compose and parse one L1_GENERATE call.
 
 The prompt is built by ``DispatchHub.fill`` over the ``injection_table()`` registry: ``fill`` takes no
-layout and resolves the node's own via ``node_layout(node, opt_sp)``, which routes to
-``opt_sp.memory.l1_layout`` for this node and to the override channel for the ``editor="l4"``
+layout and resolves the node's own via ``node_layout(node, memory)``, which routes to
+``Cycle.memory.l1_layout`` for this node and to the override channel for the ``editor="l4"``
 nodes. Two homes because the two edits have different lifetimes; one reader, so no caller
 re-derives the choice.
 
-``task_context`` (frozen framing) and ``plan`` (L3 strategy) arrive on ``OptSearchPoint`` and
+``task_context`` (the campaign's frozen framing) and ``plan`` (L3 strategy, on ``Cycle.memory``)
 surface alongside the panels — this node is fan-in, reading both layers' outputs in one round.
 
 ``no_op_variant`` is checked at two boundaries, through ONE ``candidate_delta``:
@@ -46,14 +46,14 @@ from promptpotter.application.optimization.dispatch.schemas import (
     build_l1_response_model,
 )
 from promptpotter.domain.escalation_signals import ValidationFailure
-from promptpotter.domain.opt_search_point import EvidenceGrounding
-from promptpotter.domain.results import (
+from promptpotter.domain.opt_search_point import EvidenceGrounding, OptSearchPoint, node_source
+from promptpotter.domain.optimizer_state import (
     L1_PARSE_FAILURE_MALFORMED,
     L1_PARSE_FAILURE_TOOLING,
     L1_PARSE_FAILURE_WRONG_TYPE,
-    CandidateProposal,
-    candidate_label,
+    POTTER_MANIFEST,
 )
+from promptpotter.domain.results import CandidateProposal, candidate_label
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 from promptpotter.shared import truncate
@@ -113,14 +113,15 @@ async def l1_generate(
     pipeline_schema = cycle.session.pipeline_schema
 
     bundle = build_bundle(cycle)
-    # L2-authored layout rides the OSP; `fill` resolves each slot's injections into `injection_vars`.
+    # L2-authored layout rides `cycle.memory`; `fill` resolves each slot's injections into
+    # `injection_vars`.
     template, injection_vars, rendered, coverage = DispatchHub.fill(
         load_optimizer_prompt("l1_generate"), bundle, node="l1_generate"
     )
     # What L1 may cite IS what L1 was shown — one derivation, feeding the prompt's menu and
     # the wire schema's enum, so the two can't disagree about which panels exist this round.
     citable = citable_fields(
-        opt_sp.memory.l1_layout,
+        cycle.memory.l1_layout,
         exploration_budget=bundle.cycle_slice.exploration_budget,
         rendered=rendered,
     )
@@ -197,7 +198,7 @@ async def l1_generate(
             parse_err.failing_chars,
             parse_err.diagnosis(),
         )
-        opt_sp.memory.wounds.validation_failures.append(
+        cycle.memory.wounds.validation_failures.append(
             ValidationFailure(
                 axis="l1_generate.output",
                 value=truncate(parse_err.raw, 300),
@@ -233,7 +234,7 @@ async def l1_generate(
             round_num,
             type(generated).__name__,
         )
-        opt_sp.memory.wounds.validation_failures.append(
+        cycle.memory.wounds.validation_failures.append(
             ValidationFailure(
                 axis="l1_generate.output",
                 value=truncate(str(generated), 300),
@@ -261,9 +262,10 @@ async def l1_generate(
         # flows to the one validation producer (``validate_overrides`` via ``parse_population``),
         # which records it as a non-fatal ``hallucinated_node`` wound, and
         # ``merge_pipeline_params`` strips it from the wire.
-        child = opt_sp.mutate(
+        child = OptSearchPoint.derive(
+            [opt_sp],
             changes_description=v.changes_description,
-            source="l1_generate",
+            source=node_source(POTTER_MANIFEST, "l1_generate"),
             evidence_grounding=_parse_evidence_grounding(v.evidence_grounding),
             **v.prompt_fields_updates,
         )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 from promptpotter.application.optimization.validators.l1_strict import (
@@ -72,6 +73,7 @@ def parse_population(
     pipeline_params: dict[str, Any] | None,
     schema: PipelineSchema | None,
     *,
+    runtime_failures: Sequence[RuntimeFailure],
     prompt_block_catalogue: str = "guidance",
 ) -> tuple[list[OptSearchPoint], list[dict[str, Any] | None]]:
     """Project proposals into searchpoints. ``provider`` / ``route_order`` mutations are ALWAYS
@@ -105,11 +107,11 @@ def parse_population(
                 )
                 if outcome is not None:
                     failures.extend(outcome.evidence["failures"])
-                # Re-propose check: rejects (param, value) already in
-                # opt_sp.memory.wounds.runtime_failures; runs even when schema-compliance passes.
+                # Re-propose check: rejects (param, value) already in the cycle's runtime
+                # wounds; runs even when schema-compliance passes.
                 rf_outcome = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.run(
                     pipeline_overlay,
-                    opt_sp=opt_sp,
+                    runtime_failures=runtime_failures,
                     pipeline_params=merged_pp,
                 )
                 if rf_outcome is not None:
@@ -140,7 +142,7 @@ def parse_population(
             if ph_outcome is not None:
                 failures.extend(ph_outcome.evidence["failures"])
             if failures:
-                opt_sp.memory.wounds.validation_failures = failures
+                cp.validation_failures = failures
                 for vf in failures:
                     logger.warning(
                         "candidate %s: validation failure on %s — proposed %r not in allowed %r (reason=%s)",
@@ -157,6 +159,7 @@ def parse_population(
 
 def build_score_report(
     opt_sp: OptSearchPoint,
+    validation_failures: Sequence[ValidationFailure],
     pipeline_overlay: dict[str, Any] | None,
     score_summary: dict[str, Any],
     query_results: list[Any],
@@ -172,7 +175,6 @@ def build_score_report(
     degradation_context: DegradationContext | None = None,
     invalid: bool = False,
     new_runtime_failure: RuntimeFailure | None = None,
-    l1_diversity: float = 1.0,
 ) -> ScoredCandidate:
     """Typed candidate score report. The CI is CARRIED from the gateway's own fold
     (`search_point_scorer::_composite`), never re-derived here — one writer, one band, and the
@@ -180,9 +182,7 @@ def build_score_report(
     ``sp_hash(session.pipeline_schema)`` — the call ``build_dataset_run_data`` makes to key the
     rows — so the report and the archive name one identity; ``""`` where nothing was measured.
     ``run_id`` is the walk's own (``ScoredWalk.run_id``), ``None`` where nothing was walked."""
-    # Lazy: scoring → optimization circular.
-
-    evaluators = {**(score_summary.get("evaluators") or {}), "l1_diversity": l1_diversity}
+    evaluators = dict(score_summary.get("evaluators") or {})
     # Refresh the row-derivable subset from the rows, as the read-side mask does (`mask/load.py`):
     # on a RECONSTRUCT-from-disk path — resume repair, an origin replayed off its round file — the
     # snapshot carries whatever evaluator vocabulary was current when it was written, so a formula
@@ -225,7 +225,7 @@ def build_score_report(
         cache_read_tokens=measured.cache_read if measured else None,
         partial_reason=str(score_summary.get("partial_reason", "")),
         invalid=invalid,
-        validation_failures=list(opt_sp.memory.wounds.validation_failures),
+        validation_failures=list(validation_failures),
         runtime_failures=[new_runtime_failure] if new_runtime_failure else [],
         elimination_context=elimination_context or {},
         degradation_context=degradation_context or {},
@@ -258,12 +258,10 @@ INVALID_SCORES: dict[str, Any] = {
 }
 
 
-def fatal_validation_failures(opt_sp: OptSearchPoint) -> list[ValidationFailure]:
+def fatal_validation_failures(failures: Sequence[ValidationFailure]) -> list[ValidationFailure]:
     """The failures that cost a candidate its measurement, as opposed to riding along as signal.
 
     ``hallucinated_node`` is the one non-fatal reason — the phantom edit is stripped and the real
     edits still ran. One definition, because the scorer and the yield count must agree on which
     candidates measured."""
-    return [
-        vf for vf in opt_sp.memory.wounds.validation_failures if vf.reason != "hallucinated_node"
-    ]
+    return [vf for vf in failures if vf.reason != "hallucinated_node"]

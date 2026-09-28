@@ -14,6 +14,7 @@ from promptpotter.domain.scoring import CellScorer, is_unscored
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 from promptpotter.infrastructure.store import archive_queries
 from promptpotter.shared.hashing import shapes_optimizer_prompt
+from promptpotter.shared.instrument import MeasurementRole
 
 
 @shapes_optimizer_prompt
@@ -121,11 +122,8 @@ def _collect(*items: tuple[str, str | None]) -> dict[str, str] | None:
 class AxisIndex:
     """Derived axis-keyed view over the MeasurementArchive (axis → value → [accuracy])."""
 
-    def __init__(
-        self,
-        sample_index: SampleIndex | None = None,
-    ) -> None:
-        self.sample_index: SampleIndex = sample_index or SampleIndex()
+    def __init__(self, *, sample_ids: frozenset[int] | None) -> None:
+        self.sample_index = SampleIndex(sample_ids=sample_ids)
         self._axis_values: dict[str, dict[str, list[float]]] = defaultdict(
             lambda: defaultdict(list),
         )
@@ -429,10 +427,15 @@ class AxisIndex:
         # cross-cycle digest the L1/L2/L3 prompts read reflects the deliberately-explored
         # datapoints, not whichever connector replayed most. Unscoreable runs are dropped for the
         # same reason: a fitness from a dead vocabulary is not comparable to one from this run's.
+        # A bench pass goes whole: its accuracy is a reading on rows no optimizer may learn from.
         all_entries: list[dict[str, Any]] = []
         for entry in archive_queries.list_runs(stores, dataset_name=dataset_name):
             run_id = entry.get("run_id", "")
-            if entry_grade(entry) == "C" or run_id in self._unscoreable_runs:
+            if (
+                entry_grade(entry) == "C"
+                or run_id in self._unscoreable_runs
+                or entry.get("name") == MeasurementRole.BENCH
+            ):
                 continue
             all_entries.append(entry)
             if not run_id or run_id in self._axis_seen_runs:
@@ -519,10 +522,11 @@ class AxisIndex:
         scorer_id: str = "none",
         *,
         dataset_name: str | None,
+        sample_ids: frozenset[int] | None,
     ) -> AxisIndex | None:
         if stores is None:
             return None
-        idx = cls()
+        idx = cls(sample_ids=sample_ids)
         idx.refresh(
             stores,
             scorer=scorer,

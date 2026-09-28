@@ -68,7 +68,7 @@ export function MeasurementRun({
             candidate_id: c.candidate_id,
             label: c.label,
             accuracy: c.accuracy,
-            is_winner: c.is_winner,
+            is_selected: c.is_selected,
           }
         : null,
     );

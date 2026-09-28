@@ -68,6 +68,8 @@ def _fit_or_extend(
         dataset_name=dataset_name,
         scorer=scorer,
         scorer_id=scorer_id,
+        # An inner cell holds nothing out (`tasks.py::inner_instrument_config`).
+        sample_ids=None,
     )
     if not obs:
         return None

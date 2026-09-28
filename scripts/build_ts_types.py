@@ -58,6 +58,7 @@ from promptpotter.application.pipeline_resolve import (
     RunsWithParam,
 )
 from promptpotter.domain.backend import BackpressureReading
+from promptpotter.domain.bench import BenchReading, BenchScore
 from promptpotter.domain.cells import (
     Cell,
     CellCandidate,
@@ -80,8 +81,12 @@ from promptpotter.domain.opt_search_point import (
     EvidenceGrounding,
     FewShotExample,
     IndividualLineage,
-    L2L3Memory,
     OptSearchPoint,
+)
+from promptpotter.domain.optimizer_state import (
+    L2L3Memory,
+    OptimizerState,
+    PotterRoundState,
     WoundChannels,
 )
 from promptpotter.domain.pipeline_schema import (
@@ -203,6 +208,8 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     WoundChannels,
     L1Layout,
     L2L3Memory,
+    PotterRoundState,
+    OptimizerState,
     OptSearchPoint,
     RoundResult,
     SpendBucket,
@@ -237,6 +244,8 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     # --- active router ---
     ActiveSessionResponse,
     SpawnedBy,  # nested in CycleListEntry — the emitter does not recurse, so register it
+    BenchReading,  # nested in BenchScore, which nests in CycleListEntry
+    BenchScore,
     CycleListEntry,
     CyclesResponse,
     # --- commands middleware ---
@@ -711,7 +720,7 @@ _HEADER = """\
 
 
 def main() -> int:
-    from promptpotter.domain.phases import DashboardState, RunPhase
+    from promptpotter.domain.phases import DashboardState, PotterDashboardState, RunPhase
 
     blocks = [_emit_interface(model) for model in EXPORTED_MODELS]
     blocks.append(
@@ -722,6 +731,12 @@ def main() -> int:
             DashboardState,
             "The fine-grained activity axis, `dashboard.json::state` "
             "(domain/phases.py::DashboardState).",
+        )
+    )
+    blocks.append(
+        _emit_enum_union(
+            PotterDashboardState,
+            "Potter's own activities on that axis (domain/phases.py::PotterDashboardState).",
         )
     )
     blocks.append(_emit_command_kinds())

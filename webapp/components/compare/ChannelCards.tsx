@@ -538,14 +538,14 @@ function useChannelHead(
   return useMemo(() => {
     const courseKey = reading ? encodeCyclePath(readingPath(reading)) : null;
     const candidates = (courseKey && index.get(courseKey)?.candidates) || [];
-    // Tree order, so the LAST node at the max round is the most recent (no re-sort). `is_winner`
+    // Tree order, so the LAST node at the max round is the most recent (no re-sort). `is_selected`
     // alone says nothing on a round still scoring, so the crown walk reads `election_held`.
     let newest: LineageNode | null = null;
     let crowned: LineageNode | null = null;
     for (const c of candidates) {
       if (c.round == null) continue;
       if (newest === null || c.round >= (newest.round ?? -1)) newest = c;
-      if (c.is_winner && c.election_held && (crowned === null || c.round >= (crowned.round ?? -1))) {
+      if (c.is_selected && c.election_held && (crowned === null || c.round >= (crowned.round ?? -1))) {
         crowned = c;
       }
     }

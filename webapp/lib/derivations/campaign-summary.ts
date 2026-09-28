@@ -3,6 +3,7 @@
 
 import type { ReactNode } from "react";
 import type {
+  BenchScore,
   CampaignSummary,
   ConfigKnob,
   ConfigMapResponse,
@@ -15,6 +16,7 @@ import {
   fmtAgo,
   fmtDateTime,
   fmtPct0,
+  fmtSigned,
   fmtTokens,
   fmtUsd,
   fmtUsdCents,
@@ -64,6 +66,17 @@ function spendFloor(c: CampaignSummary): string {
 
 export function spendLabel(c: CampaignSummary): string {
   return `${spendFloor(c)}${fmtUsdCents(c.spend_used_usd)}`;
+}
+
+// The headline: the selection graded on held-out rows no optimizer node read. Every value served.
+export function benchStat(bench: BenchScore): RowStat {
+  return {
+    label: "Bench",
+    value: fmtPct0(bench.selected.composite_fitness),
+    sub:
+      `origin ${fmtPct0(bench.origin.composite_fitness)} · lift ${fmtSigned(bench.lift)} · ` +
+      `${bench.bench_size} held-out rows`,
+  };
 }
 
 export function accuracyStat(origin: number | null, best: number | null): RowStat {
@@ -185,6 +198,7 @@ export function campaignCard(
 
   const cap = runsWith ? runsWith.max_rounds : null;
   const stats: RowStat[] = [
+    ...(answering.bench_score ? [benchStat(answering.bench_score)] : []),
     {
       label: "Spend",
       value: `${spendFloor(campaign)}${fmtUsd(campaign.spend_used_usd)}`,

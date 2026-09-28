@@ -206,7 +206,8 @@ failed measurement (validation failure on L1 output, runtime failure
 mid-eval, deprecated cache entry from a transient backend hiccup) is
 **innocent** — a technical issue, not the candidate's fault. We log
 it, ignore it, and keep accumulating evidence on the same candidate.
-A candidate is aborted only when its **`DegradationCheck`** fires — a bench check, run on
+A candidate is aborted only when its **`DegradationCheck`**
+(`application/scoring/classification.py::DegradationCheck`) fires — a bench check, run on
 every optimizer's arms whatever its eliminator — i.e. when its
 fraction of failed measurements crosses the per-campaign
 `degradation_threshold` (`campaign.yaml::degradation_threshold`,
@@ -297,7 +298,7 @@ world is a strict containment hierarchy:
   produces a distinct campaign regardless of declaration. The
   declaration is recorded as *properties* on `campaign.json`, never as
   the id: `root_content_hash` (resume's config-drift check) and
-  `optimizer_prompt_hash`, the digest of the selected manifest (an audit join key — optimizer
+  `optimizer_manifest_hashes`, one digest per optimizer manifest (an audit join key — optimizer
   drift is asked per ROUND, where it can name one and fork at it).
   The dataset is embedded so "campaigns for dataset X" is a prefix scan.
 - **Cycle** — one node in a campaign's lineage tree: root | fork | diag.
@@ -379,7 +380,7 @@ sidebar: `session` (a session root run — `resume` extends it),
 `user_fork` (every operator-initiated branch folds into this one kind —
 `domain/run_records.py::MINT_KIND_FOR_TRIGGER` is the table, and it raises at
 import on an unbadged trigger), `auto_rebase` (a branch an optimizer's controller
-requested — potter's L2/L3 rebase; fork trigger `l2_rebase` / `l3_rebase`).
+requested — potter's L2/L3 rebase; fork trigger `optimizer_rebase`, `issued_by` naming the layer).
 
 #### Three data scopes — campaign / dataset / workspace
 

@@ -16,7 +16,7 @@ function node(
   over: Partial<LineageNode> & Pick<LineageNode, "kind" | "id" | "label">,
 ): LineageNode {
   return {
-    parent_id: null,
+    parent_ids: [],
     course_label: over.label,
     path: [],
     children: [],
@@ -26,16 +26,16 @@ function node(
     composite_fitness: null,
     status: "",
     election_held: false,
-    is_winner: false,
+    is_selected: false,
     theta: null,
     theta_se: null,
   theta_caveat: null,
     evaluators: {},
     mean_fitness_ci_lo: null,
     mean_fitness_ci_hi: null,
-    matched_parent_lift: null,
-    matched_parent_lift_ci_lo: null,
-    matched_parent_lift_ci_hi: null,
+    reference_lift: null,
+    reference_lift_ci_lo: null,
+    reference_lift_ci_hi: null,
     scored_samples: null,
     expected_samples: null,
     cached_samples: null,
@@ -76,7 +76,7 @@ function candsH(rounds: { n: number; held?: boolean }[]): LineageNode[] {
         label: `C${ri + 1}.${i + 1}`,
         round: ri + 1,
         accuracy: 0.5,
-        is_winner: !r.held && i === r.n - 1,
+        is_selected: !r.held && i === r.n - 1,
       }),
     ),
   );
@@ -107,7 +107,7 @@ function laneKey(id: string, over: Partial<LineageNode> = {}): string {
 
 function hangOffWinner(parent: LineageNode, round: number, child: LineageNode): LineageNode {
   const children = parent.children.map((c) =>
-    c.round === round && c.is_winner
+    c.round === round && c.is_selected
       ? { ...c, children: [...c.children, child] }
       : c,
   );

@@ -40,11 +40,11 @@ _HEADER_KEY = "run"
 # The INDEX's fold key — a run's identity, which is what addresses its detail file
 # (`runs/{run_id}.jsonl`). It was `content_hash` while the file was `{label}_{content_hash}`, and
 # the two disagree by construction: the label is not in the hash, so `origin_<h>` and
-# `round_parent_<h>` are one entry, last-wins. Those two are the SAME searchpoint on the same rows
-# and different readings of it — the parent fold is scored `opt_sp=None, l1_diversity=1.0` — so the
-# surviving entry's `scores`, `item_count`, `source` and `provenance` were whichever landed last,
-# a per-sample write could overwrite a complete run with a 3-of-30 one, and `reindex` unlinked the
-# loser's detail as an orphan: paid measurement, destroyed and reported as GC.
+# `parent_<h>` are one entry, last-wins. Those two are the SAME searchpoint on the same rows
+# and two readings of it, so the surviving entry's `scores`, `item_count`, `source` and
+# `provenance` were whichever landed last, a per-sample write could overwrite a complete run with a
+# 3-of-30 one, and `reindex` unlinked the loser's detail as an orphan: paid measurement, destroyed
+# and reported as GC.
 _INDEX_FOLD_KEY = "run_id"
 _DETAIL_SUFFIX = ".jsonl"
 _COLD_SUFFIX = ".jsonl.gz"

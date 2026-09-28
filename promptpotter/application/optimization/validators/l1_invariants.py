@@ -62,9 +62,7 @@ def lost_ideas(prior_rounds: Sequence[Any]) -> list[tuple[int, frozenset[str]]]:
                 # COLLAPSED is no measurement, and a degradation cut names no gate at all.
                 if cand.elimination_context.get("gate") != EliminationGate.EPSILON:
                     continue
-            elif cand.matched_parent_accuracy is None or (
-                cand.accuracy > cand.matched_parent_accuracy
-            ):
+            elif cand.reference_accuracy is None or (cand.accuracy > cand.reference_accuracy):
                 continue
             if fp := candidate_idea(cand.prompt_fields, parent, cand.pipeline_overlay, parent_pp):
                 out.append((rr.round, fp))
@@ -81,10 +79,8 @@ def detect_invariants(
     round — if rejection would leave no live proposal, they are all restored."""
     parent_pp = parent_pipeline_params or {}
     for cp in proposals:
-        cp.opt_sp.memory.wounds.validation_failures = [
-            vf
-            for vf in cp.opt_sp.memory.wounds.validation_failures
-            if vf.reason not in INVARIANT_REASONS
+        cp.validation_failures = [
+            vf for vf in cp.validation_failures if vf.reason not in INVARIANT_REASONS
         ]
     seen: dict[tuple[Any, ...], int] = {}
     n_no_op = 0
@@ -99,8 +95,8 @@ def detect_invariants(
         child_fields = cp.opt_sp.prompt_fields()
         delta = candidate_delta(child_fields, parent_fields, cp.pipeline_overlay, parent_pp)
         if not delta:
-            cp.opt_sp.memory.wounds.validation_failures = [
-                *cp.opt_sp.memory.wounds.validation_failures,
+            cp.validation_failures = [
+                *cp.validation_failures,
                 ValidationFailure(
                     axis="variant",
                     value="(no mutation)",
@@ -113,8 +109,8 @@ def detect_invariants(
         sig = delta.signature()
         if sig in seen:
             twin = seen[sig]
-            cp.opt_sp.memory.wounds.validation_failures = [
-                *cp.opt_sp.memory.wounds.validation_failures,
+            cp.validation_failures = [
+                *cp.validation_failures,
                 ValidationFailure(
                     axis="variant",
                     value=f"duplicate of C{twin + 1}",
@@ -145,8 +141,8 @@ def detect_invariants(
     n_repeat = 0
     if len(repeats) < n_live:
         for cp, echo in repeats:
-            cp.opt_sp.memory.wounds.validation_failures = [
-                *cp.opt_sp.memory.wounds.validation_failures,
+            cp.validation_failures = [
+                *cp.validation_failures,
                 ValidationFailure(
                     axis="variant",
                     value=f"re-proposes the idea measured and lost in round {echo}",

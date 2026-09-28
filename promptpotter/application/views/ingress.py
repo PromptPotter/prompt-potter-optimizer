@@ -13,8 +13,6 @@ from promptpotter.application.views.render.optimizer_prompt_text import (
 from promptpotter.application.views.view_models import (
     AnyView,
     CandidatesGeneratedView,
-    EscalationEnterView,
-    EscalationExitView,
     InitEnterView,
     InitExitView,
     L2RefineEnterView,
@@ -29,7 +27,7 @@ from promptpotter.application.views.view_models import (
     WarningEntry,
 )
 from promptpotter.domain.candidate_diff import build_candidate_flat, flatten_sp_summary
-from promptpotter.domain.phases import PhaseEvent
+from promptpotter.domain.phases import CampaignPhase, PhaseEvent, PotterPhase
 from promptpotter.domain.results import ScoredCandidate
 from promptpotter.domain.ruler import is_flat_ruler_id
 from promptpotter.shared import truncate
@@ -105,14 +103,15 @@ def _init_exit(d: dict[str, Any], ctx: ViewContext) -> InitExitView:
     return InitExitView(
         origin_acc=cycle.origin_round.accuracy,
         cycle_id_short=(session.state.cycle_id or "?")[:12],
-        samples=len(session.scoring.scoring_set),
+        samples=len(session.scoring.require_partition().search),
+        bench_samples=len(session.scoring.require_partition().bench),
         origin_samples=len(cycle.origin_round.results),
         obs_on=session.state.obs is not None,
         resumed_from_round=session.state.resumed_from_round,
         # Rounds replayed off disk — round 0 is built fresh by `Cycle.start`, so it is
         # only "cached" when a resume's priors superseded it.
         cached_rounds_count=sum(1 for rr in cycle.rounds if rr.round > 0),
-        task_context_keys=len(cycle.opt_sp.memory.task_context),
+        task_context_keys=len(cycle.framing),
         l2_round=cycle.escalation.l2_round,
         composite_fitness_formula=full,
         composite_fitness_formula_short=short,
@@ -201,7 +200,7 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
     winner_label = str(d.get("winner_label") or "?")
     winner_total = int(d.get("winner_total", 0))
 
-    # Read exactly as ``winner_matched_parent_accuracy`` is read four lines down — the file
+    # Read exactly as ``winner_reference_accuracy`` is read four lines down — the file
     # already knew an accuracy can be absent and applied it to the parent's but not the winner's.
     raw_winner = d.get("winner_accuracy")
     w_acc = None if raw_winner is None else float(raw_winner)
@@ -211,11 +210,11 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
     # matches the ``improved`` gate, not the full-set comparison that punishes PoBB-locked
     # winners. Absent when the winner did not cover the parent's panel, and it stays absent —
     # falling back to ``parent_acc`` publishes a prefix accuracy minus a full-panel rate.
-    raw_matched = d.get("winner_matched_parent_accuracy")
-    matched_parent_acc = None if raw_matched is None else float(raw_matched)
-    matched_parent_composite = d.get("winner_matched_parent_composite")
+    raw_matched = d.get("winner_reference_accuracy")
+    reference_acc = None if raw_matched is None else float(raw_matched)
+    reference_composite = d.get("winner_reference_composite")
     # No Δ without BOTH ends of it. The winner's own rate is the new half of that condition.
-    delta = None if matched_parent_acc is None or w_acc is None else w_acc - matched_parent_acc
+    delta = None if reference_acc is None or w_acc is None else w_acc - reference_acc
     p_value: float | None = d.get("p_value")  # computed by l1_score; not recomputed here.
     # The WHOLE reading is emitted, so a cold scale is legible here rather than arriving as a
     # bare float indistinguishable from a warm one — headline `ability` declines the cold case.
@@ -255,28 +254,10 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
         l1_critique_text=format_l1_critique_for_prompt(d.get("critique")),
         composite_fitness_formula=ctx.composite_fitness_formula,
         composite_fitness_formula_short=ctx.composite_fitness_formula_short,
-        matched_parent_accuracy=matched_parent_acc,
-        matched_parent_composite=matched_parent_composite,
+        reference_accuracy=reference_acc,
+        reference_composite=reference_composite,
         headline_metric=ctx.headline_metric,
         ability_theta=ability_theta,
-    )
-
-
-def _escalation_enter(d: dict[str, Any], ctx: ViewContext) -> EscalationEnterView:
-    return EscalationEnterView(
-        check_name=d.get("check_name", "?"),
-        target=d.get("target", "?"),
-        degraded_rate=d.get("degraded_rate", 0.0),
-        warning_types=dict(d.get("warning_types") or {}),
-    )
-
-
-def _escalation_exit(d: dict[str, Any], ctx: ViewContext) -> EscalationExitView:
-    return EscalationExitView(
-        classifications=tuple(
-            (c.get("warning_type", ""), c.get("status", ""))
-            for c in (d.get("classifications") or [])
-        )
     )
 
 
@@ -326,17 +307,15 @@ def _plan_exit(d: dict[str, Any], ctx: ViewContext) -> PlanExitView:
 
 
 _BUILDERS: dict[str, Any] = {
-    "init:enter": _init_enter,
-    "init:exit": _init_exit,
-    "l1_generate:enter": _l1_generate_enter,
-    "l1_generate:exit": _l1_generate_exit,
-    "l1_score:exit": _l1_score_exit,
-    "refine_strategy:enter": _refine_enter,
-    "refine_strategy:exit": _refine_exit,
-    "modify_plan:enter": _plan_enter,
-    "modify_plan:exit": _plan_exit,
-    "escalation:enter": _escalation_enter,
-    "escalation:exit": _escalation_exit,
+    f"{CampaignPhase.INIT}:enter": _init_enter,
+    f"{CampaignPhase.INIT}:exit": _init_exit,
+    f"{CampaignPhase.PROPOSE}:enter": _l1_generate_enter,
+    f"{CampaignPhase.PROPOSE}:exit": _l1_generate_exit,
+    f"{CampaignPhase.MEASURE}:exit": _l1_score_exit,
+    f"{PotterPhase.REFINE_STRATEGY}:enter": _refine_enter,
+    f"{PotterPhase.REFINE_STRATEGY}:exit": _refine_exit,
+    f"{PotterPhase.MODIFY_PLAN}:enter": _plan_enter,
+    f"{PotterPhase.MODIFY_PLAN}:exit": _plan_exit,
 }
 
 
@@ -372,8 +351,8 @@ def score_entry_from_dict(s: dict[str, Any]) -> ScoreEntry:
         escalation_aborted=sc.escalation_aborted,
         partial_reason=sc.partial_reason,
         invalid_reason=invalid_reason,
-        matched_parent_accuracy=sc.matched_parent_accuracy,
-        matched_parent_composite=sc.matched_parent_composite,
+        reference_accuracy=sc.reference_accuracy,
+        reference_composite=sc.reference_composite,
         theta=sc.theta,
         theta_se=sc.theta_se,
     )

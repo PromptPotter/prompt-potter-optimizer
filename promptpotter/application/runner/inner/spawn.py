@@ -19,7 +19,6 @@ from promptpotter.application.diagnostics.seed_screen import class_floor, draw_b
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.mint import prepare_fresh_cycle, resolve_cycle_plan
 from promptpotter.application.jobs.quota import unadmitted_limits
-from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     resolved_overrides,
     set_optimizer_prompt_overrides,
@@ -49,7 +48,8 @@ from promptpotter.domain.l4.proxies import (
 from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.phases import REFUSAL_STOPS, RunPhase, StopReason
 from promptpotter.domain.pipeline_schema import stable_hash
-from promptpotter.domain.results import candidate_label
+from promptpotter.domain.results import candidate_label, invariant_collapses
+from promptpotter.infrastructure.llm.heartbeat import heartbeat
 from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND, _CYCLE_LEDGER
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.archive_queries import capture_evidence_epoch
@@ -158,7 +158,7 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
     # otherwise). No `or 0.0`: an origin that was never scored has no level to narrate.
     assert result.origin_level is not None
     origin = result.origin_level
-    levels = result.round_parent_levels
+    levels = result.round_levels
     # Lead with `mean_round_delta`, the term the outer formula scores — a headline the generator
     # is not graded on teaches the wrong lesson, so this line moves whenever the measurand does.
     # `parent_level_series`, not `levels`: the law averages over the round BUDGET, and dividing by
@@ -177,7 +177,7 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
         (
             h
             for r in sorted(by_round)
-            if (c := by_round[r].critique)
+            if (c := by_round[r].optimizer_state.payload.critique)
             for h in c.get("failure_highlights") or []
             if h.strip()
         ),
@@ -193,8 +193,9 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
         if 0 <= r - 1 < len(levels):
             parts.append(f"level {levels[r - 1]:.3f} (D{levels[r - 1] - origin:+.3f})")
         prior = by_round.get(r - 1)
-        if prior is not None and prior.critique and prior.critique.get("priority_fix"):
-            parts.append(f"steer: {_clip(prior.critique['priority_fix'], 130)}")
+        steer = prior.optimizer_state.payload.critique if prior is not None else None
+        if steer and steer.get("priority_fix"):
+            parts.append(f"steer: {_clip(steer['priority_fix'], 130)}")
         scored = [c for c in rnd.candidate_scores if not c.invalid]
         if scored:
             # Rank by lift over the MATCHED parent, and never invent the comparison where there
@@ -204,8 +205,8 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
             top = max(
                 scored,
                 key=lambda c: (
-                    c.accuracy - c.matched_parent_accuracy
-                    if c.matched_parent_accuracy is not None and c.accuracy is not None
+                    c.accuracy - c.reference_accuracy
+                    if c.reference_accuracy is not None and c.accuracy is not None
                     else float("-inf"),
                     c.composite_fitness,
                 ),
@@ -216,8 +217,8 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
                 else ""
             )
             versus = (
-                f" vs matched-parent {top.matched_parent_accuracy:.3f}"
-                if top.matched_parent_accuracy is not None
+                f" vs matched-parent {top.reference_accuracy:.3f}"
+                if top.reference_accuracy is not None
                 else " (stopped before it covered the origin's samples, so nothing to compare)"
             )
             parts.append(
@@ -226,14 +227,15 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
             )
         else:
             parts.append("no scored candidates")
+        collapses = invariant_collapses(rnd.candidate_scores)
         anomalies = [
             f"{tag} x{n}"
             # `repeat` is the anomaly the OUTER generator most needs: the inner loop stopped
             # forming new hypotheses, which is an optimizer prompt defect, not task difficulty.
             for tag, n in (
-                ("no-op", rnd.l1_n_no_op),
-                ("dup", rnd.l1_n_duplicate),
-                ("repeat", rnd.l1_n_repeat),
+                ("no-op", collapses.get("no_op_variant", 0)),
+                ("dup", collapses.get("duplicate_variant", 0)),
+                ("repeat", collapses.get("repeat_variant", 0)),
             )
             if n
         ]
@@ -318,18 +320,27 @@ def _open_inner_campaign(
 
     plan = resolve_cycle_plan(session, campaign_config, train_data)
     store = session.store.campaigns
-    existing = store.load(CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id))
-    if existing is None:
+    root = CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id)
+    if store.load(root) is None:
         prepare_fresh_cycle(session, campaign_config, train_data, campaign_id=campaign_id)
         return 0
 
+    # A rebase retires the root under `superseded_by`; the banked trajectory is its successor's.
+    hop = store.line_holder(root)
+    existing = store.load(hop)
+    if existing is None:
+        raise CellUnscoreableError(
+            f"its campaign {campaign_id} names successor {hop.cycle_id}, which has no index",
+            spent={},
+            step_timings={},
+        )
     phase = derive_run_phase(
-        store.cycle_dir(CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id)),
+        store.cycle_dir(hop),
         is_terminal=bool(existing.get("finished_at")),
     )
     if phase in (RunPhase.RUNNING, RunPhase.GATE, RunPhase.CHECKIN):
         raise CellUnscoreableError(
-            f"its campaign {campaign_id}/{plan.cycle_id} reads {phase} — another producer "
+            f"its campaign {campaign_id}/{hop.cycle_id} reads {phase} — another producer "
             "owns it, and two runs writing one cycle is not a measurement",
             spent={},
             step_timings={},
@@ -337,7 +348,7 @@ def _open_inner_campaign(
     session_id = str(existing.get("parent_session_id") or "")
     if not session_id:
         raise CellUnscoreableError(
-            f"its campaign {campaign_id}/{plan.cycle_id} names no parent session, so there "
+            f"its campaign {campaign_id}/{hop.cycle_id} names no parent session, so there "
             "is no session record to continue under",
             spent={},
             step_timings={},
@@ -345,17 +356,13 @@ def _open_inner_campaign(
 
     session.session_id = session_id
     session.campaign_id = campaign_id
-    session.state.cycle_id = plan.cycle_id
-    save_active_pointer(
-        session.store.base_dir,
-        session_id,
-        CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id),
-    )
+    session.state.cycle_id = hop.cycle_id
+    save_active_pointer(session.store.base_dir, session_id, hop)
     banked = len(existing.get("rounds") or [])
     logger.info(
         "inner campaign %s/%s CONTINUES from %d banked round record(s) (was %s)",
         campaign_id,
-        plan.cycle_id,
+        hop.cycle_id,
         banked,
         phase,
     )
@@ -454,7 +461,6 @@ async def _run_inner_campaign(
     observers = build_run_observers(
         session=session,
         campaign_config=campaign_config,
-        dataset=train_data,
         display=None,
         resumed_from_round=None,
         origin_accuracy=0.0,

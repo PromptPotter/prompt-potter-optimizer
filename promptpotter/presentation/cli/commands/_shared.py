@@ -187,7 +187,6 @@ def backend_unreachable_result(exc: BackendUnreachableError) -> CommandResult:
 def _build_observers(
     session: Session,
     campaign_config: CampaignConfig,
-    train_data: list[Sample],
     origin_acc: float,
 ) -> RunObservers:
 
@@ -195,7 +194,6 @@ def _build_observers(
     return build_run_observers(
         session=session,
         campaign_config=campaign_config,
-        dataset=train_data,
         display=LiveDisplay.for_campaign(session, campaign_config, origin_acc=origin_acc),
         origin_accuracy=origin_acc,
     )
@@ -281,7 +279,7 @@ async def drive_cycle(
     registry.mark_started(job.job_id)
     pre_origin_acc = ctx.state.get("origin_accuracy", 0.0)
     try:
-        observers = _build_observers(session, campaign_config, train_data, pre_origin_acc)
+        observers = _build_observers(session, campaign_config, pre_origin_acc)
 
         # Control-local hooks (pause.flag under .runtime/) are bound centrally in
         # run_optimization (the single runner seam) so CLI and API launches behave

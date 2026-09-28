@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from promptpotter.domain.bench import BankPartition
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.export import PromptExport, parse_prompt_export
@@ -704,7 +705,7 @@ class CampaignStore:
         The reader half of "we write a file and provide a reader" (`roadmap.md` § Application
         radius). It lives here so a consumer never has to know where the file sits — every caller
         that re-derived the winner from `CycleResult` instead built it out of the wire-side
-        `winner_prompt_fields`, which cannot be rebuilt into a `PromptTemplate`.
+        `result_prompt_fields`, which cannot be rebuilt into a `PromptTemplate`.
         """
         text = read_text_optional(self._layout(hop).export)
         return parse_prompt_export(text) if text else None
@@ -738,6 +739,12 @@ class CampaignStore:
         with graceful("Supersede relation write failed"):
             self.update(hop, {"superseded_by": successor_cycle_id})
         self._stamp_terminal(hop, StopReason.REBASED)
+
+    def line_holder(self, hop: CycleHop) -> CycleHop:
+        """The cycle answering for *hop*'s line now — itself unless a supersede cut moved it."""
+        while (data := self.load(hop)) is not None and (successor := data.get("superseded_by")):
+            hop = CycleHop(campaign_id=hop.campaign_id, cycle_id=successor)
+        return hop
 
     def _stamp_terminal(self, hop: CycleHop, reason: StopReason) -> bool:
         data = read_json_optional(self._index_path(hop))
@@ -810,6 +817,7 @@ class CampaignStore:
             "updated_at": data.get("updated_at", ""),
             "human_intervened": bool(data.get("human_intervened", False)),
             "spawned_by": data.get("spawned_by"),
+            "bench_score": (data.get("final") or {}).get("bench"),
         }
 
     def enumerate_cycles(self) -> list[dict[str, Any]]:
@@ -1144,6 +1152,20 @@ class CampaignStore:
         yet to pin anything."""
         raw = read_yaml_optional(self._layout(hop).resolved_experiment)
         return raw if isinstance(raw, dict) else None
+
+    def write_bank_partition(self, hop: CycleHop, partition: BankPartition) -> None:
+        """Re-written every run init: the partition is a pure function of the bank and the frozen
+        declaration, so a disagreement between runs is a changed bank, which the id lists show."""
+        split = partition.split
+        write_json(
+            self._layout(hop).bank_partition,
+            {
+                "split": None if split is None else split.model_dump(mode="json"),
+                "search_ids": [s.id for s in partition.search],
+                "bench_ids": [s.id for s in partition.bench],
+                "demo_ids": [s.id for s in partition.demo],
+            },
+        )
 
     def write_optimized_surface(self, hop: CycleHop, leaves: Sequence[ValueLeaf]) -> None:
         """Record WHAT this cycle optimizes, and how each value reaches the model.

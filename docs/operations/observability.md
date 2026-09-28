@@ -4,7 +4,7 @@ Every optimizer LLM call, backend match, and escalation check emits a structured
 
 ## What's traced, and where
 
-Phase events (`CampaignPhase` in `domain/phases.py`: `init`, `origin`, `l1_generate`, `l1_score`, `refine_strategy`, `modify_plan`, `escalation`) emit `enter`/`exit` pairs into the per-cycle ledger; an `escalation` enter carries the round's signal as `{check_name, target, degraded_rate, warning_types}`. `langfuse/events.jsonl` is a pure mirror — nothing reads it for state reconstruction.
+Phase events (`domain/phases.py`: the bench's `CampaignPhase` — `init`, `origin`, `propose`, `measure` — and potter's `PotterPhase` — `refine_strategy`, `modify_plan`) emit `enter`/`exit` pairs into the per-cycle ledger. `langfuse/events.jsonl` is a pure mirror — nothing reads it for state reconstruction.
 
 | Source | Event | Payload |
 |--------|-------|---------|
@@ -19,7 +19,7 @@ Phase events (`CampaignPhase` in `domain/phases.py`: `init`, `origin`, `l1_gener
 
 `index.json::final.wall_clock` is the cycle's own clock, folded from the ledger at finalize (`ledger_scan.py::scan_ledger_wall_clock`) and rendered by `review.md` § Wall clock. It is banked rather than derived on read because no round document carries a timestamp and the records it is folded from are compactable. **A resumed cycle's clock is its LAST launch's** — a round an earlier launch closed carries no seconds rather than a wrong number, so a result quoting a clock quotes an unbroken run.
 
-**Two denominators, and they are not interchangeable.** `phase_s` is CLOCK, keyed by `CampaignPhase`: the brackets do not nest, so the legs sum and each is a real share of `elapsed_s`. `worked_s` is summed CALL time per spend bucket and billing node, off `TokenUsageRecord.duration_s`: concurrent cells overshoot the clock and replayed calls are excluded, so it says what the search *worked*, never what share of the run a node held. Quote `phase_s` for a share; quote `worked_s` for a cost.
+**Two denominators, and they are not interchangeable.** `phase_s` is CLOCK, keyed by phase: the brackets do not nest, so the legs sum and each is a real share of `elapsed_s`. `worked_s` is summed CALL time per spend bucket and billing node, off `TokenUsageRecord.duration_s`: concurrent cells overshoot the clock and replayed calls are excluded, so it says what the search *worked*, never what share of the run a node held. Quote `phase_s` for a share; quote `worked_s` for a cost.
 
 **Every fresh call is a span on the clock, so no call needs a bracket to be counted.** A bill is stamped when it lands, so a call spans `[timestamp − duration_s, timestamp]`, and `unbracketed_call_s` is the CLOCK those spans held outside every phase bracket and gate, keyed like `worked_s`. It is decided by interval arithmetic and never by node name, so a node that runs between brackets — the round's critique, a non-escalating L2 — is attributed without joining the phase vocabulary, and a call inside its own bracket is not counted twice. `unattributed_s` is what no bracket, gate or fresh call held.
 
@@ -82,13 +82,13 @@ Suppressing `↩` under a fatal warning is load-bearing: a fatal warning means t
 
 In `cycles/{cycle_id}/rounds/round_NNNN.json`:
 
-- `opt_sp.memory.l1_layout` — per-slot signal-name layout L2 stamped. **The** thing to read: it and `l1_overrides` are the only two surfaces L2 can move, so a fire that changed neither bought nothing (`review.md`'s `l2_targets_l1_surface`).
-- `opt_sp.memory.l1_overrides` — L1 runtime knobs (creativity, n_variants).
+- `optimizer_state.payload.memory.l1_layout` — per-slot signal-name layout L2 stamped. **The** thing to read: it and `l1_overrides` are the only two surfaces L2 can move, so a fire that changed neither bought nothing (`review.md`'s `l2_targets_l1_surface`).
+- `optimizer_state.payload.memory.l1_overrides` — L1 runtime knobs (creativity, n_variants).
 
 In its audit twin `cycles/{cycle_id}/.runtime/cache/rounds/round_NNNN.json` — the round document carries no `nodes`:
 
 - `nodes.l2_context.input.prompt` / `.output` — rendered L2 prompt (incl. the field catalogue) / raw JSON.
 
-`opt_sp.memory.task_context` is operator-authored framing that L2 reads and cannot write — a change there came from the operator, not the loop. There is no `probe_round_commitment` decision: probe rounds are not wired.
+The campaign's `task_context` (`Cycle.framing`, from the dataset's `task_context.yaml`) is operator-authored framing that L2 reads and cannot write — a change there came from the operator, not the loop. There is no `probe_round_commitment` decision: probe rounds are not wired.
 
 Deep dive: [`../developer/dispatch-hub.md`](../developer/dispatch-hub.md).

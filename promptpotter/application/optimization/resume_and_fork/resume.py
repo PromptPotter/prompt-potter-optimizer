@@ -85,7 +85,7 @@ def _optimizer_mismatches(prior: list[RoundResult]) -> dict[int, ReplayMismatch]
 
     current = compute_optimizer_prompt_hashes()
     out: dict[int, ReplayMismatch] = {}
-    unstamped = [t.round for t in prior if not t.optimizer_prompt_hashes]
+    unstamped = [t.round for t in prior if not t.optimizer_state.payload.optimizer_prompt_hashes]
     if unstamped:
         logger.warning(
             "Round(s) %s carry no optimizer stamp, so whether they ran under the optimizer "
@@ -93,7 +93,7 @@ def _optimizer_mismatches(prior: list[RoundResult]) -> dict[int, ReplayMismatch]
             ", ".join(str(r) for r in unstamped),
         )
     for t in prior:
-        recorded = t.optimizer_prompt_hashes
+        recorded = t.optimizer_state.payload.optimizer_prompt_hashes
         moved = sorted(n for n, h in recorded.items() if current.get(n) != h)
         if not moved:
             continue

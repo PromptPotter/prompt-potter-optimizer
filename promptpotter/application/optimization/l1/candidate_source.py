@@ -44,7 +44,7 @@ async def generate_or_load_candidates(
     config = cycle.config
     # Cap n_variants at 3× config so L2 can't blow up the round budget.
     opt = config.optimization
-    opt_params = cycle.opt_sp.memory.l1_overrides
+    opt_params = cycle.memory.l1_overrides
     _n_variants = min(opt_params.get("n_variants", opt.n_variants), opt.n_variants * 3)
     _creativity = opt_params.get(
         "creativity", float(optimizer_node_config("l1_generate")["temperature"])
@@ -69,7 +69,7 @@ async def generate_or_load_candidates(
 
     emit_phase(
         on_phase,
-        CampaignPhase.L1_GENERATE,
+        CampaignPhase.PROPOSE,
         "enter",
         round=round_num,
         max_rounds=opt.max_rounds,
@@ -78,7 +78,9 @@ async def generate_or_load_candidates(
         n_variants=_n_variants,
         creativity=_creativity,
         model=optimizer_model(),
-        has_l1_critique=bool(cycle.rounds[-1].critique) if cycle.rounds else False,
+        has_l1_critique=(
+            bool(cycle.rounds[-1].optimizer_state.payload.critique) if cycle.rounds else False
+        ),
         pipeline_params=parent_pipeline_params,
         parent_prompt_fields={k: v for k, v in cycle.opt_sp.prompt_field_dict().items() if v},
     )
@@ -110,7 +112,7 @@ async def generate_or_load_candidates(
             )
         emit_phase(
             on_phase,
-            CampaignPhase.L1_GENERATE,
+            CampaignPhase.PROPOSE,
             "exit",
             round=round_num,
             n_candidates=len(persisted),
@@ -174,7 +176,7 @@ async def generate_or_load_candidates(
                     round=round_num,
                     idx=idx,
                     candidate_id=cp.opt_sp.lineage.id,
-                    parent_id=cp.opt_sp.lineage.parent_id,
+                    parent_ids=list(cp.opt_sp.lineage.parent_ids),
                     label=candidate_label(round_num, idx),
                     changes_description=cp.opt_sp.lineage.changes_description,
                     source=cp.opt_sp.lineage.source,
@@ -183,7 +185,7 @@ async def generate_or_load_candidates(
 
     emit_phase(
         on_phase,
-        CampaignPhase.L1_GENERATE,
+        CampaignPhase.PROPOSE,
         "exit",
         round=round_num,
         n_candidates=len(candidates),

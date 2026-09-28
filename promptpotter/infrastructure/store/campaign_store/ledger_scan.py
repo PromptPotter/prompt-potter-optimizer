@@ -21,7 +21,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from promptpotter.domain.phases import CampaignPhase, RunPhase
+from promptpotter.domain.phases import CampaignPhase, PotterPhase, RunPhase
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler
 from promptpotter.domain.run_records import (
     CandidateMintedRecord,
@@ -44,7 +44,7 @@ from promptpotter.shared.clock import epoch_seconds
 _SCORED_INCLUDE = frozenset(LedgerCandidate.model_fields) - {
     "round",
     "idx",
-    "parent_id",
+    "parent_ids",
     "source",
     "state",
 }
@@ -118,7 +118,7 @@ def scan_ledger_candidates(ledger_path: Path) -> list[LedgerCandidate]:
             _merge(
                 (minted.round, minted.idx),
                 candidate_id=minted.candidate_id,
-                parent_id=minted.parent_id,
+                parent_ids=minted.parent_ids,
                 label=minted.label,
                 changes_description=minted.changes_description,
                 source=minted.source,
@@ -232,13 +232,13 @@ _CallSpan = tuple[str, str, float, float]
 
 
 def _phase_spans(rows: list[dict[str, Any]]) -> list[tuple[str, float, float]]:
-    """Bracketed spans per :class:`CampaignPhase`, paired on ``(phase, round)``.
+    """Bracketed spans per phase, the bench's and potter's, paired on ``(phase, round)``.
 
-    The roster is the ENUM, never a hand-listed set: ``round`` is an open marker with no exit,
+    The roster is the ENUMS, never a hand-listed set: ``round`` is an open marker with no exit,
     ``control`` is the run-phase channel and ``backend`` a warning channel, and each would read as
     a bracket that never closes. An unpaired enter contributes nothing — a phase the run died
     inside measured no span, and inventing one would close it at a moment nothing recorded."""
-    brackets = {p.value for p in CampaignPhase}
+    brackets = {p.value for p in (*CampaignPhase, *PotterPhase)}
     open_at: dict[tuple[str, object], float] = {}
     out: list[tuple[str, float, float]] = []
     for rec in rows:

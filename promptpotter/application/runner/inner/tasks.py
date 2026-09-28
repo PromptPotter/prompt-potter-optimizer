@@ -330,6 +330,8 @@ def inner_instrument_config(
         update={
             "sp_budget_round": min(spec.n_samples, n_scored),
             "sp_budget_origin": n_scored,
+            # The drawn cell IS the bank: the outer loop grades an instrument, so none holds out.
+            "dataset_split": None,
             "optimization": base.optimization.model_copy(update=opt_update),
             "pipeline_overlay": po,
         }

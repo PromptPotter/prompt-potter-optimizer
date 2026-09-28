@@ -118,7 +118,7 @@ collects everything else.
   typecheck, so there is no standing test to keep). The bug class: the decision then
   lives in an *absent* argument, and reading the call site tells you nothing — you must
   notice the absence, jump to a distant default, and find a docstring clause naming the
-  intended callers. `open_walk` / `compute_composite_fitness` take `opt_sp` this way.
+  intended callers. `open_walk` / `score_search_point` take `measured` this way.
   A default is fine when it is a *derivation* every caller would repeat identically
   (`round_scorer=None` → the schema's own default formula), not when the right value
   genuinely differs per call site.

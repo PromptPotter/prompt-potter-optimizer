@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.search_point import JobSearchPoint
+    from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 
 
 def content_hash_of(jsp: JobSearchPoint, dataset: list[Sample]) -> str:
@@ -41,13 +41,15 @@ def build_origin_cycle_id(
     schema: PipelineSchema,
     dataset: list[Sample],
     base_pipeline_params: dict[str, Any] | None = None,
+    *,
+    framing: TaskDecomposition,
 ) -> str:
     """Origin cycle id — config-AWARE, so it agrees with the measurement key and a connector-config edit yields a
     DISTINCT origin. The schema is REQUIRED: two callers holding it differently stamped two ids for one origin."""
     base_pp = (
         base_pipeline_params if base_pipeline_params is not None else schema.to_pipeline_params()
     )
-    jsp = opt_sp.to_job_search_point(base_pipeline_params=base_pp, schema=schema)
+    jsp = opt_sp.to_job_search_point(base_pipeline_params=base_pp, schema=schema, framing=framing)
     return cycle_config_identity(jsp, dataset)
 
 

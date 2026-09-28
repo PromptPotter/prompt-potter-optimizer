@@ -136,6 +136,9 @@ class PipelineData(LedgerPipelineData, total=False):
     # grades the machine. Absent means the backend reports no phases; ``{}`` would mean it
     # reported none, and only one of those is ever true.
     step_phases: dict[str, float]
+    # Characters of the candidate's prompt template, stamped at `measure_sample` BEFORE a sample
+    # is interpolated: one number per candidate, which the archive key covers, so a replay is right.
+    target_prompt_chars: int
     # The SE beside ``mean_round_delta`` is this arm's OWN half of a paired cell difference — the
     # shared origin level is excluded because it cancels in that difference (`domain/l4/proxies.py`).
     mean_parent_level_se: float

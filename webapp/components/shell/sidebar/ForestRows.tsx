@@ -394,7 +394,7 @@ function CandidateRow({
   // Keyed on the ROUND, not the label: a fork's C0 replays the candidate it was cut from.
   const isOrigin = (cand.round ?? 0) === 0;
   const cutFrom = cutFromLabel(cand, siblings);
-  const elected = wasElected(cand.is_winner, roundSizes(siblings).get(cand.round ?? 0) ?? 1);
+  const elected = wasElected(cand.is_selected, roundSizes(siblings).get(cand.round ?? 0) ?? 1);
   const retiredBy = cand.superseded_by;
 
   const cycleId = candPath[candPath.length - 1]!.cycleId;
@@ -424,9 +424,9 @@ function CandidateRow({
               : "awaiting election";
 
   const caveat = cand.theta_caveat;
-  const lift = cand.matched_parent_lift;
-  const liftLo = cand.matched_parent_lift_ci_lo;
-  const liftHi = cand.matched_parent_lift_ci_hi;
+  const lift = cand.reference_lift;
+  const liftLo = cand.reference_lift_ci_lo;
+  const liftHi = cand.reference_lift_ci_hi;
   const stats: RowStat[] = [
     {
       label: "Ability θ",

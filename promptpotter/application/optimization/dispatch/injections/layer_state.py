@@ -45,7 +45,7 @@ _PLAN_HEADER = "PLAN:\n"
 )
 def _r_plan(b: InjectionBundle) -> list[Item]:
     """L3's strategic plan text — read by every prompt; persistent until next L3 fire."""
-    plan = b.opt_sp.plan
+    plan = b.memory.plan
     return [Item(f"{_PLAN_HEADER}{plan}" if plan else "")]
 
 
@@ -57,7 +57,7 @@ def _r_plan(b: InjectionBundle) -> list[Item]:
 )
 def _r_l3_to_l2_note(b: InjectionBundle) -> list[Item]:
     """Sticky L3→L2 directive — mounted only in L2's template, absent from L1."""
-    note = b.opt_sp.memory.wounds.l3_note
+    note = b.memory.wounds.l3_note
     return [Item(f"L3 NOTE TO L2:\n{note}" if note else "")]
 
 
@@ -103,7 +103,7 @@ def _r_rendered_prompt(b: InjectionBundle) -> list[Item]:
     # neighbouring fields (26% of banked candidates carried a duplicated paragraph, the worst
     # 2.13x its parent); shown SPLICED, a replacement absorbs the operator's framing as prose,
     # which the next render splices around again.
-    if fields := b.opt_sp.stored_fields():
+    if fields := b.opt_sp.render_fields():
         # A HELD field still renders — the fields you replace must fit around it — but is named as
         # the operator's; the override slot has no key for it.
         schema = b.pipeline_schema
@@ -137,7 +137,7 @@ def _r_rendered_prompt(b: InjectionBundle) -> list[Item]:
     citable=False,
 )
 def _r_l1_overrides(b: InjectionBundle) -> list[Item]:
-    overrides = b.opt_sp.memory.l1_overrides
+    overrides = b.memory.l1_overrides
     return [Item(f"CURRENT L1 CONFIG: {json.dumps(overrides)}" if overrides else "")]
 
 
@@ -151,7 +151,7 @@ def _r_l1_layout(b: InjectionBundle) -> list[Item]:
     """The OTHER lever's current value, the sibling ``l1_overrides`` has. An edit MOVES one panel, so
     what L2 needs to read is where each already sits — including the ones sitting nowhere, which are
     the only ones a move can gain the prompt."""
-    layout = b.opt_sp.memory.l1_layout
+    layout = b.memory.l1_layout
     lines = [f"  {slot}: {', '.join(layout.slot(slot)) or '(empty)'}" for slot in L1_LAYOUT_SLOTS]
     if unplaced := sorted(NODE_LAYOUTS["l1_generate"].possible - set(layout.all_placeholders())):
         lines.append(f"  available, not shown: {', '.join(unplaced)}")
@@ -171,7 +171,7 @@ def _r_l1_layout(b: InjectionBundle) -> list[Item]:
 def _r_task_context(b: InjectionBundle) -> list[Item]:
     """The operator's framing, rendered VERBATIM — this panel never truncates, because a renderer cannot
     know which half of an authored sentence matters. The budget is enforced at mint, where a human is."""
-    tc = b.opt_sp.memory.task_context
+    tc = b.framing
     if not tc:
         return []
     skip = {"raw_description"}

@@ -66,7 +66,7 @@ async def emit_origin_round(
                 campaign_id=session.state.tracing_campaign_id,
                 round_num=0,
             ):
-                round_result.critique = await run_l1_critique(
+                round_result.optimizer_state.payload.critique = await run_l1_critique(
                     cycle, round_result, round_num=0, ledger=session.state.ledger
                 )
 
@@ -121,7 +121,7 @@ def persist_round(
         cycle.pending_decisions.clear()
 
     if cycle.axes is not None:
-        round_result.axis_memory_peaked = sorted(cycle.axes.peaked_axes())
+        round_result.optimizer_state.payload.axis_memory_peaked = sorted(cycle.axes.peaked_axes())
 
     if (ledger := session.state.ledger) is not None:
         for d in flushed:
@@ -225,7 +225,7 @@ async def post_round(
     # optimizer prompt reproduces it, so route L2 to heal now instead of burning l1_patience dead
     # rounds. `l1_mandatory_breach` reads candidate_scores, which is empty in exactly this round,
     # so it can't catch this — the round owns the signal on `l1_parse_failure`.
-    l1_zero_candidates = round_result.l1_parse_failure is not None
+    l1_zero_candidates = round_result.optimizer_state.payload.l1_parse_failure is not None
     # Evidence-starvation router input, derived from the SAME helper the degradation grade
     # reads (``evidence_starved_node``) so routing and verdict can't diverge. Health itself
     # isn't stamped until ``close_round`` (below), so we read the rates directly here.
@@ -257,7 +257,7 @@ async def post_round(
         hop=CycleHop(campaign_id=session.campaign_id, cycle_id=session.state.cycle_id),
         round_num=round_num,
         accuracy=round_result.accuracy,
-        winner_label=round_result.winner_label,
+        winner_label=next(iter(round_result.selected_labels), None),
         budget=budget_gate,
         log=logger.info,
     )

@@ -1,4 +1,4 @@
-"""Round-winner selection. Composite and evaluators are searchpoint-aware from the scoring gateway — nothing is
+"""Round-winner selection. Composite and evaluators come from the scoring gateway — nothing is
 recomputed here."""
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ from promptpotter.application.optimization.l1.score.loop import (
 )
 from promptpotter.application.optimization.pobb.checks import PoBBConfig
 from promptpotter.application.optimization.resume_and_fork.decisions import (
-    ResumeCheckpointKind,
     record_decision,
 )
 from promptpotter.application.optimization.validators.l1_invariants import L1YieldStats
@@ -43,6 +42,7 @@ from promptpotter.domain.results import (
     is_electable,
     is_leader_eligible,
 )
+from promptpotter.domain.run_records import PotterCheckpointKind
 from promptpotter.domain.scoring import QueryMeasurement, is_unscored
 from promptpotter.domain.search_point import strip_rendered_prompt
 from promptpotter.domain.validators import StopRule
@@ -135,7 +135,7 @@ def _verdict_reason(
 
 
 def _fold_strict_rejections(
-    stats: L1YieldStats, population: list[OptSearchPoint], *, n_proposed: int
+    stats: L1YieldStats, proposals: list[CandidateProposal]
 ) -> L1YieldStats:
     """Re-derive ``l1_yield`` as the share of proposals that can still MEASURE.
 
@@ -143,10 +143,10 @@ def _fold_strict_rejections(
     run later, in ``parse_population``. Both land on the same wound channel, so ONE predicate spans
     them — subtracting the collapse counters as well would charge those candidates twice. The
     counters stay as they are; they name three specific shapes, and a strict rejection is none."""
-    if not n_proposed:
+    if not proposals:
         return stats
-    live = sum(1 for ind in population if not fatal_validation_failures(ind))
-    return replace(stats, l1_yield=live / n_proposed)
+    live = sum(1 for cp in proposals if not fatal_validation_failures(cp.validation_failures))
+    return replace(stats, l1_yield=live / len(proposals))
 
 
 def _separability(round_num: int, electable: list[ScoredCandidate]) -> bool | None:
@@ -157,24 +157,24 @@ def _separability(round_num: int, electable: list[ScoredCandidate]) -> bool | No
     be READ as a result. It reaches the loop's control path rather than only warning, because a
     round that resolved nothing is silent on every other channel — a winner is crowned and every
     number reads — and would otherwise reset L1's patience exactly as a round that advanced does."""
-    bracketed = [c for c in electable if c.matched_parent_lift_ci_lo is not None]
+    bracketed = [c for c in electable if c.reference_lift_ci_lo is not None]
     if not bracketed:
         return None
     if any(
-        (c.matched_parent_lift_ci_lo or 0.0) > 0.0 or (c.matched_parent_lift_ci_hi or 0.0) < 0.0
+        (c.reference_lift_ci_lo or 0.0) > 0.0 or (c.reference_lift_ci_hi or 0.0) < 0.0
         for c in bracketed
     ):
         return True
-    widest = max(bracketed, key=lambda c: c.matched_parent_lift_ci_hi or 0.0)
+    widest = max(bracketed, key=lambda c: c.reference_lift_ci_hi or 0.0)
     emit_round_warning(
         kind="round_not_separable",
         message=(
             f"round {round_num} resolved nothing: every one of its {len(bracketed)} readable arms "
-            f"has a lift interval spanning 0 (best reaches {widest.matched_parent_lift_ci_hi:+.3f} "
+            f"has a lift interval spanning 0 (best reaches {widest.reference_lift_ci_hi:+.3f} "
             "at its upper bound). An arm this round elects is the best of what it saw, not a "
             "measured improvement over the parent"
         ),
-        detail={"arms": len(bracketed), "best_ci_hi": widest.matched_parent_lift_ci_hi},
+        detail={"arms": len(bracketed), "best_ci_hi": widest.reference_lift_ci_hi},
     )
     return False
 
@@ -203,11 +203,10 @@ async def l1_score(
         cycle.opt_sp,
         pipeline_params,
         schema,
+        runtime_failures=cycle.memory.wounds.runtime_failures,
         prompt_block_catalogue=cycle.config.optimization.prompt_block_catalogue,
     )
-    yield_stats = _fold_strict_rejections(
-        yield_stats, opt_sp_population, n_proposed=len(candidates)
-    )
+    yield_stats = _fold_strict_rejections(yield_stats, candidates)
     # By identity, not position: `scored` below is filtered, so its index no longer aligns
     # with this full-population list.
     params_by_id = {
@@ -218,11 +217,7 @@ async def l1_score(
     # round file. A local list here reaches the round file only, leaving the declared sole
     # ingress never learning who won.
     decisions = cycle.pending_decisions
-    (
-        all_candidate_results,
-        candidate_scores,
-        escalation_signal,
-    ) = await score_population(
+    all_candidate_results, candidate_scores = await score_population(
         cycle,
         opt_sp_population,
         effective_pipeline_params,
@@ -233,7 +228,6 @@ async def l1_score(
         pobb_config=pobb_config,
         round_num=round_num,
         decisions=decisions,
-        l1_diversity=yield_stats.l1_yield,
     )
 
     # The REPLICATION cohort, deliberately the looser predicate: `scored` decides who gets extra
@@ -272,22 +266,14 @@ async def l1_score(
     # individual scored. All nine are overwritten when a winner is elected.
     best_acc = parent.report.accuracy
     best_comp = parent.report.composite_fitness
-    # Must share the headline's sample basis, or a held round renders a phantom lift. No winner
-    # ⇒ both are the parent's standing; a winner keeps the matched reference set below.
-    best_parent_accuracy = parent.report.accuracy
     best_opt_sp: OptSearchPoint = parent.opt_sp
     best_results: list[QueryMeasurement] = list(cast("list[QueryMeasurement]", parent.results))
     best_label = parent.report.label
     best_scores: dict[str, float] = dict(parent.report.evaluators)
-    best_matched_parent_acc: float | None = parent.report.accuracy
-    best_matched_parent_composite: float | None = parent.report.composite_fitness
-    # Not seeded from the parent like its two neighbours: the parent's lift over ITSELF is 0 by
-    # construction, and a round that crowned nobody publishing "+0.000" reads as a measured tie.
-    best_lift: tuple[float | None, float | None, float | None] = (None, None, None)
+    reference_id = parent.opt_sp.lineage.id
     # Clamped so a tiny dataset stays electable.
     coverage_floor = min(pobb_config.n_min, len(dataset))
     cs_by_id = {cs.candidate_id: i for i, cs in enumerate(candidate_scores)}
-    matched_by_id: dict[str, dict[str, Any] | None] = {}
     electable: list[str] = []
     for ind in scored:
         cs_idx = cs_by_id.get(ind.lineage.id)
@@ -299,17 +285,17 @@ async def l1_score(
             cand_results,
             schema,
         )
-        matched_by_id[ind.lineage.id] = matched
         # Unconditional on ``matched``: the lift is defined on the cells both reached, so a
         # truncated arm gets an honest (wider) interval instead of nothing.
         lift = matched_parent_lift(cand_results, cast("list[QueryMeasurement]", parent.results))
         candidate_scores[cs_idx] = candidate_scores[cs_idx].model_copy(
             update={
-                "matched_parent_accuracy": matched["accuracy"] if matched else None,
-                "matched_parent_composite": matched["composite_fitness"] if matched else None,
-                "matched_parent_lift": lift[0] if lift else None,
-                "matched_parent_lift_ci_lo": lift[1] if lift else None,
-                "matched_parent_lift_ci_hi": lift[2] if lift else None,
+                "reference_id": reference_id,
+                "reference_accuracy": matched["accuracy"] if matched else None,
+                "reference_composite": matched["composite_fitness"] if matched else None,
+                "reference_lift": lift[0] if lift else None,
+                "reference_lift_ci_lo": lift[1] if lift else None,
+                "reference_lift_ci_hi": lift[2] if lift else None,
             }
         )
         # A collapsed arm is scored here and still refused entry — it keeps its matched stamp,
@@ -368,7 +354,7 @@ async def l1_score(
     separable = _separability(round_num, [candidate_scores[cs_by_id[cid]] for cid in electable])
     record_decision(
         decisions,
-        ResumeCheckpointKind.ROUND_WINNER,
+        PotterCheckpointKind.ROUND_WINNER,
         {
             "candidate_ids": electable,
             "round_num": round_num,
@@ -384,21 +370,12 @@ async def l1_score(
     if winner_id:
         winner_ind = next(ind for ind in scored if ind.lineage.id == winner_id)
         winner_cs = candidate_scores[cs_by_id[winner_id]]
-        matched = matched_by_id[winner_id]
         best_acc = winner_cs.accuracy
         best_comp = winner_cs.composite_fitness
-        best_parent_accuracy = parent.report.accuracy
         best_opt_sp = winner_ind
         best_results = list(all_candidate_results[winner_id])
         best_label = winner_ind.lineage.changes_description or winner_ind.lineage.id[:12]
         best_scores = dict(winner_cs.evaluators)
-        best_matched_parent_acc = matched["accuracy"] if matched else None
-        best_matched_parent_composite = matched["composite_fitness"] if matched else None
-        best_lift = (
-            winner_cs.matched_parent_lift,
-            winner_cs.matched_parent_lift_ci_lo,
-            winner_cs.matched_parent_lift_ci_hi,
-        )
 
     base = _compute_accuracy(best_results)
     # The headline sample count rides the winner's ScoredCandidate row, so the round header
@@ -418,7 +395,7 @@ async def l1_score(
         # A recorded diagnostic; it does not gate promotion. Significance runs on the per-sample
         # FITNESS rather than binary hits: a candidate lifting ground-truth's rank without yet
         # landing it at rank 1 is real improvement a binary-hit test is blind to.
-        # TWO-SIDED to match the winner's `matched_parent_lift_ci_*` beside it; the directional
+        # TWO-SIDED to match the winner's `reference_lift_ci_*` beside it; the directional
         # decision is `elect_round_winner`'s, on θ.
         cand_fit, parent_fit = paired_fitness(best_results, parent_election_results)
         _d, _lo, _hi, p_value, _n = paired_reading(cand_fit, parent_fit)
@@ -450,19 +427,10 @@ async def l1_score(
         improved=improved,
         p_value=p_value,
         verdict_reason=verdict_reason,
-        parent_accuracy=best_parent_accuracy,
-        matched_parent_accuracy=best_matched_parent_acc,
-        matched_parent_composite=best_matched_parent_composite,
-        matched_parent_lift=best_lift[0],
-        matched_parent_lift_ci_lo=best_lift[1],
-        matched_parent_lift_ci_hi=best_lift[2],
         # Over the whole electable field, not the winner's own interval: the question is whether
         # THIS ROUND told the arms apart, and one arm's bracket cannot answer that.
         separable=separable,
-        prompt_fields={
-            **best_opt_sp.prompt_field_dict(),
-            "lineage": best_opt_sp.lineage.model_dump(),
-        },
+        prompt_fields=best_opt_sp.prompt_field_dict(),
         # Stripped, because the round's incoming params carry the PREVIOUS winner's render and
         # nothing re-renders at this write — persisting it makes the document claim a prompt the
         # winner never ran. `prompt_fields` above is the winner's own, and every reader rebuilds
@@ -473,26 +441,28 @@ async def l1_score(
         results=cast("list[dict[str, Any]]", best_results),
         all_candidate_results=cast("dict[str, list[dict[str, Any]]]", dict(all_candidate_results)),
         # The bar, banked with the arms that were held to it. Every scalar this round stamps
-        # about the parent — `parent_accuracy`, `matched_parent_*`, the θ the election fit under
+        # about the reference — the arms' `reference_*`, the θ the election fit under
         # `PARENT_ABILITY_ID` — is read off exactly these rows, and none of them could be
         # re-derived, masked or checked without them.
-        parent_results=cast("list[dict[str, Any]]", list(parent_election_results)),
+        reference_results={
+            reference_id: cast("list[dict[str, Any]]", list(parent_election_results))
+        },
         candidates_scored=len(scored),
         electable_count=len(electable),
         candidate_scores=candidate_scores,
+        selected_labels=[winner_cs.label] if winner_id else [],
         # `decisions` is NOT set here: `persist_round` flushes the cycle's sink onto this
         # round and onto the ledger in one act, so the round file has one writer.
         degraded_samples=count_degraded_samples(best_results),
         deprecated=base["deprecated"],
-        escalation_signal=escalation_signal,
         evaluators=best_scores,
-        l1_yield=yield_stats.l1_yield,
-        # The collapse COUNTS are not passed: `RoundResult` derives them from
-        # `candidate_scores`, and passing them would be a second recording that could disagree.
-        l1_parse_failure=yield_stats.l1_parse_failure,
-        # Stamped here rather than at save time: a re-save (a repair, a rescore) must not
-        # restamp a round with the optimizer running NOW and erase which one actually ran it.
-        optimizer_prompt_hashes=compute_optimizer_prompt_hashes(),
+        optimizer_state=cycle.optimizer_state(
+            l1_yield=yield_stats.l1_yield,
+            l1_parse_failure=yield_stats.l1_parse_failure,
+            # Stamped here rather than at save time: a re-save (a repair, a rescore) must not
+            # restamp a round with the optimizer running NOW and erase which one actually ran it.
+            optimizer_prompt_hashes=compute_optimizer_prompt_hashes(),
+        ),
     )
     return round_result, best_opt_sp
 

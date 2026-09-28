@@ -54,9 +54,13 @@ async def run_generation_only_round(
                     improved=False,
                     prompt_fields=cycle.opt_sp.prompt_field_dict(),
                     candidates_scored=0,
-                    l1_yield=yield_stats.l1_yield,
-                    # Collapse counts derive from `candidate_scores` — see `RoundResult`.
+                    selected_labels=[],
                     opt_sp=cycle.opt_sp,
+                    optimizer_state=cycle.optimizer_state(
+                        l1_yield=yield_stats.l1_yield,
+                        l1_parse_failure=yield_stats.l1_parse_failure,
+                        optimizer_prompt_hashes={},
+                    ),
                 ),
             )
         write_hard_samples_artifacts(session, cycle)

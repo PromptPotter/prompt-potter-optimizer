@@ -15,7 +15,6 @@ from promptpotter.application.optimization.l1.score.overlap import measure_overl
 from promptpotter.application.optimization.l1.score.winner import l1_score
 from promptpotter.application.optimization.pobb.checks import PoBBConfig
 from promptpotter.application.optimization.resume_and_fork.decisions import (
-    ResumeCheckpointKind,
     record_decision,
 )
 from promptpotter.application.optimization.round_analysis import compute_round_diagnostics
@@ -30,6 +29,7 @@ from promptpotter.domain.phases import (
     emit_phase,
 )
 from promptpotter.domain.results import RoundResult, is_leader_eligible, unscoreable_cells
+from promptpotter.domain.run_records import PotterCheckpointKind
 from promptpotter.domain.validators import StopRule
 
 # Module-level alias for test monkeypatching.
@@ -106,7 +106,7 @@ async def execute_round(
     assert cycle.tracking.current_sp is not None
     emit_phase(
         callbacks.on_phase,
-        CampaignPhase.L1_SCORE,
+        CampaignPhase.MEASURE,
         "enter",
         round=round_num,
         n_candidates=len(candidates),
@@ -148,7 +148,7 @@ async def execute_round(
         round_result.opt_sp = winner_opt_sp
     emit_phase(
         callbacks.on_phase,
-        CampaignPhase.L1_SCORE,
+        CampaignPhase.MEASURE,
         "exit",
         round=round_num,
         winner_label=round_result.label,
@@ -164,8 +164,12 @@ async def execute_round(
         verdict_reason=round_result.verdict_reason,
         p_value=round_result.p_value,
         candidate_scores=[c.model_dump() for c in round_result.candidate_scores],
-        winner_matched_parent_accuracy=round_result.matched_parent_accuracy,
-        winner_matched_parent_composite=round_result.matched_parent_composite,
+        winner_reference_accuracy=next(
+            (s.reference_accuracy for s in round_result.selected_scores), None
+        ),
+        winner_reference_composite=next(
+            (s.reference_composite for s in round_result.selected_scores), None
+        ),
     )
 
     # PANEL COVERAGE — the round's own completeness, asked HERE because this is the last
@@ -192,7 +196,7 @@ async def execute_round(
     assert ledger is not None, "build_run_observers must bind state.ledger before a round runs"
     record_decision(
         ledger,
-        ResumeCheckpointKind.PANEL_COVERAGE,
+        PotterCheckpointKind.PANEL_COVERAGE,
         {
             "candidate_ids": [c.candidate_id for c in round_result.candidate_scores],
             "round_num": round_num,
@@ -291,7 +295,7 @@ async def execute_round(
                         round_num=round_num,
                         ledger=session.state.ledger,
                     )
-                round_result.critique = critique_result
+                round_result.optimizer_state.payload.critique = critique_result
     except BaseException:
         overlap.cancel()
         raise
@@ -321,7 +325,7 @@ async def execute_round(
                     lineage_id=winner_opt_sp.lineage.id,
                     rendered_prompt=winner_opt_sp.render(),
                     layer1_fields={f: getattr(winner_opt_sp, f) for f in PROMPT_STRING_FIELDS},
-                    parent_id=winner_opt_sp.lineage.parent_id,
+                    parent_ids=tuple(winner_opt_sp.lineage.parent_ids),
                 )
             )
 

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, cast
 from promptpotter.application.views.ingress import from_phase_event
 from promptpotter.application.views.view_models import ViewContext
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.results import RoundResult, is_round_winner
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import (
     CycleRecord,
     ElectionRecord,
@@ -53,7 +53,6 @@ if TYPE_CHECKING:
     from promptpotter.application.scoring.query_loop import Flight
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.phases import PhaseEvent
-    from promptpotter.domain.sample import Sample
     from promptpotter.presentation.terminal.live.display import LiveDisplay
 
 logger = logging.getLogger(__name__)
@@ -146,18 +145,18 @@ def _round_fit(round_result: RoundResult) -> dict[str, LedgerFit]:
     An untouched arm is dropped rather than served as a row of nulls: on a cold ruler no candidate
     carries θ at all, and an arm below the coverage floor never reaches the fit."""
     return {
-        cs.label: fit
+        cs.label: fit.model_copy(update={"reference_id": cs.reference_id})
         for cs in round_result.candidate_scores
         if (
             fit := LedgerFit(
                 theta=cs.theta,
                 theta_se=cs.theta_se,
                 theta_caveat=cs.theta_caveat,
-                matched_parent_accuracy=cs.matched_parent_accuracy,
-                matched_parent_composite=cs.matched_parent_composite,
-                matched_parent_lift=cs.matched_parent_lift,
-                matched_parent_lift_ci_lo=cs.matched_parent_lift_ci_lo,
-                matched_parent_lift_ci_hi=cs.matched_parent_lift_ci_hi,
+                reference_accuracy=cs.reference_accuracy,
+                reference_composite=cs.reference_composite,
+                reference_lift=cs.reference_lift,
+                reference_lift_ci_lo=cs.reference_lift_ci_lo,
+                reference_lift_ci_hi=cs.reference_lift_ci_hi,
             )
         )
         != LedgerFit()
@@ -211,17 +210,7 @@ class RunCallbacks:
                 round=round_result.round,
                 fit=_round_fit(round_result),
                 live_round_result=round_result,
-                # `winner_id` is non-empty on a HELD round too — it names the retained
-                # parent, which is no candidate of THIS round, so the match fails and the
-                # crown is empty. The emptiness is in the match, never in the id.
-                winner_label=next(
-                    (
-                        cs.label
-                        for cs in round_result.candidate_scores
-                        if is_round_winner(cs.candidate_id, round_result.winner_id)
-                    ),
-                    "",
-                ),
+                selected_labels=list(round_result.selected_labels),
             )
         )
 
@@ -590,7 +579,6 @@ def build_run_observers(
     *,
     session: Session,
     campaign_config: CampaignConfig,
-    dataset: list[Sample],
     display: LiveDisplay | None = None,
     resumed_from_round: int | None = None,
     origin_accuracy: float | None = None,

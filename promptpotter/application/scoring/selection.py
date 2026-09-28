@@ -25,7 +25,7 @@ from promptpotter.application.intelligence.exploration import (
     theta_bounds_given_delta,
     theta_lift_over_parent,
 )
-from promptpotter.application.optimization.pobb.classification import scoreable_rows
+from promptpotter.application.scoring.classification import scoreable_rows
 from promptpotter.shared.statistics import (
     discordant_counts,
     mean_ci,
@@ -175,9 +175,9 @@ def parent_selection_bias(rounds: Sequence[RoundResult]) -> float:
     noise draw — and ``rescore_parent`` replays its cached rows, so the inflation never washes out.
     Corrects the BAR only: the challengers are unselected draws and carry no such term."""
     for rr in reversed(rounds):
-        if not rr.winner_id:
+        if not rr.selected_labels:
             continue
-        winner = next((c for c in rr.candidate_scores if c.candidate_id == rr.winner_id), None)
+        winner = next(iter(rr.selected_scores), None)
         se = winner.theta_se if winner else None
         if not se:
             return 0.0

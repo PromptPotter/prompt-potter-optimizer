@@ -15,7 +15,7 @@ describe("runSummary", () => {
             candidate_id: "c0",
             label: servedLabel(0, 0),
             accuracy: 0.62,
-            is_winner: true,
+            is_selected: true,
           }),
         ],
       }),
@@ -29,9 +29,9 @@ describe("runSummary", () => {
             candidate_id: "b",
             label: servedLabel(2, 1),
             accuracy: 0.74,
-            matched_parent_accuracy: 0.6,
+            reference_accuracy: 0.6,
             changes_description: "step-by-step thinking style",
-            is_winner: true,
+            is_selected: true,
           }),
         ],
       }),
@@ -64,7 +64,7 @@ describe("runSummary", () => {
         rounds: [
           summaryRound({
             round: 1,
-            candidates: [summaryCandidate({ candidate_id: "x", accuracy: 0.5, is_winner: true })],
+            candidates: [summaryCandidate({ candidate_id: "x", accuracy: 0.5, is_selected: true })],
           }),
         ],
       }),
@@ -88,7 +88,7 @@ describe("runSummary", () => {
           summaryRound({
             round: 0,
             candidates: [
-              summaryCandidate({ candidate_id: "c0", label: servedLabel(0, 0), is_winner: true }),
+              summaryCandidate({ candidate_id: "c0", label: servedLabel(0, 0), is_selected: true }),
             ],
           }),
           summaryRound({

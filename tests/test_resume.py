@@ -20,8 +20,8 @@ from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
     restore_measurement_archive,
 )
-from promptpotter.application.optimization.pobb.classification import scoreable_rows
 from promptpotter.application.optimization.resume_and_fork.replayers import replay_decisions
+from promptpotter.application.scoring.classification import scoreable_rows
 from promptpotter.application.scoring.formula import (
     ScoringFormulaError,
     compile_scorer,
@@ -33,11 +33,11 @@ from promptpotter.application.scoring.search_point_scorer import (
 )
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import RoundResult
-from promptpotter.domain.run_records import CycleSeed
+from promptpotter.domain.run_records import CycleSeed, PotterCheckpointKind
 from promptpotter.domain.scoring import is_unscored
-from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import error_category, is_error_result
+from tests.factories import optimizer_state
 
 # Every cycle lives inside a campaign; the foundation factory's default id.
 _CAMPAIGN = "testds__20260101-000000"
@@ -70,6 +70,8 @@ def _round(**kw: Any) -> RoundResult:
             "improved": False,
             "prompt_fields": {},
             "candidates_scored": 0,
+            "selected_labels": [],
+            "optimizer_state": optimizer_state().model_dump(),
             **kw,
         }
     )
@@ -241,6 +243,7 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
         try_inherit_fork_origin,
     )
     from promptpotter.domain.opt_search_point import OptSearchPoint
+    from promptpotter.domain.search_point import TaskDecomposition
 
     stores = built_stores
     parent = "cycle_inherit_parent"
@@ -292,21 +295,21 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
 
     # Resolve the origin OSP exactly as ``establish_campaign_origin`` does (fork-seed wins).
     unmodified_seed = CycleSeed(origin_prompt_fields=dict(prompt), origin_source="fork_seed")
-    unmodified_osp = resolve_origin_opt_search_point(
-        {}, task_context=TaskDecomposition(), seed=unmodified_seed
-    )
+    unmodified_osp = resolve_origin_opt_search_point({}, seed=unmodified_seed)
     inherited = try_inherit_fork_origin(
         session,  # type: ignore[arg-type]
         unmodified_seed,
         resolved_origin=unmodified_osp,
+        framing=TaskDecomposition(),
     )
     assert inherited is not None
     # The branch point's OWN measurement, carried whole — not a re-rolled number, and not
     # an accuracy with the rest of the report re-derived around it.
     assert inherited.report.accuracy == 0.2
-    # C0 carries the OSP object, so the inherited origin keeps its fork_seed lineage.
+    # C0 carries the OSP object, so the inherited origin keeps the lineage the seed stamped.
     assert isinstance(inherited.resolved_origin, OptSearchPoint)
-    assert inherited.resolved_origin.lineage.source == "fork_seed"
+    assert inherited.resolved_origin.lineage.source == "origin"
+    assert inherited.resolved_origin.lineage.changes_description.startswith("Operator-steered")
 
     edited_seed = CycleSeed(
         origin_prompt_fields={**prompt, "instruction": "do it differently"},
@@ -315,9 +318,8 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
     edited = try_inherit_fork_origin(
         session,  # type: ignore[arg-type]
         edited_seed,
-        resolved_origin=resolve_origin_opt_search_point(
-            {}, task_context=TaskDecomposition(), seed=edited_seed
-        ),
+        resolved_origin=resolve_origin_opt_search_point({}, seed=edited_seed),
+        framing=TaskDecomposition(),
     )
     assert edited is None
 
@@ -579,7 +581,7 @@ def test_unresolved_round_stalls_and_replays_as_one() -> None:
 def test_l2_l3_escalation_state_survives_resume() -> None:
     """Resume-integrity: L2/L3 counters rebuilt from the ledger must equal the live in-run ones.
 
-    Builds the records the way the firing seam writes them — the same ``CampaignPhase``, and the
+    Builds the records the way the firing seam writes them — the same ``PotterPhase``, and the
     counters on the typed exit VIEW — so this pins reader-against-writer rather than
     reader-against-itself. It has to, because the arm has been wrong in both halves at once:
     ``fold`` compared ``record.phase`` to ``"l2_context"``/``"l3_plan"`` (the NODE names, which
@@ -591,7 +593,7 @@ def test_l2_l3_escalation_state_survives_resume() -> None:
     from promptpotter.application.campaign_config import EscalationLadder
     from promptpotter.application.optimization.escalation.state import EscalationFSM
     from promptpotter.application.views.view_models import L2RefineExitView, PlanExitView
-    from promptpotter.domain.phases import CampaignPhase
+    from promptpotter.domain.phases import PotterPhase
     from promptpotter.domain.run_records import PhaseRecord
 
     def snapshot(f: EscalationFSM) -> tuple[int, int, float, int, int, float, int]:
@@ -637,11 +639,11 @@ def test_l2_l3_escalation_state_survives_resume() -> None:
 
     # What the exit records carry on disk: the post-fire state, on the persisted view. Real
     # views, not dicts — a namespace here would let a renamed field pass with every gate green.
-    banked: list[tuple[CampaignPhase, object]] = [
-        (CampaignPhase.REFINE_STRATEGY, l2_view(1, 0, 0.60)),
-        (CampaignPhase.REFINE_STRATEGY, l2_view(2, 1, 0.60)),
+    banked: list[tuple[PotterPhase, object]] = [
+        (PotterPhase.REFINE_STRATEGY, l2_view(1, 0, 0.60)),
+        (PotterPhase.REFINE_STRATEGY, l2_view(2, 1, 0.60)),
         (
-            CampaignPhase.MODIFY_PLAN,
+            PotterPhase.MODIFY_PLAN,
             PlanExitView(
                 new_plan_preview="",
                 changes_description="",
@@ -691,7 +693,6 @@ def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) ->
     from types import SimpleNamespace
 
     from promptpotter.application.optimization.resume_and_fork.decisions import (
-        ResumeCheckpointKind,
         record_decision,
     )
     from promptpotter.application.run_observers import RunCallbacks
@@ -715,7 +716,7 @@ def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) ->
     # persisted, so it is still pending when round 2 closes.
     record_decision(
         cycle.pending_decisions,
-        ResumeCheckpointKind.ELIMINATION_CUT,
+        PotterCheckpointKind.ELIMINATION_CUT,
         {"round_num": 1},
         True,
         round=1,
@@ -724,14 +725,14 @@ def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) ->
 
     record_decision(
         cycle.pending_decisions,
-        ResumeCheckpointKind.L2_ESCALATION_TRIGGER,
+        PotterCheckpointKind.L2_ESCALATION_TRIGGER,
         {"round_num": 1},
         True,
         round=1,
     )
     record_decision(
         cycle.pending_decisions,
-        ResumeCheckpointKind.ROUND_WINNER,
+        PotterCheckpointKind.ROUND_WINNER,
         {"round_num": 2},
         "c2",
         round=2,
@@ -741,7 +742,7 @@ def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) ->
     # A fire with no round after it: the buffer is the only copy until teardown flushes it.
     record_decision(
         cycle.pending_decisions,
-        ResumeCheckpointKind.L2_ESCALATION_TRIGGER,
+        PotterCheckpointKind.L2_ESCALATION_TRIGGER,
         {"round_num": 2},
         True,
         round=2,
@@ -871,8 +872,7 @@ def test_two_readings_of_one_searchpoint_are_two_runs_and_reindex_destroys_neith
 ) -> None:
     """A run is identified by ``run_id``; ``content_hash`` is a property of what it MEASURED, and
     two runs legitimately share one. The label is not in the hash, so `origin_<h>` and
-    `round_parent_<h>` are the same searchpoint on the same rows read twice — the parent fold
-    scored `opt_sp=None, l1_diversity=1.0`, the origin with the round's real diversity.
+    `parent_<h>` are the same searchpoint on the same rows read twice.
 
     Two silent harms, both of which keying the index on ``content_hash`` committed: (1) one entry
     survived for the pair, so `scores`/`item_count`/`source`/`provenance` were whichever landed
@@ -973,14 +973,14 @@ def test_compaction_round_trips_every_field_it_moved(built_stores: Stores) -> No
         archive,
         run_id="run_c0",
         content_hash="h_c0",
-        name="candidate_0",
+        name="panel",
         measurements=[_compactable_cell(1)],
     )
     _archive_run(
         archive,
         run_id="run_c0",
         content_hash="h_c0",
-        name="candidate_0",
+        name="panel",
         measurements=[_compactable_cell(2)],
     )
     before = archive.load_by_id("run_c0")
@@ -1016,7 +1016,7 @@ def test_compaction_round_trips_every_field_it_moved(built_stores: Stores) -> No
 
 
 def test_compaction_spares_the_runs_that_actually_serve_the_cache(built_stores: Stores) -> None:
-    """``origin`` and ``round_parent`` replay 78.6% and 84.5% of their cells from the archive
+    """``origin`` and ``parent`` replay 78.6% and 84.5% of their cells from the archive
     against 4.5% for a candidate — 82% of all cache value for a third of the bytes. Compacting one
     of them would silently turn cache hits into re-measurements: no error, just spend.
 
@@ -1033,7 +1033,7 @@ def test_compaction_spares_the_runs_that_actually_serve_the_cache(built_stores: 
         archive,
         run_id="run_p1",
         content_hash="h_p",
-        name="round_parent",
+        name="parent",
         measurements=[_compactable_cell(1)],
     )
     _archive_run(
@@ -1066,7 +1066,6 @@ def test_a_fork_inherits_the_decisions_of_the_rounds_it_lifted(built_stores: Sto
     must NOT come along, or the branch replays a decision it never made.
     """
     from promptpotter.application.optimization.resume_and_fork.decisions import (
-        ResumeCheckpointKind,
         record_decision,
     )
     from promptpotter.domain.cycle_paths import CycleDir
@@ -1083,9 +1082,9 @@ def test_a_fork_inherits_the_decisions_of_the_rounds_it_lifted(built_stores: Sto
     store.create(parent, {})
     parent_ledger = CycleEventLog.open(CycleDir(store.cycle_dir(parent)))
     for rnd, kind in (
-        (0, ResumeCheckpointKind.ROUND_WINNER),
-        (1, ResumeCheckpointKind.ELIMINATION_CUT),
-        (2, ResumeCheckpointKind.ROUND_WINNER),
+        (0, PotterCheckpointKind.ROUND_WINNER),
+        (1, PotterCheckpointKind.ELIMINATION_CUT),
+        (2, PotterCheckpointKind.ROUND_WINNER),
     ):
         record_decision(parent_ledger, kind, {"round_num": rnd}, "x", round=rnd)
 
@@ -1164,6 +1163,39 @@ def test_an_applied_scenario_forks_at_its_round_and_carries_the_criterion(
             steered_by="tester",
             keep_rounds=True,
         )
+
+
+def test_a_deepened_inner_cell_continues_the_cycle_that_holds_its_line(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rebase retires an inner campaign's root under `superseded_by`, and what was banked since is
+    the successor's. Deepening the cell reopening the root measures a trajectory other than the one
+    banked, and the outer round scores that other run with no error anywhere."""
+    import types
+
+    from promptpotter.application.runner.inner import spawn
+
+    store = built_stores.campaigns
+    root = CycleHop(campaign_id=_CAMPAIGN, cycle_id="cycle_innerroot")
+    store.create(root, {"parent_session_id": "sess-inner", "rounds": [{"round": 0}]})
+    successor = root.model_copy(update={"cycle_id": "cycle_innerroot_fork_a"})
+    banked = [{"round": r} for r in range(3)]
+    store.create(successor, {"parent_session_id": "sess-inner", "rounds": banked})
+    store.mark_superseded(root, successor.cycle_id)
+    store.mark_finished(
+        successor, status="max_rounds", stop_reason="max_rounds", finished_at="2026-09-01T00:00:00Z"
+    )
+
+    plan = types.SimpleNamespace(cycle_id=root.cycle_id)
+    monkeypatch.setattr(spawn, "resolve_cycle_plan", lambda *_: plan)
+    session = types.SimpleNamespace(
+        store=built_stores, session_id="", campaign_id="", state=types.SimpleNamespace(cycle_id="")
+    )
+    open_campaign: Any = spawn._open_inner_campaign
+    continued = open_campaign(session, None, [], campaign_id=_CAMPAIGN)
+
+    assert session.state.cycle_id == successor.cycle_id, "the retired root was reopened"
+    assert continued == len(banked)
 
 
 def test_a_resumed_cycle_clocks_only_its_own_launch(tmp_path: Path) -> None:

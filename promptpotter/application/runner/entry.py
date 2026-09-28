@@ -38,16 +38,18 @@ from promptpotter.application.run_observers import (
     run_limits_from,
 )
 from promptpotter.application.run_phase_control import declare_run_phase
+from promptpotter.application.runner.bench import BenchPass, bench_selection, score_on_bench
 from promptpotter.application.runner.inner.ruler import refresh_inner_rulers
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.runner.loop import run_round_loop, set_round_cap
-from promptpotter.application.runner.output import write_log_md
+from promptpotter.application.runner.output import write_log_md, write_review_md
 from promptpotter.application.runner.round import flush_pending_decisions
 from promptpotter.application.runner.termination import RUN_STOPS, BudgetGate, run_stop_reason
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.application.scoring.query_loop import FlightGauge
 from promptpotter.config.settings import APP_VERSION
+from promptpotter.domain.bench import BenchScore, partition_bank
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import PromptExport, build_prompt_export
 from promptpotter.domain.launch_limits import HeldLimits
@@ -406,6 +408,7 @@ def _build_cycle_result(
     started_at: str,
     finished_at: str,
     spend: SpendRollup | None,
+    bench: BenchScore | None,
 ) -> CycleResult:
     """Assemble the terminal :class:`CycleResult`; ``cycle is None`` is the init-crash fallback, and
     ``origin is None`` a stop inside origin scoring. Both ``winner_*`` read ``best_sp``, since
@@ -427,20 +430,20 @@ def _build_cycle_result(
     return CycleResult(
         rounds=cycle_rounds,
         n_l1_rounds=len(cycle_rounds),
-        best_accuracy=cycle.tracking.best_accuracy if cycle is not None else None,
-        best_round=cycle.tracking.best_round if cycle is not None else 0,
+        result_accuracy=cycle.tracking.best_accuracy if cycle is not None else None,
+        result_round=cycle.tracking.best_round if cycle is not None else 0,
         origin_accuracy=origin.report.accuracy if origin is not None else None,
         origin_composite_fitness=(
             cycle.origin_round.composite_fitness if cycle is not None else None
         ),
         origin_level=origin_lv[0] if origin_lv is not None else None,
         origin_level_se=origin_lv[1] if origin_lv is not None else None,
-        round_parent_levels=[t for t, _ in levels],
-        round_parent_level_ses=[se for _, se in levels],
+        round_levels=[t for t, _ in levels],
+        round_level_ses=[se for _, se in levels],
         # An unlimited `max_rounds` declares no budget, which is what this field's 0 means.
         round_budget=(cycle.config.optimization.max_rounds or 0) if cycle is not None else 0,
-        winner_prompt_fields=best_sp.prompt_fields if best_sp else {},
-        winner_pipeline_params=best_sp.pipeline_params if best_sp else None,
+        result_prompt_fields=best_sp.prompt_fields if best_sp else {},
+        result_pipeline_params=best_sp.pipeline_params if best_sp else None,
         stop_reason=stop_reason,
         started_at=started_at,
         finished_at=finished_at,
@@ -449,6 +452,7 @@ def _build_cycle_result(
         resumed_from_round=session.state.resumed_from_round,
         spend=spend,
         error=cycle_error,
+        bench=bench,
     )
 
 
@@ -458,25 +462,26 @@ def _winning_round(cycle: Cycle | None, result: CycleResult) -> RoundResult | No
     index 0, rather than ``result.rounds``, which drops it: the origin is the reference the result
     is differenced against, so counting it as a search result would credit the loop with its floor.
 
-    It is also the round whose ``prompt_fields`` round-trip. ``CycleResult.winner_prompt_fields``
+    It is also the round whose ``prompt_fields`` round-trip. ``CycleResult.result_prompt_fields``
     is the wire-side projection — it has already flattened ``few_shot_examples`` into a rendered
     ``few_shot_block``, which ``from_prompt_fields`` cannot restore and ``extra="forbid"`` rejects.
     """
     if cycle is None:
         return None
-    return next((rr for rr in cycle.rounds if rr.round == result.best_round), None)
+    return next((rr for rr in cycle.rounds if rr.round == result.result_round), None)
 
 
 def _export_artifact(
     session: Session,
     cycle_result: CycleResult,
-    winner: RoundResult | None,
+    cycle: Cycle | None,
     *,
     formula: str | None,
 ) -> PromptExport | None:
     """``None`` when no round ever closed: there is no measured prompt to hand a consumer, and an
     artifact whose whole point is a fitness with provenance may not carry an unmeasured one."""
-    if winner is None:
+    winner = _winning_round(cycle, cycle_result)
+    if cycle is None or winner is None:
         return None
     # `campaign.json` is the one owner of both — every other surface derives from it, and a
     # second copy here would be one more thing to re-sync.
@@ -488,12 +493,14 @@ def _export_artifact(
         cycle_id=session.state.cycle_id,
         dataset_name=campaign.dataset_name if campaign else (session.dataset_name or ""),
         dataset_hash=dataset_hash(session.samples),
-        optimizer_prompt_hash=campaign.optimizer_prompt_hash if campaign else "",
+        optimizer_manifest_hashes=campaign.optimizer_manifest_hashes if campaign else {},
         stop_reason=str(cycle_result.stop_reason),
         finished_at=cycle_result.finished_at,
         formula=formula,
         origin_accuracy=cycle_result.origin_accuracy,
         origin_composite_fitness=cycle_result.origin_composite_fitness,
+        framing=cycle.framing,
+        bench=cycle_result.bench,
     )
 
 
@@ -508,6 +515,7 @@ def _close_cycle(
     started_at: str,
     accuracy_ceiling: float | None,
     diag: bool,
+    bench: BenchScore | None,
 ) -> CycleResult:
     """The one terminal path, for a stop raised in the round loop and one raised in run init."""
     finished_at = utcnow_iso()
@@ -526,18 +534,28 @@ def _close_cycle(
         # In-memory, not the debounced ``dashboard.json``: at finalize the live rollup is
         # already complete.
         spend=observers.dashboard.state.spend,
+        bench=bench,
     )
     langfuse_trace_id = _finalize_run(
         session,
         observers,
         cycle_result,
         accuracy_ceiling=accuracy_ceiling,
-        winner=_winning_round(cycle, cycle_result),
+        cycle=cycle,
         diag=diag,
     )
     if langfuse_trace_id is not None:
         cycle_result = cycle_result.model_copy(update={"langfuse_trace_id": langfuse_trace_id})
     return cycle_result
+
+
+def _bench_grades(stop_reason: StopReason) -> bool:
+    """A cycle that ended holding a selection is graded, a spend halt included — that is what the
+    set-aside is for. A rebase is graded as the fork it hands its line to, when that ends."""
+    outcome = STOP_REASON_INFO[stop_reason].outcome
+    return (
+        outcome in (StopOutcome.SUCCESS, StopOutcome.HALTED) and stop_reason != StopReason.REBASED
+    )
 
 
 @dataclass
@@ -569,6 +587,8 @@ async def _run_single_cycle(
 
     cycle: Cycle | None = None
     cancel_exc: asyncio.CancelledError | None = None
+    budget_gate: BudgetGate | None = None
+    origin_bench: BenchPass | None = None
     try:
         cycle = await init_optimization_loop(
             origin,
@@ -600,7 +620,6 @@ async def _run_single_cycle(
             observers = build_run_observers(
                 session=session,
                 campaign_config=campaign_config,
-                dataset=dataset,
                 display=observers.display,
                 resumed_from_round=session.state.resumed_from_round,
                 origin_accuracy=origin.report.accuracy,
@@ -613,6 +632,21 @@ async def _run_single_cycle(
         # than a parallel reader; `observers` is bound in the builder so the rebase loop's
         # rebuild cannot leave it on a stale ref.
         budget_gate = _arm_run_controls(session, observers, campaign_config)
+        if session.scoring.require_partition().bench and origin.resolved_origin is not None:
+            # The reference, read before any search; its price is set aside, so the pass that
+            # grades the selection still fits under the ceiling the search spends against.
+            origin_bench = await score_on_bench(
+                session,
+                origin.resolved_origin.to_job_search_point(
+                    base_pipeline_params=session.pipeline_params or None,
+                    schema=session.pipeline_schema,
+                    framing=cycle.framing,
+                ),
+                round_num=0,
+                cb=cb,
+                spend=observers.dashboard.state.spend,
+            )
+            budget_gate.book.set_aside(origin_bench.incurred_usd, origin_bench.billed_tokens)
         stop_reason, cycle_error = await run_round_loop(
             cycle,
             dataset,
@@ -662,6 +696,35 @@ async def _run_single_cycle(
             kind=kind, message=message, stop_reason="CRASHED", traceback=tb
         )
 
+    bench: BenchScore | None = None
+    if (
+        cycle is not None
+        and budget_gate is not None
+        and origin_bench is not None
+        and _bench_grades(stop_reason)
+    ):
+        budget_gate.book.set_aside(0.0, 0)
+        try:
+            bench = await bench_selection(
+                cycle, session, origin=origin_bench, cb=cb, spend=observers.dashboard.state.spend
+            )
+        except RUN_STOPS as stop:
+            bench_stop = run_stop_reason(stop)
+            # A pause mid-pass keeps the cycle resumable, and the resume takes the pass again.
+            if STOP_REASON_INFO[bench_stop].outcome is StopOutcome.PAUSED:
+                stop_reason, cycle_error = bench_stop, None
+            else:
+                logger.warning(
+                    "The bench pass stopped (%s), so this cycle reports no bench score.",
+                    bench_stop,
+                )
+        except KeyboardInterrupt:
+            stop_reason, cycle_error = StopReason.PAUSED, None
+        except asyncio.CancelledError as exc:
+            # Paused, so a resume finds its rounds done and takes the bench pass again.
+            cancel_exc = exc
+            stop_reason, cycle_error = StopReason.PAUSED, None
+
     cycle_result = _close_cycle(
         cycle,
         origin,
@@ -672,6 +735,7 @@ async def _run_single_cycle(
         started_at=started_at,
         accuracy_ceiling=campaign_config.accuracy_ceiling,
         diag=mode.diag,
+        bench=bench,
     )
     # A fork that never completed a round leaves an empty dir. Ahead of the re-raise below,
     # because a cancellation is one of the interrupts that produces one.
@@ -697,7 +761,6 @@ def _mint_and_rebase_fork(
     *,
     session: Session,
     observers: RunObservers,
-    dataset: list[Sample],
     rebase_req: RebaseRequest,
     rebase_count: int,
 ) -> tuple[_PreparedRun, RunObservers]:
@@ -729,7 +792,6 @@ def _mint_and_rebase_fork(
     observers = build_run_observers(
         session=session,
         campaign_config=prep.campaign_config,
-        dataset=dataset,
         display=observers.display,
         resumed_from_round=rebase_req.fork_from_round,
         origin_accuracy=prep.origin.report.accuracy,
@@ -760,8 +822,12 @@ async def run_optimization(
     limits: HeldLimits,
 ) -> CycleResult:
     """End-to-end optimization, origin scoring included. *observers* MUST be pre-built (ledger bound
-    before origin)."""
+    before origin). *dataset* is the whole bank; everything below this seam reads only the part of
+    it the declared split leaves to the search."""
     started_at = utcnow_iso()
+    partition = partition_bank(dataset, campaign_config.dataset_split)
+    session.scoring.partition = partition
+    dataset = list(partition.search)
     # Every launch path reaches here; bolted onto one entry point instead, it leaves the others
     # pricing off whatever table shipped. No-op on a fresh cache.
     refresh_rates_in_background()
@@ -804,6 +870,7 @@ async def run_optimization(
             started_at=started_at,
             accuracy_ceiling=campaign_config.accuracy_ceiling,
             diag=mode.diag,
+            bench=None,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         # Prep is the only phase outside `_run_single_cycle`'s try, and the longest. An
@@ -848,7 +915,6 @@ async def run_optimization(
             prep,
             session=session,
             observers=observers,
-            dataset=dataset,
             rebase_req=rebase_req,
             rebase_count=rebase_count,
         )
@@ -860,7 +926,7 @@ def _finalize_run(
     cycle_result: CycleResult,
     *,
     accuracy_ceiling: float | None,
-    winner: RoundResult | None = None,
+    cycle: Cycle | None,
     diag: bool,
 ) -> str | None:
     """Returns the Langfuse trace id from the terminal ``end_campaign`` emit (``None`` when
@@ -918,7 +984,7 @@ def _finalize_run(
             # under the same round number, never a second copy banked beside it.
             **round_clocks(rounds, accuracy_ceiling=accuracy_ceiling)._asdict(),
             "prompt_hashes": compute_optimizer_prompt_hashes(),
-            # On the origin's OWN samples — never `rounds[0].matched_parent_composite`, which
+            # On the origin's OWN samples — never `rounds[0].reference_composite`, which
             # is round 1's winner's matched floor on a different sample basis.
             "origin_composite_fitness": cycle_result.origin_composite_fitness,
             # The formula EVERY number above was computed under, resolved by the same call the
@@ -930,8 +996,12 @@ def _finalize_run(
             # which may name a different round than the index's top-level
             # `best_accuracy`/`best_round`. "How good did it get" reads those top-level fields,
             # so there is deliberately no accuracy scalar duplicated here.
-            "winner_prompt_fields": cycle_result.winner_prompt_fields,
-            "winner_pipeline_params": cycle_result.winner_pipeline_params,
+            "result_prompt_fields": cycle_result.result_prompt_fields,
+            "result_pipeline_params": cycle_result.result_pipeline_params,
+            # The HEADLINE, on rows no optimizer node read; every basis above is the optimizer's.
+            "bench": (
+                None if cycle_result.bench is None else cycle_result.bench.model_dump(mode="json")
+            ),
         }
         session.store.campaigns.mark_finished(
             session.hop,
@@ -941,9 +1011,13 @@ def _finalize_run(
             interrupted_round=interrupted_round,
             crash_traceback=crash_traceback,
             final=final_block,
-            export=_export_artifact(session, cycle_result, winner, formula=round_formula),
+            export=_export_artifact(session, cycle_result, cycle, formula=round_formula),
         )
         write_log_md(session)
+        # Re-rendered off the `final` just banked: the round-close render could not carry the
+        # bench score, which is taken after the last round closes.
+        if cycle is not None:
+            write_review_md(session, cycle)
     # Declared BEFORE the drain, so dashboard.json's stopped state is in place before the audit
     # settles. `_halted_mid_round` threads `"interrupted": true` into a partial round file. The
     # append reaches the projection through the same door every other fact does — it is a
@@ -958,10 +1032,10 @@ def _finalize_run(
     if obs:
         langfuse_trace_id = obs.end_campaign(
             session.state.tracing_campaign_id,
-            best_accuracy=cycle_result.best_accuracy,
+            best_accuracy=cycle_result.result_accuracy,
             n_l1_rounds=cycle_result.n_l1_rounds,
             stop_reason=stop_reason,
-            best_round=cycle_result.best_round,
+            best_round=cycle_result.result_round,
         )
     return langfuse_trace_id
 

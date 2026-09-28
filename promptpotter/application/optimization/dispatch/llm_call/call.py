@@ -14,10 +14,6 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
-from promptpotter.application.optimization.dispatch.llm_call.heartbeat import (
-    heartbeat,
-    waiting_on,
-)
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     get_optimizer_config_overrides,
     get_optimizer_schema,
@@ -34,6 +30,7 @@ from promptpotter.domain.run_records import (
     LLMCallStartRecord,
 )
 from promptpotter.infrastructure.llm.base import LLMClientBase
+from promptpotter.infrastructure.llm.heartbeat import heartbeat, waiting_on
 from promptpotter.infrastructure.llm.json_parse import (
     OptimizerPromptParseError,
     extract_parsed_json,

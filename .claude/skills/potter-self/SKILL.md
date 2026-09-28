@@ -25,7 +25,7 @@ The optimizer is three nested generation loops (`promptpotter/application/optimi
 
 - **L1** (`l1_generate`) generates candidate prompts with cause from its evidence surface — the panels its live layout renders (`NODE_LAYOUTS["l1_generate"].floor`, `domain/l1_layout.py` — read the membership there) — under `plan` from L3 and the operator's frozen `task_context`.
 - **L2** (`l2_context`) fires on L1 stall and moves L1's surface — `l1_layout` (which panels L1 sees) and `l1_overrides` (how hard it explores). **It cannot write `task_context`**: `L2ContextOutput` has no such field, so a fire that changed neither lever bought nothing.
-- **L3** (`l3_plan`) replans on L2 stall, writing `OptSearchPoint.plan`.
+- **L3** (`l3_plan`) replans on L2 stall, writing `Cycle.memory.plan`.
 
 **Never name a panel from memory.** The citable set is *derived* — `@signal(..., citable=True)` intersected with the node's live layout by `citable_fields` (`dispatch/injections/registry.py`). A panel that does not render invites a fabricated citation, which is exactly how `sibling_yield` — a name this skill carried for weeks — went on being cited after it was deleted from the code.
 
@@ -66,7 +66,7 @@ Reads happen by opening files; `evidence` is the one read VERB, because a compar
 4. **`l2_context` / `l3_plan` when fired** — their behaviour checks (`validators/l2_behavior.py`, `l3_output.py` — read the registry there), whether the `l1_layout` / `l1_overrides` move is evidence-anchored, plan text sane and within its render cap.
 5. **Spot-check ≥1 inner campaign per outer sample batch** — the same four reads one level down, under `.inner/<key>/…/campaigns/`.
 
-**STOP-AND-DIAGNOSE, not keep-watching:** `raw_chars: 0` / an empty candidate list · an outer sample returning in ~0.0s (stale-cache reuse) · off-enum grounding fields · any optimizer call > 2 min · a headline Δ that disagrees with `matched_parent_*` / `improved`.
+**STOP-AND-DIAGNOSE, not keep-watching:** `raw_chars: 0` / an empty candidate list · an outer sample returning in ~0.0s (stale-cache reuse) · off-enum grounding fields · any optimizer call > 2 min · a headline Δ that disagrees with `reference_*` / `improved`.
 
 A quiet outer round is normal — it is awaiting a multi-minute inner campaign, and the cycle heartbeats its own ledger ("inner rX/Y · best Z%") while it waits. General hang triage: [`docs/operations/persistence-and-state.md`](../../../docs/operations/persistence-and-state.md) § Diagnosing a live or stuck run.
 

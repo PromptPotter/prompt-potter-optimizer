@@ -286,7 +286,7 @@ class LangfuseSink:
             name="prompt_version",
             input={
                 "lineage_id": event.lineage_id,
-                "parent_id": event.parent_id,
+                "parent_ids": list(event.parent_ids),
             },
             output={
                 "family": "target_prompt",

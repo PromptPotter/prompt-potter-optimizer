@@ -183,14 +183,6 @@ class TaskDecomposition:
                 coerced[k] = str(v)
         return cls(**coerced)
 
-    @classmethod
-    def coerce(cls, v: TaskDecomposition | dict[str, Any] | None) -> TaskDecomposition:
-        """The one "already typed ⇒ passthrough, else build" admission, read by the OSP field
-        validator."""
-        if isinstance(v, TaskDecomposition):
-            return v
-        return cls.from_dict(v)
-
     def check_budget(self, *, source: str) -> None:
         """Both bounds, because the per-field one cannot see the sum. Called once at the run-start
         seam, so an over-budget field stops the campaign instead of clipping every render."""

@@ -67,21 +67,6 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   webapp/e2e/walk/responsive.spec.ts` — empty means the card is still unswept; the Lighthouse half
   has nothing on disk to grep for a number that was never taken.
 
-- **Holistic reframes — larger chunks, noted so they aren't mistaken for done; don't slip one into a
-  release.** **Whether L4 should reach the escalation machinery.**
-  Not "each is built from scratch" — L2 and L3 already share `dispatch/`, `escalation/`, `cycle.py`
-  and `OPTIMIZER_RESPONSE_MODELS`, and `application/optimization/CLAUDE.md` already splits the
-  conceptual family from the structural one, which leaves only L4 outside, at the connector seam.
-  So the question is not whether three strangers should converge; it is whether the recursion
-  belongs inside the ladder it recurses on. **Asked and DEFERRED by the operator** — held by
-  decision, not by nobody having looked. **The ground it was deferred on is gone**: it was
-  "structural while what the milestone needs is empirical", and the new M13 is itself structural.
-  What replaces it is stronger — [`roadmap.md`](roadmap.md) § The optimizer plug point answers the
-  same question in the same direction, since a peer is a sibling manifest rather than a rung and
-  nesting stays re-entrancy at a seam. **Rides with nothing, deliberately.**
-  **Re-test:** read that section; if it settles the question for the operator too, this item is
-  deletable rather than deferred, and deleting it is how it ships.
-
 - **Optimizer model repair-rate on heavy L2/L3 structured output — unmeasured.** What is owed is the
   measurement: a live cycle reaching L3, read under the model
   `promptpotter/assets/optimizer/pipeline.yaml` currently pins — read it off that file, never off
@@ -169,21 +154,10 @@ predicates, and later readers accept nothing else.
   (a display token) instead of `is_error_result`, and `domain/sample.py::Measurement` has no
   `error_category`, so a formula-failure row replays as a live answer and verify reads archived
   holes as measured. `grep -n 'predicted") == "ERROR"' promptpotter/infrastructure/store/measurement_archive.py`.
-- `application/runner/inner/spawn.py::_open_inner_campaign` continues the ROOT inner cycle and never
-  follows `superseded_by`, so deepening a rebased inner cell reopens the retired root and measures
-  a trajectory other than the one banked. `grep -c superseded_by promptpotter/application/runner/inner/spawn.py` (0).
 - `presentation/terminal/completion.py::render_completion` takes the max raw subset accuracy as
   "Best", a third derivation beside `best_round_on_shared_cells` and the composite high-water that
   `CycleResult.best_round` names under `index.json`'s field name. `grep -n "r.accuracy), default=None"
   promptpotter/presentation/terminal/completion.py`.
-- `connectors/promptpotter.py` reads `inner_tasks.yaml` raw (no `resolve_experiment`) beside the
-  typed `runner/inner/tasks.py::InnerTasks`, so an `axes:` panel reaches the run as zero tasks and
-  every axes grid hashes as one instrument; `connectors/CLAUDE.md` and `promptpotter/CLAUDE.md`
-  both describe it wrongly. `grep -c resolve_experiment promptpotter/connectors/promptpotter.py` (0).
-- The inner benchmark's directory is resolved three ways — `connectors/promptpotter.py::_identity_config`
-  by sibling path, the spawn through a sandbox store with an empty tenant tier, the ruler through
-  `readable_dataset_dir` — so a tenant-tier copy splits identity, run and ruler. `grep -n
-  "dataset_dir.parent / str(benchmark)" promptpotter/connectors/promptpotter.py`.
 
 **Shape 3 — an act or a reading lives in ONE adapter, so the entry points disagree.** The
 canonical mechanisms are ones an adapter may call, not the only path an act can take. Remedy:

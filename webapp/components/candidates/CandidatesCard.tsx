@@ -246,7 +246,7 @@ export function CandidatesCard() {
         candidate_id: v.candidate_id,
         label: v.label,
         accuracy: v.accuracy,
-        is_winner: v.is_winner,
+        is_selected: v.is_selected,
       });
     },
     [setSelectionForCandidate, leafCycleId],

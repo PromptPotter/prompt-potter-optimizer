@@ -250,7 +250,6 @@ export function MeasurementsPane({
     totals ? `${totals.total_measurements} graded cells` : null,
     totals?.mean_fitness != null ? `${fmtPct0(totals.mean_fitness)} mean fitness` : null,
     `${data.measuredCount} measured · ${data.unmeasuredCount} unmeasured`,
-    data.splitTest != null ? `${data.splitTest} test held out` : null,
   ]
     .filter(Boolean)
     .join(" · ");

@@ -60,6 +60,7 @@ if TYPE_CHECKING:
     from harbor.models.trial.result import TrialResult
 
     from promptpotter.domain.value_tree import Delivery
+    from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
 
@@ -543,7 +544,7 @@ def _task_pin(task: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _identity_config(
-    _dataset_dir: Path, experiment: Mapping[str, Any] | None
+    _stores: Stores, _dataset_dir: Path, experiment: Mapping[str, Any] | None
 ) -> dict[str, dict[str, Any]]:
     """What every cell of the panel is measured WITH, folded into measurement identity: the agent
     driving the task and the reward it is graded on. Narrow on purpose, so a comment or a retimed

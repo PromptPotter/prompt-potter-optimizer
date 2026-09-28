@@ -142,7 +142,7 @@ function Lift({
 }
 
 // Spend, lift and changes as one box. All SERVED: the lift is `ability_delta` in logits, never
-// `best − origin` (`run-summary.ts`); the floor is `matched_parent_accuracy`.
+// `best − origin` (`run-summary.ts`); the floor is `reference_accuracy`.
 function ConfigBox({
   observe,
   summary,
@@ -180,7 +180,7 @@ function ConfigBox({
           </span>
           <Lift
             accuracy={shownRow?.accuracy ?? null}
-            parentAccuracy={shownRow?.matchedParentAccuracy ?? null}
+            parentAccuracy={shownRow?.referenceAccuracy ?? null}
             theta={observe.state === "best" ? summary.abilityDelta : null}
             scored={shownRow?.n_samples ?? null}
             expected={shownRow?.n_expected ?? null}

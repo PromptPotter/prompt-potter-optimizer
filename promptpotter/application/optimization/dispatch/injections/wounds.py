@@ -44,7 +44,7 @@ def _validation_block(b: InjectionBundle) -> str:
     most RECENT ``VALIDATION_RENDER_CAP``, which is where the fixable ones are: the list
     accumulates on the searchpoint, so an unbounded render grew with the cycle until the cap
     downstream cut it — and cut the newest, the round L1 is being asked to heal."""
-    failures = b.opt_sp.memory.wounds.validation_failures
+    failures = b.memory.wounds.validation_failures
     if not failures:
         return ""
     shown = failures[-VALIDATION_RENDER_CAP:]
@@ -63,7 +63,7 @@ def _validation_block(b: InjectionBundle) -> str:
 def _runtime_block(b: InjectionBundle) -> str:
     """Mid-eval runtime failures, owner-tagged. ACCUMULATED entries filter through the config match; NEW ones always pass —
     they describe the failure being heard right now."""
-    runtime_failures = b.opt_sp.memory.wounds.runtime_failures
+    runtime_failures = b.memory.wounds.runtime_failures
     if not runtime_failures:
         return ""
     round_num = b.cycle_slice.round_num
@@ -148,7 +148,7 @@ def _render_guard_breaches(outcomes: list[ValidatorOutcome], layer: str) -> str:
 def _r_guard_breaches(b: InjectionBundle) -> list[Item]:
     """L2 + L3 post-parse guard outcomes in one block, read by both layers so neither repeats a past breach. Prompt
     evidence only: no escalation rule reads the stream (``escalation/firing.py``)."""
-    wounds = b.opt_sp.memory.wounds
+    wounds = b.memory.wounds
     blocks = [
         blk
         for blk in (

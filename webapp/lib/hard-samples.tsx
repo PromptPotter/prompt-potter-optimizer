@@ -19,7 +19,6 @@ interface HardSamples {
   items: DatasetItem[];
   measuredCount: number;
   unmeasuredCount: number;
-  splitTest: number | null;
   // `CellRow.candidate` joins `CellCandidate.key`. Served chronologically; bucket, never re-sort.
   candidates: CellCandidate[];
   cells: CellRow[];
@@ -64,7 +63,6 @@ export function HardSamplesProvider({
       items: p.items,
       measuredCount: p.measuredCount,
       unmeasuredCount: p.unmeasuredCount,
-      splitTest: p.splitTest,
       candidates: p.candidates,
       cells: p.cells,
       totals: p.totals,
@@ -81,7 +79,6 @@ export function HardSamplesProvider({
       p.items,
       p.measuredCount,
       p.unmeasuredCount,
-      p.splitTest,
       p.candidates,
       p.cells,
       p.totals,

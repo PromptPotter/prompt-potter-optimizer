@@ -7,13 +7,14 @@ from typing import Any, Literal, NamedTuple, NotRequired, TypedDict, overload
 
 from pydantic import ConfigDict, Field, computed_field
 
+from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.escalation_signals import (
     INVARIANT_REASONS,
-    EscalationSignal,
     RuntimeFailure,
     ValidationFailure,
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
@@ -29,12 +30,8 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 __all__ = [
     "ABORT_LENS_LABELS",
     "CEILING_FRACTION",
-    "L1_PARSE_FAILURE_MALFORMED",
-    "L1_PARSE_FAILURE_TOOLING",
-    "L1_PARSE_FAILURE_WRONG_TYPE",
     "CandidateProposal",
     "CellDelta",
-    "CritiqueReadout",
     "CycleResult",
     "DegradationContext",
     "DegradationHealth",
@@ -45,8 +42,8 @@ __all__ = [
     "OverlapMember",
     "OverlapReading",
     "ParentStep",
+    "ReferenceReading",
     "RoundClocks",
-    "RoundParent",
     "RoundResult",
     "ScoreboardRankKey",
     "ScoreboardRow",
@@ -55,10 +52,10 @@ __all__ = [
     "best_round_on_shared_cells",
     "candidate_label",
     "diagnostic_held",
+    "invariant_collapses",
     "is_electable",
     "is_floor_pinned",
     "is_leader_eligible",
-    "is_round_winner",
     "measured_cells",
     "merge_known_outcomes",
     "origin_panel",
@@ -124,15 +121,6 @@ class DegradationContext(TypedDict, total=False):
     fatal: bool
     warning_types: dict[str, int]
     source: str
-
-
-class CritiqueReadout(TypedDict, total=False):
-    """A domain-local mirror, so a round file round-trips without the optimization layer's
-    schema in scope; the optimizer node's full Pydantic shape stays in ``dispatch/schemas.py``."""
-
-    priority_fix: str
-    suggested_axes: list[str]
-    failure_highlights: list[str]
 
 
 def candidate_label(round_num: int, idx: int) -> str:
@@ -221,12 +209,6 @@ def best_round_on_shared_cells(
     return (float(origin["accuracy"]), origin.get("round")) if origin else (0.0, None)
 
 
-def is_round_winner(candidate_id: str, winner_id: str) -> bool:
-    """Matched by IDENTITY, never prose: ``changes_description`` can be empty, and can repeat
-    across candidates. The elected id is already on disk twice — ask it, never re-derive it."""
-    return bool(winner_id) and candidate_id == winner_id
-
-
 class ScoredCandidate(StrictModel):
     """One candidate's L1 score report — the single shape for round-file scores.
     ``model_dump()`` IS the wire format; ``accuracy`` IS mean fitness, so there is no ``hits``."""
@@ -282,17 +264,20 @@ class ScoredCandidate(StrictModel):
     runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
     elimination_context: EliminationContext = Field(default_factory=EliminationContext)
     degradation_context: DegradationContext = Field(default_factory=DegradationContext)
-    # The PARENT as this candidate's comparison floor (``RoundParent``), which is why these are not
-    # named for the origin. ``None`` unless the candidate covered the parent's whole panel. MUST
-    # NOT default to 0.0: an unstamped 0.0 is indistinguishable from a parent that scored nothing.
-    matched_parent_accuracy: float | None = None
-    matched_parent_composite: float | None = None
+    # The individual this arm's lift is read against, over the cells it touched — potter's is the
+    # round's parent. ``None`` where the arm was never read against one (rejected before it ran).
+    reference_id: str | None = None
+    # That reference as this candidate's comparison floor. ``None`` unless the candidate covered
+    # the reference's whole panel. MUST NOT default to 0.0: an unstamped 0.0 is indistinguishable
+    # from a reference that scored nothing.
+    reference_accuracy: float | None = None
+    reference_composite: float | None = None
     # The BLOCKED lift over that floor: mean per-cell ``(candidate − parent)`` over the cells both
     # measured, Student-t bracketed. Sharper than ``mean_fitness_ci_*`` because pairing removes the
     # parent's variation. ``None`` below two shared cells — an interval from one pair is a fiction.
-    matched_parent_lift: float | None = None
-    matched_parent_lift_ci_lo: float | None = None
-    matched_parent_lift_ci_hi: float | None = None
+    reference_lift: float | None = None
+    reference_lift_ci_lo: float | None = None
+    reference_lift_ci_hi: float | None = None
     # Difficulty-adjusted Rasch ability (+ Laplace SE) on the round's joint-fit scale — what the
     # election ranks by. Unlike subset-relative `accuracy` it discounts for *which* samples this
     # candidate saw, so it explains a lower-accuracy winner. `None` outside the election fit.
@@ -306,7 +291,7 @@ class ScoredCandidate(StrictModel):
     # Normal-CLT CI on the mean per-cell FITNESS (``scoring/selection.py::mean_fitness_ci``) —
     # accuracy's own fold, so it brackets accuracy whatever the active composite formula is, which
     # is why it is not named for the composite. Present for any candidate with ≥1 scored cell,
-    # unlike ``theta_se``; the blocked ``matched_parent_lift_ci_*`` above is sharper on these rows.
+    # unlike ``theta_se``; the blocked ``reference_lift_ci_*`` above is sharper on these rows.
     mean_fitness_ci_lo: float | None = None
     mean_fitness_ci_hi: float | None = None
 
@@ -380,7 +365,7 @@ def scoreboard_rank_key(
     accuracy: float | None,
     theta: float | None = None,
     *,
-    is_winner: bool = False,
+    is_selected: bool = False,
     is_partial: bool = False,
 ) -> ScoreboardRankKey:
     """``resolved_fitness``'s argmax form: the order ``RoundResult.scoreboard`` persists in.
@@ -397,7 +382,7 @@ def scoreboard_rank_key(
     # missing θ uses — it must never outrank a candidate that was actually read.
     shown = resolved_fitness(composite_fitness, accuracy)
     return (
-        is_winner,
+        is_selected,
         # A rate the operator CUT SHORT never outranks one measured on the whole panel: the round
         # order is stratified, so the cells a stopped walk kept are a biased slice rather than a
         # smaller sample of the same thing.
@@ -424,17 +409,17 @@ _SCOREBOARD_INCLUDE: set[str] = {
     # that got everything wrong — the two are byte-identical otherwise, and the display half was
     # the one surface still rendering the first as a rate.
     "invalid",
-    "matched_parent_accuracy",
-    "matched_parent_composite",
+    "reference_accuracy",
+    "reference_composite",
     # The election's own number and the margin it was decided on. Without these the table can
     # seat a winner it has no column able to explain — the state that sent an operator hunting
     # for a bug in a round that was decided correctly.
     "theta",
     "theta_se",
     "theta_caveat",
-    "matched_parent_lift",
-    "matched_parent_lift_ci_lo",
-    "matched_parent_lift_ci_hi",
+    "reference_lift",
+    "reference_lift_ci_lo",
+    "reference_lift_ci_hi",
 }
 
 
@@ -459,8 +444,8 @@ class ScoreboardRow(StrictModel):
     invalid: bool
     # ``None`` for a row that did not cover the parent's panel — see ``ScoredCandidate``: the
     # file carries the absence rather than a 0.0 that reads as a verdict the parent never gave.
-    matched_parent_accuracy: float | None
-    matched_parent_composite: float | None
+    reference_accuracy: float | None
+    reference_composite: float | None
     mean_fitness_ci_lo: float | None
     mean_fitness_ci_hi: float | None
     # What the round was actually WON on, and by how much over the parent. See ``ScoredCandidate``
@@ -472,25 +457,29 @@ class ScoreboardRow(StrictModel):
     # reads this table when the round has closed, so an absence here would show a floor-pinned arm
     # disclaimed while in flight and clean once persisted.
     theta_caveat: ThetaCaveat | None
-    matched_parent_lift: float | None
-    matched_parent_lift_ci_lo: float | None
-    matched_parent_lift_ci_hi: float | None
-    is_winner: bool
+    reference_lift: float | None
+    reference_lift_ci_lo: float | None
+    reference_lift_ci_hi: float | None
+    is_selected: bool
 
 
 class CandidateProposal(StrictModel):
     """The child OSP carries the resulting prompt, so its prompt edit is ``candidate_delta``
-    against the parent; the overlay rides here because nothing else carries it."""
+    against the parent; the overlay and this candidate's own failures ride here because nothing
+    else carries them."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     opt_sp: OptSearchPoint
     pipeline_overlay: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    validation_failures: list[ValidationFailure] = Field(default_factory=list)
+    runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
 
 
-class RoundParent(StrictModel):
-    """The origin only at round 0; the prior winner after it. Its measurement is a
-    ``ScoredCandidate`` from the scoring gateway, so a re-score cannot drop the evaluators."""
+class ReferenceReading(StrictModel):
+    """A round's reference individual re-read on the round's panel — potter's is its parent: the
+    origin at round 0, the prior winner after it. Its measurement is a ``ScoredCandidate`` from
+    the scoring gateway, so a re-score cannot drop the evaluators."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
@@ -628,16 +617,14 @@ def parent_key(rr: RoundResult) -> str:
     """What makes two rounds' parents the SAME measurable individual: the TARGET PROMPT they are
     scored under, plus the node params that are not that prompt.
 
-    **The RENDER, not the six fields.** ``OptSearchPoint._field_value`` splices
-    ``memory.task_context`` around ``problem_description`` and renders ``few_shot_examples`` as a
-    block, so two winners can carry byte-identical ``prompt_fields`` and still send different
-    prompts. ``render()`` IS the string ``to_job_search_point`` puts on the wire, so this key
-    separates exactly what the content-addressed archive separates.
+    **The RENDER, not the six fields.** ``render()`` adds ``few_shot_examples`` as a block, so two
+    winners can carry byte-identical ``prompt_fields`` and still send different prompts. The
+    campaign's framing is left out: it is one value for the whole cycle, so it separates nothing.
 
     **NOT ``lineage.id``.** An L2/L3 transition mints a fresh ``OptSearchPoint`` from the same six
-    prompt strings — ``l1_layout`` / ``l1_overrides`` / ``plan`` steer the OPTIMIZER and never
-    reach ``render()`` — so the parent's id changes while the measured thing does not. Empty only
-    on a round that never closed, which ``parent_line`` has already skipped for want of a winner.
+    prompt strings — the optimizer state it moves never reaches ``render()`` — so the parent's id
+    changes while the measured thing does not. Empty only on a round that never closed, which
+    ``parent_line`` has already skipped for want of an individual it ended on.
     """
     # The node's own `prompt` is dropped because it is that render one step stale: on a WINNING
     # round the round file records the render the round STARTED with, not the elected winner's.
@@ -664,9 +651,10 @@ def parent_line(rounds: Sequence[RoundResult]) -> list[ParentStep]:
     for rr in rounds:
         for cs in rr.candidate_scores:
             labels.setdefault(cs.candidate_id, cs.label)
-        cid = rr.winner_id
-        if not cid:
+        # The individual the round ENDED on — its selection, or on a held round the parent kept.
+        if rr.opt_sp is None:
             continue
+        cid = rr.opt_sp.lineage.id
         key = parent_key(rr)
         first.setdefault(key, (rr.round, cid))
         config.setdefault(key, (rr.opt_sp, dict(rr.pipeline_params or {})))
@@ -763,22 +751,22 @@ def round_clocks(rounds: Sequence[RoundResult], *, accuracy_ceiling: float | Non
     )
 
 
-# The reasons `RoundResult.l1_parse_failure` can carry. Opposite kinds of evidence, so no
-# reader may treat the field as a bool:
-#   MALFORMED  — schema-noncompliant output. The optimizer prompt's fault; charge it.
-#   WRONG_TYPE — decoded cleanly but as another model, so the fault is the schema it asked
-#                for, not the transport. Charged like MALFORMED.
-#   TOOLING    — empty/truncated content. Missing data, not a verdict: charging it scores
-#                provider flakiness as a bad mutation, so the round must be EXCLUDED.
-L1_PARSE_FAILURE_MALFORMED = "optimizer_prompt_parse_failure"
-L1_PARSE_FAILURE_WRONG_TYPE = "optimizer_prompt_unexpected_type"
-L1_PARSE_FAILURE_TOOLING = "l1_provider_empty_response"
-# The reasons a CHARGING reader may hold against the optimizer prompt. Asked as this predicate,
-# never as `is not None` — that is the bool the block above forbids, and it reads TOOLING as a
-# verdict the round never reached. A ROUTING reader is a different question and may ask either.
-L1_PARSE_FAILURE_CHARGED: frozenset[str] = frozenset(
-    {L1_PARSE_FAILURE_MALFORMED, L1_PARSE_FAILURE_WRONG_TYPE}
-)
+@shapes_optimizer_prompt
+def invariant_collapses(candidate_scores: Sequence[ScoredCandidate]) -> dict[str, int]:
+    """How many proposals each ``INVARIANT_REASONS`` member collapsed — DERIVED from the arms: a
+    collapsed candidate rides them with ``invalid=True``, never dropped. One reason per candidate,
+    or the parts would sum past the population."""
+    counts: dict[str, int] = {}
+    for cand in candidate_scores:
+        if not cand.invalid:
+            continue
+        reason = next(
+            (vf.reason for vf in cand.validation_failures if vf.reason in INVARIANT_REASONS),
+            None,
+        )
+        if reason:
+            counts[reason] = counts.get(reason, 0) + 1
+    return counts
 
 
 class RoundResult(StrictModel):
@@ -824,18 +812,6 @@ class RoundResult(StrictModel):
     unscored: int = 0
     # Fatal-warning samples discarded from total/accuracy on the winner's run.
     deprecated: int = 0
-    escalation_signal: EscalationSignal | None = None
-    # Origin restricted to the winner's measured samples — apples-to-apples when PoBB locks a
-    # candidate early. Drives `improved`, p_value, verdict Δ. ``None`` when the round matched
-    # nothing, nullable for the reason stated on ``ScoredCandidate``'s pair above.
-    matched_parent_accuracy: float | None = None
-    matched_parent_composite: float | None = None
-    # The winner's blocked lift, copied from its ``ScoredCandidate``, so a reader of the round
-    # can say whether the margin it is about to print is one the round could resolve. ``None``
-    # on a round that crowned nobody: the parent's lift over itself is not a measurement.
-    matched_parent_lift: float | None = None
-    matched_parent_lift_ci_lo: float | None = None
-    matched_parent_lift_ci_hi: float | None = None
     # Did ANY electable arm's lift interval clear 0? Not `improved` beside it, which is the point
     # estimate: a round can crown a winner out of arms none of which separated from the parent.
     # Escalation reads BOTH, so a round that resolved nothing stalls instead of resetting patience.
@@ -850,33 +826,27 @@ class RoundResult(StrictModel):
     # --- raw payload ---
     prompt_fields: dict[str, Any]
     pipeline_params: dict[str, Any] | None = None
-    parent_accuracy: float | None = None
-    # Per-sample rows — ``QueryMeasurement`` + stale-data markers (see ``RoundParent.results``).
+    # Per-sample rows — ``QueryMeasurement`` + stale-data markers (see ``ReferenceReading.results``).
     results: list[dict[str, Any]] = Field(default_factory=list)
     # Per-candidate scored results — lets resume rescore under a changed scorer + replay decisions.
     all_candidate_results: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
-    # The PARENT's rows on THIS round's subset — the incumbent every arm was measured against,
-    # and until now the one panel the round threw away. `results` is the winner's (byte-identical
-    # to that candidate's rows on every round that promoted), and `all_candidate_results` holds
-    # the arms; the parent is neither, so nothing persisted it and every reader that needed the
-    # bar reconstructed it from round N-1's winner instead. **Subsets move between rounds**, so
-    # that reconstruction reads the parent on cells this round never bought — which is how a
-    # sample-set mask came to re-score every arm on the selected cells while leaving the bar they
-    # must clear at its full-set value (`mask/load.py`). Empty at round 0, which has no parent.
-    # A repair re-measures the ARMS and not the bar, so on a repaired round this stays the reading
-    # the round was actually decided under — which is what a record is for.
+    # Each REFERENCE's rows on THIS round's subset, keyed by the individual an arm's
+    # `reference_id` names — the bar every arm was measured against. **Subsets move between
+    # rounds**, so reconstructing a bar from an earlier round reads it on cells this round never
+    # bought — which is how a sample-set mask came to re-score every arm on the selected cells
+    # while leaving the bar they must clear at its full-set value (`mask/load.py`). Empty at round
+    # 0, whose reference is C0 itself. A repair re-measures the ARMS and not the bar, so on a
+    # repaired round this stays the reading the round was actually decided under.
     #
-    # On a HELD round `results` already IS these rows (the retained parent is the headline), so
-    # the panel is banked twice there. Deliberately: a reader wanting the bar must not first have
-    # to work out whether this round promoted, which is exactly the question the field exists to
-    # stop being asked.
+    # On a HELD round `results` already IS the parent's rows, so the panel is banked twice there.
+    # Deliberately: a reader wanting the bar must not first have to work out whether the round
+    # promoted.
     #
-    # Its own field rather than a reserved key in `all_candidate_results`, for the reason
-    # `OverlapReading` states about `overlap_results`: those two maps are where the election, the
-    # parent floor, the lift, the ruler and the acquisition all read, and ten call sites walk
-    # `.values()` treating each entry as an arm. A pseudo-candidate there is a silent extra arm
-    # in every one of them.
-    parent_results: list[dict[str, Any]] = Field(default_factory=list)
+    # Its own field rather than reserved keys in `all_candidate_results`, for the reason
+    # `OverlapReading` states about `overlap_results`: that map is where the election, the floor,
+    # the lift, the ruler and the acquisition all read, walking `.values()` as arms. A
+    # pseudo-candidate there is a silent extra arm in every one of them.
+    reference_results: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     candidates_scored: int
     # How many candidates actually entered the election — measured, leader-eligible, not
     # answer-collapsed. `candidates_scored` counts one step earlier, so the gap is exactly the
@@ -886,14 +856,11 @@ class RoundResult(StrictModel):
     # life bank reads it for.
     electable_count: int = 0
     candidate_scores: list[ScoredCandidate] = Field(default_factory=list)
+    # The individuals the next round derives from, by LABEL — a resume re-mints candidate ids.
+    # Empty when the round HELD; round 0 selects the ``C0`` it adopted. What CHOSE them is the
+    # optimizer's own selector; the bench reads nothing into how.
+    selected_labels: list[str]
     evaluators: dict[str, float] = Field(default_factory=dict)
-    # STORED, not derived: an INPUT to scoring, not a summary of it — it reaches
-    # `score_population` as the `l1_diversity` evaluator before any candidate has a score. The
-    # collapse COUNTS below are the opposite, pure outputs, and are derived.
-    l1_yield: float = 1.0
-    # Why this round's L1 output was unparseable (zero candidates), or None. The round owns it:
-    # a parse failure yields no candidate to charge. One of the three constants above.
-    l1_parse_failure: str | None = None
     # The 1-to-1 reading of the parent line on one shared set of cells, and the rows this round
     # bought to keep it whole. Two fields for the same reason `accuracy` and `results` are two:
     # one is what a reader is told, the other is what it was read off. The rows are HERE and not
@@ -906,24 +873,15 @@ class RoundResult(StrictModel):
     overlap_results: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     # --- computed post-scoring ---
     diagnostics: RoundDiagnostics | None = None
-    critique: CritiqueReadout | None = None
     # Stamped at round close — the sole compute site; every surface renders this one.
     health: DegradationHealth | None = None
     # --- stamped as the round closes (the document's own fields) ---
     # Resume rebuilds `Cycle.opt_sp` from it and review/sibling-wounds read its lineage, so it
     # is round state, not a rendering detail. None only on a round that never closed.
     opt_sp: OptSearchPoint | None = None
-    # AxisIndex's peaked set at close, persisted because AxisIndex is not reconstructable from
-    # the round file alone and the review writer's `evidence_grounding_present` check needs it.
-    axis_memory_peaked: list[str] = Field(default_factory=list)
-    # Which OPTIMIZER produced this round, per node. The only thing that can answer "was this
-    # round produced by the optimizer I am holding now?" once the process exited — everything
-    # else a resume re-renders depends on live cycle state. Resume diverges at the FIRST round
-    # that disagrees, which is what lets a prompt edit fork a sibling rather than condemn the
-    # campaign. Empty on a generation-only round, which stamps nothing and cannot be asked.
-    # IDENTITY, NOT A FIRE RECORD — every optimizer node is named on every round, including ones
-    # that never run. Which node RAN, and what each panel cost it, is the ledger's `llm_call`.
-    optimizer_prompt_hashes: dict[str, str] = Field(default_factory=dict)
+    # The optimizer's own state as the round ended on it — restored on resume and fork, and read
+    # by nothing outside that optimizer.
+    optimizer_state: OptimizerState
     # "generation_only" for a diag round (L1 variants generated, never scored — every
     # scoring scalar below is a structural zero, not a measurement); "" for a scored round.
     status: str = ""
@@ -934,56 +892,28 @@ class RoundResult(StrictModel):
         return f"round_{self.round}"
 
     @property
-    def l1_collapsed(self) -> dict[str, int]:
-        """DERIVED from ``candidate_scores``: a collapsed candidate rides it with ``invalid=True``,
-        never dropped. One reason per candidate, or the parts would sum past the population."""
-        counts: dict[str, int] = {}
-        for cand in self.candidate_scores:
-            if not cand.invalid:
-                continue
-            reason = next(
-                (vf.reason for vf in cand.validation_failures if vf.reason in INVARIANT_REASONS),
-                None,
-            )
-            if reason:
-                counts[reason] = counts.get(reason, 0) + 1
-        return counts
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def l1_n_no_op(self) -> int:
-        """Variants whose mutation was empty against the parent."""
-        return self.l1_collapsed.get("no_op_variant", 0)
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def l1_n_duplicate(self) -> int:
-        """Variants sig-equal to a sibling in the SAME population."""
-        return self.l1_collapsed.get("duplicate_variant", 0)
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def l1_n_repeat(self) -> int:
-        """Variants re-proposing an idea an EARLIER round measured and lost."""
-        return self.l1_collapsed.get("repeat_variant", 0)
+    def selected_scores(self) -> list[ScoredCandidate]:
+        """The selected arms' rows, in ``selected_labels`` order."""
+        by_label = {c.label: c for c in self.candidate_scores}
+        return [by_label[label] for label in self.selected_labels if label in by_label]
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def scoreboard(self) -> list[ScoreboardRow]:
-        """Rank-ordered display table — the crown first, then θ, then composite.
+        """Rank-ordered display table — the selection first, then θ, then composite.
 
         Derived, never stored: it cannot drift from `candidate_scores` the way a
-        hand-built twin could. On a warm round rank 1 IS the winner, by construction; on a cold
+        hand-built twin could. On a warm round rank 1 IS the selection, by construction; on a cold
         one no row carries a θ and the order falls back to the composite it always had.
         """
-        winner_id = self.winner_id
+        selected = set(self.selected_labels)
         ranked = sorted(
             self.candidate_scores,
             key=lambda c: scoreboard_rank_key(
                 c.composite_fitness,
                 c.accuracy,
                 c.theta,
-                is_winner=is_round_winner(c.candidate_id, winner_id),
+                is_selected=c.label in selected,
                 is_partial=bool(c.partial_reason),
             ),
             reverse=True,
@@ -991,7 +921,7 @@ class RoundResult(StrictModel):
         return [
             ScoreboardRow(
                 rank=i,
-                is_winner=is_round_winner(c.candidate_id, winner_id),
+                is_selected=c.label in selected,
                 **c.model_dump(include=_SCOREBOARD_INCLUDE),
             )
             for i, c in enumerate(ranked, start=1)
@@ -1002,10 +932,12 @@ class RoundResult(StrictModel):
         LOST. An accuracy nets the two into one number, so an edit that cracks a cell its parent
         cannot solve and breaks one it could reads as a tie — and on a small near-deterministic
         panel those two cells are the round's whole signal. An errored row on either side pairs
-        nothing, since a failed measurement is not an outcome; empty where no parent was banked."""
+        nothing, since a failed measurement is not an outcome; empty where no reference was banked."""
+        arm = next((c for c in self.candidate_scores if c.candidate_id == candidate_id), None)
+        reference = self.reference_results.get(arm.reference_id or "", []) if arm else []
         parent_hit = {
             sid: is_hit(r.get("fitness"))
-            for r in self.parent_results
+            for r in reference
             if (sid := r.get("sample_id")) is not None and not is_error_result(r)
         }
         gained: list[int] = []
@@ -1022,30 +954,13 @@ class RoundResult(StrictModel):
                 (kept if hit else lost).append(sid)
         return CellDelta(tuple(gained), tuple(lost), tuple(kept))
 
-    @property
-    def winner_id(self) -> str:
-        """The elected winner's lineage id, read off the id ``l1/score/winner.py`` stamped onto
-        ``prompt_fields``. Empty only when no candidate was crowned — then no row is a winner."""
-        lineage = self.prompt_fields.get("lineage")
-        return str(lineage.get("id", "")) if isinstance(lineage, dict) else ""
-
-    @property
-    def winner_label(self) -> str | None:
-        """The winner's ``C{round}.{n}`` — the address every surface names a candidate by.
-        ``None`` when no candidate was crowned."""
-        winner_id = self.winner_id
-        return next(
-            (c.label for c in self.candidate_scores if is_round_winner(c.candidate_id, winner_id)),
-            None,
-        )
-
 
 class CycleResult(StrictModel):
     rounds: list[RoundResult]
     # Origin-EXCLUSIVE, unlike the persisted `index.json::n_rounds`, which counts round 0.
     n_l1_rounds: int
-    best_accuracy: float | None
-    best_round: int
+    result_accuracy: float | None
+    result_round: int
     # They travel together because a consumer reading one against a composite computed on some
     # other basis is comparing two different measurements.
     origin_accuracy: float | None
@@ -1061,7 +976,7 @@ class CycleResult(StrictModel):
     # prompt. `origin_level` is `None`, not `0.0`, when the origin was never scored: a fabricated
     # 0.0 reports the climb as an enormous improvement over nothing.
     origin_level: float | None = None
-    round_parent_levels: list[float] = Field(default_factory=list)
+    round_levels: list[float] = Field(default_factory=list)
     # Index-aligned with the two above: a round that did not move the parent did not sharpen the
     # reading of it either. The WITHIN-cell precision an L4 panel needs to tell estimation noise
     # from between-cell heterogeneity. Precision only — never a penalty term.
@@ -1072,15 +987,15 @@ class CycleResult(StrictModel):
     # what makes that negative control discriminating in `test_numerics.py`. Delete the field and
     # the guarantee stops being proven and starts being merely unreachable.
     origin_level_se: float | None = None
-    round_parent_level_ses: list[float] = Field(default_factory=list)
+    round_level_ses: list[float] = Field(default_factory=list)
     # The denominator the L4 law averages over, and it must come from the config rather than
-    # ``len(round_parent_levels)``: a cycle stopped early by ``lives`` holds fewer levels, so
+    # ``len(round_levels)``: a cycle stopped early by ``lives`` holds fewer levels, so
     # a mean over "rounds that happened" compares two estimands — and it points the wrong way,
     # since ``lives`` stops a STALLING cycle and the shorter series pays it for quitting once it
     # had lifted. 0 = never declared, and the law falls back to the series length.
     round_budget: int = 0
-    winner_prompt_fields: dict[str, Any]
-    winner_pipeline_params: dict[str, Any] | None = None
+    result_prompt_fields: dict[str, Any]
+    result_pipeline_params: dict[str, Any] | None = None
     stop_reason: StopReason
     started_at: str
     finished_at: str
@@ -1095,6 +1010,9 @@ class CycleResult(StrictModel):
     # sites carry ``emit_error_record``'s return straight here — the same record the ledger
     # holds, no twin model.
     error: ErrorRecord | None = None
+    # The headline, on the held-out bench set (`domain/bench.py`). `None` where the campaign holds
+    # nothing out, and where the cycle ended before a selection could be graded.
+    bench: BenchScore | None = None
 
 
 class DiagnosticRunRecord(StrictModel):

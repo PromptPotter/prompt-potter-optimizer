@@ -276,11 +276,12 @@ is trusting its publisher completely, and this repo's capability scoping (ADR-00
 API principals, not in-process code. **`connector_origins()` is the audit surface** — it names
 the distribution behind every registered key, including the ones that are ours.
 
-Two rules follow, both enforced in `_load` / `_validate`. **A plugin may not shadow a
+Two rules follow, both enforced by `shared/plugin_registry.py::load_registry`, the one loader
+every entry-point group rides. **A plugin may not shadow a
 built-in:** `get("promptpotter")` is read by name by the L4 inner runner
 (`application/runner/inner/tasks.py`), so which object answers that key is not a third
 party's call. **A broken plugin is fatal, never skipped:** skipping would trade a loud error
-naming the package for `connector 'x' not registered` at mint time, with nothing pointing at
+naming the package for `'x' is not registered` at mint time, with nothing pointing at
 the cause.
 
 **Discovery is two paths; validation is one. Deliberately.** Declaring the built-ins as entry
@@ -305,11 +306,11 @@ no wire, so declaring a token on one fails the registry guard.
   list may be empty for connectors with no retrieval index.
 - **A declared `experiment_file` OWNS its dataset's panel, and
   `dataset_access.py::dataset_experiment` is its ONE reader** — `init_services`, and every read
-  outside a run: `GET /datasets`, `/origins`, `/cells` and the campaign pipeline. L4's `runner/inner/` is the exception: it re-reads its typed
-  `inner_tasks.yaml` per cell. Ordered before the row ladder, never a
-  fallback: rows cached under the same name describe a different instrument, and a resolver that
-  knows only MATERIALIZED banks answers a connector-owned one EMPTY, which is not a fact about the
-  dataset. Panel ORDER is the `sample_id` (`samples_from_dicts` numbers positionally).
+  outside a run: `GET /datasets`, `/origins`, `/cells` and the campaign pipeline. L4's
+  `runner/inner/` reads the panel off the run's workload, never the file. Ordered before the row
+  ladder, never a fallback: rows cached under the same name describe a different instrument, and
+  a resolver that knows only MATERIALIZED banks answers a connector-owned one EMPTY, which is not
+  a fact about the dataset. Panel ORDER is the `sample_id` (`samples_from_dicts` numbers positionally).
 - **`query` is whatever addresses one unit of work, and on an episodic backend that is an ID.**
   A judge falling back to it then grades against an identifier, so a task carrying a real question
   declares it and it rides `Sample.question` (`domain/sample.py`) — the only channel that reaches

@@ -27,7 +27,7 @@ from promptpotter.application.views.view_models import (
     RoundDigestView,
 )
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.results import HardSampleOrder, RoundResult
+from promptpotter.domain.results import HardSampleOrder, RoundResult, invariant_collapses
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
 from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
@@ -182,6 +182,8 @@ def from_disk_log(
     for t in rounds:
         traj, _ = _load_p_best_trajectory(streams_dir, t.round)
         lineage = t.opt_sp.lineage if t.opt_sp else None
+        collapses = invariant_collapses(t.candidate_scores)
+        selected = next(iter(t.selected_scores), None)
         round_views.append(
             RoundDigestView(
                 round=t.round,
@@ -191,27 +193,27 @@ def from_disk_log(
                 total=t.total,
                 composite_fitness=t.composite_fitness,
                 changes_description=(lineage.changes_description if lineage else "").strip(),
-                l1_critique_text=format_l1_critique_for_prompt(t.critique),
-                l1_yield=t.l1_yield,
-                l1_n_no_op=t.l1_n_no_op,
-                l1_n_duplicate=t.l1_n_duplicate,
-                l1_n_repeat=t.l1_n_repeat,
+                l1_critique_text=format_l1_critique_for_prompt(t.optimizer_state.payload.critique),
+                l1_yield=t.optimizer_state.payload.l1_yield,
+                l1_n_no_op=collapses.get("no_op_variant", 0),
+                l1_n_duplicate=collapses.get("duplicate_variant", 0),
+                l1_n_repeat=collapses.get("repeat_variant", 0),
                 candidates_scored=t.candidates_scored,
                 evaluators=dict(t.evaluators),
-                matched_parent_composite=t.matched_parent_composite,
+                reference_composite=selected.reference_composite if selected else None,
                 ability=t.ability,
                 verdict_reason=t.verdict_reason,
                 overlap=t.overlap,
                 p_best_trajectory=traj,
-                winner_id=t.winner_id or "",
+                winner_id=selected.candidate_id if selected else "",
                 spend=(spend_by_round or {}).get(str(t.round)),
             )
         )
 
     final_view = (
         FinalWinnerView(
-            winner_prompt_fields=dict(final.get("winner_prompt_fields") or {}),
-            winner_pipeline_params=dict(final.get("winner_pipeline_params") or {}),
+            result_prompt_fields=dict(final.get("result_prompt_fields") or {}),
+            result_pipeline_params=dict(final.get("result_pipeline_params") or {}),
         )
         if final
         else None
@@ -388,7 +390,7 @@ def write_review_md(session: Session, cycle: Cycle) -> None:
         rounds = store.load_rounds_range(session.hop, 0, n_rounds - 1) if n_rounds else []
         cycle_dir = store.cycle_dir(session.hop)
         round_audits = load_round_audits(cycle_dir, [r.round for r in rounds])
-        td = cycle.opt_sp.memory.task_context
+        td = cycle.framing
         context_object = [
             td.pipeline_purpose,
             td.optimization_goals,

@@ -44,7 +44,7 @@ sole writer, persisting `RoundResult.model_dump()` — the model **is** the roun
 
 **`LiveDashboardProjection` RESOLVES; it does not hand the browser scalars to join** from facts written on different ledger events. Five rules, each a field or a filter rather than a convention:
 
-- **`active_node` is served**, over a `_STATE_TO_NODE` map TOTAL over `DashboardState` with an import-time exhaustiveness raise. A partial map does not fail loudly; it means "nothing is running", which is a lie for every state it omits.
+- **`active_node` is served**, over a `_STATE_TO_NODE` map TOTAL over `DashboardState` and `PotterDashboardState` with an import-time exhaustiveness raise. A partial map does not fail loudly; it means "nothing is running", which is a lie for every state it omits.
 - **`current_round.round` is `state.round`, always**, so a reader selects this block over the audit twin by equality. There is deliberately no `live` flag beside it.
 - **`current_round.nodes` holds only THIS round's blocks.** `_sticky_llm_calls` is most-recent-fire-per-slot and survives round transitions, so it is filtered by each block's own `round`: presence in the served map is the client's whole definition of "this node has fired".
 - **A measurement at `NO_ROUND_SLOT` moves the RUN's scalars and not the ROUND's population** — it counts as queries scored and drives the in-flight markers, but skips `_buffer.append_sample` (`shared/instrument.py::NO_ROUND_SLOT`).
@@ -108,7 +108,7 @@ Three bounds — get them wrong and the tree lies without erroring:
 `elect_round_winner` stamps rides `ElectionRecord` — the crown, each arm's θ and its matched-parent
 lift (`ElectionRecord.fit`, keyed by MINTING label because a resume re-mints ids) — so the tree
 carries the whole verdict a `l1_critique` call before the round closes, and `election_held` is what
-separates a round that HELD from one still scoring (`is_winner: false` reads identically for both).
+separates a round that HELD from one still scoring (`is_selected: false` reads identically for both).
 The FRONTIER θ is the exception and stays on `round:complete`: it is RESTAMPED when the ruler warms,
 which round 0 reaches twice for exactly that reason, so `LedgerRoundClose.abilities` wins over the
 election's copy wherever it answers. Move either half to the other record and nothing raises: round
@@ -122,7 +122,7 @@ writes, and why — [`docs/operations/persistence-and-state.md`](../../docs/oper
 
 ## Stores
 
-`store/stores.py`: `Stores` frozen dataclass + `build_stores(identity, *, projects_root=…, benchmarks_root=…, shared_root=…)`. `shared_root` roots every CONTENT-ADDRESSED cache and equals `projects_root` everywhere except an L4 inner sandbox, which isolates campaign state but must NOT isolate a cache keyed by content hash. **`store/layout.py::SHARED_CACHE_DIRS` is the sole enumeration of that set**, because three surfaces must agree on it — `build_stores` roots them, `cli/commands/reset.py` preserves them, and the workspace storage report counts them as shared. A cache named in one list and not the others is destroyed by `reset` or double-counted, silently, and one of those costs money.
+`store/stores.py`: `Stores` frozen dataclass + `build_stores(identity, *, projects_root=…, benchmarks_root=…, shared_root=…)`. `shared_root` roots every CONTENT-ADDRESSED cache and equals `projects_root` everywhere except an L4 inner sandbox, which isolates campaign state but must NOT isolate a cache keyed by content hash, nor the dataset tier (`tenant_datasets`) its inner benchmark resolves through. **`store/layout.py::SHARED_CACHE_DIRS` is the sole enumeration of that set**, because three surfaces must agree on it — `build_stores` roots them, `cli/commands/reset.py` preserves them, and the workspace storage report counts them as shared. A cache named in one list and not the others is destroyed by `reset` or double-counted, silently, and one of those costs money.
 
 `Stores.identity` is the sole source of tenant scope, with `Stores.tenant_id` a derived `@property` returning the `TenantId` newtype — never an independent field (identity-foundation no-drift gate #4). Composite over the leaf stores `Stores` declares as its own fields, one class per `store/*.py`, except `optimizer_reuse` and `judge_reuse` — two instances of the one `LLMReuseCache` differing only in namespace directory. Separate attributes rather than a shared instance: a grader able to read the loop's cached answers would be a ruler fed by what it measures. **Cite one as attribute → class → file.**
 

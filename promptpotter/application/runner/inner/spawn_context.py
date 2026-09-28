@@ -16,14 +16,13 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from promptpotter.application.runner.inner.tasks import inner_tasks_path, load_inner_tasks
+from promptpotter.application.runner.inner.tasks import InnerTasks, inner_tasks_path
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.store.layout import inner_sandbox_dir
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.runner.inner.tasks import InnerTasks
     from promptpotter.domain.ruler import DeltaRuler
     from promptpotter.shared.identity import IdentityContext
 
@@ -67,8 +66,11 @@ _INNER_SPAWN: contextvars.ContextVar[InnerSpawnContext | None] = contextvars.Con
 )
 
 
-def _resolve_outer_panel(campaign_config: CampaignConfig, dataset_dir: Path) -> InnerTasks | None:
-    """Read the panel for the whole run, and census-check it on the same read.
+def _resolve_outer_panel(
+    session: Session, campaign_config: CampaignConfig, dataset_dir: Path
+) -> InnerTasks | None:
+    """The panel run init resolved into the workload, census-checked — never a second read of the
+    file, which the samples and the identity fingerprint were taken from.
 
     ``None`` where the dataset owns no panel: owning one IS what makes a dataset outer, and no
     name test recognises one. The observation-key half of the contract is now
@@ -76,7 +78,7 @@ def _resolve_outer_panel(campaign_config: CampaignConfig, dataset_dir: Path) -> 
     panel_path = inner_tasks_path(dataset_dir)
     if not panel_path.is_file():
         return None
-    panel = load_inner_tasks(panel_path)
+    panel = InnerTasks.model_validate(session.backend_client.workload.experiment)
     # The panel (`inner_tasks.yaml`) and the round budget (`campaign.yaml::sp_budget_round`) are
     # ONE declaration in two files. A budget BELOW the panel narrows it silently, and under
     # `per_round_resubset` rounds then draw different cells — candidates compared on bases that
@@ -114,7 +116,7 @@ def publish_inner_spawn_context(session: Session, campaign_config: CampaignConfi
             spawn_campaign_id=session.campaign_id,
             spawn_cycle_id=cycle_id,
             asking_cycle_id=cycle_id,
-            panel=_resolve_outer_panel(campaign_config, Path(dataset_dir)),
+            panel=_resolve_outer_panel(session, campaign_config, Path(dataset_dir)),
         )
     )
 

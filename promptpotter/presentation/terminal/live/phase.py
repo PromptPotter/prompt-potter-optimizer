@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.pobb.classification import (
+from promptpotter.application.scoring.classification import (
     get_ranked_items,
     ranked_item_keys_from_schema,
 )
@@ -14,7 +14,6 @@ from promptpotter.application.scoring.row_diagnostics import find_rank
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.results import (
-    is_round_winner,
     overlap_series,
     resolved_fitness,
     scoreboard_rank_key,
@@ -117,18 +116,14 @@ def render_round_stats(
         # display ordering — never a private accuracy-argmax that can star a
         # candidate the engine didn't elect.
         best = next(
-            (
-                s
-                for s in round_result.candidate_scores
-                if is_round_winner(s.candidate_id, round_result.winner_id)
-            ),
+            iter(round_result.selected_scores),
             max(
                 round_result.candidate_scores,
                 key=lambda s: scoreboard_rank_key(
                     s.composite_fitness,
                     s.accuracy,
                     s.theta,
-                    is_winner=is_round_winner(s.candidate_id, round_result.winner_id),
+                    is_selected=s.label in round_result.selected_labels,
                     is_partial=bool(s.partial_reason),
                 ),
             ),
@@ -152,17 +147,17 @@ def render_round_stats(
     # other line reads the same on a round that resolved nothing as on one that resolved
     # something; this is the line that separates them. Silent when the round crowned nobody or the
     # panel held under two shared cells, where the absence is the honest answer.
-    lo, hi = round_result.matched_parent_lift_ci_lo, round_result.matched_parent_lift_ci_hi
-    if round_result.matched_parent_lift is not None and lo is not None and hi is not None:
+    selected = next(iter(round_result.selected_scores), None)
+    lift = selected.reference_lift if selected else None
+    lo = selected.reference_lift_ci_lo if selected else None
+    hi = selected.reference_lift_ci_hi if selected else None
+    if lift is not None and lo is not None and hi is not None:
         spans_zero = lo <= 0.0 <= hi
         verdict = (
             f"{YELLOW}spans 0 — not separable from the parent{RESET}" if spans_zero else "clears 0"
         )
         lines.append(
-            _node_line(
-                f"lift vs matched parent: {round_result.matched_parent_lift:+.3f} "
-                f"[{lo:+.3f}, {hi:+.3f}]  |  {verdict}"
-            )
+            _node_line(f"lift vs matched parent: {lift:+.3f} [{lo:+.3f}, {hi:+.3f}]  |  {verdict}")
         )
 
     # The 1-to-1 series: the parent line read on the cells all of it has answered. It is the

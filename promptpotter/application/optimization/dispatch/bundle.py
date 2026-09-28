@@ -10,14 +10,12 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.optimizer_state import CritiqueReadout, L2L3Memory
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.results import (
-    CritiqueReadout,
-    EliminationGate,
-    RoundResult,
-)
+from promptpotter.domain.results import EliminationGate, RoundResult
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler
+from promptpotter.domain.search_point import TaskDecomposition
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
@@ -250,7 +248,7 @@ class ArmReading:
 
 @dataclass(frozen=True)
 class RoundDigest:
-    """Post-scoring readouts for one round. The FAILURE renderers read ``bundle.opt_sp`` instead, because failures
+    """Post-scoring readouts for one round. The FAILURE renderers read ``bundle.memory`` instead, because failures
     accumulate across rounds while these do not."""
 
     diagnostics: RoundDiagnostics | None
@@ -278,6 +276,8 @@ class InjectionBundle:
     snapshot behind ``origin_strengths``; the live cumulative results drive the failure panels."""
 
     opt_sp: OptSearchPoint
+    memory: L2L3Memory
+    framing: TaskDecomposition
     pipeline_schema: PipelineSchema | None
     cycle_slice: CycleSlice
     digest: RoundDigest

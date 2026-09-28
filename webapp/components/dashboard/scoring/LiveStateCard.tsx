@@ -48,7 +48,7 @@ export function LiveStateCard() {
     }
     // Located off the round's incumbency stamp, never by position.
     const round0 = dash.rounds.find((r) => r.round === 0);
-    const originSamples = round0?.candidates.find((c) => c.is_winner)?.scored_samples;
+    const originSamples = round0?.candidates.find((c) => c.is_selected)?.scored_samples;
     if (typeof originSamples === "number") {
       items.push(["origin_samples", originSamples]);
       seen.add("origin_samples");

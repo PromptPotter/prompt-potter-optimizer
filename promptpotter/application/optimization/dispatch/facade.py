@@ -184,11 +184,11 @@ class DispatchHub:
         channels, one call. ``rendered`` is what the node was actually SHOWN, which is the smaller set.
 
         The layout is RESOLVED here rather than passed in: it is a function of the node and the
-        cycle's searchpoint (`node_layout`), so every caller that supplied one re-derived the same
+        cycle's memory (`node_layout`), so every caller that supplied one re-derived the same
         thing — and could hand a node another node's panel set. *node* also names the discretionary
         allowance this composition must fit, and its mandatory rail."""
         table = injection_table()
-        layout = node_layout(node, bundle.opt_sp)
+        layout = node_layout(node, bundle.memory)
         order = layout.all_placeholders()
         items = {name: DispatchHub.render_items(name, bundle) for name in order}
         budget = OPTIMIZER_DISCRETIONARY_CHARS.get(node, _NO_CEILING)
@@ -302,7 +302,7 @@ def build_bundle(
     if latest_round is None and cycle.rounds:
         latest_round = cycle.rounds[-1]
     latest_diag = latest_round.diagnostics if latest_round else None
-    latest_crit = latest_round.critique if latest_round else None
+    latest_crit = latest_round.optimizer_state.payload.critique if latest_round else None
     round_num = latest_round.round + 1 if latest_round else 1
 
     current_sp = cycle.tracking.current_sp
@@ -363,6 +363,8 @@ def build_bundle(
 
     return InjectionBundle(
         opt_sp=cycle.opt_sp,
+        memory=cycle.memory,
+        framing=cycle.framing,
         pipeline_schema=cycle.session.pipeline_schema,
         cycle_slice=cs,
         digest=RoundDigest(

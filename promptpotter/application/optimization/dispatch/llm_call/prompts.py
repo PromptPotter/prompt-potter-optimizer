@@ -19,11 +19,8 @@ from promptpotter.domain.l1_layout import (
     coerce_l1_layout,
     validate_l1_layout,
 )
-from promptpotter.domain.opt_search_point import (
-    OptimizerPromptTemplate,
-    OptSearchPoint,
-    PromptTemplate,
-)
+from promptpotter.domain.opt_search_point import OptimizerPromptTemplate, PromptTemplate
+from promptpotter.domain.optimizer_state import L2L3Memory
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.validators import ValidatorOutcome
@@ -331,14 +328,14 @@ def resolve_layout_override(
     about which edits are legal."""
     spec = NODE_LAYOUTS[node]
     # The `editor` field is a contract, so it is asked rather than assumed. `l1_generate`'s
-    # layout is L2's in-campaign surface (`opt_sp.memory.l1_layout`) and nothing here applies
+    # layout is L2's in-campaign surface (`Cycle.memory.l1_layout`) and nothing here applies
     # to it — reaching this with that node means a caller believes in an L4 lever that has no
     # code path, and silence would let the belief survive.
     if spec.editor != "l4":
         raise ValueError(
             f"resolve_layout_override({node!r}): this node's layout is edited by {spec.editor!r}, "
             "not L4. Only `editor='l4'` nodes resolve a layout through the per-node override "
-            "channel; l1_generate's rides opt_sp.memory.l1_layout instead."
+            "channel; l1_generate's rides Cycle.memory.l1_layout instead."
         )
     merged = coerce_l1_layout(raw_layout, base=spec.floor)
     if merged is None:
@@ -373,17 +370,17 @@ def resolve_node_layout(node: str) -> L1Layout:
     return layout
 
 
-def node_layout(node: str, opt_sp: OptSearchPoint) -> L1Layout:
+def node_layout(node: str, memory: L2L3Memory) -> L1Layout:
     """**The layout ``node`` renders under, this cycle — the one question every fill asks.**
 
     Two storage channels, because the two edits have different lifetimes and neither can hold the
-    other: L2's edit of `l1_generate` is per-cycle searchpoint state that must survive a resume, so
-    it lives on `opt_sp.memory.l1_layout`; an L4 edit binds a whole inner cycle from OUTSIDE its
-    searchpoint, so it rides the override ContextVar. `NodeLayoutSpec.editor` is what says which —
+    other: L2's edit of `l1_generate` is per-cycle optimizer state that must survive a resume, so
+    it lives on `Cycle.memory.l1_layout`; an L4 edit binds a whole inner cycle from OUTSIDE its
+    state, so it rides the override ContextVar. `NodeLayoutSpec.editor` is what says which —
     asked HERE and nowhere else. Every call site that branched on it wrote the ternary again, and
     the split is what made "which panels does this node see" a three-file question."""
     if NODE_LAYOUTS[node].editor == "l2":
-        return opt_sp.memory.l1_layout
+        return memory.l1_layout
     return resolve_node_layout(node)
 
 
@@ -436,7 +433,7 @@ def compute_optimizer_prompt_hashes() -> dict[str, str]:
         if (spec := NODE_LAYOUTS.get(name)) is not None:
             # Only an `editor == "l4"` node can have its layout moved by the override channel
             # this hash exists to notice. `l1_generate` is edited by L2, in-campaign, through
-            # `opt_sp.memory.l1_layout` — per-cycle state that has no business in a manifest
+            # `Cycle.memory.l1_layout` — per-cycle state that has no business in a manifest
             # hash — so it contributes its floor, which is exactly what an L4 edit leaves it at.
             layout = resolve_node_layout(name) if spec.editor == "l4" else spec.floor
             blob += layout.model_dump_json()

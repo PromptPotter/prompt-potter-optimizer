@@ -364,7 +364,7 @@ class FileSink:
             "family": family,
             "version": version,
             "lineage_id": event.lineage_id,
-            "parent_id": event.parent_id,
+            "parent_ids": list(event.parent_ids),
             "layer1_fields": event.layer1_fields,
             "created_at": utcnow_iso(),
         }
@@ -375,7 +375,7 @@ class FileSink:
                 "lineage_id": event.lineage_id,
                 "family": family,
                 "version": version,
-                "parent_id": event.parent_id,
+                "parent_ids": list(event.parent_ids),
             }
         )
 

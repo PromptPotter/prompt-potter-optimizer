@@ -15,7 +15,6 @@ from promptpotter.domain.results import (
     RoundResult,
     ScoredCandidate,
     is_electable,
-    is_round_winner,
 )
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout
@@ -25,7 +24,7 @@ logger = logging.getLogger(__name__)
 # The ``ScoredCandidate`` fields each display model copies verbatim — its own field list
 # minus the derived flags below. Deriving from ``model_fields`` keeps the copy set in
 # lockstep with the model definition (add a field there, it flows here automatically).
-_SUMMARY_INCLUDE = set(RoundSummaryCandidate.model_fields) - {"is_winner", "is_leading"}
+_SUMMARY_INCLUDE = set(RoundSummaryCandidate.model_fields) - {"is_selected", "is_leading"}
 
 
 def origin_rows_from_disk(cycle_dir: Path) -> list[dict[str, Any]]:
@@ -105,13 +104,13 @@ def _leading_arm(rr: RoundResult) -> ScoredCandidate | None:
     if not electable:
         return None
     return next(
-        (c for c in electable if is_round_winner(c.candidate_id, rr.winner_id)),
+        (c for c in electable if c.label in rr.selected_labels),
         max(electable, key=lambda c: c.composite_fitness),
     )
 
 
 def build_round_summary(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> RoundSummary:
-    """One ``RoundSummary`` from a closed round — the sole writer of the persisted ``is_winner`` flag. ``health`` is
+    """One ``RoundSummary`` from a closed round — the sole writer of the persisted ``is_selected`` flag. ``health`` is
     COPIED from ``rr.health``: the projection renders the served verdict and never recomputes it."""
     # Both display models are strict name-subsets of ``ScoredCandidate`` plus the derived flags
     # below — so each is a ``model_dump(include=…)`` projection, not a hand-copy. The include-set
@@ -122,7 +121,7 @@ def build_round_summary(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> R
     candidates = [
         RoundSummaryCandidate(
             **c.model_dump(include=_SUMMARY_INCLUDE),
-            is_winner=is_round_winner(c.candidate_id, rr.winner_id),
+            is_selected=c.label in rr.selected_labels,
             is_leading=leading is not None and c.candidate_id == leading.candidate_id,
         )
         for c in rr.candidate_scores

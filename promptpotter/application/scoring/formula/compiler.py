@@ -255,6 +255,9 @@ _CHANNEL_READERS: dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], flo
     "tokens": lambda _row, pd: _own_else_steps(
         _number(pd.get("inner_tokens")), _step_tokens_sum(pd, "input", "output")
     ),
+    # Characters, not tokens: no tokenizer ships, and CAPO's length ratio reads the same over
+    # chars as over the chars/4 estimate `_compute_step_tokens` falls back to.
+    "target_prompt_chars": lambda _row, pd: _number(pd.get("target_prompt_chars")),
 }
 
 # The three health facts a cell answers about ITSELF, as 0/1 so a composite can price them — at
