@@ -36,19 +36,12 @@ from promptpotter.application.datasets.draft_campaign import (
 from promptpotter.application.datasets.draft_patch import SETTABLE_SCALARS, EditDraftPatch
 from promptpotter.application.datasets.ingest import SlugTakenError, ingest_draft
 from promptpotter.application.datasets.origin_readiness import origin_readiness
-from promptpotter.application.initialization.session import mint_checkin_skeleton
 from promptpotter.application.jobs.launcher.admission import probe_backend
 from promptpotter.application.jobs.launcher.checkin import prepare_checkin_run
-from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
-from promptpotter.application.optimization.task_context import (
-    checkin_call_context,
-    committed_task_context,
-    decompose_prompt_fields,
-)
+from promptpotter.application.jobs.mint import fresh_campaign_id, mint_framed_cycle
 from promptpotter.application.runner.entry import RunMode
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.connector import BackendUnreachableError
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
@@ -279,54 +272,6 @@ async def _ingest_and_prepare_checkin(
     return prepared.session, prepared.campaign_config, prepared.session.dataset_name or "?"
 
 
-async def _commit_task_framing(
-    session: Session,
-    *,
-    task_file: str | None,
-    task_text: str | None,
-) -> None:
-    """``--task-file`` / ``--task-text`` IS a check-in: decompose the operator's context and COMMIT
-    it as the dataset's framing. Runs BEFORE the mint because framing renders — the cycle id hashes
-    it, so a framing that arrives afterwards names a prompt the id never saw."""
-
-    override = Path(task_file).read_text(encoding="utf-8") if task_file else task_text
-    if not override:
-        # Absent framing is legitimate, but SILENT absent framing is not: the run scores an
-        # unframed prompt and the id honestly says so, which looks identical to a dataset that
-        # never had framing. Four shipped benchmarks are in exactly this state.
-        if not committed_task_context(session.store, session.dataset_name) and (
-            session.dataset_config_dir is not None
-            and (Path(session.dataset_config_dir) / "task_description.md").is_file()
-        ):
-            checkin_line(
-                "task check-in",
-                f"no committed framing — running unframed. "
-                f"`new {session.dataset_name} --task-file "
-                f"datasets/{session.dataset_name}/task_description.md` commits it",
-            )
-        return
-    dataset_name = session.dataset_name or ""
-    # The check-in's own campaign is where the decomposition bills — the same skeleton the web
-    # ingest mints, and the reason one exists: "the origin isn't authored yet, so there is no
-    # content hash to address it by".
-    _sid, campaign_id, cycle_id = mint_checkin_skeleton(
-        session.store,
-        slug=dataset_name,
-        backend_type=backend_type_of_dataset(session.store, dataset_name),
-    )
-    result = await decompose_prompt_fields(
-        override,
-        campaign_id=campaign_id,
-        context=checkin_call_context(
-            session.store, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
-        ),
-    )
-    framing = dict(result.get("task_context") or {})
-    framing["raw_description"] = override
-    session.store.tenant_datasets.save_task_context(dataset_name, framing)
-    checkin_line("task check-in", f"committed framing for {dataset_name}")
-
-
 async def _mint_fresh_session(
     args: argparse.Namespace,
 ) -> tuple[Session, CampaignConfig, str]:
@@ -364,16 +309,15 @@ async def _mint_fresh_session(
 
     train_data = session.samples
 
-    # Framing BEFORE identity — the cycle id about to be minted hashes the prompt this commits,
-    # so an operator-supplied description has to land as dataset content first.
-    await _commit_task_framing(session, task_file=args.task_file, task_text=args.task_text)
-
     # The one shared mint prologue — same application seam the web mint runs (detached).
-    minted = prepare_fresh_cycle(
+    minted = await mint_framed_cycle(
         session,
         campaign_config,
         train_data,
         campaign_id=fresh_campaign_id(session, campaign_config),
+        task_text=Path(args.task_file).read_text(encoding="utf-8")
+        if args.task_file
+        else args.task_text,
         log=logger.info if get_verbose() else None,
     )
 

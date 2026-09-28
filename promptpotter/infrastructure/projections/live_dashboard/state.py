@@ -289,10 +289,11 @@ class LiveDashboardState(StrictModel):
     # The scoring phase's calls in flight; how many its stop rules allow right now; and the most it
     # could ever hold — all counted over every candidate walking and the race catch-ups
     # (`scoring/query_loop.py::FlightGauge`). Between phases `lookahead_most` is the next round's
-    # (`n_variants` x `sp_budget_round`), so the operator can size a press before it starts.
+    # (`n_variants` x `sp_budget_round`), so the operator can size a press before it starts —
+    # ``None`` there under a manifest that declares no `n_variants`.
     in_flight: int = 0
     lookahead_allowed: int = 0
-    lookahead_most: int = 0
+    lookahead_most: int | None = 0
     # How many MORE cells the SPEND ceiling admits, and what one reserves — the fourth bound on the
     # same depth, and the only one nothing else implies. A cell reserves its worst case, so a
     # ceiling a few of those wide pins the walk at one call while the depth reads armed and the
@@ -318,7 +319,8 @@ class LiveDashboardState(StrictModel):
     last_query_elapsed_s: float | None = None
     wallclock_serialized_at: str | None = None
 
-    n_variants: int
+    # Potter's `l1_generate` knob; ``None`` under a manifest that declares no such node.
+    n_variants: int | None
     sp_budget_round: int
 
     # None until INIT:exit.
@@ -371,7 +373,7 @@ class LiveDashboardState(StrictModel):
         hop: CycleHop,
         session_id: str,
         l1_patience: int | None,
-        n_variants: int,
+        n_variants: int | None,
         sp_budget_round: int,
         langfuse_trace_url: str | None,
         headline_metric: HeadlineMetric,

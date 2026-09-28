@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
+from promptpotter.application.jobs.mint import fresh_campaign_id, mint_framed_cycle
 from promptpotter.application.jobs.quota import unadmitted_limits
 from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
@@ -100,16 +100,17 @@ async def run_campaign(
     limits: LaunchLimits,
     mode: RunMode,
 ) -> CycleResult:
-    """Mint through ``prepare_fresh_cycle``, the prologue ``new`` and the web mint run, then run the
+    """Mint through ``mint_framed_cycle``, the prologue ``new`` and the web mint run, then run the
     loop from its origin. With no slot there is no admission: the run holds its declaration as-is —
     the config's budget under *limits*' — composed exactly as every admitted launch composes it, and
     ``LaunchLimits()`` adds nothing to the config's own."""
     if not session.campaign_id:
-        prepare_fresh_cycle(
+        await mint_framed_cycle(
             session,
             campaign_config,
             train_data,
             campaign_id=fresh_campaign_id(session, campaign_config),
+            task_text=None,
         )
     held = unadmitted_limits(
         campaign_config,

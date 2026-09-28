@@ -207,7 +207,12 @@ LEDGER_BASELINE = {
     # +2: `capo_crossover.crossovers` (c) and `population.size` (μ) — CAPO's paper values on the
     # nodes that spend them. `size` is `paired_t.survivors`' number, one YAML anchor in the
     # manifest, kept apart because the paper's no-racing ablation keeps a population and no race.
-    "config_leaf_fields": 52,
+    # +1: `CampaignConfig.task_framing` — the framing ablation. Absent framing on disk is not a
+    # declaration: the first mint decomposes a description, so running unframed ON PURPOSE needs its
+    # own leaf, and one on the campaign reaches every entry point that mints and rides the manifest.
+    # +1: `paired_t.length_penalty` (γ) — CAPO's objective, declared once where the race reads it;
+    # the campaign's `per_cell` formula cannot carry it without changing every arm's bench score.
+    "config_leaf_fields": 54,
     # +1: `QUEUE_MAX_WAIT_S` — how long a launch may wait in line before it is withdrawn. It is a
     # setting and not a constant because it is the one queue number a HOST has to be able to
     # answer for: on a shared box it decides when someone else's waiting launch is given up on.
@@ -281,7 +286,9 @@ LEDGER_BASELINE = {
     # leaves) and its rounds without advance. CAPO's state between rounds, which a resume re-seats
     # off the round document; potter's payload holds nothing it could ride.
     # ±0: `axis_memory_peaked` moved from potter's payload to the round — the bench writes it.
-    "cycle_result_fields": 257,
+    # +1: `CapoRoundState.length_norm` — the longest initial prompt's length, measured once in
+    # round 1; the initial population is gone by round 2, so no round field can re-derive it.
+    "cycle_result_fields": 258,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
@@ -296,7 +303,9 @@ LEDGER_BASELINE = {
     # -1: `L2L3Memory._coerce_task_context(v: Any)` — the framing no longer rides the memory.
     # -1: `judges/__init__.py::_validate(j: Any)` takes `object` like the connector validator,
     # the signature `shared/plugin_registry.py::load_registry` asks of every group.
-    "any_params": 46,
+    # -1: `decompose_prompt_fields(context_input: Any)` is `commit_task_framing(description: str)`:
+    # its dict arm had no caller, so the one decomposition input is a description's text.
+    "any_params": 45,
     # +1: `results.py::is_floor_pinned(rows: Sequence[Mapping[str, Any]])`, the same signature as
     # `measured_cells` and `is_answer_collapsed` beside it — a round row read off disk is a plain
     # mapping, so a narrower annotation here would be a claim the callers cannot honour.
@@ -560,7 +569,11 @@ LEDGER_BASELINE = {
     # cells failed, why and at what token bill, while every panel renders (test_integrity § 5).
     # +1: a CAPO round keeping its population by the wrong rule, racing offspring without it, or
     # drawing a parent from outside it still elects a winner (test_numerics § 4).
-    "test_functions": 210,
+    # +1: an ablation arm declared unframed that still renders the committed framing measures the
+    # framed prompt, and the ablation reads as no effect (test_integrity § 1).
+    # +1: a first mint that derives its id before committing the decomposition, or bills it on no
+    # run's ledger, names a prompt nobody scores or spends money no meter sees (test_integrity § 7).
+    "test_functions": 212,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

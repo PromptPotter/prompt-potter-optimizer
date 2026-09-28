@@ -1,5 +1,5 @@
-# Ships with the dataset: a bare `new <name>` decomposes nothing (only `--task-file` /
-# `--task-text` runs the check-in), so without this file every campaign here runs unframed.
+# Ships with the dataset, so every campaign here runs this reviewed framing rather than the one
+# the first mint would decompose from `task_description.md`.
 #
 # `upstream_context` / `downstream_context` are deliberately absent: they splice into the TARGET
 # prompt, which on this dataset is the skill the agent reads.

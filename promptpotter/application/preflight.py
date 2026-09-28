@@ -105,11 +105,23 @@ def _check_config_couplings(config: CampaignConfig) -> list[PreflightWarning]:
     ]
 
 
-def _check_task_context_present(framing: Mapping[str, Any] | None) -> PreflightWarning | None:
+def _check_task_context_present(
+    config: CampaignConfig, framing: Mapping[str, Any] | None
+) -> PreflightWarning | None:
     """The operator's frozen framing is the SOLE source of l1_generate's ``task_intent`` slot, and
     an empty one renders as nothing at all — no header, no placeholder — so the slot falls back to
     the static template. Decidable before a cell is bought, and afterwards visible only as
     ``review.md``'s ``_(empty)_``."""
+    if config.task_framing == "off":
+        return PreflightWarning(
+            code="task_framing_off",
+            title="running UNFRAMED on purpose — `task_framing: off`",
+            detail=(
+                "The framing ablation: no target render splices the dataset's task framing and "
+                "l1_generate's task_intent slot renders as the static template alone. Compare "
+                "this run only against framed runs of the same dataset, never pool with them."
+            ),
+        )
     if has_framing(framing):
         return None
     return PreflightWarning(
@@ -119,9 +131,8 @@ def _check_task_context_present(framing: Mapping[str, Any] | None) -> PreflightW
             "`task_context` carries every field the operator wrote about the task, and it is the "
             "only panel feeding l1_generate's task_intent slot. Empty, that slot renders as the "
             "static template alone: the generator proposes edits knowing the failing samples and "
-            "nothing about what the pipeline is for. Ship a `task_context.yaml` beside the "
-            "dataset, or pass `--task-file` / `--task-text` so the decomposition runs — `new "
-            "<name>` with neither never calls it."
+            "nothing about what the pipeline is for. Ship a `task_description.md` beside the "
+            "dataset — the first mint decomposes it — or pass `--task-file` / `--task-text`."
         ),
     )
 
@@ -140,7 +151,7 @@ def run_preflight_checks(
     opt_model = select_optimizer(config.optimization).model()
     if (w := _check_optimizer_below_target(opt_model, target_models)) is not None:
         warnings.append(w)
-    if (w := _check_task_context_present(task_context)) is not None:
+    if (w := _check_task_context_present(config, task_context)) is not None:
         warnings.append(w)
     warnings.extend(_check_config_couplings(config))
     return warnings

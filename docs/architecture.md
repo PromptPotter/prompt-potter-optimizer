@@ -870,10 +870,10 @@ the PR description.
   first-run path; cruft-audit yes, mechanism delete no.
 
 - **Check-in decomposition into `task_context`** — the one-time
-  `checkin` LLM call that commits a dataset's framing: `new <name>
+  `checkin` LLM call that commits a dataset's framing: the first mint of
+  a framed campaign on a dataset with none committed, `new <name>
   --task-file` / `--task-text`, `new <file.csv>`, or the web check-in.
-  A bare `new <name>` decomposes nothing and runs on whatever framing is
-  already committed. Don't fold into `l1_generate`.
+  Don't fold into `l1_generate`.
 
 - **Origin, parent and check-in — the start definitions**
   (§0 § Origin, parent, and check-in). A cleanup PR cannot collapse the origin/parent distinction, drop

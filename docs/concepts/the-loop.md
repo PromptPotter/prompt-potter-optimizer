@@ -24,7 +24,7 @@ The critique step is the only place in the loop that reads raw per-sample result
 
 Post-round transitions are decided by escalation rules over `EscalationInputs` (`application/optimization/escalation/`), not a hard-coded patience FSM — predicates are pure functions over a frozen snapshot; adding a rule is one row in `escalation/rules.py`. Several preemptor rules fire L2 *before* patience runs out — **which ones is owned by [`../developer/dispatch-hub.md`](../developer/dispatch-hub.md) § Trigger**, and a copy of that set on this page is what goes stale.
 
-Five LLM call sites: `checkin` (runs around the loop and skips the dispatch hub; it decomposes only on a check-in — `new --task-file` / `--task-text`, `new <raw file>`, or the web check-in), `l1_generate`, `l1_critique`, `l2_context`, `l3_plan`. Critique-and-refine pattern inspired by [PromptWizard](https://arxiv.org/abs/2405.18369).
+Five LLM call sites: `checkin` (runs around the loop and skips the dispatch hub; it decomposes a dataset's framing once — on the first mint that finds none committed, `new --task-file` / `--task-text`, `new <raw file>`, or the web check-in), `l1_generate`, `l1_critique`, `l2_context`, `l3_plan`. Critique-and-refine pattern inspired by [PromptWizard](https://arxiv.org/abs/2405.18369).
 
 ## The state record — what one round carries forward
 

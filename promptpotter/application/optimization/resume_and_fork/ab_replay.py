@@ -21,13 +21,14 @@ from promptpotter.application.optimization.resume_and_fork.replayers import (
     ReplayMismatch,
     replay_all_mismatches,
 )
-from promptpotter.application.optimization.task_context import committed_task_context
+from promptpotter.application.optimization.task_context import campaign_framing
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.run_records import PotterCheckpointKind
 
 if TYPE_CHECKING:
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.ruler import DeltaRuler
 
@@ -142,9 +143,7 @@ def _make_replay_verdict(
 def ab_replay_cycle(
     hop: CycleHop,
     session: Session,
-    n_min: int,
-    *,
-    enable_2pl: bool,
+    campaign_config: CampaignConfig,
 ) -> AbReport:
     """Re-derive a campaign under the active engine + scorer; no LLM calls. The walk is the CAMPAIGN's — a fork shares its
     parent's measurements, so an invalidating change reaches every branch below and a per-cycle answer cannot say that."""
@@ -180,15 +179,15 @@ def ab_replay_cycle(
         .to_job_search_point(
             base_pipeline_params=origin.pipeline_params,
             schema=session.pipeline_schema,
-            framing=committed_task_context(session.store, session.dataset_name),
+            framing=campaign_framing(session.store, campaign_config, session.dataset_name),
             demo=sc.require_partition().demo,
         )
         .sp_hash(session.pipeline_schema)
     )
     ruler, _ = _calibrate_delta_ruler(
         origin.results,
-        n_min,
-        enable_2pl=enable_2pl,
+        campaign_config.optimization.elimination_n_min,
+        enable_2pl=campaign_config.optimization.enable_2pl_graduation,
         archive_obs=build_archive_observations(
             session.store,
             dataset_name=session.dataset_name,

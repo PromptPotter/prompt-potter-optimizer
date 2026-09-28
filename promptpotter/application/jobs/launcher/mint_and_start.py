@@ -39,7 +39,7 @@ from promptpotter.application.jobs.launcher.draft_build import (
     _build_default_campaign_json,
     _build_task_context,
 )
-from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
+from promptpotter.application.jobs.mint import fresh_campaign_id, mint_framed_cycle
 from promptpotter.application.jobs.quota import QuotaExceededError
 from promptpotter.application.jobs.registry import Job, JobRegistry
 from promptpotter.application.pipeline_resolve import (
@@ -239,11 +239,12 @@ async def mint_campaign_command(
         train_data = session.samples
         # The one shared mint prologue — the same seam CLI ``new`` runs inline; the web path
         # adds only the gates + detached task.
-        minted = prepare_fresh_cycle(
+        minted = await mint_framed_cycle(
             session,
             campaign_config,
             train_data,
             campaign_id=fresh_campaign_id(session, campaign_config),
+            task_text=None,
             origin_override=origin_override,
         )
         campaign_id, cycle_id = minted.campaign_id, minted.cycle_id

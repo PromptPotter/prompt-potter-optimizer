@@ -185,9 +185,6 @@ an untyped dict.
 - The `/potter-run` skill reads `run_phase` off `dashboard.json`, where it is `exclude=True` and
   never written, and no CLI verb serves `derive_run_phase` or the machine queue `cancel-queued`
   needs. `grep -n run_phase .claude/skills/potter-run/SKILL.md`.
-- `presentation/cli/commands/new.py::_commit_task_framing` mints a check-in skeleton outside
-  `launcher/checkin.py::create_checkin_campaign` and writes dataset framing from `presentation/`,
-  leaving an unstartable campaign per `--task-file`. `grep -n mint_checkin_skeleton promptpotter/presentation/cli/commands/new.py`.
 - `webapp/components/verify/VerifyPane.tsx` computes "N cached" by its own formula, which
   `verify_candidate` computes differently and never persists. `grep -n "const cacheReplays"
   webapp/components/verify/VerifyPane.tsx`.

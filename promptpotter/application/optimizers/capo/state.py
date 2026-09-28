@@ -24,6 +24,7 @@ class CapoState:
 
     population: list[OptSearchPoint] = field(default_factory=list)
     rounds_without_advance: int = 0
+    length_norm: int | None = None
 
     def snapshot(
         self,
@@ -38,6 +39,7 @@ class CapoState:
             payload=CapoRoundState(
                 population=[ind.model_copy(deep=True) for ind in population],
                 rounds_without_advance=rounds_without_advance,
+                length_norm=self.length_norm,
             ),
         )
 
@@ -63,6 +65,7 @@ class CapoState:
     def _take_up(self, payload: CapoRoundState) -> None:
         self.population = [ind.model_copy(deep=True) for ind in payload.population]
         self.rounds_without_advance = payload.rounds_without_advance
+        self.length_norm = payload.length_norm
 
 
 def capo_state(state: WorkingState) -> CapoState:

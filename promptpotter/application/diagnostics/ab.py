@@ -46,9 +46,4 @@ async def ab_replay_campaign(
     session.state.cycle_id = hop.cycle_id
     campaign_config = resolve_campaign_config(stores, campaign, hop)
     arm_diagnostic_scoring(session, campaign_config, source=RunSource.AB, log=log)
-    return ab_replay_cycle(
-        hop,
-        session,
-        campaign_config.optimization.elimination_n_min,
-        enable_2pl=campaign_config.optimization.enable_2pl_graduation,
-    )
+    return ab_replay_cycle(hop, session, campaign_config)

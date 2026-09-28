@@ -28,7 +28,7 @@ from promptpotter.application.initialization.loop_start import (
     diagnostic_trace,
 )
 from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.optimization.task_context import committed_task_context
+from promptpotter.application.optimization.task_context import campaign_framing
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.measurement_provenance import RunSource
@@ -277,7 +277,7 @@ async def screen_inner_seeds(
     ).to_job_search_point(
         pipeline_params,
         schema=session.pipeline_schema,
-        framing=committed_task_context(stores, dataset_name),
+        framing=campaign_framing(stores, campaign_config, dataset_name),
         demo=session.scoring.require_partition().demo,
     )
 

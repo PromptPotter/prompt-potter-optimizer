@@ -401,18 +401,47 @@ def test_steered_fork_seed_narrowing_overrides_campaign_locks_per_node() -> None
     assert merged.optimizer_narrowing["retriever"].param_keys == ["top_k"]
 
 
-def test_frozen_campaign_config_ceilings_survive_the_live_dataset_file() -> None:
+def test_frozen_campaign_config_ceilings_survive_the_live_dataset_file(tmp_path: Path) -> None:
     """The campaign's own snapshot decides what it RUNS, not the dataset template beside it.
 
     Carrying only `pipeline_overlay` + `optimizer_narrowing` off the snapshot is what let a
     mint-time `--config` reach `campaign.json` and never the loop: `run_limits` armed the
     file's ceilings while every surface reading the campaign showed the operator's. The
     snapshot is the delta from defaults, so a knob it never named still comes off the file.
+    A snapshot selecting another optimizer runs that manifest under ITS overlay alone.
     """
+    from types import SimpleNamespace
+
     from promptpotter.application.campaign_config import (
         apply_inherited_overlay,
         load_campaign_config,
     )
+    from promptpotter.application.datasets.authored import (
+        dataset_campaign_path,
+        load_dataset_campaign_config,
+    )
+    from promptpotter.application.optimizer_manifest import select_optimizer
+    from promptpotter.application.run_observers import build_campaign_emitter
+    from promptpotter.config.paths import benchmark_datasets_root
+
+    template = load_dataset_campaign_config(
+        dataset_campaign_path(benchmark_datasets_root() / "justlogic-d234")
+    )
+    capo_nodes = {"population": {"config": {"size": 4}}}
+    capo = apply_inherited_overlay(
+        template, {"optimization": {"optimizer": "capo", "nodes": capo_nodes}}, None
+    )
+    assert {n: o.model_dump() for n, o in capo.optimization.nodes.items()} == capo_nodes
+    assert select_optimizer(capo.optimization).node_config("population")["size"] == 4
+    session = SimpleNamespace(
+        hop=CycleHop(campaign_id="camp_capo", cycle_id="cycle_capo"),
+        tenant_root=str(tmp_path),
+        session_id="sess_capo",
+        backend_client=SimpleNamespace(max_cells_in_flight=2, measured_unit="sample"),
+    )
+    emitter = build_campaign_emitter(session, capo, origin_accuracy=None)  # type: ignore[arg-type]
+    assert emitter is not None
+    assert emitter.state.n_variants is None
 
     live = load_campaign_config(
         {

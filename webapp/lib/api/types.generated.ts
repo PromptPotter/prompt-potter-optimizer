@@ -432,6 +432,7 @@ export interface PotterRoundState {
 export interface CapoRoundState {
   population: OptSearchPoint[];
   rounds_without_advance: number;
+  length_norm: number | null;
 }
 
 /** ``{manifest, prompt_hashes, payload}`` — the one envelope every optimizer's state rides. */
@@ -697,7 +698,7 @@ export interface LiveDashboardState {
   sample_lookahead_discards: number;
   in_flight: number;
   lookahead_allowed: number;
-  lookahead_most: number;
+  lookahead_most: number | null;
   lookahead_affordable: number | null;
   cell_reserve_usd: number | null;
   waiting_on: string | null;
@@ -707,7 +708,7 @@ export interface LiveDashboardState {
   measured_unit: 'sample' | 'cell';
   last_query_elapsed_s: number | null;
   wallclock_serialized_at: string | null;
-  n_variants: number;
+  n_variants: number | null;
   sp_budget_round: number;
   run_limits: RunLimits | null;
   spend: SpendRollup;

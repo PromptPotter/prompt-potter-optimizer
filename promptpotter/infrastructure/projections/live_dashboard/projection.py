@@ -191,7 +191,7 @@ class LiveDashboardProjection(Projection):
         hop: CycleHop,
         session_id: str,
         l1_patience: int | None,
-        n_variants: int,
+        n_variants: int | None,
         sp_budget_round: int,
         headline_metric: HeadlineMetric,
         langfuse_trace_url: str | None = None,
@@ -271,7 +271,7 @@ class LiveDashboardProjection(Projection):
         tenant_root: str,
         session_id: str,
         l1_patience: int | None,
-        n_variants: int,
+        n_variants: int | None,
         sp_budget_round: int,
         headline_metric: HeadlineMetric,
         langfuse_trace_url: str | None = None,
@@ -988,9 +988,13 @@ class LiveDashboardProjection(Projection):
         s.sample_lookahead_auto = sample_lookahead_auto(self.cycle_dir)
         # Nothing scoring: the most the NEXT round could hold — every candidate's cells and one
         # catch-up per cell — so a press can be sized before the round it will apply to begins.
-        s.in_flight, s.lookahead_allowed, s.lookahead_most = (
-            self._flight if any(self._flight) else (0, 0, (s.n_variants + 1) * s.sp_budget_round)
-        )
+        if any(self._flight):
+            s.in_flight, s.lookahead_allowed, s.lookahead_most = self._flight
+        else:
+            s.in_flight = s.lookahead_allowed = 0
+            s.lookahead_most = (
+                None if s.n_variants is None else (s.n_variants + 1) * s.sp_budget_round
+            )
         # Kept whatever the phase state: between rounds these still say what the ceiling would
         # afford the next one, which is when a press is sized.
         s.lookahead_affordable = self._affordable

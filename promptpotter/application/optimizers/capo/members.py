@@ -197,23 +197,58 @@ class PairedTKnobs(StrictModel):
         description="μ, the arms the race keeps: an arm is cut once this many others are "
         "significantly better, since it can no longer be among them.",
     )
+    length_penalty: Annotated[float, Knob(Scope.POLICY, Estimand.SELECTION, Estimand.STOPPING)] = (
+        Field(
+            ge=0.0,
+            description="The paper's gamma: what CAPO's objective charges per cell for the "
+            "prompt's length over the longest initial prompt's. The race and the population both "
+            "rank on that objective; the campaign's formula still scores every arm.",
+        )
+    )
 
 
-def _cell_objectives(rows: Sequence[Mapping[str, Any]]) -> dict[str, float]:
-    """Each measured cell's per-cell composite, unclamped: a length term may take one below zero."""
+@dataclass(frozen=True)
+class _Objective:
+    """CAPO's objective on one cell (§4): correctness less γ times the scored prompt's length over
+    the longest initial prompt's. Unclamped, so a long prompt can take a cell below zero."""
+
+    length_penalty: float
+    length_norm: int
+
+    def of(self, row: Mapping[str, Any]) -> float:
+        chars = float(row["pipeline_data"]["target_prompt_chars"])
+        return float(row["fitness"]) - self.length_penalty * chars / self.length_norm
+
+
+def _objective(ctx: RoundContext) -> _Objective:
+    norm = capo_state(ctx.state).length_norm
+    if norm is None:
+        raise ValueError(
+            "CAPO's objective divides by the longest initial prompt's length, and no initial "
+            "population was generated before its race"
+        )
+    knobs = cast("PairedTKnobs", ctx.cycle.optimizer.knobs(PairedT.name))
+    return _Objective(knobs.length_penalty, norm)
+
+
+def _cell_objectives(rows: Sequence[Mapping[str, Any]], objective: _Objective) -> dict[str, float]:
     return {
-        str(sid): float(r["objective"])
+        str(sid): objective.of(r)
         for r in rows
         if (sid := r.get("sample_id")) is not None and not is_error_result(r)
     }
 
 
 def _rank_survivors(
-    survivors: Sequence[str], rows: Mapping[str, Sequence[Mapping[str, Any]]], *, size: int
+    survivors: Sequence[str],
+    rows: Mapping[str, Sequence[Mapping[str, Any]]],
+    *,
+    size: int,
+    objective: _Objective,
 ) -> list[str]:
-    """The ``size`` best survivors, best first, by mean composite over the cells every one of them
+    """The ``size`` best survivors, best first, by mean objective over the cells every one of them
     measured (App. B, `do_racing` line 35). A tie, or no shared cell at all, keeps walk order."""
-    readings = {cid: _cell_objectives(rows[cid]) for cid in survivors}
+    readings = {cid: _cell_objectives(rows[cid], objective) for cid in survivors}
     shared = set.intersection(*(set(r) for r in readings.values())) if readings else set()
 
     def mean(cid: str) -> float:
@@ -277,11 +312,13 @@ class PairedTRace:
         round_num: int,
         on_snapshot: Callable[[str, int, int, int, RaceSnapshot], None],
         decisions: list[ResumeCheckpointRecord],
+        objective: _Objective,
     ) -> None:
         self.node = node
         self._decisions = decisions
         self._alpha = knobs.alpha
         self._survivors = knobs.survivors
+        self._objective = objective
         self._block_size = block_size
         self._n_cells = n_cells
         self._round_num = round_num
@@ -305,7 +342,7 @@ class PairedTRace:
         n = len(results)
         if n == 0 or n % self._block_size or not self._priors:
             return None
-        readings = _readings(_cell_objectives(results), self._priors)
+        readings = _readings(_cell_objectives(results, self._objective), self._priors)
         if not readings:
             return None
         # The one-sided p that a prior outscores the arm is also P(arm beats it) as a t fiducial,
@@ -369,6 +406,8 @@ class PairedTRace:
                 "queries_scored": cr["queries_scored"],
                 "alpha": self._alpha,
                 "survivors": self._survivors,
+                "length_penalty": self._objective.length_penalty,
+                "length_norm": self._objective.length_norm,
                 "prior_ids": sorted(self._priors),
             },
             True,
@@ -385,7 +424,7 @@ class PairedTRace:
         }
 
     def admit(self, candidate_id: str, results: list[QueryMeasurement], sp: JobSearchPoint) -> None:
-        self._priors[candidate_id] = _cell_objectives(results)
+        self._priors[candidate_id] = _cell_objectives(results, self._objective)
 
     def start_backfill(self, sample: Sample, room: int) -> list[asyncio.Future[Any]]:
         return []
@@ -427,6 +466,7 @@ class PairedT:
             round_num=ctx.round_num,
             on_snapshot=ctx.callbacks.on_race_standing,
             decisions=ctx.cycle.pending_decisions,
+            objective=_objective(ctx),
         )
 
 
@@ -462,6 +502,10 @@ class CapoCrossover:
                 ctx,
                 size=cast("PopulationKnobs", cycle.optimizer.knobs(PopulationSelector.name)).size,
                 k_max=cast("FewShotKnobs", cycle.optimizer.knobs(FewShot.name)).k_max,
+            )
+            demo = cycle.session.scoring.require_partition().demo
+            state.length_norm = max(
+                len(ind.render_target(cycle.framing, demo=demo)) for ind in state.population
             )
         if (n := len(state.population)) < 2:
             raise ValueError(f"a crossover needs two parents; the population holds {n}")
@@ -636,7 +680,7 @@ class PopulationKnobs(StrictModel):
 
 
 class PopulationSelector:
-    """Keeps the race's survivors, best first by mean composite on the cells all of them measured,
+    """Keeps the race's survivors, best first by mean objective on the cells all of them measured,
     as the next round's population. The round advances when that best is not the incumbent."""
 
     name: ClassVar[str] = "population"
@@ -654,11 +698,18 @@ class PopulationSelector:
             for cs in measured.scores
             if cs.candidate_id in electable and cs.outcome is not ArmOutcome.ELIMINATED
         ]
-        kept = _rank_survivors(survivors, measured.rows, size=size)
+        objective = _objective(ctx)
+        kept = _rank_survivors(survivors, measured.rows, size=size, objective=objective)
         record_decision(
             cycle.pending_decisions,
             CapoCheckpointKind.POPULATION_KEPT,
-            {"survivors": survivors, "round_num": ctx.round_num, "size": size},
+            {
+                "survivors": survivors,
+                "round_num": ctx.round_num,
+                "size": size,
+                "length_penalty": objective.length_penalty,
+                "length_norm": objective.length_norm,
+            },
             kept,
             node=self.name,
             round=ctx.round_num,
@@ -670,8 +721,9 @@ class PopulationSelector:
         # A round with no survivor replaces nothing: the population it started from stands.
         carried = [by_id[cid] for cid in kept] if kept else state.population
         verdict = (
-            f"kept {len(kept)} of {len(survivors)} surviving arms (μ {size}) by mean composite "
-            f"on their shared cells; best {labels[best]}"
+            f"kept {len(kept)} of {len(survivors)} surviving arms (μ {size}) by mean objective "
+            f"(length penalty {objective.length_penalty}) on their shared cells; "
+            f"best {labels[best]}"
             if kept
             else f"no arm survived the race; the population of {len(carried)} stands"
         )
@@ -691,8 +743,11 @@ def _replay_paired_t_cut(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> bool:
     rows = ctx.round_data.all_candidate_results
-    arm = _cell_objectives(rows[inputs_ref["candidate_id"]][: int(inputs_ref["queries_scored"])])
-    priors = {pid: _cell_objectives(rows[pid]) for pid in inputs_ref["prior_ids"]}
+    objective = _recorded_objective(inputs_ref)
+    arm = _cell_objectives(
+        rows[inputs_ref["candidate_id"]][: int(inputs_ref["queries_scored"])], objective
+    )
+    priors = {pid: _cell_objectives(rows[pid], objective) for pid in inputs_ref["prior_ids"]}
     alpha = float(inputs_ref["alpha"])
     beaten = sum(1 for p, _ in _readings(arm, priors).values() if p < alpha)
     return beaten >= int(inputs_ref["survivors"])
@@ -705,7 +760,12 @@ def _replay_population_kept(
         list(inputs_ref["survivors"]),
         ctx.round_data.all_candidate_results,
         size=int(inputs_ref["size"]),
+        objective=_recorded_objective(inputs_ref),
     )
+
+
+def _recorded_objective(inputs_ref: Mapping[str, Any]) -> _Objective:
+    return _Objective(float(inputs_ref["length_penalty"]), int(inputs_ref["length_norm"]))
 
 
 CAPO_CHECKPOINT_GATING: dict[ResumeCheckpointKind, GatingMode] = {

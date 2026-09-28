@@ -30,7 +30,6 @@ from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.session_pointer import mint_session_id, save_active_pointer
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import graceful
 from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
@@ -311,9 +310,7 @@ def auto_mint_session(
     save_active_pointer(session.store.base_dir, session_id, root_hop)
 
     # Pre-seed dashboard.json so the webapp doesn't 404 in the mint→loop-start window.
-
-    with graceful("Pre-seeding dashboard.json failed"):
-        build_campaign_emitter(session, campaign_config, origin_accuracy=origin_acc)
+    build_campaign_emitter(session, campaign_config, origin_accuracy=origin_acc)
 
     logger.info(
         "Minted fresh campaign %s — session %s, cycle %s",
@@ -443,8 +440,7 @@ def finalize_checkin_to_active(
     cycle_dir = session.store.campaigns.cycle_dir(hop)
     CycleLayout(cycle_dir).checkin_flag.unlink(missing_ok=True)
 
-    with graceful("Pre-seeding dashboard.json failed"):
-        build_campaign_emitter(session, campaign_config, origin_accuracy=0.0)
+    build_campaign_emitter(session, campaign_config, origin_accuracy=0.0)
 
     logger.info(
         "Check-in campaign %s started — session %s, cycle %s",

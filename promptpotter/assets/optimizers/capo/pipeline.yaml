@@ -54,12 +54,14 @@ nodes:
   population_rejoin:
     type: algorithm
     config: {}
-  # α = 0.2, μ = 10 (App. C.4); a paired t-test, uncorrected (§4).
+  # α = 0.2, μ = 10, γ = 0.05 (App. C.4); a paired t-test, uncorrected (§4). γ prices the length
+  # in CAPO's objective, which this race and the `population` selector both rank on.
   paired_t:
     type: eliminator
     config:
       alpha: 0.2
       survivors: &mu 10
+      length_penalty: 0.05
   score:
     type: measurement
     config: {}

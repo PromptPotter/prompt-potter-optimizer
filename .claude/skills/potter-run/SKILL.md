@@ -72,7 +72,7 @@ owned by `/potter-self`.
 
 | Verb | Behavior |
 |---|---|
-| `new <name>` | Registered benchmark. Mint a fresh Campaign + root cycle from `datasets/<name>/`, run from round 0 on the committed `task_context.yaml` — none committed runs unframed; `--task-file datasets/<name>/task_description.md` decomposes and commits one first. Distinct `campaign_id` per invocation; the prior campaign is preserved. |
+| `new <name>` | Registered benchmark. Mint a fresh Campaign + root cycle from `datasets/<name>/`, run from round 0 on the committed `task_context.yaml` — none committed, the mint decomposes `task_description.md` and commits it first (one `checkin` call on the run's spend); `task_framing: off` in the campaign config runs unframed on purpose. Distinct `campaign_id` per invocation; the prior campaign is preserved. |
 | `new <file>` | Raw ingest — parse → `--set` → resolve origin → commit tenant dataset → mint + run. See [onboarding.md](reference/onboarding.md). |
 | `resume` | Continue the active cycle from the tenant pointer. `--from N` rewinds in place. |
 | `set-limits` | Raise (or lower) an existing cycle's ceiling: `--max-usd` / `--max-tokens` / `--max-rounds N\|none`. |

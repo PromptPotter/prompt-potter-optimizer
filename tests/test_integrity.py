@@ -904,6 +904,33 @@ def test_the_inner_benchmark_is_one_directory_to_identity_and_run(built_stores: 
     assert readable_dataset_dir(sandbox, "innerbench") == tenant_copy, "the cell ran another tier"
 
 
+def test_unframed_ablation_renders_no_framing_where_one_is_committed(built_stores: Any) -> None:
+    """``task_framing: off`` is the framing ablation, so its arm scores the prompt WITHOUT the
+    dataset's committed framing, and its manifest keeps saying so. A leak renders the framing into
+    a run declared unframed: both arms then measure one prompt and the ablation reads as no effect,
+    with nothing on any surface to say why. A resume that dropped the declaration runs framed."""
+    from promptpotter.application.campaign_config import (
+        CampaignConfig,
+        OptimizationConfig,
+        freeze_campaign_config,
+        load_campaign_config,
+    )
+    from promptpotter.application.optimization.task_context import campaign_framing
+
+    built_stores.tenant_datasets.save_task_context("gsm8k", {"domain": "grade-school arithmetic"})
+    framed = CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05))
+    unframed = framed.model_copy(update={"task_framing": "off"})
+
+    assert campaign_framing(built_stores, framed, "gsm8k").domain == "grade-school arithmetic"
+    assert not campaign_framing(built_stores, unframed, "gsm8k"), (
+        "the ablation arm rendered the committed framing it declared off"
+    )
+    frozen = load_campaign_config(freeze_campaign_config(unframed))
+    assert not campaign_framing(built_stores, frozen, "gsm8k"), (
+        "the campaign manifest lost the declaration, so a resume of the ablation runs framed"
+    )
+
+
 # 2. Replay eligibility — which banked row may be served back
 
 
@@ -4197,6 +4224,72 @@ def test_the_container_sweep_spares_a_run_that_is_still_measuring(
     assert sorted(ids) == ["cid_gone", "cid_prelabel"], (
         "swept a live cell or another tenant's container, or left an unclaimable one running"
     )
+
+
+def test_first_mint_decomposes_once_and_bills_the_run_it_frames(
+    built_stores: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A dataset with a description and no committed framing is decomposed by its FIRST mint. The
+    framing is on disk before the id is derived, or the id names a prompt the run never scores; the
+    check-in's bill lands on the minted cycle's ledger, or the run's meter never sees money it cost;
+    and a later mint reads the committed file rather than buying the decomposition again."""
+    from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
+    from promptpotter.application.jobs import mint
+    from promptpotter.application.optimization import task_context
+    from promptpotter.domain.run_records import TokenUsageRecord
+    from promptpotter.domain.spend import TokenAccount
+    from promptpotter.infrastructure.ledger import CycleEventLog
+    from promptpotter.infrastructure.llm.telemetry import emit_token_usage
+
+    dataset_dir = tmp_path / "regexlog"
+    dataset_dir.mkdir()
+    (dataset_dir / "task_description.md").write_text("Match log lines.\n", encoding="utf-8")
+    session = types.SimpleNamespace(
+        store=built_stores, dataset_name="regexlog", dataset_config_dir=dataset_dir
+    )
+    config = CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05))
+    checkins: list[str] = []
+    framing_at_mint: list[str] = []
+
+    async def scripted_checkin(**kwargs: Any) -> tuple[Any, int]:
+        checkins.append(kwargs["user_content"])
+        emit_token_usage(
+            node="checkin",
+            kind="optimizer",
+            usage=TokenAccount(input=900, output=100),
+            duration_s=1.0,
+            cost_usd=0.002,
+        )
+        decomposition = task_context.CheckinTaskContext(domain="log parsing")
+        return task_context.CheckinOutput(
+            task_intent="match", answer_format="one regex", task_context=decomposition
+        ), 0
+
+    def minting(session: Any, campaign_config: Any, _data: Any, **kwargs: Any) -> Any:
+        framing = mint.campaign_framing(session.store, campaign_config, session.dataset_name)
+        framing_at_mint.append(framing.domain)
+        return mint.MintedCycle(
+            cycle_id=f"cycle_{len(framing_at_mint)}",
+            session_id="s",
+            campaign_id=kwargs["campaign_id"],
+        )
+
+    monkeypatch.setattr(task_context, "run_checkin", scripted_checkin)
+    monkeypatch.setattr(mint, "prepare_fresh_cycle", minting)
+    for campaign_id in ("c1", "c2"):
+        asyncio.run(
+            mint.mint_framed_cycle(session, config, [], campaign_id=campaign_id, task_text=None)
+        )
+
+    assert framing_at_mint == ["log parsing", "log parsing"], (
+        "the id was derived before the framing it hashes was committed"
+    )
+    assert len(checkins) == 1, "a later mint bought a decomposition already on disk"
+    run_ledger = CycleEventLog.open(
+        CycleDir(built_stores.campaigns.cycle_dir(CycleHop(campaign_id="c1", cycle_id="cycle_1")))
+    )
+    bills = [r.cost_usd for _, r in run_ledger.iter() if isinstance(r, TokenUsageRecord)]
+    assert bills == [0.002], "the check-in's bill never reached the run it was bought for"
 
 
 # 8. Where the package reads and writes

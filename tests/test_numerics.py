@@ -10,6 +10,7 @@ validators that score a proposal's conformance. Every assertion is wrong-reveal
 from __future__ import annotations
 
 import asyncio
+import json
 import types
 from pathlib import Path
 from typing import Any
@@ -62,6 +63,7 @@ from promptpotter.application.scoring.formula.matchers import (
     _gsm8k_match,
     _label_match,
 )
+from promptpotter.application.scoring.formula.rescore import rescore_results
 from promptpotter.application.scoring.metrics import (
     compute_composite_fitness,
     matched_parent_stats,
@@ -611,8 +613,9 @@ def test_a_correct_but_costly_cell_is_a_HIT_everywhere_it_is_thresholded() -> No
 
 
 async def test_a_prompt_length_term_prices_the_template_not_the_sample() -> None:
-    """CAPO's length penalty, ``fitness - 0.05 * len(prompt) / len(longest initial prompt)``, as a
-    ``per_cell`` formula over the ``target_prompt_chars`` channel ``measure_sample`` stamps.
+    """A length penalty, ``fitness - 0.05 * len(prompt) / len(longest initial prompt)``, as a
+    ``per_cell`` formula over the ``target_prompt_chars`` channel ``measure_sample`` stamps — the
+    channel CAPO's own objective reads.
 
     Silent both ways it can go wrong. Read off the INTERPOLATED prompt, the penalty charges each
     cell for its own query, so arms on different subsets are ranked by which cells they drew; read
@@ -1538,8 +1541,12 @@ def test_a_capo_round_races_its_population_beside_the_offspring_and_keeps_the_be
     )
     session.source = RunSource.OPTIMIZATION_LOOP
     session.state.ledger = CycleEventLog.open(CycleDir(tmp_path / "cycle"))
+    # The campaign's composite REWARDS length, the opposite of CAPO's objective: the population
+    # must still be kept by CAPO's own reading, while the bench scores every arm by this formula.
     session.scoring.scorer = compile_scorer(
-        "label_match(predicted, ground_truth)", None, verifier_graded=False
+        "label_match(predicted, ground_truth)",
+        "fitness * min(1.0, target_prompt_chars / 200.0)",
+        verifier_graded=False,
     )
     session.scoring.partition = partition_bank(bank, config.dataset_split)
 
@@ -1554,15 +1561,16 @@ def test_a_capo_round_races_its_population_beside_the_offspring_and_keeps_the_be
             "predicted": sample.ground_truth if solved else "wrong",
             "error": None,
             "cached": False,
-            "pipeline_data": {"total_time": 0.1},
+            "pipeline_data": {"total_time": 0.1, "target_prompt_chars": len(prompt)},
         }
-        row["fitness"] = row["objective"] = 1.0 if solved else 0.0
-        return row
+        return rescore_results([row], session.scoring.scorer)[0]
+
+    wordy = "Solve it GOOD-b. " + "Take care. " * 30
 
     async def _llm(messages: list[dict], **_kw: Any) -> Any:
         prompt = messages[0]["content"]
         if "Create overall 15 prompts" in prompt:
-            text = '["Solve it GOOD-a.", "Solve it GOOD-b.", "Solve it OK-c."]'
+            text = json.dumps(["Solve it GOOD-a.", wordy, "Solve it OK-c."])
         else:
             text = "<prompt>Solve it BAD.</prompt>"
         return types.SimpleNamespace(content=text)
@@ -1606,7 +1614,11 @@ def test_a_capo_round_races_its_population_beside_the_offspring_and_keeps_the_be
     offspring = first.candidate_scores[3:]
     assert all(cs.outcome is ArmOutcome.ELIMINATED for cs in offspring), "μ=3 members beat them"
     assert all(cs.scored_samples == 4 for cs in offspring), "cut at the first block boundary"
-    assert [ind.instruction for ind in carried][2] == "Solve it OK-c.", "carried best first"
+    assert [ind.instruction for ind in carried] == [
+        "Solve it GOOD-a.",
+        wordy.strip(),
+        "Solve it OK-c.",
+    ], "carried best first by CAPO's objective, the shorter of two perfect arms ahead"
     assert first.selected_labels == [
         next(cs.label for cs in first.candidate_scores if cs.candidate_id == carried[0].lineage.id)
     ]
@@ -2176,10 +2188,10 @@ def test_no_walk_is_cut_before_the_horizon_it_launched_under() -> None:
 
 
 def test_the_paired_t_race_cuts_an_arm_only_at_a_block_once_survivors_arms_beat_it() -> None:
-    """CAPO's survival race at the paper's values (b=30, z_max=10, α=0.2, μ=10; App. B
+    """CAPO's survival race at the paper's values (b=30, z_max=10, α=0.2, μ=10, γ=0.05; App. B
     `racing_elimination`): an arm is cut once μ others are significantly better on the paired
-    per-cell composite, read only at a block boundary. Silent harm either way: cut early and the
-    population loses an arm it would keep; cut late and the blocks between are paid for nothing.
+    per-cell CAPO objective, read only at a block boundary. Silent harm either way: cut early and
+    the population loses an arm it would keep; cut late and the blocks between are paid for nothing.
 
     `≥ μ`, not `> μ`: with μ better arms this one can no longer be among the μ kept — App. B and
     the authors' implementation both cut there, although §4's prose says "more than"."""
@@ -2188,7 +2200,10 @@ def test_the_paired_t_race_cuts_an_arm_only_at_a_block_once_survivors_arms_beat_
         "nodes": {
             "blocks": {"type": "sampler", "config": {"block_size": 30, "max_blocks": 10}},
             "l1_generate": {"type": "llm", "config": {}},
-            "paired_t": {"type": "eliminator", "config": {"alpha": 0.2, "survivors": 10}},
+            "paired_t": {
+                "type": "eliminator",
+                "config": {"alpha": 0.2, "survivors": 10, "length_penalty": 0.05},
+            },
             "score": {"type": "measurement", "config": {}},
             "theta_election": {"type": "selector", "config": {}},
         },
@@ -2204,7 +2219,9 @@ def test_the_paired_t_race_cuts_an_arm_only_at_a_block_once_survivors_arms_beat_
     plan = round_plan(selected)
     snapshots: list = []
     ctx = RoundContext(
-        cycle=types.SimpleNamespace(optimizer=selected, pending_decisions=[]),
+        cycle=types.SimpleNamespace(
+            optimizer=selected, pending_decisions=[], working_state=CapoState(length_norm=100)
+        ),
         round_num=3,
         callbacks=types.SimpleNamespace(on_race_standing=lambda *a: snapshots.append(a)),
     )
@@ -2214,10 +2231,18 @@ def test_the_paired_t_race_cuts_an_arm_only_at_a_block_once_survivors_arms_beat_
     assert panel.block_size == 30
     race = plan.eliminator.race(ctx, panel, None)
 
-    # `fitness` is 1.0 on every row: the race reads the composite a length term lives in, so an
-    # arm read on correctness here would never be cut.
-    def arm(solved) -> list[dict]:
-        return [measurement(s.id, 1.0, objective=float(solved(s.id))) for s in panel.order]
+    # The campaign's composite is 1.0 on every row: the race reads CAPO's own objective, so an arm
+    # read on the composite here would never be cut.
+    def arm(solved, chars: int = 100) -> list[dict]:
+        return [
+            measurement(
+                s.id,
+                float(solved(s.id)),
+                objective=1.0,
+                pipeline_data={"target_prompt_chars": chars},
+            )
+            for s in panel.order
+        ]
 
     strong = [arm(lambda sid, k=k: (sid + k) % 5 != 0) for k in range(10)]
     weak = arm(lambda sid: sid % 10 < 3)
@@ -2240,6 +2265,9 @@ def test_the_paired_t_race_cuts_an_arm_only_at_a_block_once_survivors_arms_beat_
     # An arm solving as many cells as each prior does is beaten by none of them.
     level = arm(lambda sid: (sid + 2) % 5 != 0)
     assert all(rule.check(level[:n]) is None for n in range(30, 301, 30))
+    # ...and cut once its prompt is three times as long: γ prices the length it carries.
+    wordy = arm(lambda sid: (sid + 2) % 5 != 0, chars=300)
+    assert any(rule.check(wordy[:n]) is not None for n in range(30, 301, 30))
 
 
 # 6. Which cells a round buys

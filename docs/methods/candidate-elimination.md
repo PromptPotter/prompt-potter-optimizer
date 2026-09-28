@@ -87,10 +87,10 @@ standings reach the racing stream under `paired_t`.
   `max_blocks` whole blocks of the search pool in the bank's order: the same cells every round,
   never shuffled (App. C.4). `Panel.block_size` hands the boundaries to the eliminator; a pool
   short of one block refuses the round.
-- **`paired_t` (eliminator)** — `alpha`, `survivors` (μ). At each block boundary the arm on turn is
-  tested against every prior: a one-sided paired t (`shared/statistics.py::paired_reading`) on the
-  per-cell composite, unclamped so a length term counts, over the cells both measured. The arm is
-  cut once μ priors are significantly better — App. B's `n_sig_better ≥ μ`, where §4's prose says
+- **`paired_t` (eliminator)** — `alpha`, `survivors` (μ), `length_penalty` (γ). At each block
+  boundary the arm on turn is tested against every prior: a one-sided paired t
+  (`shared/statistics.py::paired_reading`) on CAPO's objective (below), over the cells both
+  measured. The arm is cut once μ priors are significantly better — App. B's `n_sig_better ≥ μ`, where §4's prose says
   "more than" — with no multiple-test correction, as CAPO races. The cut stamps
   `elimination_context.gate` `outscored`; the stream's `p_best` is the smallest `p_better`, the t
   fiducial P(arm beats that prior).
@@ -103,15 +103,26 @@ standings reach the racing stream under `paired_t`.
   `paired_reading` floors the SE at `1/(4n)`, which moves a p only where the paired differences
   are nearly constant.
 - **Each cut is a ledger decision**, `paired_t_cut`, REPLAYED: its record names the arm, the rows
-  it was cut at and the priors it was tested against, so a resume under a changed scorer re-reads
-  the same test off the rescored round.
+  it was cut at, the priors it was tested against and the objective's γ and normaliser, so a resume
+  under a changed scorer re-reads the same test off the rescored round.
+
+**CAPO selects on its own objective; the bench scores it on the campaign's.** Per cell, CAPO's
+objective is `fitness − γ · target_prompt_chars / length_norm` (§4): the per-sample correctness,
+less γ times the scored prompt's length over the longest initial prompt's, unclamped. γ is
+`paired_t`'s `length_penalty` (0.05, App. C.4) — declared on that node once, and read by the
+`population` selector too, so the race and the population cannot rank on two objectives.
+`length_norm` is measured when `capo_init`'s population is drawn and rides CAPO's
+`optimizer_state`, so every round and every replay divides by the same number. The campaign's
+`scoring.per_cell` composite is not in it: that formula is the ONE evaluator every optimizer's
+arms, its election and its bench headline are scored under, and a campaign never writes CAPO's
+term into it.
 
 ## CAPO's population and operators
 
 The rest of CAPO's manifest (`assets/optimizers/capo/pipeline.yaml`, every value cited there):
 `capo_crossover` merges two parents drawn at random from the population (c per round),
 `capo_mutate` rephrases each child, `few_shot` mutates its shots, and the `population` selector
-keeps the race's survivors, best first by mean composite on the cells all of them measured, cut to
+keeps the race's survivors, best first by mean objective on the cells all of them measured, cut to
 μ — a `population_kept` decision, REPLAYED. The population rides `optimizer_state` on every round
 document, so a resume or a fork re-seats it; the round advances when its best is not the
 incumbent. Where the bench runs CAPO differently from the paper:
@@ -130,9 +141,8 @@ incumbent. Where the bench runs CAPO differently from the paper:
   optimizer model, and matching it to the target's is an overlay. Its `max_tokens` is that model's
   floor, where the paper caps output at 2048 (App. C.1); the paper states no temperature, and the
   manifest's 1.0 is vLLM's sampling default.
-- **The length penalty** γ=0.05 is a `per_cell` formula the campaign writes, normalised by a
-  literal: the origin's `target_prompt_chars`, where the paper normalises by the longest initial
-  prompt's tokens (§4, App. C.4) — the generated population does not exist when the scorer is armed.
+- **The length** is counted in characters of the scored prompt, the origin's scaffolding
+  included, where the paper counts the prompt's tokens (§4) — no tokenizer ships.
 - **The 5M-input-token budget** (§5) is the campaign's `token_budget`, which counts output tokens
   too.
 - **A reply without `<prompt>` markers** makes an invalid arm that costs no cell.

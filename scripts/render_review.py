@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from promptpotter.application.campaign_config import load_campaign_config
-from promptpotter.application.optimization.task_context import committed_task_context
+from promptpotter.application.optimization.task_context import campaign_framing
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.runner.review_md import render_review_md
 from promptpotter.domain.results import RoundResult
@@ -46,7 +46,7 @@ def main(argv: list[str]) -> int:
     # ``projects/{tenant}/campaigns/{id}/cycles/{cycle}``: the tenant is three levels up.
     tenant_dir = cycle_dir.parents[3]
     stores = build_stores(default_identity(tenant_dir.name), projects_root=tenant_dir.parent)
-    td = committed_task_context(stores, manifest["dataset_name"])
+    td = campaign_framing(stores, config, manifest["dataset_name"])
     context_object = [td.pipeline_purpose, td.optimization_goals, td.key_challenges]
 
     content = render_review_md(

@@ -15,7 +15,7 @@ from promptpotter.application.datasets.loaders import resolve_dataset_items, sam
 from promptpotter.application.datasets.prompts import has_dataset_prompts, load_node_prompt
 from promptpotter.application.initialization.loop_start import populate_session_scoring
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.optimization.task_context import committed_task_context
+from promptpotter.application.optimization.task_context import campaign_framing
 from promptpotter.application.pipeline_resolve import (
     experiment_outside_run,
     resolve_pipeline_config_params,
@@ -297,7 +297,7 @@ async def establish_campaign_origin(
     )
     # The SAME read identity uses. Handed the framing instead, this seam could be given a value
     # the cycle id never saw.
-    framing = committed_task_context(session.store, session.dataset_name)
+    framing = campaign_framing(session.store, campaign_config, session.dataset_name)
     inherited = try_inherit_fork_origin(
         session, seed, resolved_origin=resolved_origin, framing=framing
     )
@@ -483,7 +483,7 @@ def prospective_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) 
             schema,
             list(partition.search),
             base_pp,
-            framing=committed_task_context(stores, dataset_name),
+            framing=campaign_framing(stores, cfg, dataset_name),
             demo=partition.demo,
         ).removeprefix("cycle_")
     except (

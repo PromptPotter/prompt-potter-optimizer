@@ -1,14 +1,22 @@
-"""One application seam for the "dataset name → minted cycle" prologue, shared by the web mint
-and the CLI; each caller keeps only its own surface concerns. Assembling it by hand drifted."""
+"""One application seam for the "dataset name → minted cycle" prologue, shared by the web mint,
+the CLI and the embedded launch; each caller keeps only its own surface concerns."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.initialization.session import auto_mint_session
-from promptpotter.application.optimization.task_context import committed_task_context
+from promptpotter.application.jobs.quota import admit_spend
+from promptpotter.application.optimization.task_context import (
+    campaign_framing,
+    commit_task_framing,
+    committed_task_context,
+)
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.pipeline_resolve import (
     configure_and_apply_pipeline,
@@ -16,9 +24,10 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.application.runner.campaign_ids import build_origin_cycle_id, mint_campaign_id
 from promptpotter.domain.bench import partition_bank
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.l4.inner_origin import instrument_of
 from promptpotter.domain.run_records import CycleSeed
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
 
@@ -90,10 +99,9 @@ def resolve_cycle_plan(
             list(partition.search),
             pipeline_params,
             # PURE read, and the reason identity can hold the framing at all: check-in commits
-            # `task_context.yaml` before anything asks for an id, so the id can hash the prompt
-            # the run will actually score. A decomposition cannot happen here — it needs a cycle
-            # to bill, which is the thing being computed.
-            framing=committed_task_context(session.store, session.dataset_name),
+            # `task_context.yaml` before anything asks for an id (`mint_framed_cycle`), so the id
+            # hashes the prompt the run will actually score.
+            framing=campaign_framing(session.store, campaign_config, session.dataset_name),
             demo=partition.demo,
         ),
     )
@@ -215,4 +223,74 @@ def prepare_fresh_cycle(
     )
 
 
-__all__ = ["CyclePlan", "fresh_campaign_id", "prepare_fresh_cycle", "resolve_cycle_plan"]
+def _description_to_decompose(
+    session: Session, campaign_config: CampaignConfig, task_text: str | None
+) -> str | None:
+    """An operator's ``task_text`` always commits. Otherwise a framed campaign decomposes its
+    dataset's ``task_description.md`` once, while no ``task_context.yaml`` is committed."""
+    if task_text:
+        return task_text
+    if campaign_config.task_framing == "off" or session.dataset_config_dir is None:
+        return None
+    if committed_task_context(session.store, session.dataset_name):
+        return None
+    path = Path(session.dataset_config_dir) / "task_description.md"
+    return (path.read_text(encoding="utf-8").strip() if path.is_file() else "") or None
+
+
+async def mint_framed_cycle(
+    session: Session,
+    campaign_config: CampaignConfig,
+    dataset: list[Sample],
+    *,
+    campaign_id: str,
+    task_text: str | None,
+    origin_override: dict[str, Any] | None = None,
+    log: Callable[..., None] | None = None,
+) -> MintedCycle:
+    """:func:`prepare_fresh_cycle` behind the dataset's framing — the mint of every entry point
+    that starts a campaign. An L4 inner cell mints through ``prepare_fresh_cycle`` alone, so a
+    round's cells never race to decompose. ``task_text`` is an operator's own description."""
+    description = _description_to_decompose(session, campaign_config, task_text)
+    # The cycle id hashes the framing this commits, so the check-in bills a scratch ledger first
+    # and its records are carried onto the minted cycle — the run's own meter.
+    with TemporaryDirectory() as scratch:
+        checkin_ledger = CycleEventLog.open(CycleDir(Path(scratch)))
+        if description is not None:
+            assert session.dataset_name, "a framing commits to the dataset the session opened"
+            await commit_task_framing(
+                session.store,
+                session.dataset_name,
+                description,
+                campaign_id=campaign_id,
+                ledger=checkin_ledger,
+                book=await asyncio.to_thread(admit_spend, stores=session.store, bucket="checkin"),
+            )
+            logger.info("Committed task framing for %s from its check-in", session.dataset_name)
+        minted = prepare_fresh_cycle(
+            session,
+            campaign_config,
+            dataset,
+            campaign_id=campaign_id,
+            origin_override=origin_override,
+            log=log,
+        )
+        run_ledger = CycleEventLog.open(
+            CycleDir(
+                session.store.campaigns.cycle_dir(
+                    CycleHop(campaign_id=minted.campaign_id, cycle_id=minted.cycle_id)
+                )
+            )
+        )
+        for _offset, record in checkin_ledger.iter():
+            run_ledger.append(record)
+    return minted
+
+
+__all__ = [
+    "CyclePlan",
+    "fresh_campaign_id",
+    "mint_framed_cycle",
+    "prepare_fresh_cycle",
+    "resolve_cycle_plan",
+]

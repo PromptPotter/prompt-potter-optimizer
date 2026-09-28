@@ -3,21 +3,19 @@ write do NOT share a tier — read resolves tenant-then-install, a decomposition
 
 from __future__ import annotations
 
-import json
-from typing import Any
-
 from pydantic import Field, model_validator
 
+from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.optimization.dispatch.llm_call.call import (
     LLMCallContext,
     run_optimizer_node,
 )
 from promptpotter.application.optimization.dispatch.schemas import OptimizerResponseModel
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
+from promptpotter.infrastructure.llm.spend_book import SpendBook, spending_under
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store.dataset_access import (
     readable_task_context,
@@ -28,10 +26,11 @@ from promptpotter.infrastructure.tracing.bridge import observed_node
 __all__ = [
     "CheckinOutput",
     "CheckinTaskContext",
+    "campaign_framing",
     "checkin_call_context",
     "checkin_campaign_call_context",
+    "commit_task_framing",
     "committed_task_context",
-    "decompose_prompt_fields",
     "run_checkin",
 ]
 
@@ -171,6 +170,16 @@ class CheckinOutput(OptimizerResponseModel):
         return self
 
 
+def campaign_framing(
+    stores: Stores, campaign_config: CampaignConfig, dataset_name: str | None
+) -> TaskDecomposition:
+    """The framing a campaign's target renders splice in — its dataset's committed one, or none
+    at all under ``task_framing: off``. Every render and identity of a campaign reads this."""
+    if campaign_config.task_framing == "off":
+        return TaskDecomposition()
+    return committed_task_context(stores, dataset_name)
+
+
 def committed_task_context(stores: Stores, dataset_name: str | None) -> TaskDecomposition:
     """The framing check-in committed, read PURELY — the half IDENTITY may use, since a
     decomposition needs a cycle to bill to and a mint is computing that cycle."""
@@ -211,45 +220,32 @@ def checkin_campaign_call_context(stores: Stores, campaign_id: str) -> LLMCallCo
     campaign = stores.campaigns.load_campaign(campaign_id)
     if campaign is None:
         raise ValueError(f"check-in campaign {campaign_id!r} not found — cannot resolve its origin")
-    return checkin_call_context(stores, campaign.root_hop)
-
-
-def checkin_call_context(stores: Stores, hop: CycleHop) -> LLMCallContext:
-    """The check-in call's audit home — the seeded campaign's own cycle ledger. The cache is what makes an unchanged
-    decomposition free on replay; omitting it silently re-spends."""
-    return LLMCallContext(
-        ledger=CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop))),
-        round_num=0,
-        cache=stores.optimizer_reuse,
+    return checkin_call_context(
+        stores, CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(campaign.root_hop)))
     )
 
 
-async def decompose_prompt_fields(
-    context_input: Any, *, campaign_id: str, context: LLMCallContext
-) -> dict[str, Any]:
-    """LLM check-in: raw context → Layer 1 prompt fields + task_context. Provider and model come from the ``checkin``
-    optimizer node config, resolved inside :func:`llm_call`."""
-    if isinstance(context_input, dict):
-        user_content = (
-            "The user has provided partial Layer 1 fields for a prompt. "
-            "Validate them, fill any gaps, and suggest improvements.\n\n"
-            f"Provided fields:\n{json.dumps(context_input, indent=2)}"
-        )
-    else:
-        user_content = (
-            "The user has provided a raw context description. Parse it into "
-            "structured Layer 1 prompt fields.\n\n"
-            f"Context:\n{context_input}"
-        )
+def checkin_call_context(stores: Stores, ledger: CycleEventLog) -> LLMCallContext:
+    """The check-in call's audit home. The cache is what makes an unchanged decomposition free on
+    replay; omitting it silently re-spends."""
+    return LLMCallContext(ledger=ledger, round_num=0, cache=stores.optimizer_reuse)
 
-    consultation_instruction = (
-        "Return a JSON object with exactly these keys. Be concise and actionable."
-    )
 
-    token = set_cycle_ledger(context.ledger)
+async def commit_task_framing(
+    stores: Stores,
+    dataset_name: str,
+    description: str,
+    *,
+    campaign_id: str,
+    ledger: CycleEventLog,
+    book: SpendBook,
+) -> None:
+    """Decompose ``description`` through the ``checkin`` node and COMMIT it as the dataset's
+    framing, billed on ``ledger`` and admitted against ``book``."""
+    context = checkin_call_context(stores, ledger)
+    token = set_cycle_ledger(ledger)
     try:
-        # A decomposition runs from the host's own CLI (`new <file>`), which no account meters.
-        with spending_under(unbounded_spend_book()):
+        with spending_under(book):
             async with observed_node(
                 "checkin",
                 "llm",
@@ -258,14 +254,18 @@ async def decompose_prompt_fields(
                 round_num=0,
             ):
                 result, _ = await run_checkin(
-                    consultation_instruction=consultation_instruction,
-                    user_content=user_content,
+                    consultation_instruction=(
+                        "Return a JSON object with exactly these keys. Be concise and actionable."
+                    ),
+                    user_content=(
+                        "The user has provided a raw context description. Parse it into "
+                        "structured Layer 1 prompt fields.\n\n"
+                        f"Context:\n{description}"
+                    ),
                     context=context,
                 )
     finally:
         reset_cycle_ledger(token)
-
-    # Pydantic guarantees every Layer-1 + task_context field is present
-    # (defaults to empty string on the model). Materialize to dict for
-    # downstream consumers that pre-date the typed boundary.
-    return result.model_dump()
+    stores.tenant_datasets.save_task_context(
+        dataset_name, {**result.task_context.model_dump(), "raw_description": description}
+    )

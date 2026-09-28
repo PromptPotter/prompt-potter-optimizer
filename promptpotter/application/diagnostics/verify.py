@@ -20,7 +20,7 @@ from promptpotter.application.initialization.loop_start import (
     diagnostic_trace,
 )
 from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.optimization.task_context import committed_task_context
+from promptpotter.application.optimization.task_context import campaign_framing
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.pipeline_resolve import merge_pipeline_params
 from promptpotter.application.runner.termination import BudgetGate
@@ -219,7 +219,7 @@ async def verify_candidate(
     jsp = opt_sp.to_job_search_point(
         effective_pipeline_params,
         schema=schema,
-        framing=committed_task_context(stores, session.dataset_name),
+        framing=campaign_framing(stores, campaign_config, session.dataset_name),
         demo=session.scoring.require_partition().demo,
     )
     node_configs = schema.node_configs(effective_pipeline_params)

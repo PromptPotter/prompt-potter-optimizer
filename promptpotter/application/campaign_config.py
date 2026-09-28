@@ -311,6 +311,14 @@ class CampaignConfig(StrictModel):
     exclude_nodes: Annotated[list[str], Knob(Scope.DATA, Estimand.SEARCH)] = Field(
         default_factory=list
     )
+    task_framing: Annotated[Literal["committed", "off"], Knob(Scope.DATA, Estimand.SEARCH)] = Field(
+        "committed",
+        description="Which task framing every target render splices in. `committed` "
+        "(default) runs under the dataset's `task_context.yaml`, which the first mint "
+        "decomposes from `task_description.md` when none is committed yet. `off` runs "
+        "UNFRAMED on purpose — the ablation arm — even where framing exists, and the campaign "
+        "manifest keeps the delta, so the result never reads as a framed one.",
+    )
     # ONE name for the per-node delta at every layer that carries one: this campaign's, a check-in
     # draft's (`DraftCampaign.pipeline_overlay`) and a cycle seed's.
     pipeline_overlay: Annotated[dict[str, Any], Knob(Scope.DATA, Estimand.SEARCH)] = Field(
@@ -407,12 +415,25 @@ def load_campaign_config(raw: dict[str, Any] | CampaignConfig) -> CampaignConfig
 def merge_config_layers(base: dict[str, Any], over: Mapping[str, Any]) -> dict[str, Any]:
     """Depth-first, so overriding one knob under ``optimization`` keeps its siblings. A shallow
     ``{**base, **over}`` replaces the whole sub-block, which is how a harness meaning to set
-    ``max_rounds`` silently dropped every other loop knob the dataset declared."""
+    ``max_rounds`` silently dropped every other loop knob the dataset declared.
+
+    ``optimization.nodes`` addresses the manifest its OWN layer selects, so a layer naming another
+    ``optimizer`` drops the base's node overlay rather than laying it onto a manifest it never named."""
+    base_opt = base.get("optimization")
+    over_opt = over.get("optimization")
+    if isinstance(base_opt, dict) and isinstance(over_opt, Mapping) and "optimizer" in over_opt:
+        held = base_opt.get("optimizer", OptimizationConfig.model_fields["optimizer"].default)
+        if over_opt["optimizer"] != held:
+            base = {**base, "optimization": {k: v for k, v in base_opt.items() if k != "nodes"}}
+    return _merge_dicts(base, over)
+
+
+def _merge_dicts(base: dict[str, Any], over: Mapping[str, Any]) -> dict[str, Any]:
     out = dict(base)
     for key, value in over.items():
         current = out.get(key)
         out[key] = (
-            merge_config_layers(current, value)
+            _merge_dicts(current, value)
             if isinstance(current, dict) and isinstance(value, Mapping)
             else value
         )

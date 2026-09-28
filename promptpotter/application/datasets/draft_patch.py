@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from pydantic import Field
 
-from promptpotter.application.campaign_config import merge_node_overlays
+from promptpotter.application.campaign_config import merge_config_layers
 from promptpotter.application.datasets.draft_campaign import (
     OptimizationOverrides,
     rendered_pipeline_json,
@@ -131,12 +131,11 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
     # keys, an out-of-range max_rounds, and a node knob its manifest refuses all reject here.
     if patch.optimization_overrides is not None:
         current = OptimizationOverrides.model_validate(draft.optimization_overrides)
-        incoming = OptimizationOverrides.model_validate(
-            {**current.model_dump(mode="json"), **patch.optimization_overrides}
+        merged = merge_config_layers(
+            {"optimization": current.model_dump(mode="json")},
+            {"optimization": patch.optimization_overrides},
         )
-        overrides = incoming.model_copy(
-            update={"nodes": merge_node_overlays(current.nodes, incoming.nodes)}
-        )
+        overrides = OptimizationOverrides.model_validate(merged["optimization"])
         resolve_optimizer(overrides.optimizer, overrides.nodes)
         changes["optimization_overrides"] = overrides.model_dump(mode="json")
 
