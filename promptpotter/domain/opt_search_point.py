@@ -25,13 +25,14 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
 
 __all__ = [
+    "FEW_SHOT_BLOCK",
     "ORIGIN_SOURCE",
     "TEMPLATE_TOKEN_RE",
     "EvidenceGrounding",
-    "FewShotExample",
     "IndividualLineage",
     "OptSearchPoint",
     "OptimizerPromptTemplate",
@@ -48,12 +49,8 @@ TEMPLATE_TOKEN_RE: Annotated[re.Pattern[str], shapes_optimizer_prompt] = re.comp
 )
 
 
-class FewShotExample(StrictModel):
-    """An input/output pair used as a few-shot demonstration."""
-
-    input: str
-    output: str
-    explanation: str | None = None
+FEW_SHOT_BLOCK: Annotated[str, shapes_optimizer_prompt] = "few_shot_block"
+"""The rendered shots' key — last in a target render, and in the wire's ``prompt_fields``."""
 
 
 def _check_render_order(cls: type[PromptTemplate]) -> None:
@@ -72,7 +69,7 @@ def _check_render_order(cls: type[PromptTemplate]) -> None:
 
 class PromptTemplate(SearchPoint):
     """The scheme shared by job + optimizer prompts: the six ``render()`` decomposition fields
-    (``PROMPT_STRING_FIELDS``), plus ``few_shot_examples``, which renders separately."""
+    (``PROMPT_STRING_FIELDS``)."""
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -91,14 +88,10 @@ class PromptTemplate(SearchPoint):
     instruction: str = ""
     thinking_style: str = ""
     answer_format: str = ""
-    few_shot_examples: list[FewShotExample] = Field(default_factory=list)
 
     @shapes_optimizer_prompt
     def _ordered_pairs(self, value_of: Callable[[str], str]) -> list[tuple[str, str]]:
-        pairs = [(f, v) for f in type(self).RENDER_ORDER if (v := value_of(f))]
-        if block := self._render_few_shot_block():
-            pairs.append(("few_shot_examples", block))
-        return pairs
+        return [(f, v) for f in type(self).RENDER_ORDER if (v := value_of(f))]
 
     @shapes_optimizer_prompt
     def render_fields(self) -> list[tuple[str, str]]:
@@ -110,17 +103,6 @@ class PromptTemplate(SearchPoint):
         return "\n\n".join(v for _, v in self.render_fields())
 
     @shapes_optimizer_prompt
-    def _render_few_shot_block(self) -> str:
-        if not self.few_shot_examples:
-            return ""
-        lines: list[str] = []
-        for ex in self.few_shot_examples:
-            lines.append(f"Input: {ex.input}\nOutput: {ex.output}")
-            if ex.explanation:
-                lines.append(f"Explanation: {ex.explanation}")
-        return "\n".join(lines)
-
-    @shapes_optimizer_prompt
     def compile_prompt(self, **kwargs: str | int) -> str:
         """Any ``{{…}}`` left after substitution stays LITERAL: an evolved node prompt echoed into an
         optimizer template carries the backend's own placeholders, which the backend fills, not us."""
@@ -130,22 +112,12 @@ class PromptTemplate(SearchPoint):
         return text
 
     def prompt_fields(self) -> dict[str, str]:
-        """String-only projection (no few-shot) for L1 summaries + validator diffs."""
+        """String-only projection (no shots) for L1 summaries + validator diffs."""
         return {f: v for f in PROMPT_STRING_FIELDS if (v := getattr(self, f))}
-
-    def prompt_field_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = dict(self.prompt_fields())
-        if self.few_shot_examples:
-            d["few_shot_examples"] = [ex.model_dump() for ex in self.few_shot_examples]
-        return d
 
     @classmethod
     def from_prompt_fields(cls, fields: dict[str, Any], **kwargs: Any) -> Self:
-        fields = dict(fields)
-        fse = fields.pop("few_shot_examples", [])
-        if fse and isinstance(fse[0], dict):
-            fse = [FewShotExample(**ex) for ex in fse]
-        return cls(few_shot_examples=fse, **fields, **kwargs)
+        return cls(**fields, **kwargs)
 
 
 class OptimizerPromptTemplate(PromptTemplate):
@@ -230,12 +202,37 @@ class OptSearchPoint(PromptTemplate):
 
     model_config = ConfigDict(extra="forbid")
 
+    shot_ids: list[int] = Field(
+        default_factory=list,
+        description=(
+            "Its few-shot shots, in render order, as ids of the campaign's demo pool — resolved "
+            "to each row's query and ground truth only when the target prompt renders."
+        ),
+    )
     lineage: IndividualLineage = Field(default_factory=IndividualLineage)
 
+    def prompt_field_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = dict(self.prompt_fields())
+        if self.shot_ids:
+            d["shot_ids"] = list(self.shot_ids)
+        return d
+
     @shapes_optimizer_prompt
-    def target_fields(self, framing: TaskDecomposition) -> list[tuple[str, str]]:
+    def _render_few_shot_block(self, demo: Sequence[Sample]) -> str:
+        rows = {s.id: s for s in demo}
+        if missing := [i for i in self.shot_ids if i not in rows]:
+            raise ValueError(f"shot ids {missing} are not in the demo pool this render was handed")
+        return "\n".join(
+            f"Input: {rows[i].query}\nOutput: {rows[i].ground_truth}" for i in self.shot_ids
+        )
+
+    @shapes_optimizer_prompt
+    def target_fields(
+        self, framing: TaskDecomposition, *, demo: Sequence[Sample]
+    ) -> list[tuple[str, str]]:
         """The campaign's framing spliced up/downstream of ``problem_description`` — which may be
-        EMPTY, and the context still renders. This render, not ``render()``, is what is scored."""
+        EMPTY, and the context still renders — and the shots last. This render, not ``render()``,
+        is what is scored."""
 
         def value_of(name: str) -> str:
             v: str = getattr(self, name)
@@ -246,11 +243,14 @@ class OptSearchPoint(PromptTemplate):
             parts = (framing.upstream_context, v, framing.downstream_context)
             return "\n\n".join(part for part in parts if part)
 
-        return self._ordered_pairs(value_of)
+        pairs = self._ordered_pairs(value_of)
+        if block := self._render_few_shot_block(demo):
+            pairs.append((FEW_SHOT_BLOCK, block))
+        return pairs
 
     @shapes_optimizer_prompt
-    def render_target(self, framing: TaskDecomposition) -> str:
-        return "\n\n".join(v for _, v in self.target_fields(framing))
+    def render_target(self, framing: TaskDecomposition, *, demo: Sequence[Sample]) -> str:
+        return "\n\n".join(v for _, v in self.target_fields(framing, demo=demo))
 
     def to_job_search_point(
         self,
@@ -258,6 +258,7 @@ class OptSearchPoint(PromptTemplate):
         *,
         schema: PipelineSchema,
         framing: TaskDecomposition,
+        demo: Sequence[Sample],
     ) -> JobSearchPoint:
         """*schema* is REQUIRED: without one this produced a valid-looking point carrying neither the
         rendered prompt nor ``steps``, and that point is scored and archived like any other."""
@@ -268,7 +269,8 @@ class OptSearchPoint(PromptTemplate):
         prompt_node = prompt_nodes[0] if prompt_nodes else ""
         if active_steps:
             pp["steps"] = list(active_steps)
-        rendered = self.render_target(framing)
+        pairs = self.target_fields(framing, demo=demo)
+        rendered = "\n\n".join(v for _, v in pairs)
         if rendered and prompt_node:
             pp.setdefault(prompt_node, {})["prompt"] = rendered
 
@@ -280,10 +282,9 @@ class OptSearchPoint(PromptTemplate):
 
         pf: dict[str, Any] = {}
         if rendered and prompt_node:
-            pf = {f: v for f, v in self.prompt_field_dict().items() if f != "few_shot_examples"}
-            block = self._render_few_shot_block()
-            if block:
-                pf["few_shot_block"] = block
+            pf = self.prompt_fields()
+            if block := dict(pairs).get(FEW_SHOT_BLOCK):
+                pf[FEW_SHOT_BLOCK] = block
 
         return JobSearchPoint(
             pipeline_params=pp,
@@ -306,13 +307,7 @@ class OptSearchPoint(PromptTemplate):
         data: dict[str, Any] = {}
         for f in PROMPT_STRING_FIELDS:
             data[f] = changes.pop(f, getattr(base, f))
-        fse = changes.pop("few_shot_examples", None)
-        if fse is not None:
-            if fse and isinstance(fse[0], dict):
-                fse = [FewShotExample(**ex) for ex in fse]
-            data["few_shot_examples"] = fse
-        else:
-            data["few_shot_examples"] = [ex.model_copy() for ex in base.few_shot_examples]
+        data["shot_ids"] = list(changes.pop("shot_ids", base.shot_ids))
         data["lineage"] = IndividualLineage(
             parent_ids=[p.lineage.id for p in parents],
             changes_description=changes_description,

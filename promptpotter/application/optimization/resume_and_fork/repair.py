@@ -238,6 +238,7 @@ async def repair_incomplete_rounds(
                 base_pipeline_params=cs.resolved_pipeline_params,
                 schema=session.pipeline_schema,
                 framing=cycle.framing,
+                demo=session.scoring.require_partition().demo,
             )
             stamp = MeasuredCandidate(
                 idx=i,

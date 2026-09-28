@@ -8,7 +8,10 @@ from __future__ import annotations
 from typing import Any
 
 from promptpotter.application.optimization.dispatch.bundle import (
+    ANSWER_LABEL_STEM,
     AXES_ENUM_PREVIEW,
+    DEMO_POOL_RENDER_CAP,
+    DEMO_QUERY_STEM,
     InjectionBundle,
     InjectionKind,
     Item,
@@ -163,6 +166,42 @@ def _r_prompt_block_catalogue(b: InjectionBundle) -> list[Item]:
         lines.append(f"  {field}:")
         lines.extend(f"    - {text}" for text in blocks)
     return [Item("\n".join(lines))]
+
+
+@signal(
+    "demo_pool",
+    kind=InjectionKind.DERIVED,
+    char_cap=None,
+    citable=False,
+)
+def _r_demo_pool(b: InjectionBundle) -> list[Item]:
+    """The value space of `shot_ids`: the parent's shots, which no other panel shows, then a window
+    of the rest that moves each round."""
+    if not b.demo_pool or b.shot_k_max <= 0:
+        return []
+    rows = {s.id: s for s in b.demo_pool}
+    current = [rows[i] for i in b.opt_sp.shot_ids]
+    others = [s for s in b.demo_pool if s.id not in set(b.opt_sp.shot_ids)]
+    k = min(DEMO_POOL_RENDER_CAP, len(others))
+    start = (b.cycle_slice.round_num - 1) * k % len(others) if others else 0
+    window = (others[start:] + others[:start])[:k]
+    shown = ", ".join(f"#{s.id}" for s in current) or "none"
+    header = (
+        "DEMO POOL — rows held out as shots, never scored. `shot_ids` REPLACES the parent's shots "
+        f"with the ids you list, in order, at most {b.shot_k_max}; omit it to keep them. Parent's "
+        f"shots: {shown}. Below: those, then {len(window)} of the {len(others)} others."
+    )
+    return [
+        Item(header),
+        *(
+            Item(
+                f"#{s.id} {' '.join(s.query.split())[:DEMO_QUERY_STEM]} -> "
+                f"{str(s.ground_truth)[:ANSWER_LABEL_STEM]}",
+                trusted=False,
+            )
+            for s in (*current, *window)
+        ),
+    ]
 
 
 @signal(

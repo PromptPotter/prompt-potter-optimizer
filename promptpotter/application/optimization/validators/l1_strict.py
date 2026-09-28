@@ -34,6 +34,7 @@ __all__ = [
     "L1_PROMPT_FIELD_NOT_GUTTED",
     "L1_PROMPT_PLACEHOLDERS_INTACT",
     "L1_SCHEMA_COMPLIANCE",
+    "L1_SHOTS_IN_DEMO_POOL",
     "validate_overrides",
 ]
 
@@ -256,6 +257,48 @@ def _check_l1_prompt_fields_open(
 L1_PROMPT_FIELDS_OPEN: LLMOutputValidator = LLMOutputValidator(
     id="l1_prompt_fields_open",
     check=_check_l1_prompt_fields_open,
+)
+
+
+def _check_l1_shots_in_demo_pool(
+    source_output: Mapping[str, Any],
+    *,
+    demo_ids: frozenset[int],
+    k_max: int,
+    **_: Any,
+) -> ValidatorOutcome | None:
+    """Reads a variant's NEW shot list, never an inherited one. An id outside the demo pool is a
+    scored row — the search's or the bench's — pasted into the prompt as a worked answer."""
+    shots: list[int] = source_output["shot_ids"]
+    failures = [
+        ValidationFailure(axis="shot_ids", value=str(i), allowed=[], reason="shot_not_in_demo_pool")
+        for i in shots
+        if i not in demo_ids
+    ]
+    if len(set(shots)) != len(shots):
+        failures.append(
+            ValidationFailure(axis="shot_ids", value=str(shots), allowed=[], reason="shot_repeated")
+        )
+    if len(shots) > k_max:
+        failures.append(
+            ValidationFailure(
+                axis="shot_ids",
+                value=str(len(shots)),
+                allowed=[str(k_max)],
+                reason="shots_over_k_max",
+            )
+        )
+    if not failures:
+        return None
+    return ValidatorOutcome(
+        validator_id=L1_SHOTS_IN_DEMO_POOL.id,
+        evidence={"failures": failures},
+    )
+
+
+L1_SHOTS_IN_DEMO_POOL: LLMOutputValidator = LLMOutputValidator(
+    id="l1_shots_in_demo_pool",
+    check=_check_l1_shots_in_demo_pool,
 )
 
 

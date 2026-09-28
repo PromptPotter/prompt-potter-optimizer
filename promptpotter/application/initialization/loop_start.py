@@ -336,7 +336,10 @@ def _build_and_start_cycle(
     # session.pipeline_params (overlay-merged) makes origin JSP + cycle-id sensitive to overlay edits.
     base_pp = session.pipeline_params or session.pipeline_schema.to_pipeline_params()
     origin_jsp = resolved_origin.to_job_search_point(
-        base_pipeline_params=base_pp, schema=session.pipeline_schema, framing=origin.framing
+        base_pipeline_params=base_pp,
+        schema=session.pipeline_schema,
+        framing=origin.framing,
+        demo=session.scoring.require_partition().demo,
     )
     resolved_cycle_id, resumed_from_round = init_cycle(
         session,

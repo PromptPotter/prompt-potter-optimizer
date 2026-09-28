@@ -92,7 +92,12 @@ def _load() -> tuple[Mapping[str, NodeMember], Mapping[str, str]]:
 
 @functools.cache
 def _load_runtimes() -> tuple[Mapping[str, OptimizerRuntime], Mapping[str, str]]:
-    runtimes = ((module.__name__, module.RUNTIME) for module in _builtin_modules())
+    # A preset shipping members alone declares no runtime; a manifest without one fails at lookup.
+    runtimes = (
+        (module.__name__, module.RUNTIME)
+        for module in _builtin_modules()
+        if hasattr(module, "RUNTIME")
+    )
     return load_registry(RUNTIME_ENTRY_POINT_GROUP, runtimes, _validate_runtime)
 
 

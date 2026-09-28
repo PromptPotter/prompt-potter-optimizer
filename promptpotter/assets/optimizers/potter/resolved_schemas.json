@@ -44,6 +44,22 @@
                 "title": "Prompt Fields Updates",
                 "type": "object"
               },
+              "shot_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "The shots this variant runs with: demo-pool ids from the DEMO POOL panel, in order. Replaces the parent's list; omit to keep it.",
+                "title": "Shot Ids"
+              },
               "changes_description": {
                 "maxLength": 320,
                 "title": "Changes Description",
@@ -216,6 +232,7 @@
                 "budget_state",
                 "confounds",
                 "critique",
+                "demo_pool",
                 "detectable_move",
                 "diagnostics",
                 "escalation_panel",

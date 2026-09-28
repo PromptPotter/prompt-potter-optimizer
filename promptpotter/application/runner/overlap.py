@@ -124,7 +124,10 @@ async def _measure_gaps(
     )
     scored = await score_search_point(
         step.opt_sp.to_job_search_point(
-            base_pipeline_params=step.pipeline_params, schema=schema, framing=cycle.framing
+            base_pipeline_params=step.pipeline_params,
+            schema=schema,
+            framing=cycle.framing,
+            demo=cycle.session.scoring.require_partition().demo,
         ),
         samples,
         cycle.session,

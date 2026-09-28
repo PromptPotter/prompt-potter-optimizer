@@ -147,12 +147,15 @@ LEDGER_BASELINE = {
     # replayers, its per-round package fingerprints, its critique re-derivation. They sat in the
     # generic `resume_and_fork/`, which now reaches them through the runtime; `state.py` is the
     # state object alone, and this half reads the dispatch hub and the critique node.
-    "modules": 372,
+    # +2: `optimizers/capo/{__init__,members}.py` — CAPO's members, `few_shot` first. The registry
+    # finds a preset's members by its subpackage, so the first member opens the package.
+    "modules": 374,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     # +2: `application/optimizers/__init__.py` (the member registry) and its `potter/`, empty.
     # -1: `optimization/l1/score/`, its modules gone to the round walk.
-    "init_files": 54,
+    # +1: `optimizers/capo/__init__.py`, empty, as `potter/`'s is.
+    "init_files": 55,
     # +1: `judges/__init__.py` — flagged for the same reason `connectors/__init__.py` is, and by
     # the same text test: a registry module has both an `__all__` and imports. Named rather than
     # emptied; the protocol types are deliberately NOT re-exported through it.
@@ -191,7 +194,11 @@ LEDGER_BASELINE = {
     # ±0 across the config split: potter's knobs left `OptimizationConfig` for its manifest's node
     # members and are counted there (`knobs.py::member_knob_count`), `mechanisms.*` flattened, and
     # `optimizer_set` became `optimizer` — a named prompt set is now a family a node's overlay picks.
-    "config_leaf_fields": 44,
+    # +1: `l1_generate.k_max` — the most shots a variant may carry. The bound is the proposer's, so
+    # it rides that node's knobs; no existing knob says how long a shot list may grow.
+    # +1: `few_shot.k_max` — the same bound on CAPO's algorithm node, which a manifest sets apart
+    # from any proposer's: CAPO's mutation and potter's generator are separate nodes.
+    "config_leaf_fields": 46,
     # +1: `QUEUE_MAX_WAIT_S` — how long a launch may wait in line before it is withdrawn. It is a
     # setting and not a constant because it is the one queue number a HOST has to be able to
     # answer for: on a shared box it decides when someone else's waiting launch is given up on.
@@ -202,7 +209,9 @@ LEDGER_BASELINE = {
     "settings_const": 12,
     # -24: `memory` (wounds, l1_layout, l1_overrides, task_context and the wound subtree) and
     # `plan` left the individual — optimizer state rides `optimizer_state`, framing the campaign.
-    "opt_search_point_fields": 15,
+    # -2: shots ride as demo-pool ids (`shot_ids`), one leaf where `few_shot_examples` carried
+    # three (`input`, `output`, `explanation`); the pool resolves them at render.
+    "opt_search_point_fields": 13,
     # +1: `theta_caveat` on `ScoredCandidate` and `ScoreboardRow` — the per-ARM half of
     # `ThetaCaveat`, so a floor-pinned arm's θ is disclaimed on the row it invalidates rather
     # than only on the round's scale reading. A served state, not a derived one: the rows a
@@ -258,7 +267,8 @@ LEDGER_BASELINE = {
     # winner, and this is the one reading taken on rows no optimizer node saw.
     # -3: `ScoredCandidate.outcome` replaces `escalation_aborted`, `elimination_stopped`, `invalid`
     # and `partial_reason` — one fact, how the walk ended, told four ways, none saying BROKEN.
-    "cycle_result_fields": 245,
+    # -2: the individual's shots are demo-pool ids, reached through each round's `opt_sp`.
+    "cycle_result_fields": 243,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
@@ -314,7 +324,10 @@ LEDGER_BASELINE = {
     "domain_any_maps": 88,
     "models_lax": 3,
     "prompt_string_fields": 6,
-    "injections": 32,
+    # +1: `demo_pool` — the value space of the `shot_ids` slot and the one carrier of the parent's
+    # shots, which `rendered_prompt` leaves out. Folds into no catalogue: its rows are fenced
+    # dataset text, and the slot withdraws on this panel's silence alone.
+    "injections": 33,
     # +1: `l1_only_ladder`. The L1 / L1+L2 / full ablation needs an arm where L2 PROVABLY never
     # fires, and a rule is the only place that can be true of: the router is the whole policy, so
     # a gate at the caller would leave the policy saying FIRE_L2 while the loop quietly did not.

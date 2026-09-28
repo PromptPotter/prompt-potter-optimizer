@@ -180,15 +180,16 @@ class L1Generate:
             n_scoring_samples=len(panel.cells),
             obs=cycle.session.state.obs,
         )
+        knobs = potter_knobs(cycle.optimizer).l1_generate
         individuals, params = parse_population(
             proposals,
             cycle.opt_sp,
             cycle.tracking.current_sp.pipeline_params,
             schema,
             runtime_failures=state.memory.wounds.runtime_failures,
-            prompt_block_catalogue=(
-                potter_knobs(cycle.optimizer).l1_generate.prompt_block_catalogue
-            ),
+            demo_ids=frozenset(s.id for s in cycle.session.scoring.require_partition().demo),
+            shot_k_max=knobs.k_max,
+            prompt_block_catalogue=knobs.prompt_block_catalogue,
         )
         yield_stats = _fold_strict_rejections(yield_stats, proposals)
         return nodes.Population(

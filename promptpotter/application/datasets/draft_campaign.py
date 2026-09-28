@@ -100,7 +100,7 @@ class DraftCampaign:
     # field reaches mint while UNSET or PROPOSED.
     field_provenance: dict[str, Provenance] = field(default_factory=dict)
     source_file: str = ""
-    # ``PromptTemplate.prompt_field_dict()`` shape. Seeded by the check-in node's
+    # ``OptSearchPoint.prompt_field_dict()`` shape. Seeded by the check-in node's
     # decomposition half or an authored dataset's prompt, operator-editable before commit,
     # written verbatim to ``prompts/default.yaml`` at mint.
     origin_prompt_fields: dict[str, Any] = field(default_factory=dict)

@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from typing import Any
 
 from pydantic import ConfigDict
 
 from promptpotter.domain.bench import BenchScore
-from promptpotter.domain.opt_search_point import PromptTemplate
+from promptpotter.domain.opt_search_point import FEW_SHOT_BLOCK, PromptTemplate
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import AbilityReading
+from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.strict_model import StrictModel
 
-EXPORT_ARTIFACT_VERSION = 1
+EXPORT_ARTIFACT_VERSION = 2
 """Bumped when a reader written against the old shape would MISREAD the new one — not when a
 field is added. :func:`parse_prompt_export` refuses anything else."""
 
@@ -79,10 +81,12 @@ class PromptExport(StrictModel):
     optimizer_manifest_hashes: dict[str, str]
     stop_reason: str
     finished_at: str
-    # Named fields, restored by ``template()``. Carries ``few_shot_examples`` structured, because
-    # this is the round document's dict — NOT ``CycleResult.result_prompt_fields``, which is the
-    # wire-side projection and has already flattened the examples to a rendered block.
+    # Named fields, restored by ``template()`` — the round document's dict, NOT
+    # ``CycleResult.result_prompt_fields``, which is the wire-side projection.
     prompt_fields: dict[str, Any]
+    # The shots as scored. An individual names them by demo-pool id, and a reader outside this
+    # campaign has no pool to resolve an id against.
+    few_shot_block: str
     # The other half of what this project evolves: the node config the winner ran under, minus
     # each node's rendered ``prompt`` (that is ``prompt_fields`` rendered, and one artifact does
     # not carry a fact twice). Model and provider ride here.
@@ -94,8 +98,12 @@ class PromptExport(StrictModel):
     bench: BenchScore | None
 
     def template(self) -> PromptTemplate:
-        """The winning prompt as the type the rest of this package passes around."""
+        """The winning prompt's fields as the type the rest of this package passes around."""
         return PromptTemplate.from_prompt_fields(self.prompt_fields)
+
+    def render(self) -> str:
+        """The winning prompt as it was scored: the fields, then the shots."""
+        return "\n\n".join(p for p in (self.template().render(), self.few_shot_block) if p)
 
 
 def parse_prompt_export(text: str) -> PromptExport:
@@ -131,6 +139,7 @@ def build_prompt_export(
     origin_accuracy: float | None,
     origin_composite_fitness: float | None,
     framing: TaskDecomposition,
+    demo: Sequence[Sample],
     bench: BenchScore | None,
 ) -> PromptExport:
     """Project the round that crowned the winner into the artifact.
@@ -140,12 +149,12 @@ def build_prompt_export(
     That is the whole special-casing: one round shape in, values that differ, no second path.
     """
     fields = dict(winner.prompt_fields)
+    fields.pop("shot_ids", None)
     selected = next(iter(winner.selected_scores), None)
     # The operator's framing splices into `problem_description` at render, so the stored fields
     # alone re-render a prompt nothing was scored on.
-    if winner.opt_sp is not None and (
-        spliced := dict(winner.opt_sp.target_fields(framing)).get("problem_description")
-    ):
+    rendered = dict(winner.opt_sp.target_fields(framing, demo=demo)) if winner.opt_sp else {}
+    if spliced := rendered.get("problem_description"):
         fields["problem_description"] = spliced
     return PromptExport(
         artifact_version=EXPORT_ARTIFACT_VERSION,
@@ -159,6 +168,7 @@ def build_prompt_export(
         stop_reason=stop_reason,
         finished_at=finished_at,
         prompt_fields=fields,
+        few_shot_block=rendered.get(FEW_SHOT_BLOCK, ""),
         tuned_params=_tuned_params(winner.pipeline_params),
         measurement=ExportMeasurement(
             round=winner.round,

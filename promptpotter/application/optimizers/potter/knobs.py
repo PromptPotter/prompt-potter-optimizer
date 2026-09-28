@@ -96,6 +96,14 @@ class L1GenerateKnobs(StrictModel):
     n_variants: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
         ge=1, description="Candidates per round"
     )
+    k_max: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+        ge=0,
+        description=(
+            "The most shots a variant may carry in ``shot_ids``, drawn from the campaign's demo "
+            "pool. ``0`` withdraws the shot slot and its panel, as does a campaign declaring no "
+            "demo pool."
+        ),
+    )
     prompt_block_catalogue: Annotated[PromptBlockCatalogue, Knob(Scope.POLICY, Estimand.SEARCH)] = (
         Field(
             description=(

@@ -214,7 +214,7 @@ def draft_from_dataset(
         )
 
     # The authored dataset's own starting prompt rides through as the draft's
-    # ``origin_prompt_fields`` (its six string fields + few-shot), so committing a
+    # ``origin_prompt_fields`` (its six string fields), so committing a
     # demo/benchmark/owned Origin preserves the prompt the optimizer evolves
     # from — a fresh CSV upload instead gets the check-in's decomposition.
     origin_prompt_fields: dict[str, Any] = {}
@@ -222,7 +222,7 @@ def draft_from_dataset(
     if prompt_names:
         name = "default" if "default" in prompt_names else prompt_names[0]
         try:
-            origin_prompt_fields = load_dataset_prompt(dataset_dir, name).prompt_field_dict()
+            origin_prompt_fields = load_dataset_prompt(dataset_dir, name).prompt_fields()
         except FileNotFoundError:
             origin_prompt_fields = {}
 

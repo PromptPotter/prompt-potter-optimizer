@@ -15,7 +15,7 @@ Implementation notes for architectural seams not obvious from a single file. AI 
 
 Four things every contributor needs to understand:
 
-1. **Prompt structure** — the 8-field scheme + the dispatch hub that fills it.
+1. **Prompt structure** — the six-field scheme, its shots, and the dispatch hub that fills it.
 2. **Dispatch** — which layer fires next, and where the decision lives.
 3. **Scoring node** — the one node that's deterministic, not LLM-driven.
 4. **Cross-run memory** — what persists between runs.
@@ -24,7 +24,9 @@ Four things every contributor needs to understand:
 
 ## 1. Prompt structure
 
-Every optimizer LLM node — `l1_generate`, `l1_critique`, `l2_context`, `l3_plan` — renders an `OptimizerPromptTemplate`; the target prompt the optimizer produces renders a `PromptTemplate`. Both live in `promptpotter/domain/opt_search_point.py`, and **each class's `RENDER_ORDER` is the field order** — they differ on purpose (the optimizer's is cut for the provider prefix cache, the target's is the archive key), so read both there, never from a copy here. `plan` is carried on the template but is not in `render()`.
+Every optimizer LLM node — `l1_generate`, `l1_critique`, `l2_context`, `l3_plan` — renders an `OptimizerPromptTemplate`; the target prompt the optimizer produces renders a `PromptTemplate`. Both live in `promptpotter/domain/opt_search_point.py`, and **each class's `RENDER_ORDER` is the field order** — they differ on purpose (the optimizer's is cut for the provider prefix cache, the target's is the archive key), so read both there, never from a copy here.
+
+**Shots are part of the target prompt, carried by id and rendered last.** An individual's `shot_ids` name rows of the campaign's demo pool (`DatasetSplit.demo`); `OptSearchPoint.target_fields(framing, demo=)` resolves each to its query and ground truth and appends the block after the fields, so the rendered prompt the archive hashes is one function of the fields, the ids and the pool — two individuals naming the same ids in the same order render and key identically. Every render of a scored prompt is handed the pool; the individual never carries a row's text, and the export carries the resolved block because its reader has no pool. A demo row is never scored and never reaches a round's panel or the bench set. `l1_generate` edits the list through the `shot_ids` slot, bounded by its node's `k_max` and offered only while the `demo_pool` panel shows the menu; `validators/l1_strict.py::L1_SHOTS_IN_DEMO_POOL` rejects an id outside the pool, a repeat, or a list longer than `k_max`. An `algorithm` member edits shots without a model call — CAPO's `optimizers/capo/members.py::FewShot` mutates each individual's list, and `cross_shots` is what a recombining node calls.
 
 **Invariant:** no prompt site summarizes its own data. If a name isn't in `injection_table()`, it doesn't enter a prompt. **The render chain, the per-layer composition paths and the per-placeholder source map are owned by** [`dispatch-hub.md`](dispatch-hub.md) — read them there.
 

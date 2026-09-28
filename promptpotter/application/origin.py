@@ -191,8 +191,8 @@ def try_inherit_fork_origin(
     if cand is None:
         return None
 
-    # Identity gate: an operator edit changes the render → re-score.
-    if resolved_origin.render() != OptSearchPoint.from_prompt_fields(cand.prompt_fields).render():
+    # Identity gate: an operator edit changes the render or the shots → re-score.
+    if resolved_origin.prompt_field_dict() != cand.prompt_fields:
         return None
 
     origin_acc = cand.accuracy
@@ -260,7 +260,7 @@ def resolve_origin_opt_search_point(
             except FileNotFoundError:
                 continue
             origin = OptSearchPoint.from_prompt_fields(
-                template.prompt_field_dict(),
+                template.prompt_fields(),
                 lineage=IndividualLineage(
                     changes_description=(f"Origin from {dataset_dir}/prompts/ ({node_name})"),
                     source=ORIGIN_SOURCE,
@@ -347,6 +347,7 @@ async def establish_campaign_origin(
         base_pipeline_params=session.pipeline_params,
         schema=pipeline_schema,
         framing=framing,
+        demo=session.scoring.require_partition().demo,
     )
     # populate_session_scoring overwrites scoring/source; loop repopulates before round 1.
     populate_session_scoring(
@@ -476,13 +477,14 @@ def prospective_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) 
         items = resolve_dataset_items(stores, dataset_name)
         if not items:
             return None
-        search = partition_bank([Sample(**it) for it in items], cfg.dataset_split).search
+        partition = partition_bank([Sample(**it) for it in items], cfg.dataset_split)
         return build_origin_cycle_id(
             opt_sp,
             schema,
-            list(search),
+            list(partition.search),
             base_pp,
             framing=committed_task_context(stores, dataset_name),
+            demo=partition.demo,
         ).removeprefix("cycle_")
     except (
         OSError,

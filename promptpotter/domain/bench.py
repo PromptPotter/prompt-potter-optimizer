@@ -30,8 +30,8 @@ class DatasetSplit(StrictModel):
     demo: int = Field(
         0,
         ge=0,
-        description="Rows reserved as the demo pool — shot material for an optimizer whose "
-        "individuals carry few-shot examples, never scored by the search.",
+        description="Rows reserved as the demo pool — the rows an individual's `shot_ids` name, "
+        "rendered into its prompt as query and ground truth, never scored.",
     )
     seed: int = Field(
         0,
@@ -68,6 +68,11 @@ def partition_bank(bank: Sequence[Sample], split: DatasetSplit | None) -> BankPa
     ranked = sorted(bank, key=lambda s: hashlib.sha256(f"{split.seed}:{s.key}".encode()).digest())
     bench_ids = {s.id for s in ranked[: split.bench]}
     demo_ids = {s.id for s in ranked[split.bench : held]}
+    if unlabelled := sorted(s.id for s in bank if s.id in demo_ids and s.ground_truth is None):
+        raise ValueError(
+            f"demo rows {unlabelled} carry no ground truth, so they cannot render as a shot: a "
+            "verifier-graded bank declares no demo pool."
+        )
     return BankPartition(
         split=split,
         search=tuple(s for s in bank if s.id not in bench_ids and s.id not in demo_ids),

@@ -15,6 +15,7 @@ from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import ArmOutcome, RoundResult
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler
+from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 
 if TYPE_CHECKING:
@@ -130,6 +131,10 @@ ANSWER_LABEL_STEM = 40
 # head carries the collapse signal; the ground-truth line beside it is a value space and is
 # never row-limited.
 ANSWER_TALLY_ROWS = 5
+# Demo rows the shot menu lists per round beside the parent's own shots; the window rotates
+# through the pool across rounds, so a 200-row pool is offered whole without being sent whole.
+DEMO_POOL_RENDER_CAP = 12
+DEMO_QUERY_STEM = 80
 
 # Untrusted-content fence — wraps signals carrying sample queries, ground truths, model echoes
 # or pipeline warnings. The note rides inside the open tag so call sites carry no instruction.
@@ -314,6 +319,10 @@ class InjectionBundle:
     is_origin_round: bool = False
     # `Connector.measured_unit` — every panel counting rows renders through it.
     measured_unit: MeasuredUnit = "sample"
+    # The campaign's demo pool and the most shots a variant may carry; either empty silences the
+    # shot menu, which withdraws the `shot_ids` slot with it.
+    demo_pool: tuple[Sample, ...] = ()
+    shot_k_max: int = 0
 
 
 @dataclass(frozen=True)
@@ -366,6 +375,8 @@ __all__ = [
     "ANSWER_LABEL_STEM",
     "ANSWER_TALLY_ROWS",
     "AXES_ENUM_PREVIEW",
+    "DEMO_POOL_RENDER_CAP",
+    "DEMO_QUERY_STEM",
     "FENCE_CLOSE",
     "FENCE_OPEN_PREFIX",
     "FENCE_OVERHEAD",

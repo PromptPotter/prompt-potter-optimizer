@@ -76,9 +76,7 @@ export function PromptFieldsEditor({
     onApply({ origin_prompt_fields: merged });
   };
 
-  const fewShot = Array.isArray(value.few_shot_examples)
-    ? (value.few_shot_examples as unknown[]).length
-    : 0;
+  const fewShot = Array.isArray(value.shot_ids) ? (value.shot_ids as unknown[]).length : 0;
 
   const shown = compact && readOnly ? FIELDS.filter((f) => (fields[f.key] ?? "").trim()) : FIELDS;
 
@@ -118,7 +116,7 @@ export function PromptFieldsEditor({
       </div>
       {fewShot > 0 ? (
         <p className="prompt-editor-fewshot">
-          + {fewShot} few-shot example{fewShot === 1 ? "" : "s"} (kept as-is)
+          + {fewShot} shot{fewShot === 1 ? "" : "s"} (kept as-is)
         </p>
       ) : null}
     </section>

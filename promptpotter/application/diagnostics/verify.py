@@ -220,6 +220,7 @@ async def verify_candidate(
         effective_pipeline_params,
         schema=schema,
         framing=committed_task_context(stores, session.dataset_name),
+        demo=session.scoring.require_partition().demo,
     )
     node_configs = schema.node_configs(effective_pipeline_params)
     predicate: dict[str, dict[str, Any]] = dict(node_configs)

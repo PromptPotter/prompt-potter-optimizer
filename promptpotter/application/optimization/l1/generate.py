@@ -155,6 +155,7 @@ async def l1_generate(
         parent_prompt=opt_sp.prompt_fields(),
         # The baseline `detect_invariants` reads too: the parent's resolved, folded config.
         parent_params=cycle.tracking.current_sp.pipeline_params,
+        parent_shot_ids=opt_sp.shot_ids,
     )
     try:
         generated, _prompt, _repairs = await run_optimizer_node(
@@ -270,6 +271,7 @@ async def l1_generate(
             source=node_source(POTTER_MANIFEST, "l1_generate"),
             evidence_grounding=_parse_evidence_grounding(v.evidence_grounding),
             **v.prompt_fields_updates,
+            **({} if v.shot_ids is None else {"shot_ids": v.shot_ids}),
         )
         population.append(CandidateProposal(opt_sp=child, pipeline_overlay=v.pipeline_overlay))
 

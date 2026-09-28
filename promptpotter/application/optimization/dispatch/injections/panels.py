@@ -812,7 +812,13 @@ def _candidate_mutation(
     """What the candidate EDITED, per field: a prose field as the words it wrote and cut
     (``changed_words``), a param as its new value. Returned UNCLIPPED — the render clips for the
     eye. The delta rule is the shared ``candidate_delta`` dedup hashes."""
-    delta = candidate_delta(cand.prompt_fields, parent, cand.pipeline_overlay, parent_pp)
+    # A round document omits an empty shot list, so absence reads as none on both sides.
+    delta = candidate_delta(
+        {"shot_ids": [], **cand.prompt_fields},
+        {"shot_ids": [], **parent},
+        cand.pipeline_overlay,
+        parent_pp,
+    )
     pp_nested: dict[str, Any] = {}
     for (node, param), value in delta.params.items():
         pp_nested.setdefault(node, {})[param] = value
@@ -821,6 +827,8 @@ def _candidate_mutation(
         (field, changed_words(str(parent.get(field) or ""), value))
         for field, value in delta.prompt.items()
     ]
+    if delta.shots is not None:
+        pairs.append(("shot_ids", ", ".join(f"#{i}" for i in delta.shots) or "none"))
     return pairs[:MEMORY_FIELD_CAP]
 
 

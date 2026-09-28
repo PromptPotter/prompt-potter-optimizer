@@ -85,7 +85,6 @@ from promptpotter.domain.l1_layout import L1Layout
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.opt_search_point import (
     EvidenceGrounding,
-    FewShotExample,
     IndividualLineage,
     OptSearchPoint,
 )
@@ -206,7 +205,6 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     RuntimeFailure,
     ScoredCandidate,
     ScoreboardRow,
-    FewShotExample,
     EvidenceGrounding,
     IndividualLineage,
     WoundChannels,

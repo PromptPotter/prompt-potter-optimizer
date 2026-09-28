@@ -59,7 +59,7 @@ from promptpotter.application.scoring.metrics import (
 from promptpotter.application.scoring.sample_measurement import measure_sample
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.escalation_signals import ValidationFailure
-from promptpotter.domain.opt_search_point import FewShotExample, OptSearchPoint
+from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import (
     NodePromptInfo,
@@ -611,8 +611,11 @@ async def test_a_prompt_length_term_prices_the_template_not_the_sample() -> None
         ],
     )
     origin = OptSearchPoint(instruction="Answer {{query}}.")
-    shots = [{"input": "2+2", "output": "4"}, {"input": "3+3", "output": "6"}]
-    candidate = OptSearchPoint(instruction="Answer {{query}}.", few_shot_examples=shots)
+    demo = [
+        Sample(id=90, query="2+2", ground_truth="4"),
+        Sample(id=91, query="3+3", ground_truth="6"),
+    ]
+    candidate = OptSearchPoint(instruction="Answer {{query}}.", shot_ids=[90, 91])
     longest_initial = len(origin.render())
     wire_prompts: list[str] = []
 
@@ -645,14 +648,14 @@ async def test_a_prompt_length_term_prices_the_template_not_the_sample() -> None
 
     async def _objectives(sp: OptSearchPoint, queries: list[str]) -> list[float]:
         params = sp.to_job_search_point(
-            {}, schema=schema, framing=TaskDecomposition()
+            {}, schema=schema, framing=TaskDecomposition(), demo=demo
         ).pipeline_params
         rows = [
             await measure_sample(Sample(id=i, query=q, ground_truth="4"), session, params)  # type: ignore[arg-type]
             for i, q in enumerate(queries)
         ]
         assert [r["pipeline_data"]["target_prompt_chars"] for r in rows] == [
-            len(sp.render())
+            len(sp.render_target(TaskDecomposition(), demo=demo))
         ] * len(rows)
         return [r["objective"] for r in rows]
 
@@ -661,7 +664,7 @@ async def test_a_prompt_length_term_prices_the_template_not_the_sample() -> None
         scored = await _objectives(candidate, ["1+3", "a much longer query, " * 20 + "1+3"])
 
     assert len(set(map(len, wire_prompts[1:]))) == 2, "guard: the two cells' wire prompts differ"
-    ratio = len(candidate.render()) / longest_initial
+    ratio = len(candidate.render_target(TaskDecomposition(), demo=demo)) / longest_initial
     assert ratio > 1.5, "guard: the shots are inside the length"
     assert scored == [pytest.approx(1.0 - 0.05 * ratio)] * 2
 
@@ -2255,9 +2258,9 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
     member widens its coverage; the panel is the ORIGIN's own cells and does not move,
     so a late member is topped up onto it rather than narrowing it for everyone before it; and a
     member is a CONFIGURATION — the RENDERED target prompt, not the six fields and not a lineage
-    id. An L2/L3 transition re-mints the parent's OSP from the same fields, and few-shot examples
-    move the render without moving the fields; either one mistaken puts two individuals' cells
-    inside one bar, at a rate neither of them scored.
+    id. An L2/L3 transition re-mints the parent's OSP from the same fields, and shots move the
+    render without moving the fields; either one mistaken puts two individuals' cells inside one
+    bar, at a rate neither of them scored.
     """
     from promptpotter.domain.opt_search_point import IndividualLineage, OptSearchPoint
     from promptpotter.domain.results import (
@@ -2282,14 +2285,14 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
         )
 
     def rnd(
-        n: int, cid: str, label: str, instruction: str, comp: float, *ids: int, shot: str = ""
+        n: int, cid: str, label: str, instruction: str, comp: float, *ids: int, shot: int = 0
     ) -> RoundResult:
         # `instruction` and `shot` BOTH make the configuration here — the second only through
         # the render, which is the whole point.
         osp = OptSearchPoint(
             instruction=instruction,
             lineage=IndividualLineage(id=cid),
-            few_shot_examples=[FewShotExample(input=shot, output="x")] if shot else [],
+            shot_ids=[shot] if shot else [],
         )
         return RoundResult(
             round=n,
@@ -2320,10 +2323,10 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
     # and keeps C2.1's label rather than appearing beside it as an unnamed twin.
     assert [(s.candidate_id, s.label) for s in line] == [("c0", "C0"), ("w2", "C2.1")]
 
-    # A round-4 winner carrying C2.1's six fields verbatim and a few-shot example is a
-    # DIFFERENT individual: it runs a longer prompt. Folded in, it would take C2.1's label and
-    # bar, and its rows would overwrite C2.1's on every cell they share.
-    ctx = best_line([*history, rnd(4, "w4", "C4.1", "edited", 0.7, 5, 6, 7, shot="framing")])
+    # A round-4 winner carrying C2.1's six fields verbatim and a shot is a DIFFERENT
+    # individual: it runs a longer prompt. Folded in, it would take C2.1's label and bar, and its
+    # rows would overwrite C2.1's on every cell they share.
+    ctx = best_line([*history, rnd(4, "w4", "C4.1", "edited", 0.7, 5, 6, 7, shot=90)])
     assert [s.candidate_id for s in ctx] == ["c0", "w2", "w4"]
     # An optimizer's pick that never beat the bench's best joins no line, whatever it elected.
     worse = best_line([*history, rnd(4, "w4", "C4.1", "worse", 0.55, 5, 6, 7)])
@@ -2933,7 +2936,7 @@ def test_a_blank_answer_is_no_edit_at_either_boundary():
     parent = _parent()
     parent_params = {"llm_only": {"temperature": 0.0}}
     model = build_l1_response_model(
-        {}, parent_prompt=parent.prompt_fields(), parent_params=parent_params
+        {}, parent_prompt=parent.prompt_fields(), parent_params=parent_params, parent_shot_ids=()
     )
 
     def variant(**slots) -> dict:
@@ -3070,6 +3073,8 @@ def test_parse_population_flags_dropped_optimizer_prompt_port():
         pipeline_params=None,
         schema=schema,
         runtime_failures=[],
+        demo_ids=frozenset(),
+        shot_k_max=0,
     )
     parse_population(
         [inherits_broken],
@@ -3077,6 +3082,8 @@ def test_parse_population_flags_dropped_optimizer_prompt_port():
         pipeline_params={"l1_generate": {"problem_description": "Panels without ports."}},
         schema=schema,
         runtime_failures=[],
+        demo_ids=frozenset(),
+        shot_k_max=0,
     )
 
     dropped_failures = dropped.validation_failures

@@ -101,6 +101,12 @@ def _reading(
     )
 
 
+def _round_prompt(rr: RoundResult) -> dict[str, Any]:
+    return {f: rr.prompt_fields.get(f, "") for f in PROMPT_STRING_FIELDS} | {
+        "shot_ids": list(rr.prompt_fields.get("shot_ids", []))
+    }
+
+
 def _origin_round(
     opt_sp: OptSearchPoint,
     sp: JobSearchPoint,
@@ -378,6 +384,7 @@ class Cycle:
             base_pipeline_params=session.pipeline_params or None,
             schema=schema,
             framing=framing,
+            demo=session.scoring.require_partition().demo,
         )
         _assert_overlay_preserved(sp, session.pipeline_params)
 
@@ -481,6 +488,7 @@ class Cycle:
         if not priors:
             return
         schema = self.session.pipeline_schema
+        demo = self.session.scoring.require_partition().demo
         tr = self.tracking
         from_round = min(rr.round for rr in priors)
         self.rounds = [rr for rr in self.rounds if rr.round < from_round] + sorted(
@@ -503,7 +511,10 @@ class Cycle:
         # The winner's OWN resolved params, off the round file — without them resume reverts
         # every config axis L1 won back to the origin floor.
         tr.current_sp = self.opt_sp.to_job_search_point(
-            base_pipeline_params=last_rr.pipeline_params, schema=schema, framing=self.framing
+            base_pipeline_params=last_rr.pipeline_params,
+            schema=schema,
+            framing=self.framing,
+            demo=demo,
         )
         # A high-water mark over what each round MEASURED, walked from the origin floor forward
         # on each round's own scalars — never a score over `acc_cum`, whose rows come from
@@ -515,10 +526,11 @@ class Cycle:
         tr.best_round = origin_rr.round
         tr.best_theta = origin_rr.ability.theta if origin_rr.ability is not None else None
         tr.best_theta_se = origin_rr.ability.se if origin_rr.ability is not None else None
-        tr.best_sp = self.opt_sp.model_copy(
-            update={f: origin_rr.prompt_fields.get(f, "") for f in PROMPT_STRING_FIELDS}
-        ).to_job_search_point(
-            base_pipeline_params=origin_rr.pipeline_params, schema=schema, framing=self.framing
+        tr.best_sp = self.opt_sp.model_copy(update=_round_prompt(origin_rr)).to_job_search_point(
+            base_pipeline_params=origin_rr.pipeline_params,
+            schema=schema,
+            framing=self.framing,
+            demo=demo,
         )
         acc_cum: list[dict[str, Any]] = []
         for rr in self.rounds:
@@ -529,11 +541,12 @@ class Cycle:
                 tr.best_round = rr.round
                 # From THIS round's prompts, not `self.opt_sp` (pinned to the last prior above),
                 # or a resumed best≠last cycle pairs best params with last text.
-                best_opt_sp = self.opt_sp.model_copy(
-                    update={f: rr.prompt_fields.get(f, "") for f in PROMPT_STRING_FIELDS}
-                )
+                best_opt_sp = self.opt_sp.model_copy(update=_round_prompt(rr))
                 tr.best_sp = best_opt_sp.to_job_search_point(
-                    base_pipeline_params=rr.pipeline_params, schema=schema, framing=self.framing
+                    base_pipeline_params=rr.pipeline_params,
+                    schema=schema,
+                    framing=self.framing,
+                    demo=demo,
                 )
             # Re-maxed here so a resumed cycle reconstructs exactly what a fresh
             # `absorb_round` held.
@@ -668,7 +681,10 @@ class Cycle:
             rr.pipeline_params if rr.pipeline_params is not None else tr.current_sp.pipeline_params
         )
         tr.current_sp = self.opt_sp.to_job_search_point(
-            base_pipeline_params=_pp, schema=schema, framing=self.framing
+            base_pipeline_params=_pp,
+            schema=schema,
+            framing=self.framing,
+            demo=self.session.scoring.require_partition().demo,
         )
         tr.current_results = merge_known_outcomes(tr.current_results, list(rr.results))
         # "Current" is what the parent SCORED, never an accuracy over the mixed-provenance

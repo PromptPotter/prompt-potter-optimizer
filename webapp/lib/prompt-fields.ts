@@ -12,7 +12,7 @@ export const PROMPT_FIELD_LABEL: Record<string, string> = {
   thinking_style: "Thinking style",
   answer_format: "Answer format",
   // Not decomposition fields, but they ride the same dict.
-  few_shot_examples: "Few-shot examples",
+  shot_ids: "Shots",
   plan: "Plan",
 };
 

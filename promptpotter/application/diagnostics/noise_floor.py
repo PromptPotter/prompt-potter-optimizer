@@ -110,6 +110,7 @@ async def measure_noise_floor(
         pipeline_params,
         schema=schema,
         framing=committed_task_context(stores, campaign.dataset_name),
+        demo=session.scoring.require_partition().demo,
     )
     scoring_set = [s for s in session.samples if s.id in sample_ids]
     if not scoring_set:

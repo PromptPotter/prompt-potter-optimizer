@@ -278,6 +278,7 @@ async def screen_inner_seeds(
         pipeline_params,
         schema=session.pipeline_schema,
         framing=committed_task_context(stores, dataset_name),
+        demo=session.scoring.require_partition().demo,
     )
 
     readings: list[SeedReading] = []

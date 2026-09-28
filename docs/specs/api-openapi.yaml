@@ -4414,8 +4414,8 @@ components:
           type: object
           additionalProperties: true
           description: |
-            The campaign's origin prompt — a `PromptTemplate.prompt_field_dict()`
-            shape (the six string fields + optional `few_shot_examples`). Seeded
+            The campaign's origin prompt — an `OptSearchPoint.prompt_field_dict()`
+            shape (the six string fields + optional `shot_ids`). Seeded
             by the check-in node's decomposition, or from an authored dataset's
             prompt on the derived-draft path; operator-editable before commit and
             written verbatim to `prompts/default.json` at mint. `{}` until the

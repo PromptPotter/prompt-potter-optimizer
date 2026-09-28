@@ -17,7 +17,7 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 # steer panel edits them through `PromptFieldsEditor`, not the config widgets).
 _PROMPT_OWNED_FIELDS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
     PROMPT_STRING_FIELDS
-) | {"few_shot_examples", "plan"}
+)
 
 MOVABLE_AGENTS: tuple[str, ...] = ("l1", "l2")
 """Who may move a search axis — the closed set behind ``NodeConfigParam.movable_by``, in the

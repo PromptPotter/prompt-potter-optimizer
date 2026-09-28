@@ -17,6 +17,7 @@ import asyncio
 import copy
 import functools
 import logging
+import random
 import subprocess
 import sys
 import types
@@ -179,7 +180,7 @@ def test_sp_hash_is_not_recoverable_from_the_stripped_config() -> None:
     )
     opt_sp = OptSearchPoint(persona="Expert", instruction="Solve it.")
     sp = opt_sp.to_job_search_point(
-        base_pipeline_params={}, schema=schema, framing=TaskDecomposition()
+        base_pipeline_params={}, schema=schema, framing=TaskDecomposition(), demo=()
     )
     assert sp.render(), "the point that runs carries the rendered prompt in its node config"
 
@@ -188,7 +189,7 @@ def test_sp_hash_is_not_recoverable_from_the_stripped_config() -> None:
     assert not stripped.render(), "and the stripped twin reaches the backend with no prompt"
 
     restored = opt_sp.to_job_search_point(
-        base_pipeline_params=sp.config_params, schema=schema, framing=TaskDecomposition()
+        base_pipeline_params=sp.config_params, schema=schema, framing=TaskDecomposition(), demo=()
     )
     assert restored.sp_hash(schema) == sp.sp_hash(schema)
 
@@ -1290,10 +1291,10 @@ def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing() -> 
     }
     # A generator that replaces every field with exactly what it was shown changes nothing.
     rewritten = OptSearchPoint.derive([opt_sp], source="potter:l1_generate", **shown)
-    assert rewritten.render_target(framing) == opt_sp.render_target(framing)
+    assert rewritten.render_target(framing, demo=()) == opt_sp.render_target(framing, demo=())
     # The framing still reaches the target prompt, and L1 still sees it — as context, not as the
     # field it is being asked to rewrite. Dropping either half trades this bug for a blinder one.
-    assert upstream in opt_sp.render_target(framing)
+    assert upstream in opt_sp.render_target(framing, demo=())
     assert upstream in "".join(i.text for i in _r_task_context(bundle))
 
 
@@ -1462,16 +1463,20 @@ def test_no_held_out_row_reaches_a_round_panel_or_an_archive_view() -> None:
     """The headline is read on the bench set, so a bench or demo row the optimizer ever sees makes
     it grade its own exam — and nothing says so: every number renders, only higher.
 
-    Two roads in. The round's panel is drawn from the search pool, so the partition must never hand
-    a held-out row to it. And the archive is filed by DATASET: once the bench measures its rows they
+    Three roads in. The round's panel is drawn from the search pool, so the partition must never
+    hand a held-out row to it. The archive is filed by DATASET: once the bench measures its rows they
     sit beside the search's, so an archive view the optimizer reads must drop them — the sample
-    index is the one that puts a row's QUERY TEXT into the generator's prompt.
+    index is the one that puts a row's QUERY TEXT into the generator's prompt. And a shot pastes a
+    row into the prompt with its answer, so only a demo row may be one — never a bench row, and
+    never a search row the panel then scores against its own worked answer.
     """
     from promptpotter.application.intelligence.exploration import (
         Observation,
         select_round_subset,
     )
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
+    from promptpotter.application.optimization.validators.l1_strict import L1_SHOTS_IN_DEMO_POOL
+    from promptpotter.application.optimizers.capo.members import cross_shots, mutate_shots
     from promptpotter.domain.bench import DatasetSplit, partition_bank
 
     bank = [Sample(id=i, query=f"claim {i}", ground_truth="TRUE") for i in range(60)]
@@ -1480,6 +1485,29 @@ def test_no_held_out_row_reaches_a_round_panel_or_an_archive_view() -> None:
     held = {s.id for s in (*part.bench, *part.demo)}
     assert (len(part.bench), len(part.demo), len(part.search)) == (12, 6, 42)
     assert held.isdisjoint(s.id for s in part.search)
+    assert {s.id for s in part.bench}.isdisjoint(s.id for s in part.demo)
+
+    demo_ids = frozenset(s.id for s in part.demo)
+    for leak in (part.search[0].id, part.bench[0].id):
+        outcome = L1_SHOTS_IN_DEMO_POOL.run(
+            {"shot_ids": [part.demo[0].id, leak]}, demo_ids=demo_ids, k_max=len(demo_ids)
+        )
+        rejected = [f.value for f in outcome.evidence["failures"]] if outcome else []
+        assert rejected == [str(leak)], f"a shot naming scored row {leak} was accepted"
+    # CAPO's shot operators draw from the demo pool alone, and within `k_max`. The support, never
+    # the stream: add, drop and keep each occur, and a crossover samples the union at the mean.
+    pool = sorted(demo_ids)
+    moves = set()
+    for seed in range(60):
+        out = mutate_shots(pool[:2], pool, k_max=3, rng=random.Random(seed))
+        assert set(out) <= demo_ids and len(set(out)) == len(out) <= 3
+        moves.add(len(out) - 2)
+    assert moves == {-1, 0, 1}
+    assert all(
+        len(mutate_shots(pool[:3], pool, k_max=3, rng=random.Random(s))) <= 3 for s in range(30)
+    )
+    child = cross_shots([pool[:2], pool[2:6]], rng=random.Random(0))
+    assert len(child) == 3 and set(child) <= demo_ids
     # A row's CONTENT holds it out, not its slot: the same bank in another order agrees.
     assert {s.id for s in partition_bank(bank[::-1], split).bench} == {s.id for s in part.bench}
 
@@ -1620,7 +1648,9 @@ def test_a_held_prompt_field_is_neither_offered_nor_accepted() -> None:
         cp = CandidateProposal(
             opt_sp=OptSearchPoint.derive([parent], source="potter:l1_generate", **updates)
         )
-        parse_population([cp], parent, None, schema, runtime_failures=[])
+        parse_population(
+            [cp], parent, None, schema, runtime_failures=[], demo_ids=frozenset(), shot_k_max=0
+        )
         failures = cp.validation_failures
         return [f.axis for f in failures if f.reason == "forbidden_axis"]
 

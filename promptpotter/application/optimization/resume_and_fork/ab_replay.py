@@ -181,6 +181,7 @@ def ab_replay_cycle(
             base_pipeline_params=origin.pipeline_params,
             schema=session.pipeline_schema,
             framing=committed_task_context(session.store, session.dataset_name),
+            demo=sc.require_partition().demo,
         )
         .sp_hash(session.pipeline_schema)
     )

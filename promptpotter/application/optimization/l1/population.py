@@ -15,6 +15,7 @@ from promptpotter.application.optimization.validators.l1_strict import (
     L1_PROMPT_FIELDS_OPEN,
     L1_PROMPT_PLACEHOLDERS_INTACT,
     L1_SCHEMA_COMPLIANCE,
+    L1_SHOTS_IN_DEMO_POOL,
 )
 from promptpotter.application.pipeline_resolve import merge_pipeline_params
 from promptpotter.domain.candidate_diff import candidate_delta
@@ -35,6 +36,8 @@ def parse_population(
     schema: PipelineSchema | None,
     *,
     runtime_failures: Sequence[RuntimeFailure],
+    demo_ids: frozenset[int],
+    shot_k_max: int,
     prompt_block_catalogue: str = "guidance",
 ) -> tuple[list[OptSearchPoint], list[dict[str, Any] | None]]:
     """Project proposals into searchpoints. ``provider`` / ``route_order`` mutations are ALWAYS
@@ -48,8 +51,14 @@ def parse_population(
         pipeline_overlay = cp.pipeline_overlay
         opt_sp = cp.opt_sp
         merged_pp = merge_pipeline_params(pipeline_params, pipeline_overlay, schema)
+        failures: list[ValidationFailure] = []
+        if opt_sp.shot_ids != parent.shot_ids:
+            shots_outcome = L1_SHOTS_IN_DEMO_POOL.run(
+                {"shot_ids": opt_sp.shot_ids}, demo_ids=demo_ids, k_max=shot_k_max
+            )
+            if shots_outcome is not None:
+                failures.extend(shots_outcome.evidence["failures"])
         if schema:
-            failures: list[ValidationFailure] = []
             # The DELTA, never the child's whole prompt: an inherited field was not proposed.
             prompt_edit = candidate_delta(opt_sp.prompt_fields(), parent_fields, None, None).prompt
             block_outcome = L1_PROMPT_BLOCKS_IN_LIBRARY.run(
@@ -102,17 +111,17 @@ def parse_population(
             )
             if ph_outcome is not None:
                 failures.extend(ph_outcome.evidence["failures"])
-            if failures:
-                cp.validation_failures = failures
-                for vf in failures:
-                    logger.warning(
-                        "candidate %s: validation failure on %s — proposed %r not in allowed %r (reason=%s)",
-                        opt_sp.lineage.id[:8],
-                        vf.axis,
-                        vf.value,
-                        vf.allowed,
-                        vf.reason,
-                    )
+        if failures:
+            cp.validation_failures = failures
+            for vf in failures:
+                logger.warning(
+                    "candidate %s: validation failure on %s — proposed %r not in allowed %r (reason=%s)",
+                    opt_sp.lineage.id[:8],
+                    vf.axis,
+                    vf.value,
+                    vf.allowed,
+                    vf.reason,
+                )
         opt_sp_list.append(opt_sp)
         merged.append(merged_pp)
     return opt_sp_list, merged

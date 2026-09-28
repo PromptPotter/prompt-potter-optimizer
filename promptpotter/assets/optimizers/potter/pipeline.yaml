@@ -75,6 +75,7 @@ nodes:
       model: deepseek/deepseek-v4-flash:nitro
       # The proposer's own knobs, beside its call config (`optimizers/potter/knobs.py`).
       n_variants: 5
+      k_max: 5
       prompt_block_catalogue: guidance
       schema_field_rename: false
     description: &nitro_probe >-

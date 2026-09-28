@@ -399,7 +399,10 @@ async def _run_transition(
     new_opt = result.opt_sp
     cycle.adopt(new_opt)
     cycle.tracking.current_sp = new_opt.to_job_search_point(
-        base_pipeline_params=current_pp, schema=pipeline_schema, framing=cycle.framing
+        base_pipeline_params=current_pp,
+        schema=pipeline_schema,
+        framing=cycle.framing,
+        demo=cycle.session.scoring.require_partition().demo,
     )
     transition.apply(cycle, state, result)
     emit_phase(

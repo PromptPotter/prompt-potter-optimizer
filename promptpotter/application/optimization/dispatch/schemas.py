@@ -4,7 +4,7 @@ drops those. A field edit IS a prompt edit: regenerate via ``scripts/build_optim
 from __future__ import annotations
 
 import functools
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Annotated, Any, ClassVar, cast
 
 from pydantic import (
@@ -172,6 +172,11 @@ class L1Variant(OptimizerResponseModel):
             "active PipelineSchema at runtime."
         ),
     )
+    shot_ids: list[int] | None = Field(
+        None,
+        description="The shots this variant runs with: demo-pool ids from the DEMO POOL panel, "
+        "in order. Replaces the parent's list; omit to keep it.",
+    )
     # Capped like every other node's prose. `l1_generate` was the ONLY optimizer node with no
     # length bound on any output field, while it is the most-fired and the one whose answer can
     # run into `max_tokens` — a truncated response is not a short answer, it is a ZERO-CANDIDATE
@@ -188,6 +193,7 @@ class L1Variant(OptimizerResponseModel):
     # convicted and a restatement of the parent passes to `l1_invariants`.
     parent_prompt: ClassVar[Mapping[str, str]] = {}
     parent_params: ClassVar[Mapping[str, Any]] = {}
+    parent_shot_ids: ClassVar[tuple[int, ...]] = ()
 
     @model_validator(mode="after")
     def _reject_empty_mutation(self) -> L1Variant:
@@ -195,14 +201,16 @@ class L1Variant(OptimizerResponseModel):
         # it can only drop the candidate; here the message rides the schema-repair retry back to
         # the model (`llm/openai_compat.py`), so the round gets the arm instead of losing it.
         cls = type(self)
-        if not candidate_delta(
-            self.prompt_fields_updates, cls.parent_prompt, self.pipeline_overlay, cls.parent_params
-        ):
+        written: dict[str, Any] = dict(self.prompt_fields_updates)
+        if self.shot_ids is not None:
+            written["shot_ids"] = self.shot_ids
+        parent = {**cls.parent_prompt, "shot_ids": cls.parent_shot_ids}
+        if not candidate_delta(written, parent, self.pipeline_overlay, cls.parent_params):
             raise ValueError(
-                "this variant mutates nothing: pipeline_overlay or prompt_fields_updates must "
-                "carry a value that DIFFERS from the current one. Describing a change in "
-                "changes_description is not making one, and an empty string or the field's "
-                "current text is not an edit. Emit the new text."
+                "this variant mutates nothing: pipeline_overlay, prompt_fields_updates or "
+                "shot_ids must carry a value that DIFFERS from the current one. Describing a "
+                "change in changes_description is not making one, and an empty string or the "
+                "field's current text is not an edit. Emit the new text."
             )
         return self
 
@@ -216,6 +224,7 @@ def build_l1_response_model(
     *,
     parent_prompt: Mapping[str, str],
     parent_params: Mapping[str, Any],
+    parent_shot_ids: Sequence[int],
 ) -> type[L1GenerateOutput]:
     """``L1GenerateOutput`` validating through renamed wire keys, against the parent this round
     mutates. ``populate_by_name`` is left OFF deliberately: a model emitting the original key fails
@@ -229,6 +238,7 @@ def build_l1_response_model(
     # the parent's own text must never be emitted back to the model as something to fill in.
     variant.parent_prompt = dict(parent_prompt)
     variant.parent_params = dict(parent_params)
+    variant.parent_shot_ids = tuple(parent_shot_ids)
     # `variant` is a class only at runtime, so `list[variant]` written as a subscript is a type
     # expression over a variable that mypy objects to unstably; `__class_getitem__` builds the same
     # `list[...]` as a VALUE, which no configuration type-analyses.

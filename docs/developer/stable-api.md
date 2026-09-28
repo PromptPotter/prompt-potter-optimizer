@@ -242,7 +242,8 @@ from the same call that stamps `index.json::final`, so both are projections of o
 ```python
 from promptpotter.domain.export import parse_prompt_export
 export = parse_prompt_export(Path("…/export.json").read_text())
-template = export.template()          # PromptTemplate — fields by name, few-shot intact
+template = export.template()          # PromptTemplate — fields by name
+prompt = export.render()              # the prompt as scored: those fields, then its shots
 export.measurement.composite_fitness  # under export.measurement.formula, never a bare number
 ```
 

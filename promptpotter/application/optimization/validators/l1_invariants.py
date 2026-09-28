@@ -90,9 +90,11 @@ def detect_invariants(
     # how many proposals SURVIVE the other two gates, which is only known after the loop.
     repeats: list[tuple[CandidateProposal, int]] = []
     n_live = 0
-    parent_fields = parent_opt_sp.prompt_fields()
+    # Both whole lists, so a variant that only moved its shots is an edit and one that dropped
+    # every shot is too.
+    parent_fields = {**parent_opt_sp.prompt_fields(), "shot_ids": parent_opt_sp.shot_ids}
     for i, cp in enumerate(proposals):
-        child_fields = cp.opt_sp.prompt_fields()
+        child_fields = {**cp.opt_sp.prompt_fields(), "shot_ids": cp.opt_sp.shot_ids}
         delta = candidate_delta(child_fields, parent_fields, cp.pipeline_overlay, parent_pp)
         if not delta:
             cp.validation_failures = [

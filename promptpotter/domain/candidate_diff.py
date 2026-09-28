@@ -54,13 +54,14 @@ def parent_param_value(parent_cfg: dict[str, Any], param: str) -> Any:
 @dataclass(frozen=True)
 class CandidateDelta:
     """What a candidate changed against its parent: prompt field → new text, ``(node, param)`` →
-    new value. Empty ⇔ the candidate is a clone."""
+    new value, and its new shot list where it moved one. Empty ⇔ the candidate is a clone."""
 
     prompt: dict[str, str]
     params: dict[tuple[str, str], Any]
+    shots: tuple[int, ...] | None
 
     def __bool__(self) -> bool:
-        return bool(self.prompt or self.params)
+        return bool(self.prompt or self.params) or self.shots is not None
 
     def signature(self) -> tuple[Any, ...]:
         """Hashable identity — two siblings with one signature are one candidate."""
@@ -69,6 +70,7 @@ class CandidateDelta:
             tuple(
                 sorted((n, p, json.dumps(v, sort_keys=True)) for (n, p), v in self.params.items())
             ),
+            self.shots,
         )
 
 
@@ -88,8 +90,10 @@ def candidate_delta(
 ) -> CandidateDelta:
     """The ONE definition of what a candidate changed — the parse guard, round-local dedup, the
     repeat gate, the ALREADY TRIED panel and earned blocks all read it. ``child_fields`` may be the
-    child's whole prompt or only the fields a variant wrote."""
+    child's whole prompt or only the fields a variant wrote; a ``shot_ids`` key absent from it is
+    no shot edit, so a whole-prompt comparison passes both sides' lists."""
     parent = parent_pp or {}
+    shots = child_fields.get("shot_ids")
     return CandidateDelta(
         prompt={
             f: str(v)
@@ -102,6 +106,11 @@ def candidate_delta(
             for p, v in cfg.items()
             if _is_edit(v, parent_param_value(parent.get(n) or {}, p))
         },
+        shots=(
+            tuple(shots)
+            if shots is not None and list(shots) != list(parent_fields.get("shot_ids", ()))
+            else None
+        ),
     )
 
 

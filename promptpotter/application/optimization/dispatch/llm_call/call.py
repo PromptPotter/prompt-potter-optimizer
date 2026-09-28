@@ -445,7 +445,7 @@ async def run_optimizer_node(
         context=context,
         trace_meta={
             "template_name": template_name,
-            "template_fields": template.prompt_field_dict(),
+            "template_fields": template.prompt_fields(),
             "variables": prompt_vars,
         },
         **overrides,

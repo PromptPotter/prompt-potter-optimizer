@@ -444,8 +444,8 @@ def _winning_round(cycle: Cycle | None, result: CycleResult) -> RoundResult | No
     is differenced against, so counting it as a search result would credit the loop with its floor.
 
     It is also the round whose ``prompt_fields`` round-trip. ``CycleResult.result_prompt_fields``
-    is the wire-side projection — it has already flattened ``few_shot_examples`` into a rendered
-    ``few_shot_block``, which ``from_prompt_fields`` cannot restore and ``extra="forbid"`` rejects.
+    is the wire-side projection — it carries the rendered ``few_shot_block`` in place of the
+    ``shot_ids`` it came from, which ``from_prompt_fields`` cannot restore.
     """
     if cycle is None:
         return None
@@ -481,6 +481,7 @@ def _export_artifact(
         origin_accuracy=cycle_result.origin_accuracy,
         origin_composite_fitness=cycle_result.origin_composite_fitness,
         framing=cycle.framing,
+        demo=session.scoring.require_partition().demo,
         bench=cycle_result.bench,
     )
 
@@ -622,6 +623,7 @@ async def _run_single_cycle(
                     base_pipeline_params=session.pipeline_params or None,
                     schema=session.pipeline_schema,
                     framing=cycle.framing,
+                    demo=session.scoring.require_partition().demo,
                 ),
                 round_num=0,
                 cb=cb,

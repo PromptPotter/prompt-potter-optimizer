@@ -77,6 +77,7 @@ def resolve_cycle_plan(
         dataset_dir=session.dataset_config_dir,
         seed=_campaign_origin_seed(origin_override),
     )
+    partition = partition_bank(dataset, campaign_config.dataset_split)
     return CyclePlan(
         pipeline_params=pipeline_params,
         origin=origin,
@@ -86,13 +87,14 @@ def resolve_cycle_plan(
         cycle_id=build_origin_cycle_id(
             origin,
             schema,
-            list(partition_bank(dataset, campaign_config.dataset_split).search),
+            list(partition.search),
             pipeline_params,
             # PURE read, and the reason identity can hold the framing at all: check-in commits
             # `task_context.yaml` before anything asks for an id, so the id can hash the prompt
             # the run will actually score. A decomposition cannot happen here — it needs a cycle
             # to bill, which is the thing being computed.
             framing=committed_task_context(session.store, session.dataset_name),
+            demo=partition.demo,
         ),
     )
 

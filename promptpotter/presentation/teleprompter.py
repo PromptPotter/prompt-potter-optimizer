@@ -205,13 +205,13 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
         if stop_reason_outcome(result.stop_reason) is not StopOutcome.SUCCESS:
             return student
         # The winner comes off the ARTIFACT, never off `CycleResult.result_prompt_fields`: that is
-        # the wire-side projection and flattens few-shot examples into a rendered block a
-        # `PromptTemplate` rejects outright — a crash that waits for the first winner carrying
-        # demonstrations and lands after the whole campaign is paid for.
+        # the wire-side projection, whose rendered shot block a `PromptTemplate` rejects outright —
+        # a crash that waits for the first winner carrying shots and lands after the whole
+        # campaign is paid for.
         self.export = session.store.campaigns.read_export(session.hop)
         if self.export is None:
             return student
-        return _with_instructions(student, self.export.template().render())
+        return _with_instructions(student, self.export.render())
 
     # -- the dataset the campaign is keyed by -------------------------------------------------
 

@@ -362,13 +362,6 @@ export interface ScoreboardRow {
   is_selected: boolean;
 }
 
-/** An input/output pair used as a few-shot demonstration. */
-export interface FewShotExample {
-  input: string;
-  output: string;
-  explanation: string | null;
-}
-
 /** Panel field + citation L1 declares to justify a mutation. */
 export interface EvidenceGrounding {
   /** A citable panel named in the prompt, or stall_exploration. */
@@ -451,7 +444,10 @@ export interface OptSearchPoint {
   instruction: string;
   thinking_style: string;
   answer_format: string;
-  few_shot_examples: FewShotExample[];
+  /** Its few-shot shots, in render order, as ids of the campaign's demo pool —
+   * resolved to each row's query and ground truth only when the target prompt
+   * renders. */
+  shot_ids: number[];
   lineage: IndividualLineage;
 }
 

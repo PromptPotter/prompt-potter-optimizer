@@ -26,7 +26,7 @@ def _valid_axis_set(schema: PipelineSchema) -> set[str]:
     hallucinated `suggested_axes` (e.g. `prompt_size`) before they seed the next round. A prompt
     field the campaign held is not one: steering L1 at it spends a round on a slot it cannot write.
     """
-    out: set[str] = set(schema.open_prompt_fields()) | {"few_shot_examples", "plan"}
+    out: set[str] = set(schema.open_prompt_fields()) | {"shot_ids"}
     for node in schema.nodes:
         if node.name:
             out.add(node.name)

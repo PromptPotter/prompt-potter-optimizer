@@ -587,8 +587,8 @@ def parent_key(rr: RoundResult) -> str:
     """What makes two rounds' parents the SAME measurable individual: the TARGET PROMPT they are
     scored under, plus the node params that are not that prompt.
 
-    **The RENDER, not the six fields.** ``render()`` adds ``few_shot_examples`` as a block, so two
-    winners can carry byte-identical ``prompt_fields`` and still send different prompts. The
+    **The six fields AND the shots.** Two winners can carry byte-identical fields and still send
+    different prompts through ``shot_ids``, which name rows of the campaign's one demo pool. The
     campaign's framing is left out: it is one value for the whole cycle, so it separates nothing.
 
     **NOT ``lineage.id``.** An L2/L3 transition mints a fresh ``OptSearchPoint`` from the same six
@@ -600,7 +600,11 @@ def parent_key(rr: RoundResult) -> str:
     # round the round file records the render the round STARTED with, not the elected winner's.
     # Every other param — temperature, effort — is a real axis and stays in the key.
     return stable_hash(
-        [rr.opt_sp.render() if rr.opt_sp else "", strip_rendered_prompt(rr.pipeline_params)]
+        [
+            rr.opt_sp.render() if rr.opt_sp else "",
+            rr.opt_sp.shot_ids if rr.opt_sp else [],
+            strip_rendered_prompt(rr.pipeline_params),
+        ]
     )
 
 

@@ -179,11 +179,13 @@ async def _walk_population(
     order = [int(s.id) for s in panel.order]
     # Single merge site: each candidate's frozen searchpoint, shared by the in-flight dashboard
     # seed (resolved config-only) and the candidate's walk and report.
+    demo = cycle.session.scoring.require_partition().demo
     sps = [
         ind.to_job_search_point(
             base_pipeline_params=population.pipeline_params[idx],
             schema=cycle.session.pipeline_schema,
             framing=cycle.framing,
+            demo=demo,
         )
         for idx, ind in enumerate(population.individuals)
     ]

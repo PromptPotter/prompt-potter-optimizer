@@ -31,6 +31,9 @@ L1_MANDATORY: frozenset[str] = frozenset(
         # carrier of the states where that number is not ability.
         "measurand",
         "confounds",
+        # The one carrier of the parent's shots, which the rendered prompt leaves out; silent
+        # without a demo pool, so it costs nothing where there are none to edit.
+        "demo_pool",
     }
 )
 
@@ -48,6 +51,7 @@ L1_POSSIBLE: frozenset[str] = frozenset(
         "rendered_prompt",
         "pipeline_param_catalogue",
         "prompt_block_catalogue",
+        "demo_pool",
         "diagnostics",
         "escalation_panel",
         "l1_wounds",
@@ -198,6 +202,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "sample_provenance",
                 "pipeline_param_catalogue",
                 "prompt_block_catalogue",
+                "demo_pool",
                 "plan",
                 "answer_distribution",
                 "critique",

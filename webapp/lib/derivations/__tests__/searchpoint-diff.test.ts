@@ -41,17 +41,17 @@ describe("searchPointDiff", () => {
   it("compares non-string values structurally — a list or a number is not a change unless it moved", () => {
     expect(
       searchPointDiff(
-        cfg({ few_shot_examples: [1, 2] }, { steps: ["a", "b"] }),
-        cfg({ few_shot_examples: [1, 2] }, { steps: ["a", "b"] }),
+        cfg({ shot_ids: [1, 2] }, { steps: ["a", "b"] }),
+        cfg({ shot_ids: [1, 2] }, { steps: ["a", "b"] }),
       ),
     ).toEqual([]);
     expect(
       searchPointDiff(
-        cfg({ few_shot_examples: [1, 2] }, { llm_only: { model: "a" } }),
-        cfg({ few_shot_examples: [1, 2, 3] }, { llm_only: { model: "b" } }),
+        cfg({ shot_ids: [1, 2] }, { llm_only: { model: "a" } }),
+        cfg({ shot_ids: [1, 2, 3] }, { llm_only: { model: "b" } }),
       ),
     ).toEqual([
-      { kind: "prompt", node: null, names: ["Few-shot examples"] },
+      { kind: "prompt", node: null, names: ["Shots"] },
       { kind: "config", node: "llm_only", names: ["model"] },
     ]);
   });

@@ -107,6 +107,7 @@ def _nested_param_property(node: PipelineNode, param: str) -> dict[str, Any] | N
 _SLOT_PANEL: dict[str, str] = {
     "prompt_fields_updates": "rendered_prompt",
     "pipeline_overlay": "pipeline_param_catalogue",
+    "shot_ids": "demo_pool",
 }
 
 
@@ -225,6 +226,14 @@ def build_l1_response_schema(
         )
     else:
         del variant_props["prompt_fields_updates"]
+    # Shots render into that same prompt, so they are write-only without it too. No `null` arm:
+    # omitting the key already keeps the parent's shots.
+    shots = variant_props["shot_ids"]
+    if pipeline_schema.prompt_node_names():
+        array_arm = next(a for a in shots["anyOf"] if a.get("type") == "array")
+        variant_props["shot_ids"] = {**array_arm, "description": shots["description"]}
+    else:
+        del variant_props["shot_ids"]
 
     for slot, panel in _SLOT_PANEL.items():
         if panel in silent_panels:
