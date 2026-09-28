@@ -643,7 +643,9 @@ LEDGER_BASELINE = {
     # +1: a head-to-head pairing two optimizers' selections across bench sets another seed drew, or
     # across a grader that moved under one shared origin, still prints an interval and a winner
     # (test_numerics § 7).
-    "test_functions": 218,
+    # +2: walks of one configuration in separate processes each buying the cells the others
+    # measured, and a dead claimer's cell held forever, still score every arm (test_integrity § 2).
+    "test_functions": 220,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -751,7 +753,10 @@ LEDGER_BASELINE = {
     # each row's price by bucket beside its headline, and the guard naming the field that differs.
     # -1: `BenchSet.cell_formula` — the resolved text reads `fitness` for a defaulted and a declared
     # composite that grade a miss differently; `scorer_id`, stamped by the run, names both apart.
-    "served_fields": 716,
+    # +6: `HeadToHeadRow`'s three ratios, `lift_per_incurred_usd` and `concurrent_with`, and
+    # `HeadToHead.ratio_reference` — cost and speed compared across arms by the backend, on
+    # INCURRED spend, with the shared-cache confound named per row; no surface divides.
+    "served_fields": 722,
 }
 
 

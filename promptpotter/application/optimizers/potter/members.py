@@ -13,6 +13,7 @@ from promptpotter.application.intelligence.exploration import (
     select_round_subset,
 )
 from promptpotter.application.intelligence.indexes.axis import NOISE_THRESHOLD
+from promptpotter.application.optimizer_manifest import bound_inner_optimizer
 from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.potter import couplings
 from promptpotter.application.optimizers.potter.dispatch.facade import injection_source_digest
@@ -195,6 +196,7 @@ class L1Generate:
             runtime_failures=state.memory.wounds.runtime_failures,
             demo_ids=frozenset(s.id for s in cycle.session.scoring.require_partition().demo),
             shot_k_max=knobs.k_max,
+            inner_optimizer=bound_inner_optimizer(),
             prompt_block_catalogue=knobs.prompt_block_catalogue,
         )
         yield_stats = _fold_strict_rejections(yield_stats, proposals)

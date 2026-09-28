@@ -1524,6 +1524,11 @@ export interface HeadToHeadRow {
   spend: SpendRollup | null;
   wall_clock_s: number | null;
   rounds: number;
+  incurred_usd_ratio: number | null;
+  loop_incurred_usd_ratio: number | null;
+  wall_clock_ratio: number | null;
+  lift_per_incurred_usd: number | null;
+  concurrent_with: string[];
 }
 
 /** Two campaigns' selections paired on the bench rows both scored, in the headline composite. */
@@ -1544,6 +1549,7 @@ export interface HeadToHead {
   verdict: boolean | null;
   differs_on: string[];
   pairs: SelectionPair[];
+  ratio_reference: string | null;
   note: string;
 }
 

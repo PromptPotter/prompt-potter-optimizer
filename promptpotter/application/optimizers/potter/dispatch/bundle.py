@@ -20,6 +20,7 @@ from promptpotter.domain.search_point import TaskDecomposition
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
+    from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
 
 
@@ -302,6 +303,8 @@ class InjectionBundle:
     # shot menu, which withdraws the `shot_ids` slot with it.
     demo_pool: tuple[Sample, ...] = ()
     shot_k_max: int = 0
+    # The manifest whose prompts an L4 outer edits (`bound_inner_optimizer`); `None` off the recursion.
+    inner_optimizer: SelectedOptimizer | None = None
 
 
 @dataclass(frozen=True)

@@ -3545,6 +3545,17 @@
             "title": "Pairs",
             "type": "array"
           },
+          "ratio_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ratio Reference"
+          },
           "rows": {
             "items": {
               "$ref": "#/components/schemas/HeadToHeadRow"
@@ -3569,6 +3580,7 @@
           "verdict",
           "differs_on",
           "pairs",
+          "ratio_reference",
           "note"
         ],
         "title": "HeadToHead",
@@ -3613,6 +3625,46 @@
             ],
             "title": "Comparable"
           },
+          "concurrent_with": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Concurrent With",
+            "type": "array"
+          },
+          "incurred_usd_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incurred Usd Ratio"
+          },
+          "lift_per_incurred_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lift Per Incurred Usd"
+          },
+          "loop_incurred_usd_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loop Incurred Usd Ratio"
+          },
           "optimizer": {
             "title": "Optimizer",
             "type": "string"
@@ -3635,6 +3687,17 @@
             "title": "Subject",
             "type": "string"
           },
+          "wall_clock_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wall Clock Ratio"
+          },
           "wall_clock_s": {
             "anyOf": [
               {
@@ -3656,7 +3719,12 @@
           "comparable",
           "spend",
           "wall_clock_s",
-          "rounds"
+          "rounds",
+          "incurred_usd_ratio",
+          "loop_incurred_usd_ratio",
+          "wall_clock_ratio",
+          "lift_per_incurred_usd",
+          "concurrent_with"
         ],
         "title": "HeadToHeadRow",
         "type": "object"

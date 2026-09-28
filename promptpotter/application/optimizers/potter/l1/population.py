@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimizers.potter.validators.l1_strict import (
     L1_CONFIG_NOT_IN_RUNTIME_FAILURES,
@@ -24,6 +24,9 @@ from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import CandidateProposal
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 
+if TYPE_CHECKING:
+    from promptpotter.application.optimizer_manifest import SelectedOptimizer
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["parse_population"]
@@ -38,6 +41,7 @@ def parse_population(
     runtime_failures: Sequence[RuntimeFailure],
     demo_ids: frozenset[int],
     shot_k_max: int,
+    inner_optimizer: SelectedOptimizer | None,
     prompt_block_catalogue: str = "guidance",
 ) -> tuple[list[OptSearchPoint], list[dict[str, Any] | None]]:
     """Project proposals into searchpoints. ``provider`` / ``route_order`` mutations are ALWAYS
@@ -91,10 +95,11 @@ def parse_population(
                 # prose proposed nothing. The gutting check takes the parent's params because the
                 # length it judges is a COMPARISON — the delta alone cannot say what it replaced.
                 for outcome in (
-                    L1_INNER_STEER_IS_LEGAL.run(pipeline_overlay),
+                    L1_INNER_STEER_IS_LEGAL.run(pipeline_overlay, inner_optimizer=inner_optimizer),
                     L1_INNER_LAYOUT_APPLIES.run(pipeline_overlay),
                     L1_PROMPT_FIELD_NOT_GUTTED.run(
                         pipeline_overlay,
+                        inner_optimizer=inner_optimizer,
                         pipeline_params=pipeline_params,
                     ),
                 ):
@@ -106,6 +111,7 @@ def parse_population(
             # parent inherits a severed port without re-proposing it).
             ph_outcome = L1_PROMPT_PLACEHOLDERS_INTACT.run(
                 merged_pp or {},
+                inner_optimizer=inner_optimizer,
                 opt_sp=opt_sp,
                 pipeline_schema=schema,
             )

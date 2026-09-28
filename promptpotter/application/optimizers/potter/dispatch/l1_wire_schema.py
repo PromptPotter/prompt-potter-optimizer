@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Collection, Sequence
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.optimizer_manifest import resolve_node_override
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
@@ -36,6 +36,9 @@ from promptpotter.domain.pipeline_schema import (
     PipelineSchema,
 )
 from promptpotter.shared.hashing import shapes_optimizer_prompt
+
+if TYPE_CHECKING:
+    from promptpotter.application.optimizer_manifest import SelectedOptimizer
 
 shapes_optimizer_prompt(__name__)
 
@@ -118,6 +121,7 @@ def build_l1_response_schema(
     pipeline_schema: PipelineSchema,
     *,
     citable_fields: Sequence[str],
+    inner_optimizer: SelectedOptimizer | None,
     silent_panels: Collection[str] = (),
     schema_field_rename: bool = False,
     n_variants: int | None = None,
@@ -187,10 +191,14 @@ def build_l1_response_schema(
                 param_props[param] = {"type": declared_type}
             else:
                 param_props[param] = {}
-            # Only on a node carrying a layout — an optimizer node, whose `instruction` is the
-            # long-form artifact. Elsewhere the declaration is prompt text that never binds.
+            # Only on an inner optimizer node, whose `instruction` is the long-form artifact.
+            # Elsewhere the declaration is prompt text that never binds.
             ceiling = OPTIMIZER_PROMPT_FIELD_MAX_CHARS.get(param)
-            if ceiling is not None and NODE_LAYOUTS.get(node.name) is not None:
+            if (
+                ceiling is not None
+                and inner_optimizer is not None
+                and node.name in inner_optimizer.llm_nodes
+            ):
                 param_props[param]["maxLength"] = ceiling
         # The field-NAME lever is the strongest and the only one that can break a parser,
         # so the campaign must unlock it: dropped from the emitted schema when locked, and

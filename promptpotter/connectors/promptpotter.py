@@ -3,17 +3,18 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application import optimizers
-from promptpotter.application.campaign_config import OptimizationConfig
 from promptpotter.application.intelligence import exploration
-from promptpotter.application.optimizer_manifest import SelectedOptimizer, resolve_optimizer
 from promptpotter.application.runner.inner import ruler
 from promptpotter.application.runner.inner.spawn import inner_cell_envelope_s, run_inner_cycle
-from promptpotter.application.runner.inner.tasks import InnerTasks
+from promptpotter.application.runner.inner.tasks import (
+    InnerTasks,
+    inner_benchmark_documents,
+    select_inner_optimizer,
+)
 from promptpotter.application.scoring import metrics, selection
 from promptpotter.config.prompt_blocks import block_library
 from promptpotter.connectors.protocol import Connector, InProcessWorkload
@@ -22,12 +23,8 @@ from promptpotter.domain.l4.inner_origin import INNER_ORIGIN_KEY
 from promptpotter.domain.l4.proxies import INNER_RESULT_KEY, OUTER_PROXY_KEYS
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, stable_hash
-from promptpotter.infrastructure.store.dataset_access import (
-    DatasetAccessError,
-    readable_dataset_dir,
-)
-from promptpotter.infrastructure.store.io import read_yaml, read_yaml_optional
+from promptpotter.domain.pipeline_schema import stable_hash
+from promptpotter.infrastructure.store.io import read_yaml
 from promptpotter.shared.hashing import module_source_digest
 
 if TYPE_CHECKING:
@@ -37,6 +34,7 @@ if TYPE_CHECKING:
 
     import httpx
 
+    from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
@@ -107,15 +105,11 @@ def _identity_config(
     # `config` only, deliberately. `available_models` is a permission list and
     # `optimizer.param_allowed_values` bounds what L1 may PROPOSE — neither changes what the
     # origin does, so widening either must not void a panel that cost an hour to measure.
-    # The benchmark resolves through `readable_dataset_dir`, the dir the spawn runs and the ruler
-    # grades; an unresolvable one hashes as ``None``, a distinct input from any real config.
+    # An unresolvable benchmark hashes as ``None``, a distinct input from any real config.
     benchmark = inner_tasks.get("inner_benchmark")
-    benchmark_dir: Path | None = None
-    if benchmark:
-        with contextlib.suppress(DatasetAccessError):
-            benchmark_dir = readable_dataset_dir(stores, str(benchmark))
-    inner_pipeline = read_yaml_optional(benchmark_dir / "pipeline.yaml") if benchmark_dir else None
-    inner_campaign = read_yaml_optional(benchmark_dir / "campaign.yaml") if benchmark_dir else None
+    inner_pipeline, inner_campaign_config = inner_benchmark_documents(
+        stores, str(benchmark) if benchmark else None
+    )
     inner_spec = {
         "benchmark": benchmark,
         "config": inner_tasks.get("inner_benchmark_config") or {},
@@ -124,18 +118,9 @@ def _identity_config(
             if inner_pipeline and isinstance(inner_pipeline.get("nodes"), dict)
             else None
         ),
-        "campaign": (inner_campaign or {}).get("campaign_config"),
+        "campaign": inner_campaign_config,
     }
-    # The manifest the INNER campaign selects, under its own overlay. An unresolvable benchmark
-    # hashes the default manifest, which is what such an inner campaign would run.
-    inner_opt = ((inner_spec["campaign"] or {}).get("optimization")) or {}
-    inner = resolve_optimizer(
-        inner_opt.get("optimizer", OptimizationConfig.model_fields["optimizer"].default),
-        {
-            node: ManifestNodeOverlay.model_validate(raw)
-            for node, raw in (inner_opt.get("nodes") or {}).items()
-        },
-    )
+    inner = select_inner_optimizer(inner_spec["campaign"])
     inner_optimizer = _inner_optimizer_revision(dataset_dir, inner)
     # What the inner optimizer's prompts SAY, and which of its panels fill each one: both are
     # code, so nothing above reaches them — see `OptimizerRuntime.source_digest`.

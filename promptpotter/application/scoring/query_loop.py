@@ -11,7 +11,7 @@ import logging
 import re
 import sys
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
+    from promptpotter.infrastructure.store.measurement_archive import CellClaim
 
 logger = logging.getLogger(__name__)
 
@@ -276,6 +277,11 @@ class QueryLoopState:
     record_run: Callable[[list[QueryMeasurement], dict[str, Any]], None]
     # Keeps rows the walk has back and has not taken, beside the rows it has, for a resumption.
     bank: Callable[[list[QueryMeasurement], list[QueryMeasurement]], None]
+    # A cell no prior covers: the row another walk banked or is measuring, else this walk's hold on
+    # it. ``None`` where nothing is archived or the walk re-measures on purpose.
+    claim_cell: (
+        Callable[[Sample], Awaitable[tuple[QueryMeasurement | None, CellClaim | None]]] | None
+    )
 
 
 def _armed_cells(session: Session) -> int:
@@ -327,12 +333,20 @@ class _Acquired:
     result: QueryMeasurement
     fresh: bool  # False ⇒ replayed from the prior cache (no ``persist_fresh``)
     deprecated_display: QueryMeasurement | None = None
+    # Held until the row is on disk or discarded, so no other walk measures the cell meanwhile.
+    claim: CellClaim | None = None
 
 
 def _returned_row(cell: asyncio.Task[_Acquired]) -> QueryMeasurement | None:
     if not cell.done() or cell.cancelled() or cell.exception() is not None:
         return None
     return cell.result().result
+
+
+def _release_claim(cell: asyncio.Task[_Acquired]) -> None:
+    returned = cell.done() and not cell.cancelled() and cell.exception() is None
+    if returned and (claim := cell.result().claim) is not None:
+        claim.release()
 
 
 def _quiet(call: asyncio.Future[Any]) -> None:
@@ -343,6 +357,9 @@ def _quiet(call: asyncio.Future[Any]) -> None:
 
 async def _acquire(sample: Sample, idx: int, ctx: QueryLoopState) -> _Acquired:
     cached = ctx.cached_sample_results.get(sample.id)
+    claim: CellClaim | None = None
+    if cached is None and ctx.claim_cell is not None:
+        cached, claim = await ctx.claim_cell(sample)
     if cached is not None:
         cached_r = _materialize_cached(cached, ctx.scorer)
         # Can re-measure for real, so a hit gets a slot like anything else.
@@ -354,20 +371,28 @@ async def _acquire(sample: Sample, idx: int, ctx: QueryLoopState) -> _Acquired:
         # Rescored here, rendered at the take: a display call from a cell prints out of walk order.
         deprecated_display = _materialize_cached(cached_deprecated, ctx.scorer)
 
-    result = await measure_sample(
-        sample,
-        ctx.session,
-        pipeline_params=ctx.search_point.pipeline_params,
-    )
-    result = await _maybe_recover_degraded(result, sample, ctx)
-    if sample.id in ctx.deprecated_samples:
-        cast(dict[str, Any], result)["retry_of_deprecated_cache"] = True
+    try:
+        result = await measure_sample(
+            sample,
+            ctx.session,
+            pipeline_params=ctx.search_point.pipeline_params,
+        )
+        result = await _maybe_recover_degraded(result, sample, ctx)
+        if sample.id in ctx.deprecated_samples:
+            cast(dict[str, Any], result)["retry_of_deprecated_cache"] = True
+        if claim is not None:
+            claim.publish(cast(dict[str, Any], result))
+    except BaseException:
+        if claim is not None:
+            claim.release()
+        raise
     return _Acquired(
         sample=sample,
         idx=idx,
         result=result,
         fresh=True,
         deprecated_display=deprecated_display,
+        claim=claim,
     )
 
 
@@ -464,7 +489,13 @@ class Walk:
             ctx.on_sample_scored(acq.deprecated_display, acq.idx, n)
 
         self.results.append(acq.result)
-        running = ctx.persist_fresh(self.results) if acq.fresh else ctx.running_scores(self.results)
+        try:
+            running = (
+                ctx.persist_fresh(self.results) if acq.fresh else ctx.running_scores(self.results)
+            )
+        finally:
+            if acq.claim is not None:
+                acq.claim.release()
 
         # Asked of every row, not only fresh ones: a replay never carries an error, but the
         # stale-data protocol re-measures a replayed cell. The backend already spent its own
@@ -599,11 +630,13 @@ class Walk:
             )
         for cell in self.finished.values():
             _quiet(cell)
+            _release_claim(cell)
         draining = list(self.running.values())
         for cell in draining:
             if cancel:
                 cell.cancel()
             cell.add_done_callback(_quiet)
+            cell.add_done_callback(_release_claim)
         self.running, self.finished = {}, {}
         return draining
 

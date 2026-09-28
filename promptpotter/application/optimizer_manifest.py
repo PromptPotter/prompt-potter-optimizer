@@ -2,8 +2,9 @@
 campaign's ``optimization.nodes`` overlay laid on — plus the bench's own check-in node beside it.
 
 Resolved off the config wherever one is in hand, and bound per task (:func:`bind_optimizer`) for
-the calls deep inside a round that hold none — beside the two other per-task bindings on those
-calls, the determinism clamp and the outer's prompt overrides an L4 inner cell runs under."""
+the calls deep inside a round that hold none — beside the other per-task bindings on those calls:
+the determinism clamp, the outer's prompt overrides an L4 inner cell runs under, and the manifest
+an L4 outer's inner cells select (:func:`bind_inner_optimizer`)."""
 
 from __future__ import annotations
 
@@ -51,7 +52,9 @@ __all__ = [
     "NodeKnobs",
     "OptimizerKnobsResponse",
     "SelectedOptimizer",
+    "bind_inner_optimizer",
     "bind_optimizer",
+    "bound_inner_optimizer",
     "bound_optimizer",
     "checkin_manifest",
     "declared_node_override",
@@ -387,6 +390,21 @@ def bound_optimizer() -> SelectedOptimizer:
             "`select_optimizer(config.optimization)` before anything reads a node"
         )
     return selected
+
+
+# The manifest an L4 outer's inner cells select, bound at `publish_inner_spawn_context`: what the
+# outer's arms mutate, never the outer's own. `None` off the recursion.
+_INNER: contextvars.ContextVar[SelectedOptimizer | None] = contextvars.ContextVar(
+    "inner_optimizer", default=None
+)
+
+
+def bind_inner_optimizer(selected: SelectedOptimizer | None) -> None:
+    _INNER.set(selected)
+
+
+def bound_inner_optimizer() -> SelectedOptimizer | None:
+    return _INNER.get()
 
 
 def llm_node_document(node: str) -> tuple[PipelineNode, Mapping[str, Any], Mapping[str, Any]]:

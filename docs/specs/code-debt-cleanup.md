@@ -150,7 +150,7 @@ predicates, and later readers accept nothing else.
   `origin.py::resolve_origin_opt_search_point`, without the framing; `ab` then splits the origin
   into two arms on its δ ruler. `grep -n "from_prompt_fields(origin.prompt_fields)\|from_prompt_fields(round_file.prompt_fields)"
   promptpotter/application/bench/resume_and_fork/ab_replay.py promptpotter/application/diagnostics/noise_floor.py`.
-- `infrastructure/store/measurement_archive.py::load_reusable_results` tests `predicted == "ERROR"`
+- `infrastructure/store/measurement_archive.py::ReplayFeed.advance` tests `predicted == "ERROR"`
   (a display token) instead of `is_error_result`, and `domain/sample.py::Measurement` has no
   `error_category`, so a formula-failure row replays as a live answer and verify reads archived
   holes as measured. `grep -n 'predicted") == "ERROR"' promptpotter/infrastructure/store/measurement_archive.py`.

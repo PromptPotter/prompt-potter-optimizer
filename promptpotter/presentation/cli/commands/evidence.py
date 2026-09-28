@@ -177,15 +177,20 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
         )
     lines += [
         "",
+        f"  /ref divides by {h2h.ratio_reference or '—'}, the oldest run carrying a spend and a "
+        "wall clock: total and optimizer-only (`loop`) INCURRED USD, then elapsed seconds. "
+        "lift/$ is the bench lift per incurred USD; USD is the bill.",
         f"  {'campaign':<24}  {'optimizer':<9}  {'sel':>3}  {'selected':>8}  {'95% CI':>16}  "
         f"{'origin':>7}  {'95% CI':>16}  {'lift':>7}  {'95% CI':>18}  {'USD':>8}  "
-        f"{'tokens':>8}  {'wall s':>7}  {'rounds':>6}",
+        f"{'tokens':>8}  {'wall s':>7}  {'rounds':>6}  {'USD/ref':>8}  {'loop/ref':>8}  "
+        f"{'wall/ref':>8}  {'lift/$':>7}",
     ]
     for r in h2h.rows:
         # `x` off the instrument most rows share: its headline is listed, never paired.
         mark = {True: " ", False: "x", None: " "}[r.comparable]
         b = r.bench
         spend = r.spend
+        per_usd = r.lift_per_incurred_usd
         lines.append(
             f" {mark}{r.campaign_id[:24]:<24}  {r.optimizer[:9]:<9}  "
             + (
@@ -203,7 +208,12 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
                 if spend is not None
                 else f"{'—':>8}  {'—':>8}  "
             )
-            + f"{'—' if r.wall_clock_s is None else f'{r.wall_clock_s:.0f}':>7}  {r.rounds:>6}"
+            + f"{'—' if r.wall_clock_s is None else f'{r.wall_clock_s:.0f}':>7}  {r.rounds:>6}  "
+            + "  ".join(
+                f"{'—' if x is None else f'{x:.2f}':>8}"
+                for x in (r.incurred_usd_ratio, r.loop_incurred_usd_ratio, r.wall_clock_ratio)
+            )
+            + f"  {'—' if per_usd is None else f'{per_usd:+.2f}':>7}"
         )
     buckets = list(TOKEN_KIND_BUCKET.values())
     lines += [

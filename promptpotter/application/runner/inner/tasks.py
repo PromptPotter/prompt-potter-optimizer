@@ -3,8 +3,10 @@ outer dataset; no name test recognises one. ``extra="forbid"`` throughout: the t
 
 from __future__ import annotations
 
+import contextlib
 import itertools
 import re
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ConfigDict, Field, ValidationError, model_validator
@@ -13,11 +15,17 @@ from promptpotter import connectors
 from promptpotter.application.campaign_config import (
     CampaignConfig,
     DeterminismClamp,
+    OptimizationConfig,
     merge_node_overlays,
 )
+from promptpotter.application.optimizer_manifest import SelectedOptimizer, resolve_optimizer
 from promptpotter.config.settings import DEFAULT_ORIGIN_BUDGET
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.store.dataset_access import (
+    DatasetAccessError,
+    readable_dataset_dir,
+)
 from promptpotter.infrastructure.store.io import read_yaml_optional
 from promptpotter.shared.errors import CellUnscoreableError
 
@@ -25,6 +33,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from promptpotter.application.runner.inner.spawn_context import InnerSpawnContext
+    from promptpotter.infrastructure.store.stores import Stores
 
 
 class InnerBenchmarkConfig(StrictModel):
@@ -251,6 +260,37 @@ def load_inner_tasks(path: Path) -> InnerTasks:
         ) from exc
 
 
+def inner_benchmark_documents(
+    stores: Stores, benchmark: str | None
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """The inner benchmark's ``pipeline.yaml`` and ``campaign.yaml::campaign_config`` from the dir the
+    spawn runs and the ruler grades (``readable_dataset_dir``). An unresolvable one reads as absent."""
+    benchmark_dir: Path | None = None
+    if benchmark:
+        with contextlib.suppress(DatasetAccessError):
+            benchmark_dir = readable_dataset_dir(stores, benchmark)
+    if benchmark_dir is None:
+        return None, None
+    campaign = read_yaml_optional(benchmark_dir / "campaign.yaml")
+    return (
+        read_yaml_optional(benchmark_dir / "pipeline.yaml"),
+        (campaign or {}).get("campaign_config"),
+    )
+
+
+def select_inner_optimizer(campaign_config: Mapping[str, Any] | None) -> SelectedOptimizer:
+    """The manifest the inner campaign selects under its own overlay — what every L4 arm mutates.
+    One naming none, or an unresolvable benchmark (``None``), runs the default manifest."""
+    opt = (campaign_config or {}).get("optimization") or {}
+    return resolve_optimizer(
+        opt.get("optimizer", OptimizationConfig.model_fields["optimizer"].default),
+        {
+            node: ManifestNodeOverlay.model_validate(raw)
+            for node, raw in (opt.get("nodes") or {}).items()
+        },
+    )
+
+
 def resolve_inner_task(ctx: InnerSpawnContext, query: str) -> InnerTaskSpec:
     """Map an outer query to its inner-campaign spec — the top-level benchmark + budget, overlaid by the
     matching cell. A query with no matching cell runs the panel's default.
@@ -344,7 +384,9 @@ def inner_instrument_config(
 __all__ = [
     "InnerBenchmarkConfig",
     "InnerTaskSpec",
+    "inner_benchmark_documents",
     "inner_instrument_config",
     "load_inner_tasks",
     "resolve_inner_task",
+    "select_inner_optimizer",
 ]

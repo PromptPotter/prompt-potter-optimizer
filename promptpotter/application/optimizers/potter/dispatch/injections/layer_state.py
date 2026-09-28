@@ -120,7 +120,9 @@ def _r_rendered_prompt(b: InjectionBundle) -> list[Item]:
             f"[{field}{HELD_PROMPT_FIELD_MARK if field in held else ''}]\n{text}"
             for field, text in fields
         )
-    inner = effective_optimizer_prompts(b.pipeline_schema, b.cycle_slice.pipeline_params)
+    inner = effective_optimizer_prompts(
+        b.pipeline_schema, b.cycle_slice.pipeline_params, b.inner_optimizer
+    )
     if inner:
         sections.append(_OPTIMIZER_PROMPT_HEADER)
         # One section per node·field: the cap's truncation drops whole tail sections,

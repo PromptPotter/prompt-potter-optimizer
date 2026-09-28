@@ -77,6 +77,7 @@ Reads happen by opening the on-disk artifact tree. `evidence` is the one read VE
                                         #   `shared_root / tenant_id`. Peer of campaigns/
       index.jsonl                  # append-only, last-wins by run_id; `reindex` rebuilds it from runs/
       runs/{run_id}.jsonl          # one append-only log per run: a `k:"run"` header row + a `k:"m:{sample_id}"` row each
+      claims/{cell}.lock|.json     # a cell some walk is measuring now, and its row until taken (transient)
       derived/                     # read models folded FROM the runs (regenerable)
     optimizer_reuse/{hash}.json         # PAID — optimizer-LLM answers, replayed instead of re-sampled
     judge_reuse/{hash}.json             # PAID — LLM-as-judge grading replies, same shape, own tree:
@@ -278,6 +279,18 @@ The single most-asked operating question: *"I edited a connector tunable — wil
 4. **On L4 the identity inputs are NOT frozen — editing one mid-campaign re-measures the origin.** `connectors/promptpotter.py::_identity_config` fingerprints what the inner optimizer nodes RESOLVE TO (`_inner_optimizer_revision` — each node's prompt body, its resolved response schema, which is prompt text riding every call as `response_format`, and its config), **the source deciding what each node is handed** (the inner optimizer runtime's `source_digest` — potter's is `injection_source_digest`, whose hashed set carries its per-node layouts), **the estimator's own source** (`_measurement_source_digest`), and the inner benchmark's `pipeline.yaml` node configs *and* `campaign.yaml` — the worker model and the scoring formula included, since either changes what every cell measures. Both source digests are normalized through the AST, so a comment costs nothing while an expression voids the origin. Fact 2 does not cover these — they are read live, not snapshotted — so an edit lands on the *running* campaign: the banked outer origin stops joining and the next round pays to score it again. **Land config fixes before an origin is measured, never between its rounds.**
 
    **Deliberately NOT in it, because a corpus that cannot survive them cannot accumulate:** the manifest's non-inner nodes (`checkin`, descriptions, `available_models`), `APP_VERSION`, and the `inner_tasks.yaml` roster — each seat is its own sample's `source_pin`, so adding or editing one re-measures that seat alone. The version constant voided every banked cell on every release while saying nothing about whether the measurement had changed.
+
+### Concurrent walks buy a cell once
+
+Walks in separate processes often score one configuration on one panel at once — several campaigns measuring the same origin, a fork beside its parent. The cell is the replay key, `(node_configs, sample_key)`, and a cell measured once is the row every walk reads; a second measurement is money spent to make headlines disagree, since the backend is not deterministic and a run log keeps the last row per sample. The protocol is `measurement_archive.py::ReplayFeed`, driven by `search_point_scorer.py::_claim_cell`:
+
+1. **Replay rows are read forward.** Before measuring a cell, a walk reads the index entries and run-log bytes banked since its last read (`ReplayFeed.advance`), so a cell another process banked after this walk opened is replayed, not bought.
+2. **A cell is claimed before it is measured** — an OS file lock at `measurements/claims/{cell}.lock` (`ReplayFeed.claim`). A cell another walk holds is waited for, polled, and the wait heartbeats so it never reads as a vanished producer.
+3. **The row is shared the moment it returns**, as `{cell}.json` beside the lock, and every waiter replays it then. No waiter depends on the holder's walk order, so two walks can never hold each other's cells. Only a row a replay could serve is shared — no error, not deprecated, graded at least `REUSABLE_MIN_GRADE`; otherwise the claim drops and the waiter measures.
+4. **The holder releases once the row is on disk or discarded** — after `Walk.take` persists it, or when `Walk.end` drops it (a look-ahead cell past a cut, a pause, a cell still landing after its walk ended). The shared row is unlinked before the lock, so a row found under a free lock outlived a dead holder and the next claimer deletes it.
+5. **A crash needs no expiry.** The kernel drops the lock with its process, and the next poll takes the cell over; a live holder is never timed out, however long its cell runs.
+
+A waiter that replayed a row its holder later discarded keeps it: it is a measurement of that cell, and the holder's own run still never records it. **`force_fresh` claims nothing** — repair, `noise-floor` and the origin gate's re-measure measure on purpose — and neither does a configuration with no node configs, which has no cell identity.
 
 ## Changing the composite formula — fork, never swap
 

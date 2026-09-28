@@ -8,7 +8,6 @@ from typing import Any
 
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
-    bound_optimizer,
     checkin_manifest,
     llm_node_document,
     optimizer_prompt,
@@ -40,12 +39,13 @@ __all__ = [
 ]
 
 
-def base_optimizer_template(name: str) -> OptimizerPromptTemplate:
-    """Override-free and off the family the MANIFEST FILE names: the base an L4 prose mutation
-    merges onto, and the declaration of the inline ``{{tokens}}`` that mutation must preserve."""
-    node, _config, document = llm_node_document(name)
-    file_config = (document["nodes"][node.name] or {}).get("config") or {}
-    return optimizer_prompt(name, file_config, document)
+def base_optimizer_template(inner: SelectedOptimizer, name: str) -> OptimizerPromptTemplate:
+    """Override-free and off the family the MANIFEST FILE names — *inner*'s, the manifest the L4
+    inner campaign selects, unless the bench's check-in declares *name*: the base an L4 prose
+    mutation merges onto, and the declaration of the inline ``{{tokens}}`` it must preserve."""
+    checkin = checkin_manifest()
+    document = checkin.document if checkin.schema.get_node(name) is not None else inner.document
+    return optimizer_prompt(name, (document["nodes"][name] or {}).get("config") or {}, document)
 
 
 def _running_template(
@@ -59,12 +59,13 @@ def _running_template(
 def effective_optimizer_prompts(
     schema: PipelineSchema | None,
     pipeline_params: dict[str, Any] | None,
+    inner: SelectedOptimizer | None,
 ) -> dict[str, dict[str, str]]:
-    """``{}`` off the recursion — a node qualifies only if it names an optimizer prompt we hold the
-    base for AND advertises ``PromptTemplate`` fields, which no normal campaign's nodes do."""
-    if schema is None:
+    """``{}`` off the recursion (*inner* is ``None``) — a node qualifies only if it names one of
+    *inner*'s optimizer prompts AND advertises ``PromptTemplate`` fields."""
+    if schema is None or inner is None:
         return {}
-    owned = {*bound_optimizer().llm_nodes, *checkin_manifest().schema.active_steps}
+    owned = {*inner.llm_nodes, *checkin_manifest().schema.active_steps}
     keys_by_node = schema.node_param_keys()
     params = pipeline_params or {}
     out: dict[str, dict[str, str]] = {}
@@ -74,7 +75,7 @@ def effective_optimizer_prompts(
         fields = [f for f in PROMPT_STRING_FIELDS if f in keys_by_node.get(node_name, set())]
         if not fields:
             continue
-        base = base_optimizer_template(node_name)
+        base = base_optimizer_template(inner, node_name)
         node_params = params.get(node_name)
         override = node_params if isinstance(node_params, dict) else {}
         out[node_name] = {

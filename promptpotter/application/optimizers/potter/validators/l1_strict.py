@@ -10,7 +10,7 @@ consulting the schema at all are `l1_invariants.py`."""
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimizers.potter.dispatch import prompts as _opt_prompts
 from promptpotter.application.optimizers.potter.dispatch.layout import (
@@ -25,6 +25,9 @@ from promptpotter.domain.pipeline_schema import SCHEMA_OWNED_FIELDS, PipelineSch
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, WHO_ANSWERS_KEYS
 from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
+
+if TYPE_CHECKING:
+    from promptpotter.application.optimizer_manifest import SelectedOptimizer
 
 __all__ = [
     "DROPPED_MANDATORY_PLACEHOLDER",
@@ -360,19 +363,21 @@ L1_CONFIG_NOT_IN_RUNTIME_FAILURES: LLMOutputValidator = LLMOutputValidator(
 )
 
 
-def _optimizer_template_failures(pipeline_params: dict[str, Any]) -> list[ValidationFailure]:
+def _optimizer_template_failures(
+    pipeline_params: dict[str, Any], inner: SelectedOptimizer
+) -> list[ValidationFailure]:
     """PERMANENT, not transitional: these ports sit mid-sentence, so they can never move to the
     layout channel. Checks the MERGED params — a child inherits token-less prose without re-proposing it."""
     failures: list[ValidationFailure] = []
     for node_name, cfg in node_config_items(pipeline_params):
-        if node_name not in NODE_LAYOUTS:
+        if node_name not in inner.llm_nodes:
             continue
         prose = {
             k: v for k, v in cfg.items() if k in PromptTemplate.model_fields and isinstance(v, str)
         }
         if not prose:
             continue
-        base = _opt_prompts.base_optimizer_template(node_name)
+        base = _opt_prompts.base_optimizer_template(inner, node_name)
         declared = sorted(set(TEMPLATE_TOKEN_RE.findall(base.render())))
         if not declared:
             continue
@@ -393,6 +398,7 @@ def _optimizer_template_failures(pipeline_params: dict[str, Any]) -> list[Valida
 def _check_l1_prompt_placeholders_intact(
     source_output: Mapping[str, Any],
     *,
+    inner_optimizer: SelectedOptimizer | None,
     opt_sp: OptSearchPoint | None = None,
     pipeline_schema: PipelineSchema | None = None,
     **_: Any,
@@ -417,8 +423,8 @@ def _check_l1_prompt_placeholders_intact(
                         reason=DROPPED_MANDATORY_PLACEHOLDER,
                     )
                 )
-    if isinstance(source_output, dict):
-        failures.extend(_optimizer_template_failures(source_output))
+    if isinstance(source_output, dict) and inner_optimizer is not None:
+        failures.extend(_optimizer_template_failures(source_output, inner_optimizer))
     if not failures:
         return None
     return ValidatorOutcome(
@@ -490,6 +496,8 @@ _FORBIDDEN_INNER_STEERS: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 def _check_l1_inner_steer_is_legal(
     source_output: Mapping[str, Any],
+    *,
+    inner_optimizer: SelectedOptimizer | None,
     **_: Any,
 ) -> ValidatorOutcome | None:
     """An edit may make the inner loop search BETTER or WORSE — measurable either way. It may not
@@ -509,14 +517,14 @@ def _check_l1_inner_steer_is_legal(
     The sibling of ``_check_l1_prompt_placeholders_intact``: that one forbids DELETING a channel,
     this one forbids writing prose no channel can carry. Reads the DELTA, never the merge — a child
     inheriting a parent's prose has proposed nothing, and checking the merge would convict it for
-    its ancestor. Scoped to ``NODE_LAYOUTS``, so it reaches only overrides that ARE inner optimizer
-    prompts: on an ordinary campaign the same words in a target prompt steer a task rather than a
-    loop, and mean nothing here."""
-    if not source_output:
+    its ancestor. Scoped to the inner manifest's llm nodes, so it reaches only overrides that ARE
+    inner optimizer prompts: on an ordinary campaign the same words in a target prompt steer a task
+    rather than a loop, and mean nothing here."""
+    if not source_output or inner_optimizer is None:
         return None
     failures: list[ValidationFailure] = []
     for node_name, node_params in source_output.items():
-        if node_name not in NODE_LAYOUTS or not isinstance(node_params, dict):
+        if node_name not in inner_optimizer.llm_nodes or not isinstance(node_params, dict):
             continue
         for field, value in node_params.items():
             if field not in PromptTemplate.model_fields or not isinstance(value, str):
@@ -557,16 +565,18 @@ _GUTTABLE_MIN_CHARS = 1000
 _GUT_RATIO = 0.35
 
 
-def _parent_field_text(node: str, field: str, pipeline_params: Mapping[str, Any] | None) -> str:
+def _parent_field_text(
+    inner: SelectedOptimizer, node: str, field: str, pipeline_params: Mapping[str, Any] | None
+) -> str:
     """What this field says BEFORE the candidate's edit — the parent's own override where it made
-    one, else the manifest template. The same two-step the run resolves, so the length compared
+    one, else *inner*'s template. The same two-step the run resolves, so the length compared
     against is the text the generator was shown as CURRENT INNER OPTIMIZER PROMPTS."""
     parent = (pipeline_params or {}).get(node)
     if isinstance(parent, Mapping):
         inherited = parent.get(field)
         if isinstance(inherited, str) and inherited:
             return inherited
-    template = _opt_prompts.base_optimizer_template(node)
+    template = _opt_prompts.base_optimizer_template(inner, node)
     current = getattr(template, field, "")
     return current if isinstance(current, str) else ""
 
@@ -574,6 +584,7 @@ def _parent_field_text(node: str, field: str, pipeline_params: Mapping[str, Any]
 def _check_l1_prompt_field_not_gutted(
     source_output: Mapping[str, Any],
     *,
+    inner_optimizer: SelectedOptimizer | None,
     pipeline_params: Mapping[str, Any] | None = None,
     **_: Any,
 ) -> ValidatorOutcome | None:
@@ -583,17 +594,18 @@ def _check_l1_prompt_field_not_gutted(
     declares — the output shape, the forbidden moves, the evidence it must ground on — is ordinary
     prose, and deleting it raises nothing and reads as a bold edit.
 
-    Scoped to ``NODE_LAYOUTS`` and to the DELTA for the same reasons as the steer table above."""
-    if not source_output:
+    Scoped to the inner manifest's llm nodes and to the DELTA for the same reasons as the steer
+    table above."""
+    if not source_output or inner_optimizer is None:
         return None
     failures: list[ValidationFailure] = []
     for node_name, node_params in source_output.items():
-        if node_name not in NODE_LAYOUTS or not isinstance(node_params, dict):
+        if node_name not in inner_optimizer.llm_nodes or not isinstance(node_params, dict):
             continue
         for field, value in node_params.items():
             if field not in PromptTemplate.model_fields or not isinstance(value, str):
                 continue
-            parent = _parent_field_text(node_name, field, pipeline_params)
+            parent = _parent_field_text(inner_optimizer, node_name, field, pipeline_params)
             if len(parent) < _GUTTABLE_MIN_CHARS:
                 continue
             if len(value) >= _GUT_RATIO * len(parent):

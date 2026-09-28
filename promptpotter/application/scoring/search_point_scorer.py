@@ -4,7 +4,10 @@ search point scored alone: cache resolution, archival, observability. The sole s
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import logging
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
@@ -15,11 +18,13 @@ from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.query_loop import QueryLoopState, Walk, run_walks
 from promptpotter.application.scoring.selection import mean_fitness_ci
+from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE, grade_run, meets_grade
 from promptpotter.domain.results import ArmOutcome
 from promptpotter.domain.scoring import CellScorer, QueryMeasurement
 from promptpotter.domain.spend import ROLE_SPEND_KIND
 from promptpotter.domain.validators import StopRule, StopSignal
-from promptpotter.infrastructure.llm.telemetry import filed_as
+from promptpotter.infrastructure.llm.heartbeat import heartbeat
+from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND, filed_as
 from promptpotter.infrastructure.store import archive_queries
 from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 from promptpotter.infrastructure.tracing.events import DatasetRun
@@ -38,7 +43,11 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.infrastructure.store.measurement_archive import ReplayableRow
+    from promptpotter.infrastructure.store.measurement_archive import (
+        CellClaim,
+        ReplayableRow,
+        ReplayFeed,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -172,27 +181,17 @@ def _replayable_on(
 
 
 def _resolve_prior_cache(
-    search_point: JobSearchPoint,
     dataset: list[Sample],
     session: Session,
     *,
-    pipeline_schema: PipelineSchema,
-    force_fresh: bool,
+    feed: ReplayFeed | None,
     label: str,
 ) -> tuple[dict[int, QueryMeasurement], dict[int, QueryMeasurement], set[int]]:
     """Load-side cache resolution — reusable-archive lookup, deprecated-row split, preamble log.
-    ``force_fresh`` skips reuse."""
-    store = session.store
-    backend_id = session.backend_id
-    dataset_name = session.dataset_name
+    No ``feed`` ⇒ no reuse."""
     cached_sample_results: dict[int, QueryMeasurement] = {}
-    if store and backend_id and not force_fresh:
-        node_configs = pipeline_schema.node_configs(search_point.pipeline_params)
-        cached_sample_results = _replayable_on(
-            dataset,
-            archive_queries.reusable_results(store, node_configs, is_fatal=is_deprecated),
-            dataset_name,
-        )
+    if feed is not None:
+        cached_sample_results = _replayable_on(dataset, feed.advance(), session.dataset_name)
 
     cached_sample_results, deprecated_samples = _split_off_deprecated_samples(cached_sample_results)
     if deprecated_samples:
@@ -221,6 +220,54 @@ def _resolve_prior_cache(
             total - cached_in_dataset,
         )
     return cached_sample_results, deprecated_samples, dataset_sample_ids
+
+
+_CLAIM_POLL_S = 0.5
+
+
+async def _claim_cell(
+    sample: Sample,
+    *,
+    feed: ReplayFeed,
+    session: Session,
+    dataset: list[Sample],
+    cached: dict[int, QueryMeasurement],
+    shareable: Callable[[dict[str, Any]], bool],
+) -> tuple[QueryMeasurement | None, CellClaim | None]:
+    """The row a concurrent walk banked or is measuring for this cell, else this walk's hold on it:
+    a cell another process reached after this walk opened is never bought, or drawn, twice."""
+    waiting: asyncio.Task[None] | None = None
+    try:
+        while True:
+            claim = feed.claim(sample.key, shareable=shareable)
+            if claim is not None:
+                try:
+                    banked = {k: b for k, b in feed.advance().items() if not is_deprecated(b.row)}
+                    cached.update(_replayable_on(dataset, banked, session.dataset_name))
+                except BaseException:
+                    claim.release()
+                    raise
+                if (row := cached.get(sample.id)) is None:
+                    return None, claim
+                claim.release()
+                return row, None
+            if (measured := feed.claimed_row(sample.key)) is not None:
+                return cast(QueryMeasurement, {**measured, "sample_id": sample.id}), None
+            if waiting is None:
+                waiting = asyncio.create_task(
+                    heartbeat(
+                        session.state.ledger,
+                        call_id=f"scoring:{sample.id}",
+                        node="backend_scoring",
+                        round_num=_CURRENT_ROUND.get(),
+                        start_monotonic=time.monotonic(),
+                        detail_fn=lambda: "another run is measuring this cell",
+                    )
+                )
+            await asyncio.sleep(_CLAIM_POLL_S)
+    finally:
+        if waiting is not None:
+            waiting.cancel()
 
 
 def _walk_stop_signal(batch: QueryLoopResult) -> StopSignal | None:
@@ -328,14 +375,26 @@ def open_walk(
     # that did not produce them.
     run_id = f"{run_label}_{content_hash}"
 
-    cached_sample_results, deprecated_samples, dataset_sample_ids = _resolve_prior_cache(
-        search_point,
-        dataset,
-        session,
-        pipeline_schema=pipeline_schema,
-        force_fresh=force_fresh,
-        label=label,
+    replaying = bool(store and backend_id) and not force_fresh
+    node_configs = pipeline_schema.node_configs(search_point.pipeline_params) if replaying else []
+    # No node configs, no cell identity: every such searchpoint would share one claim per sample.
+    feed = (
+        archive_queries.replay_feed(store, node_configs, is_fatal=is_deprecated)
+        if store and node_configs
+        else None
     )
+    cached_sample_results, deprecated_samples, dataset_sample_ids = _resolve_prior_cache(
+        dataset, session, feed=feed, label=label
+    )
+
+    def _shareable(row: dict[str, Any]) -> bool:
+        """What a waiting walk may replay — a row this walk's own run would serve back."""
+        if is_error_result(row) or is_deprecated(row):
+            return False
+        graded = grade_run(
+            source, [row], pipeline_schema, human_intervened=session.human_intervened
+        )
+        return meets_grade(graded.grade, REUSABLE_MIN_GRADE)
 
     prior_tail = rescored_prior_tail(
         cached_sample_results=cached_sample_results,
@@ -454,6 +513,16 @@ def open_walk(
         running_scores=_composite,
         record_run=_record_run,
         bank=_bank,
+        claim_cell=None
+        if feed is None
+        else functools.partial(
+            _claim_cell,
+            feed=feed,
+            session=session,
+            dataset=dataset,
+            cached=cached_sample_results,
+            shareable=_shareable,
+        ),
     )
     return Walk(
         dataset=dataset,

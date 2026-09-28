@@ -7,6 +7,7 @@ from collections.abc import Callable, Iterable, Iterator
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.infrastructure.store.io import append_jsonl, write_jsonl
+from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
 from promptpotter.infrastructure.store.read_model import iter_jsonl
 from promptpotter.shared.instrument import instrument_mode
 
@@ -14,7 +15,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from promptpotter.domain.sample import Measurement
-    from promptpotter.infrastructure.store.measurement_archive import ReplayableRow
     from promptpotter.infrastructure.store.stores import Stores
 
 __all__ = [
@@ -34,8 +34,8 @@ __all__ = [
     "record_measurement_run",
     "reindex_measurements",
     "replace_measurement_detail",
+    "replay_feed",
     "reset_measurement_run",
-    "reusable_results",
     "run_signatures",
     "runs_since",
     "sample_fold_rows",
@@ -49,7 +49,7 @@ __all__ = [
 # The archive plays two roles that were never named apart, and conflating them is
 # what made an L4 inner cycle unreproducible:
 #
-#   CACHE  — content-addressed replay of raw grades (`reusable_results`). Keyed by
+#   CACHE  — content-addressed replay of raw grades (`replay_feed`). Keyed by
 #            content hash, so a hit IS the same measurement. Must stay tenant-global:
 #            it is what lets an inner origin replay instead of being re-paid and
 #            re-drawn. NEVER filtered.
@@ -145,17 +145,17 @@ def runs_since(
     )
 
 
-def reusable_results(
+def replay_feed(
     stores: Stores,
     node_configs: list[tuple[str, dict[str, Any]]],
     is_fatal: Callable[[dict[str, Any]], bool] | None = None,
-) -> dict[str, ReplayableRow]:
+) -> ReplayFeed:
     """Per-sample cache reuse from prior runs sharing *node_configs*, keyed by ``sample_key``.
 
-    The grade floor is the facade's, not the caller's: this is the seam ADR-0005's "every consumer
+    The grade floor is the feed's, not the caller's: this is the seam ADR-0005's "every consumer
     excludes ``C``" is enforced at, and a replayed row is re-archived under the reading run, so a
     caller free to lower it could launder a ``C`` cell into the δ ruler."""
-    return stores.archive.load_reusable_results(node_configs, is_fatal=is_fatal)
+    return ReplayFeed(stores.archive, node_configs, is_fatal)
 
 
 # -- writes -------------------------------------------------------------------

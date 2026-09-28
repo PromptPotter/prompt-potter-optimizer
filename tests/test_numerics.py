@@ -109,16 +109,17 @@ from promptpotter.domain.ruler import (
     is_flat_ruler_id,
     theta_caveat,
 )
-from promptpotter.domain.run_records import CandidateMintedRecord
+from promptpotter.domain.run_records import CandidateMintedRecord, WallClock
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import extract_item_label
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
-from promptpotter.domain.spend import SpendRollup
+from promptpotter.domain.spend import SpendBucket, SpendRollup
 from promptpotter.domain.wounds import ValidationFailure
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
 from promptpotter.infrastructure.store.archive_queries import record_measurement_run
+from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared import extract_gsm8k_number
 from promptpotter.shared.errors import RulerCoverageError
 from promptpotter.shared.statistics import (
@@ -3361,6 +3362,12 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench(built_stores) -> 
         origin: float = 0.4,
         regraded: float = 0.0,
         scorer: str = "auto_charged",
+        band: float | None = None,
+        at: int | None = None,
+        incurred: float = 0.2,
+        billed: float | None = None,
+        loop: float = 0.05,
+        wall: float = 100.0,
     ) -> Any:
         split = DatasetSplit(bench=6, seed=seed)
         partition = partition_bank(bank, split)
@@ -3369,7 +3376,7 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench(built_stores) -> 
             Campaign(
                 campaign_id=cid,
                 dataset_name="ds",
-                created_at=f"2026-09-26T00:00:0{n}Z",
+                created_at=f"2026-09-26T00:00:{n:02d}Z",
                 root_cycle_id=hop.cycle_id,
                 config={
                     "optimization": {
@@ -3400,14 +3407,16 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench(built_stores) -> 
                 {**header, "scores": {}, "content_hash": run_id, "created_at": ""},
                 rows,
             )
+            composite = level + 0.05 + (regraded if role == "origin" else 0.0)
+            wide = band if role == "origin" else None
             readings.append(
                 BenchReading(
                     round=int(role == "selected"),
                     sp_hash=role,
                     accuracy=level,
-                    composite_fitness=level + 0.05 + (regraded if role == "origin" else 0.0),
-                    ci_lo=None,
-                    ci_hi=None,
+                    composite_fitness=composite,
+                    ci_lo=None if wide is None else composite - wide,
+                    ci_hi=None if wide is None else composite + wide,
                     n_scored=len(rows),
                     run_id=run_id,
                     stopped=None,
@@ -3417,21 +3426,48 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench(built_stores) -> 
             bench_size=6,
             origin=readings[0],
             selected=readings[1],
-            lift=None,
+            lift=selected - origin - regraded,
             lift_ci_lo=None,
             lift_ci_hi=None,
         )
-        final = {"bench": bench.model_dump(mode="json"), "scorer_id": scorer}
+        hour = n if at is None else at
+        final = {
+            "bench": bench.model_dump(mode="json"),
+            "scorer_id": scorer,
+            "started_at": f"2026-09-26T{hour:02d}:00:00Z",
+            "finished_at": f"2026-09-26T{hour:02d}:30:00Z",
+            "wall_clock": WallClock(elapsed_s=wall).model_dump(),
+        }
         stores.campaigns.update(hop, {"final": final})
+        spend = SpendRollup(
+            loop=SpendBucket(used_usd=loop, incurred_usd=loop),
+            total_used_usd=incurred if billed is None else billed,
+            total_incurred_usd=incurred,
+        )
+        dashboard = CycleLayout(stores.campaigns.cycle_dir(hop)).dashboard
+        dashboard.write_text(json.dumps({"spend": spend.model_dump()}), encoding="utf-8")
         return SubjectSpec("campaign", cid)
 
     potter = campaign("potter_a", 1, seed=0, selected=0.5)
-    capo = campaign("capo_b", 2, seed=0, selected=0.7)
+    capo = campaign(
+        "capo_b", 2, seed=0, selected=0.7, incurred=0.3, billed=0.1, loop=0.15, wall=50.0
+    )
     h2h = subject_evidence(stores, [potter, capo]).head_to_head
     assert h2h is not None and h2h.verdict is True
     (pair,) = h2h.pairs
     assert (pair.campaign_a, pair.campaign_b, pair.n_rows) == ("potter_a", "capo_b", 6)
     assert pair.shift == pytest.approx(0.2) and pair.ci_lo is not None and pair.ci_lo > 0.0
+    # Priced against the oldest run on INCURRED spend: capo replayed cells potter paid for, so its
+    # bill, a third of what its search consumed, prices arriving second rather than its optimizer.
+    assert h2h.ratio_reference == "potter_a"
+    row = h2h.rows[1]
+    assert (row.incurred_usd_ratio, row.loop_incurred_usd_ratio, row.wall_clock_ratio) == (
+        pytest.approx(1.5),
+        pytest.approx(3.0),
+        pytest.approx(0.5),
+    )
+    assert row.lift_per_incurred_usd == pytest.approx(1.0)
+    assert [r.concurrent_with for r in h2h.rows] == [[], []]
 
     # Another seed drew other held-out rows: its headline is listed and never paired.
     gepa = campaign("gepa_c", 3, seed=1, selected=0.9)
@@ -3457,6 +3493,25 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench(built_stores) -> 
     h2h = subject_evidence(stores, [potter, capo, regraded]).head_to_head
     assert h2h is not None and h2h.differs_on == ["scorer_id"]
     assert [(p.campaign_a, p.campaign_b) for p in h2h.pairs] == [("potter_a", "capo_b")]
+
+    # Arms running at once each read the shared origin LIVE, and the archive keeps one row per
+    # cell: a gap inside both readings' own bands is backend noise, one beyond them a grader.
+    lead = campaign("potter_g", 7, seed=0, selected=0.5, band=0.2, at=7)
+    twin = campaign("capo_h", 8, seed=0, selected=0.7, band=0.2, at=7, regraded=0.15)
+    h2h = subject_evidence(stores, [lead, twin]).head_to_head
+    assert h2h is not None and h2h.verdict is True
+    assert [r.concurrent_with for r in h2h.rows] == [["capo_h"], ["potter_g"]]
+    far = campaign("capo_i", 9, seed=0, selected=0.7, band=0.2, at=7, regraded=0.6)
+    h2h = subject_evidence(stores, [lead, twin, far]).head_to_head
+    assert h2h is not None and h2h.differs_on == ["origin_reading"]
+    assert [r.comparable for r in h2h.rows] == [True, True, False]
+    # A later run replays the archive, so it answers to a raced headline within the bands, and
+    # to a run nobody raced exactly as before: the same gap to `potter_a` is another grader.
+    late = campaign("potter_j", 10, seed=0, selected=0.5, band=0.2, regraded=0.15)
+    h2h = subject_evidence(stores, [lead, twin, late]).head_to_head
+    assert h2h is not None and h2h.verdict is True
+    h2h = subject_evidence(stores, [potter, capo, late]).head_to_head
+    assert h2h is not None and h2h.differs_on == ["origin_reading"]
 
 
 # 8. The L4 outer proxy — what one finished inner cycle says
@@ -3936,6 +3991,7 @@ def test_parse_population_flags_dropped_optimizer_prompt_port():
     The citable menu sits in `problem_description` rather than `answer_format` because it is the
     one per-ROUND value in an otherwise static template, and `problem_description` renders last —
     holding it ahead of that voided the provider prefix cache for everything behind it."""
+    from promptpotter.application.optimizer_manifest import resolve_optimizer
     from promptpotter.application.optimizers.potter.dispatch.prompts import (
         base_optimizer_template,
     )
@@ -3948,7 +4004,8 @@ def test_parse_population_flags_dropped_optimizer_prompt_port():
         ],
     )
     parent = _parent()
-    base_problem_description = base_optimizer_template("l1_generate").problem_description
+    potter = resolve_optimizer("potter", {})
+    base_problem_description = base_optimizer_template(potter, "l1_generate").problem_description
     dropped = CandidateProposal(
         opt_sp=OptSearchPoint.derive([parent], source="potter:l1_generate"),
         pipeline_overlay={"l1_generate": {"problem_description": "Read the panels."}},
@@ -3971,6 +4028,7 @@ def test_parse_population_flags_dropped_optimizer_prompt_port():
         runtime_failures=[],
         demo_ids=frozenset(),
         shot_k_max=0,
+        inner_optimizer=potter,
     )
     parse_population(
         [inherits_broken],
@@ -3980,6 +4038,7 @@ def test_parse_population_flags_dropped_optimizer_prompt_port():
         runtime_failures=[],
         demo_ids=frozenset(),
         shot_k_max=0,
+        inner_optimizer=potter,
     )
 
     dropped_failures = dropped.validation_failures

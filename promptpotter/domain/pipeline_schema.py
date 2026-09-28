@@ -1147,7 +1147,7 @@ class PipelineSchema(StrictModel):
         node only an alternative pipeline reaches still changes the measurement, and keyed on the
         chain alone an edit landing there is indistinguishable from its parent.
 
-        Off-chain nodes LEAD, and only where configured. ``MeasurementArchive.find_by_node_configs``
+        Off-chain nodes LEAD, and only where configured. ``ReplayFeed`` (the measurement archive)
         matches a prefix whose partial arm forgives divergence past a row's terminal node; an
         off-chain node has no chain position, so trailing it would read as a reusable partial.
         Leading breaks the match at position 0. Configured-only keeps an untouched point on the

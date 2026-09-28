@@ -13,6 +13,7 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.knobs import check_couplings
+from promptpotter.application.optimizer_manifest import bound_inner_optimizer
 from promptpotter.application.optimizers.potter.dispatch import bundle as bundle_module
 from promptpotter.application.optimizers.potter.dispatch import compose
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
@@ -416,6 +417,7 @@ def build_bundle(
         is_origin_round=latest_round is cycle.origin_round,
         demo_pool=cycle.session.scoring.require_partition().demo,
         shot_k_max=knobs.l1_generate.k_max,
+        inner_optimizer=bound_inner_optimizer(),
     )
 
 

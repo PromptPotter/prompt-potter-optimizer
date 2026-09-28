@@ -16,7 +16,13 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from promptpotter.application.runner.inner.tasks import InnerTasks, inner_tasks_path
+from promptpotter.application.optimizer_manifest import bind_inner_optimizer
+from promptpotter.application.runner.inner.tasks import (
+    InnerTasks,
+    inner_benchmark_documents,
+    inner_tasks_path,
+    select_inner_optimizer,
+)
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.store.layout import inner_sandbox_dir
 
@@ -107,6 +113,12 @@ def publish_inner_spawn_context(session: Session, campaign_config: CampaignConfi
         session.store.tenant_id,
         CycleHop(campaign_id=session.campaign_id, cycle_id=cycle_id),
     )
+    panel = _resolve_outer_panel(session, campaign_config, Path(dataset_dir))
+    bind_inner_optimizer(
+        select_inner_optimizer(inner_benchmark_documents(session.store, panel.inner_benchmark)[1])
+        if panel is not None
+        else None
+    )
     _INNER_SPAWN.set(
         InnerSpawnContext(
             inner_sandbox_root=inner_root,
@@ -116,7 +128,7 @@ def publish_inner_spawn_context(session: Session, campaign_config: CampaignConfi
             spawn_campaign_id=session.campaign_id,
             spawn_cycle_id=cycle_id,
             asking_cycle_id=cycle_id,
-            panel=_resolve_outer_panel(session, campaign_config, Path(dataset_dir)),
+            panel=panel,
         )
     )
 
