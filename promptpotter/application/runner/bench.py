@@ -11,7 +11,6 @@ from promptpotter.application.scoring.selection import matched_parent_lift
 from promptpotter.domain.bench import BenchReading, BenchScore
 from promptpotter.domain.phases import CampaignPhase, emit_phase
 from promptpotter.domain.results import resolved_fitness
-from promptpotter.infrastructure.llm.telemetry import diagnostic_spend
 from promptpotter.shared.instrument import NO_ROUND_SLOT, MeasurementRole
 
 if TYPE_CHECKING:
@@ -43,9 +42,10 @@ async def score_on_bench(
     spend: SpendRollup,
 ) -> BenchPass:
     usd_before, tokens_before = spend.total_incurred_usd, spend.total_tokens_used
-    # Banked as `diagnostic`: the pass grades what the search kept and advances nothing, so it is
-    # money spent asking about the search — the bucket every such re-measure lands in.
-    with diagnostic_spend():
+    # Bracketed without a round: the pass scores after the loop, and a round here would move the
+    # dashboard's round back to the one being graded.
+    emit_phase(cb.on_phase, CampaignPhase.BENCH, "enter")
+    try:
         scored = await score_search_point(
             search_point,
             list(session.scoring.require_partition().bench),
@@ -55,6 +55,8 @@ async def score_on_bench(
             on_sample_scored=partial(cb.on_sample_scored, NO_ROUND_SLOT, 0),
             on_sample_starting=partial(cb.on_sample_started, NO_ROUND_SLOT, 0),
         )
+    finally:
+        emit_phase(cb.on_phase, CampaignPhase.BENCH, "exit")
     scores = scored.scores
     accuracy = scores["accuracy"]
     reading = BenchReading(

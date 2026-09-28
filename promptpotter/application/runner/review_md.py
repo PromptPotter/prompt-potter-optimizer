@@ -163,11 +163,11 @@ def _render_header(
 ) -> list[str]:
     cycle_id = index.get("cycle_id") or "(unknown cycle)"
     mode = (final.get("mode") or "full").strip() or "full"
-    verdict = "N/A" if stats is None else stats.round_1_verdict
+    conformance = "" if stats is None else f" · round-1 conformance: **{stats.round_1_verdict}**"
     parts: list[str] = [
         f"# Review — {cycle_id}",
         "",
-        f"_mode: **{mode}** · round-1 conformance: **{verdict}**_",
+        f"_mode: **{mode}**{conformance}_",
         "",
     ]
     if halt is not None:
@@ -280,14 +280,12 @@ def _render_stats_block(
         "## Round statistics",
         "",
         f"- **rounds_to_separable**: {_clock(clocks.rounds_to_separable)}",
-        f"- rounds_to_improved (promotion, no interval): {_clock(clocks.rounds_to_improved)}",
+        f"- rounds_to_improved (a new best selected, no interval): "
+        f"{_clock(clocks.rounds_to_improved)}",
         f"- rounds_to_ceiling ({basis}): {_clock(clocks.rounds_to_ceiling)}",
     ]
     if stats is None:
-        lines.append(
-            f"- the optimizer's own stats (yield, lift, behaviour pass rates, L2 fires): N/A — "
-            f"`{optimizer_name}` keeps none"
-        )
+        lines.append(f"- the optimizer's own stats: N/A — `{optimizer_name}` keeps none")
     else:
         lines += [
             f"- yield_rate: {_rate(stats.yield_rate)}",
@@ -433,8 +431,7 @@ def _render_round(
         if series := overlap_series(round_data.overlap):
             parts.append(f"- overlap: {series}")
         if round_data.verdict_reason:
-            # The round is won on θ-lift, so `improved` above names the outcome and nothing on
-            # this page named the number behind it.
+            # `improved` above names the outcome; this is the selector's own reading behind it.
             parts.append(f"- verdict: {round_data.verdict_reason}")
     if schema_repair_retries:
         parts.append(f"- schema_repair_retries: {schema_repair_retries}")

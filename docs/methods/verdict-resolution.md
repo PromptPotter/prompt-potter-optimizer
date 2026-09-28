@@ -170,6 +170,34 @@ responses. A sound round can carry a pinned arm, and a pinned arm can sit on a s
   pulled θ down ~2 logits. `fit_theta_given_delta` raises on it now, and `Cycle.calibrate_ruler`
   makes coverage a postcondition by EXTENDING the ruler onto each round's cells.
 
+## What an arm's lift is read against — `lift_reference`
+
+Every arm's `reference_*` numbers — the blocked lift and its interval, the matched floor — the
+round's `separable` and its `p_value` are read against ONE individual per arm, named by
+`ScoredCandidate.reference_id`, with its rows banked in `RoundResult.reference_results`. Which
+individual is a campaign-level choice, `OptimizationConfig.lift_reference`, and both values run
+under every optimizer so a comparison of the two readings is one knob apart:
+
+- **`best_so_far` (default)** — the round's selected best-so-far individual. It is re-scored on
+  the round's whole panel and paired with each arm on the cells both
+  measured, so a truncated arm keeps its lift and interval but gets no matched floor. It asks
+  whether an arm beats what the bench already holds. Potter's parent IS this individual — its
+  generator mutates the prior winner — so potter reads exactly what it read before the choice
+  existed.
+- **`parents`** — the arm's own `parent_ids`, each re-measured on exactly the cells the arm
+  measured, so every arm has a matched floor. It asks whether the operator that made the arm
+  added anything over its inputs. A crossover child is read against the BETTER of its parents on
+  those cells: the bar it must clear to have gained over what it recombined, and a conservative
+  one, since the better parent is picked on the same cells the lift is read on. An arm with no
+  parent has no reference.
+
+Neither value moves what an optimizer's selector reads: potter elects on θ against the round's
+best-so-far and CAPO keeps its population on its own length-penalised objective, whichever lift is
+reported. What
+moves is every number above — and through `separable`, potter's stall ladder. Under `parents`
+arms read against several individuals leave a sample-set mask no single bar to re-derive
+(`mask/load.py::_parent`), so a masked election there is undecidable rather than guessed.
+
 ## ⚠️ The crowning bar is an OPEN defect — be skeptical of anything resting on it
 
 **Unresolved as of 2026-08-29. This is not a caveat on a working mechanism; it is a known bug with

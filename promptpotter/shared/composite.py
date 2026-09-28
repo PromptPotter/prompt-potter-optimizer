@@ -155,12 +155,16 @@ def extract_evaluator_names(formula: str, available: set[str]) -> list[str]:
     return out
 
 
-def render_composite_fitness_oneliner(composite_fitness: float, parent: float | None = None) -> str:
-    """``parent=None`` collapses to the bare value."""
-    if parent is None:
+def render_composite_fitness_oneliner(
+    composite_fitness: float, reference: float | None = None
+) -> str:
+    """``reference=None`` collapses to the bare value."""
+    if reference is None:
         return f"composite_fitness={composite_fitness:.4f}"
-    delta = composite_fitness - parent
-    return f"composite_fitness={composite_fitness:.4f}  (Δ{delta:+.4f} vs parent {parent:.4f})"
+    delta = composite_fitness - reference
+    return (
+        f"composite_fitness={composite_fitness:.4f}  (Δ{delta:+.4f} vs reference {reference:.4f})"
+    )
 
 
 def _pairs_line(
@@ -179,13 +183,13 @@ def render_composite_fitness_block(
     evaluators: dict[str, float] | None,
     formula: str | None,
     *,
-    parent: float | None = None,
+    reference: float | None = None,
     use_short_names: bool = False,
 ) -> list[str]:
     line1 = f"composite_fitness = {composite_fitness:.4f}"
-    if parent is not None:
-        delta = composite_fitness - parent
-        line1 += f"   parent={parent:.4f}  Δ{delta:+.4f}"
+    if reference is not None:
+        delta = composite_fitness - reference
+        line1 += f"   reference={reference:.4f}  Δ{delta:+.4f}"
 
     if not formula:
         return [f"{line1}  (formula unavailable)"]

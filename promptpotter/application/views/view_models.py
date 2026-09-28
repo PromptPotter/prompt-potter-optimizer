@@ -213,7 +213,11 @@ class RoundCompleteView:
     round: int
     parent_acc: float
     scores: tuple[ScoreEntry, ...]
+    # The selected arm's candidate label; ``""`` on a round that held its best-so-far.
     winner_label: str
+    # The selected optimizer's own declaration (`Selector.stamps_theta`): the scoreboard carries
+    # an ability column only where the selector fits one, so a cold potter round still shows it.
+    stamps_theta: bool
     # ``None`` where the round graded no cell on accuracy — every arm errored, or the backend is
     # verifier-graded. It matches ``RoundResult.accuracy``, which has always been optional; this
     # field narrowed it to ``float`` and the builder bridged the gap with a ``float()`` that
@@ -231,16 +235,12 @@ class RoundCompleteView:
     # Present on a won round as well as a held one, which is what lets the terminal print a
     # verdict either way instead of falling silent exactly when nothing was resolved.
     verdict_reason: str | None
-    next_action: str
     composite_fitness_formula: str | None
     composite_fitness_formula_short: str | None
-    # The parent restricted to the winner's measured samples; verdict line + Δ read these so
-    # operator-facing "Δ vs parent" matches the ``l1_score`` gate. ``None`` when the winner
-    # did not cover the parent's panel — the verdict then states the winner's own rate and
-    # drops the "(was …)" clause rather than quoting the full-set parent, which is a
-    # different sample basis and would read as lift the winner never earned.
-    # No default: the one builder resolves it, and a ``0.0`` sitting here would render
-    # "was 0.0%" on any round whose payload lacked the key.
+    # The selected arm's reference restricted to its measured samples; the verdict line + Δ read
+    # these. ``None`` when the arm did not cover its reference's panel — the verdict then drops
+    # the reference rate rather than quoting a full-set one, a different sample basis that would
+    # read as lift the arm never earned. No default: a ``0.0`` here would render as a real rate.
     reference_accuracy: float | None
     reference_composite: float | None = None
     # WHICH number headlines the verdict line. Carried rather than read from config at render

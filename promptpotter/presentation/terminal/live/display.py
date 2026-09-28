@@ -285,8 +285,12 @@ class LiveDisplay(Projection):
         rr = record.live_round_result
         if rr is None or not (reason := rr.verdict_reason):
             return
-        crown = ", ".join(record.selected_labels) or "nobody"
-        self._write(f"  {GREEN}✓ elected {crown}{RESET} {DIM}— {reason}{RESET}")
+        verdict = (
+            f"{GREEN}✓ selected {', '.join(record.selected_labels)}{RESET}"
+            if record.selected_labels
+            else f"{DIM}· held the best-so-far{RESET}"
+        )
+        self._write(f"  {verdict} {DIM}— {reason}{RESET}")
         if series := overlap_series(rr.overlap):
             self._write(f"  {DIM}overlap ({series}){RESET}")
 
@@ -553,7 +557,7 @@ class LiveDisplay(Projection):
             self._round_best_key = key
             self._round_best_acc = acc
             self._round_best_label = label
-            vs = f"  (Δ {_fmt_delta(lift)} vs parent)" if isinstance(lift, int | float) else ""
+            vs = f"  (Δ {_fmt_delta(lift)} vs reference)" if isinstance(lift, int | float) else ""
             return f"  {GREEN}★ leader: {label} {acc:.1%}{vs}{RESET}"
         gap = acc - (self._round_best_acc or acc)
         prior = self._round_best_label or "leader"
@@ -603,7 +607,7 @@ class LiveDisplay(Projection):
                 round_result.composite_fitness,
                 dict(round_result.evaluators),
                 formula_short or formula_full,
-                parent=next((s.reference_composite for s in round_result.selected_scores), None),
+                reference=next((s.reference_composite for s in round_result.selected_scores), None),
                 use_short_names=bool(formula_short),
             ):
                 self._write(_node_line(line))

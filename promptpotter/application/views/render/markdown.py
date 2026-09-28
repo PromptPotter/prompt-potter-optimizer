@@ -152,7 +152,7 @@ def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
         formula,
         # THIS round's matched floor, the same one the terminal compares against — the two
         # printed different Δ for one round while this read the whole-cycle origin composite.
-        parent=rd.reference_composite,
+        reference=rd.reference_composite,
         use_short_names=False,
     )
     if composite_fitness_block:

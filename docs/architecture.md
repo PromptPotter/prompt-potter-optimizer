@@ -122,7 +122,7 @@ Repeat until goal hit, `max_rounds`, or the optimizer's controller chooses to st
 #### Potter's two efficiency mechanisms inside the measurement
 
 Both are first-class, and each is a potter node riding the measurement's
-`run_walks(backfills=, checks=)` seam that every optimizer's sampler and eliminator ride:
+`run_walks(backfills=, blocks=, checks=)` seam that every optimizer's sampler and eliminator ride:
 
 - **Candidate budget allocation (PoBB)** — potter's `eliminator`. A candidate keeps
   accumulating samples only while there is statistical evidence it
@@ -151,7 +151,7 @@ The start definitions the whole loop depends on. Say "origin", never "baseline".
 
 **Origin = the starting configuration = C0.** In program evolution an individual **is** a configuration, so the origin resolves to an `OptSearchPoint` (`resolve_origin_opt_search_point`, `application/origin.py`) — the same type every candidate is — and "the config the loop starts from" and "C0, the first candidate" are one statement rather than two. For a fork it is the point the fork branches *from*. Scoring it yields its **measurement** (round 0, via `establish_campaign_origin`; `origin_accuracy_of` derives it back off `rounds[0]`). The name `origin_accuracy` survives only where the fact IS C0 — `CycleResult`, the export, the campaign index; a round's own floor is per arm, against that arm's reference.
 
-**Origin is the parent at offset 0.** The general relation is *parent* — an individual a candidate was derived from (`parent_ids`: one for a mutation, several for a crossover). Each arm's lift is read against one individual, its **reference** (`reference_id`), scored over the samples that arm touched so the diff is matched (built by `rescore_parent`, which labels it with the reference individual's own label). At round 0 every parent is the origin; after that, whatever the optimizer's selector kept. **Reserve "origin" for offset 0 and the fork point; everywhere else say parent** — two names for one relation is how this word drifted before.
+**Origin is the parent at offset 0.** The general relation is *parent* — an individual a candidate was derived from (`parent_ids`: one for a mutation, several for a crossover). Each arm's lift is read against one individual, its **reference** (`reference_id`), paired over the samples that arm touched so the diff is matched: the round's best-so-far re-scored on the panel (`rescore_parent`, which labels it with that individual's own label), or under `lift_reference: parents` the arm's better parent re-measured on the arm's own cells ([`methods/verdict-resolution.md`](methods/verdict-resolution.md) § What an arm's lift is read against). At round 0 every parent is the origin; after that, whatever the optimizer's selector kept. **Reserve "origin" for offset 0 and the fork point; everywhere else say parent** — two names for one relation is how this word drifted before.
 
 **The origin arrives incomplete; check-in completes it and gates it.** The operator supplies what they have, and it is not a whole origin until the **required inputs** that pipeline declares are resolved: query/target column map, dataset binding, and any node-type-raised dependency such as a `candidate_source` node's candidate library. Origin is therefore **per-pipeline** — different backends require different inputs. Once it clears both gates it is the **parent of round 1's candidates**; round 0 is not something C0 parents, round 0 *is* C0, measured.
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import types
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -43,10 +44,11 @@ from promptpotter.application.optimization.resume_and_fork.replayers import repl
 from promptpotter.application.optimization.validators.l1_invariants import (
     detect_invariants,
 )
-from promptpotter.application.optimizer_manifest import SelectedOptimizer, bind_optimizer
+from promptpotter.application.optimizer_manifest import bind_optimizer
 from promptpotter.application.optimizers.capo import operators as capo_operators
-from promptpotter.application.optimizers.capo.state import CapoState
-from promptpotter.application.optimizers.nodes import RoundContext
+from promptpotter.application.optimizers.capo.state import CapoState, capo_state
+from promptpotter.application.optimizers.nodes import Population, RoundContext
+from promptpotter.application.runner.measurement import measure_population
 from promptpotter.application.runner.round import execute_round, round_plan
 from promptpotter.application.scoring import query_loop
 from promptpotter.application.scoring.candidate_report import (
@@ -74,7 +76,6 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import StopReason
-from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     NodePromptInfo,
     NodeType,
@@ -1489,14 +1490,15 @@ def test_a_round_that_measured_nothing_usable_names_which_way_it_broke():
     assert holed.degraded_rate == 0.0  # the one classifiable cell was clean — and says so
 
 
-def test_a_capo_round_races_its_population_beside_the_offspring_and_keeps_the_best(
-    built_stores, tmp_path, monkeypatch
-) -> None:
-    """CAPO through the real round spine (arXiv 2504.16005 Alg. 1): the population rejoins the
-    race ahead of its offspring, the race cuts an offspring μ members beat, the selector carries
-    the survivors best first, the next round draws its parents from them, and a resume re-seats
-    that population and re-derives both decisions. Silent if wrong: a population kept by the wrong
-    rule, or parents drawn from outside it, still yields a round with a winner."""
+def _capo_cycle(
+    built_stores: Any,
+    tmp_path: Path,
+    monkeypatch: Any,
+    nodes: dict,
+    solves: Callable[[str, Sample], bool],
+) -> Cycle:
+    """A CAPO cycle over a sixteen-row bank, whose backend answers a cell right where
+    ``solves(prompt, sample)`` says."""
     bank = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(16)]
     schema = PipelineSchema(
         name="capo-e2e",
@@ -1515,13 +1517,7 @@ def test_a_capo_round_races_its_population_beside_the_offspring_and_keeps_the_be
                 "optimizer": "capo",
                 "degradation_threshold": 0.0,
                 "elimination_n_min": 2,
-                "nodes": {
-                    "blocks": {"config": {"block_size": 4, "max_blocks": 3}},
-                    "capo_crossover": {"config": {"crossovers": 2}},
-                    "few_shot": {"config": {"k_max": 1}},
-                    "paired_t": {"config": {"survivors": 3}},
-                    "population": {"config": {"size": 3}},
-                },
+                "nodes": nodes,
             },
         }
     )
@@ -1551,9 +1547,8 @@ def test_a_capo_round_races_its_population_beside_the_offspring_and_keeps_the_be
     session.scoring.partition = partition_bank(bank, config.dataset_split)
 
     async def _measure(sample: Sample, _session: Any, *, pipeline_params: Any) -> dict:
-        # GOOD answers every cell, OK the even ones, anything else none.
         prompt = pipeline_params["solve"]["prompt"]
-        solved = "GOOD" in prompt or ("OK" in prompt and sample.id % 2 == 0)
+        solved = solves(prompt, sample)
         row = {
             "sample_id": sample.id,
             "query": sample.query,
@@ -1565,19 +1560,7 @@ def test_a_capo_round_races_its_population_beside_the_offspring_and_keeps_the_be
         }
         return rescore_results([row], session.scoring.scorer)[0]
 
-    wordy = "Solve it GOOD-b. " + "Take care. " * 30
-
-    async def _llm(messages: list[dict], **_kw: Any) -> Any:
-        prompt = messages[0]["content"]
-        if "Create overall 15 prompts" in prompt:
-            text = json.dumps(["Solve it GOOD-a.", wordy, "Solve it OK-c."])
-        else:
-            text = "<prompt>Solve it BAD.</prompt>"
-        return types.SimpleNamespace(content=text)
-
     monkeypatch.setattr(query_loop, "measure_sample", _measure)
-    monkeypatch.setattr(capo_operators, "llm_call", _llm)
-
     origin = OptSearchPoint(instruction="Answer.", answer_format="Reply with the letter.")
     framing = TaskDecomposition(pipeline_purpose="Answer each query with its letter.")
     search = list(session.scoring.partition.search)
@@ -1595,16 +1578,53 @@ def test_a_capo_round_races_its_population_beside_the_offspring_and_keeps_the_be
         config=config,
     )
     bind_optimizer(cycle.optimizer)
-    noop = lambda *_a, **_k: None  # noqa: E731
-    callbacks = types.SimpleNamespace(
-        on_phase=noop,
-        announce_candidate=noop,
-        on_sample_scored=noop,
-        on_sample_started=noop,
-        on_candidate_scored=noop,
-        on_race_standing=noop,
-        on_election=noop,
-    )
+    return cycle
+
+
+_noop = lambda *_a, **_k: None  # noqa: E731
+_QUIET_CALLBACKS = types.SimpleNamespace(
+    on_phase=_noop,
+    announce_candidate=_noop,
+    on_sample_scored=_noop,
+    on_sample_started=_noop,
+    on_candidate_scored=_noop,
+    on_race_standing=_noop,
+    on_election=_noop,
+)
+
+
+def test_a_capo_round_races_its_population_beside_the_offspring_and_keeps_the_best(
+    built_stores, tmp_path, monkeypatch
+) -> None:
+    """CAPO through the real round spine (arXiv 2504.16005 Alg. 1): the population rejoins the
+    race ahead of its offspring, the race cuts an offspring μ members beat, the selector carries
+    the survivors best first, the next round draws its parents from them, and a resume re-seats
+    that population and re-derives both decisions. Silent if wrong: a population kept by the wrong
+    rule, or parents drawn from outside it, still yields a round with a winner."""
+    wordy = "Solve it GOOD-b. " + "Take care. " * 30
+
+    async def _llm(messages: list[dict], **_kw: Any) -> Any:
+        prompt = messages[0]["content"]
+        if "Create overall 15 prompts" in prompt:
+            text = json.dumps(["Solve it GOOD-a.", wordy, "Solve it OK-c."])
+        else:
+            text = "<prompt>Solve it BAD.</prompt>"
+        return types.SimpleNamespace(content=text)
+
+    nodes = {
+        "blocks": {"config": {"block_size": 4, "max_blocks": 3}},
+        "capo_crossover": {"config": {"crossovers": 2}},
+        "few_shot": {"config": {"k_max": 1}},
+        "paired_t": {"config": {"survivors": 3}},
+        "population": {"config": {"size": 3}},
+    }
+    # GOOD answers every cell, OK the even ones, anything else none.
+    good_or_even = lambda prompt, s: "GOOD" in prompt or ("OK" in prompt and s.id % 2 == 0)  # noqa: E731
+    cycle = _capo_cycle(built_stores, tmp_path, monkeypatch, nodes, good_or_even)
+    monkeypatch.setattr(capo_operators, "llm_call", _llm)
+    session = cycle.session
+    search = list(session.scoring.partition.search)
+    callbacks = _QUIET_CALLBACKS
 
     first = asyncio.run(execute_round(cycle, 1, search, callbacks))  # type: ignore[arg-type]
     carried = first.optimizer_state.payload.population
@@ -2187,87 +2207,69 @@ def test_no_walk_is_cut_before_the_horizon_it_launched_under() -> None:
     assert sharper > 0, "a candidate ahead's returned cells never moved the horizon"
 
 
-def test_the_paired_t_race_cuts_an_arm_only_at_a_block_once_survivors_arms_beat_it() -> None:
-    """CAPO's survival race at the paper's values (b=30, z_max=10, α=0.2, μ=10, γ=0.05; App. B
-    `racing_elimination`): an arm is cut once μ others are significantly better on the paired
-    per-cell CAPO objective, read only at a block boundary. Silent harm either way: cut early and
-    the population loses an arm it would keep; cut late and the blocks between are paid for nothing.
+def test_the_paired_t_race_cuts_live_arms_together_at_each_block_on_the_rows_they_share(
+    built_stores, tmp_path, monkeypatch
+) -> None:
+    """CAPO's race (arXiv 2504.16005 App. B, `do_racing`): every live arm walks block k, then each
+    is tested against every other live arm on the same cells, on CAPO's objective; the arms μ
+    others beat are cut together, and the race stops once μ or fewer remain. Silent harm: raced in
+    turn, the first arm has no rival and walks the whole panel, and the survivors buy blocks the
+    paper never pays for.
 
     `≥ μ`, not `> μ`: with μ better arms this one can no longer be among the μ kept — App. B and
     the authors' implementation both cut there, although §4's prose says "more than"."""
-    manifest = {
-        "name": "capo-race",
-        "nodes": {
-            "blocks": {"type": "sampler", "config": {"block_size": 30, "max_blocks": 10}},
-            "l1_generate": {"type": "llm", "config": {}},
-            "paired_t": {
-                "type": "eliminator",
-                "config": {"alpha": 0.2, "survivors": 10, "length_penalty": 0.05},
-            },
-            "score": {"type": "measurement", "config": {}},
-            "theta_election": {"type": "selector", "config": {}},
-        },
-        "pipelines": {"default": ["blocks", "l1_generate", "paired_t", "score", "theta_election"]},
+    first_block: set[int] = set()
+    # GOOD answers every cell, LATE only the first block's, anything else none.
+    good_or_late = lambda prompt, s: "GOOD" in prompt or ("LATE" in prompt and s.id in first_block)  # noqa: E731
+    nodes = {
+        "blocks": {"config": {"block_size": 4, "max_blocks": 3}},
+        "paired_t": {"config": {"alpha": 0.2, "survivors": 2, "length_penalty": 0.05}},
     }
-    selected = SelectedOptimizer(
-        name="capo-race",
-        document=manifest,
-        overlay={},
-        schema=parse_pipeline_response(manifest),
-        resolved_schemas={},
+    cycle = _capo_cycle(built_stores, tmp_path, monkeypatch, nodes, good_or_late)
+    capo_state(cycle.working_state).length_norm = 100
+    ctx = RoundContext(cycle=cycle, round_num=1, callbacks=_QUIET_CALLBACKS)  # type: ignore[arg-type]
+    plan = round_plan(cycle.optimizer)
+    search = list(cycle.session.scoring.partition.search)
+    panel = plan.sampler.draw(ctx, search)
+    order = [s.id for s in panel.order]
+    assert order == [s.id for s in search[:12]], "three whole blocks, the pool's order"
+    first_block.update(order[:4])
+    assert cycle.tracking.current_sp is not None
+    kinds = ("BAD", "GOOD-a", "LATE", "GOOD-b", "GOOD-c" + " Take care." * 30)
+    arms = [
+        OptSearchPoint.derive([cycle.opt_sp], source="test", instruction=f"Solve it {kind}.")
+        for kind in kinds
+    ]
+    population = Population(
+        proposals=[CandidateProposal(opt_sp=arm) for arm in arms],
+        individuals=arms,
+        pipeline_params=[cycle.tracking.current_sp.pipeline_params] * len(arms),
+        optimizer_state=CapoState().snapshot({}, population=[], rounds_without_advance=0),
     )
-    plan = round_plan(selected)
-    snapshots: list = []
-    ctx = RoundContext(
-        cycle=types.SimpleNamespace(
-            optimizer=selected, pending_decisions=[], working_state=CapoState(length_norm=100)
-        ),
-        round_num=3,
-        callbacks=types.SimpleNamespace(on_race_standing=lambda *a: snapshots.append(a)),
-    )
-    pool = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(305)]
-    panel = plan.sampler.draw(ctx, pool)
-    assert [s.id for s in panel.order] == list(range(300)), "ten whole blocks, the pool's order"
-    assert panel.block_size == 30
-    race = plan.eliminator.race(ctx, panel, None)
+    measured = asyncio.run(measure_population(ctx, population, panel, plan.eliminator))
 
-    # The campaign's composite is 1.0 on every row: the race reads CAPO's own objective, so an arm
-    # read on the composite here would never be cut.
-    def arm(solved, chars: int = 100) -> list[dict]:
-        return [
-            measurement(
-                s.id,
-                float(solved(s.id)),
-                objective=1.0,
-                pipeline_data={"target_prompt_chars": chars},
-            )
-            for s in panel.order
-        ]
-
-    strong = [arm(lambda sid, k=k: (sid + k) % 5 != 0) for k in range(10)]
-    weak = arm(lambda sid: sid % 10 < 3)
-    for k, rows in enumerate(strong[:9]):
-        race.admit(f"strong{k}", rows, _DUMMY_SP)
-    rule = race.rule([])
-    upcoming = [(s, None) for s in panel.order]
-    assert all(rule.check(weak[:n]) is None for n in range(1, 301)), "nine better is not ten"
-    assert rule.earliest_stop([], upcoming) is None
-
-    race.admit("strong9", strong[9], _DUMMY_SP)
-    race.open_turn("weak", 10, 12)
-    assert rule.earliest_stop([], upcoming) == 30, "the horizon is the first block boundary"
-    assert rule.check(weak[:29]) is None, "never cut inside a block"
-    signal = rule.check(weak[:30])
-    assert signal is not None and signal.outcome is ArmOutcome.ELIMINATED
-    assert len(signal.check_result["outscored_by"]) == 10
-    assert snapshots[-1][0] == "paired_t" and snapshots[-1][4].p_best < 0.2
-
-    # An arm solving as many cells as each prior does is beaten by none of them.
-    level = arm(lambda sid: (sid + 2) % 5 != 0)
-    assert all(rule.check(level[:n]) is None for n in range(30, 301, 30))
-    # ...and cut once its prompt is three times as long: γ prices the length it carries.
-    wordy = arm(lambda sid: (sid + 2) % 5 != 0, chars=300)
-    assert any(rule.check(wordy[:n]) is not None for n in range(30, 301, 30))
+    # Block 1 cuts BAD, beaten by the four arms BEHIND it, and the wordy GOOD-c, which γ prices
+    # below three arms solving as much; block 2 cuts LATE, beaten by exactly μ=2; the two left
+    # are μ, so the race stops them there rather than buying block 3.
+    assert [(cs.outcome, cs.scored_samples) for cs in measured.scores] == [
+        (ArmOutcome.ELIMINATED, 4),
+        (ArmOutcome.LOCKED_IN, 8),
+        (ArmOutcome.ELIMINATED, 8),
+        (ArmOutcome.LOCKED_IN, 8),
+        (ArmOutcome.ELIMINATED, 4),
+    ]
+    outscored_bad = measured.scores[0].elimination_context["outscored_by"]
+    assert sorted(outscored_bad) == ["C1.2", "C1.3", "C1.4", "C1.5"]
+    for arm in arms:
+        taken = [r["sample_id"] for r in measured.rows[arm.lineage.id]]
+        assert taken == order[: len(taken)], "every arm walks the one shared order"
+    cuts = [d.inputs_ref for d in cycle.pending_decisions if d.kind == "paired_t_cut"]
+    ids = [arm.lineage.id for arm in arms]
+    assert [(c["candidate_id"], c["queries_scored"], sorted(c["raced_against"])) for c in cuts] == [
+        (ids[0], 4, sorted(ids[1:])),
+        (ids[4], 4, sorted(ids[:4])),
+        (ids[2], 8, sorted([ids[1], ids[3]])),
+    ]
 
 
 # 6. Which cells a round buys
@@ -2690,6 +2692,81 @@ def test_matched_parent_lift_drops_the_cell_that_measured_nothing() -> None:
     # Below two shared cells there is no spread, so no interval — reported as absence rather than
     # as the `_normal_posterior` n=1 fallback, which invents an SE of 0.5 out of one reading.
     assert matched_parent_lift(clean[:1], origin[:1]) is None
+
+
+def test_parents_lift_reads_a_crossover_against_its_better_parent_on_its_own_cells(
+    monkeypatch,
+) -> None:
+    """``lift_reference: parents``. A crossover child cut after four of six cells is read against
+    the better of its two parents, both re-measured on exactly those four cells; a mutation of the
+    best-so-far reuses that individual's panel re-score, re-measuring nothing. Silent if wrong: a
+    reference read on the full panel, or the worse parent, still prints a lift and an interval."""
+    from promptpotter.application.optimizers.nodes import Panel, Population, RoundContext
+    from promptpotter.application.runner import measurement as measurement_node
+    from promptpotter.application.scoring.selection import matched_parent_lift
+    from promptpotter.domain.results import ReferenceReading
+
+    best = OptSearchPoint(instruction="best so far")
+    weak, strong = OptSearchPoint(instruction="weak"), OptSearchPoint(instruction="strong")
+    child = OptSearchPoint.derive([weak, strong], source="capo:capo_crossover", instruction="x")
+    mutant = OptSearchPoint.derive([best], source="potter:l1_generate", instruction="m")
+    cells = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(6)]
+    grade = {weak.lineage.id: 0.2, strong.lineage.id: 0.6}
+    asked: dict[str, list[int]] = {}
+
+    async def _score(_sp: Any, dataset: list[Sample], *_a: Any, measured: Any, **_k: Any) -> Any:
+        asked[measured.candidate_id] = [s.id for s in dataset]
+        rows = [measurement(s.id, grade[measured.candidate_id]) for s in dataset]
+        return types.SimpleNamespace(results=rows)
+
+    monkeypatch.setattr(measurement_node, "score_search_point", _score)
+    config = load_campaign_config(
+        {"optimization": {"degradation_threshold": 0.0, "lift_reference": "parents"}}
+    )
+    partition = types.SimpleNamespace(demo=[])
+    cycle = types.SimpleNamespace(
+        config=config,
+        rounds=[],
+        framing=TaskDecomposition(),
+        axes=None,
+        session=types.SimpleNamespace(
+            pipeline_schema=_single_node_schema(),
+            scoring=types.SimpleNamespace(require_partition=lambda: partition),
+        ),
+    )
+    noop = lambda *_a, **_k: None  # noqa: E731
+    ctx = RoundContext(
+        cycle=cycle,  # type: ignore[arg-type]
+        round_num=2,
+        callbacks=types.SimpleNamespace(on_sample_scored=noop, on_sample_started=noop),  # type: ignore[arg-type]
+    )
+    individuals = [weak, strong, child, mutant]
+    population = Population(
+        proposals=[],
+        individuals=individuals,
+        pipeline_params=[{}] * len(individuals),
+        optimizer_state=optimizer_state(),
+    )
+    rows = {
+        child.lineage.id: measurements([0.8] * 4),
+        mutant.lineage.id: measurements([0.8, 0.8]),
+    }
+    bar_rows = measurements([0.5] * 6)
+    bar = ReferenceReading(opt_sp=best, report=scored_candidate(best.lineage.id), results=bar_rows)
+
+    read_against, banked = asyncio.run(
+        measurement_node._lift_references(
+            ctx, population, Panel(cells, cells, 1), rows, [child, mutant], bar
+        )
+    )
+
+    assert asked == {weak.lineage.id: [0, 1, 2, 3], strong.lineage.id: [0, 1, 2, 3]}
+    reference_id, reference_rows = read_against[child.lineage.id]
+    assert reference_id == strong.lineage.id
+    lift = matched_parent_lift(rows[child.lineage.id], reference_rows)
+    assert lift is not None and lift[0] == pytest.approx(0.2)
+    assert read_against[mutant.lineage.id] == (best.lineage.id, bar_rows[:2])
+    assert set(banked) == {strong.lineage.id, best.lineage.id}
 
 
 def test_paired_reading_matches_ttest_rel_and_brackets_the_same_evidence_it_tests() -> None:

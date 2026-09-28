@@ -72,39 +72,39 @@ Five independent mechanisms can end a candidate's evaluation early or annotate a
 
 **Each rule also answers how EARLY it could fire** (`StopRule.earliest_stop`), over every way the cells still out can resolve, and that answer is what lets a look-ahead walk launch past the next cell while a cut still discards at most one call: a cell is launched only if no rule can fire before it. The answer may come early, never late. PoBB builds it from the reading's two inputs instead of trying completions — the θ gap's extremes are exact, since the MAP rises with every grade; its noise has a closed-form floor; the sign bound is extreme at its corners — and the rate check counts every unknown cell as degraded. The fatal fast-path fires on one row's content, so no rule can foresee it; it stays out of the answer, like the fault aborts in `scoring/query_loop.py`, and those stops discard whatever was out. An operator's pause, skip or budget stop first keeps what is already paid for — the results already back and the catch-ups already started — and starts nothing while it does. A call already sent is cancelled only where that stops what it bills (`Connector.cancel_stops_billing`): otherwise a pause or a spent ceiling waits for it, and what the stopped walks were sure to take is banked, so the resumed round replays it; a skip is replayed there too. No cell starts that the run's spend book cannot hold at its bound beside every cell out (`infrastructure/llm/spend_book.py`).
 
-**A round's candidates walk at once and decide in turn** (`runner/measurement.py::measure_population`). One loop drives the whole phase (`scoring/query_loop.py::run_walks`): it launches every candidate's cells, and only the candidate whose turn it is takes a cell, answers a skip and is decided. Slots go to that candidate's catch-ups, then its cells, then the candidates ahead of it, which leave one slot free. A later candidate may measure ahead of the ones before it, but is taken, checked and cut only once every candidate before it is decided — so its priors are exactly a serial round's. While it measures ahead, each undecided candidate before it may or may not become a prior, so its horizon reads each as a prior it cannot count on, graded where that candidate's returned cells say and unknown everywhere else. The same horizon, taken over the whole remaining panel and summed over every walk plus the catch-ups, is what the round serves as the concurrency its rules allow (`scoring/query_loop.py::FlightGauge`) — the depth an `auto` arming actually runs at, beneath the backend's ceiling.
+**A round's candidates walk at once and decide in turn** (`runner/measurement.py::measure_population`) — under PoBB; a block race decides them together, below. One loop drives the whole phase (`scoring/query_loop.py::run_walks`): it launches every candidate's cells, and only the candidate whose turn it is takes a cell, answers a skip and is decided. Slots go to that candidate's catch-ups, then its cells, then the candidates ahead of it, which leave one slot free. A later candidate may measure ahead of the ones before it, but is taken, checked and cut only once every candidate before it is decided — so its priors are exactly a serial round's. While it measures ahead, each undecided candidate before it may or may not become a prior, so its horizon reads each as a prior it cannot count on, graded where that candidate's returned cells say and unknown everywhere else. The same horizon, taken over the whole remaining panel and summed over every walk plus the catch-ups, is what the round serves as the concurrency its rules allow (`scoring/query_loop.py::FlightGauge`) — the depth an `auto` arming actually runs at, beneath the backend's ceiling.
 
 **One comparator, one stop rule — do not add a sixth.** A paired-margin futility gate ran here and was removed. Anything that counts discordant binary wins is a second comparator beside the θ ruler the election actually ranks on, so the two disagree by construction; it re-encodes the election's bar a second time; and it goes inert on a graded backend, where a per-sample fitness of 0.63 is neither a win nor a loss. Its kill payload also stamped a hardcoded `p_best: 0.0`, which `is_leader_eligible` reads as a PoBB loss — silently barring a cut candidate from the round election, so whole rounds closed with no winner while the real θ lift was positive. Buying futility back means one gate **on the θ ruler**.
 
 ## CAPO's race — the `blocks` sampler and the `paired_t` eliminator
 
 CAPO's survival selection (arXiv 2504.16005 §4, App. B) is a second eliminator, for its own
-manifest; it takes PoBB's row 5 in the ladder above and leaves potter's untouched. It rides the
-same `run_walks(backfills=, checks=)` seam, so `DegradationCheck` still runs beside it and its
-standings reach the racing stream under `paired_t`.
+manifest; it takes PoBB's row 5 in the ladder above and leaves potter's untouched. It is a **block
+race**: its race answers `blocks` where PoBB answers `rule`, and `run_walks(blocks=)` then turns
+every live arm once per block and hands the block's rows to the race's `close`, which decides the
+arms together. `DegradationCheck` still runs on each arm's own rows beside it, and its standings
+reach the racing stream under `paired_t`.
 
 - **`blocks` (sampler)** — `block_size` (b), `max_blocks` (z_max). The panel is the first
   `max_blocks` whole blocks of the search pool in the bank's order: the same cells every round,
   never shuffled (App. C.4). `Panel.block_size` hands the boundaries to the eliminator; a pool
   short of one block refuses the round.
-- **`paired_t` (eliminator)** — `alpha`, `survivors` (μ), `length_penalty` (γ). At each block
-  boundary the arm on turn is tested against every prior: a one-sided paired t
-  (`shared/statistics.py::paired_reading`) on CAPO's objective (below), over the cells both
-  measured. The arm is cut once μ priors are significantly better — App. B's `n_sig_better ≥ μ`, where §4's prose says
-  "more than" — with no multiple-test correction, as CAPO races. The cut stamps
-  `elimination_context.gate` `outscored`; the stream's `p_best` is the smallest `p_better`, the t
-  fiducial P(arm beats that prior).
-- **Where it departs from the paper**, all forced by a seam that decides arms in turn. An arm is
-  tested against the arms before it that finished, never those after it, and an admitted prior is
-  never cut; CAPO races every live arm block by block. Racing does not stop once μ arms remain, so
-  every survivor walks every block, and the top-μ trim by mean is the selector's. The population
-  rejoins the race ahead of its offspring (`population_rejoin`), so every offspring is tested
-  against every member — and a member, with fewer than μ arms before it, is never cut.
-  `paired_reading` floors the SE at `1/(4n)`, which moves a p only where the paired differences
-  are nearly constant.
+- **`paired_t` (eliminator)** — `alpha`, `survivors` (μ), `length_penalty` (γ). Every live arm
+  walks block k in walk order; at its close each is tested against every other live arm: a
+  one-sided paired t (`shared/statistics.py::paired_reading`) on CAPO's objective (below), over the
+  cells both measured — the same k blocks, since every arm walks one order. The arms that μ others
+  significantly beat are cut together, off the readings taken before any cut — App. B's
+  `n_sig_better ≥ μ`, where §4's prose says "more than" — with no multiple-test correction, as
+  CAPO races. Once μ or fewer arms are left the race is settled and stops them where they stand,
+  `locked_in`; an arm that took the whole panel completes instead. A cut stamps
+  `elimination_context.gate` `outscored`, a settled arm `settled`; the stream's `p_best` is the
+  smallest `p_better`, the t fiducial P(arm beats that rival).
+- **Where it departs from the paper.** A race that starts with μ arms or fewer still walks its
+  first block, so the selector has rows to rank; App. B races none. `paired_reading` floors the SE
+  at `1/(4n)`, which moves a p only where the paired differences are nearly constant.
 - **Each cut is a ledger decision**, `paired_t_cut`, REPLAYED: its record names the arm, the rows
-  it was cut at, the priors it was tested against and the objective's γ and normaliser, so a resume
-  under a changed scorer re-reads the same test off the rescored round.
+  it was cut at, the arms it raced against and the objective's γ and normaliser, so a resume under
+  a changed scorer re-reads the same test off the rescored round.
 
 **CAPO selects on its own objective; the bench scores it on the campaign's.** Per cell, CAPO's
 objective is `fitness − γ · target_prompt_chars / length_norm` (§4): the per-sample correctness,

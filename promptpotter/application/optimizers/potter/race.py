@@ -109,6 +109,10 @@ class PoBBRace:
     def n_priors(self) -> int:
         return len(self._check.priors_by_sample)
 
+    @property
+    def blocks(self) -> None:
+        return None
+
     def rule(self, ahead: Sequence[tuple[str, Walk | None]]) -> _PriorsAhead:
         return _PriorsAhead(self._check, ahead)
 

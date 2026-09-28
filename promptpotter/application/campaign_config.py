@@ -233,6 +233,21 @@ class OptimizationConfig(StrictModel):
         ),
     )
 
+    lift_reference: Annotated[
+        Literal["best_so_far", "parents"], Knob(Scope.POLICY, Estimand.GATE)
+    ] = Field(
+        "best_so_far",
+        description=(
+            "What each arm's lift is read against — its `reference_id` and every `reference_*` "
+            "number, the round's `separable` and its `p_value`. ``best_so_far`` (default): the "
+            "round's selected best-so-far individual, re-scored on the round's panel and paired "
+            "with the arm on the cells both measured. ``parents``: the arm's own `parent_ids`, "
+            "each re-measured on exactly the cells the arm measured; a crossover child is read "
+            "against the better of its parents there, the bar it must clear to have added "
+            "anything over what it recombined. An arm with no parent has no reference."
+        ),
+    )
+
     origin_gate: Annotated[
         Literal["strict", "critical_only", "off"], Knob(Scope.POLICY, Estimand.GATE)
     ] = Field(

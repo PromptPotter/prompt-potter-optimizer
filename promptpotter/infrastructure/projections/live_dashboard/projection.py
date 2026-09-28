@@ -749,7 +749,7 @@ class LiveDashboardProjection(Projection):
         s.current_query_payload = query_text
         s.current_sample_id = sid
         s.open_sample_ids = list(self._open_samples)
-        s.candidate = "parent" if ci == NO_ROUND_SLOT else f"{candidate_label(s.round, ci)}/{ct}"
+        s.candidate = "reference" if ci == NO_ROUND_SLOT else f"{candidate_label(s.round, ci)}/{ct}"
 
     def _absorb_sample_scored(self, result: dict[str, Any], *, last_in_candidate: bool) -> None:
         s = self.state
@@ -1005,7 +1005,7 @@ class LiveDashboardProjection(Projection):
             s.waiting_on, s.waiting_since = None, None
         else:
             ci = opened[1]
-            owner = "parent" if ci == NO_ROUND_SLOT else candidate_label(s.round, ci)
+            owner = "reference" if ci == NO_ROUND_SLOT else candidate_label(s.round, ci)
             s.waiting_on = f"{owner} · sample {self._waiting[0]}"
             s.waiting_since = self._waiting[1]
         s.backpressure = self._backpressure

@@ -239,8 +239,8 @@ class ScoredCandidate(StrictModel):
     # eliminator's (potter's are `pobb/checks.py::EliminationContext`).
     elimination_context: dict[str, Any] = Field(default_factory=dict)
     degradation_context: DegradationContext = Field(default_factory=DegradationContext)
-    # The individual this arm's lift is read against, over the cells it touched — potter's is the
-    # round's parent. ``None`` where the arm was never read against one (rejected before it ran).
+    # The individual this arm's lift is read against, over the cells it touched — which one is
+    # `OptimizationConfig.lift_reference`. ``None`` where the arm was never read against one.
     reference_id: str | None = None
     # That reference as this candidate's comparison floor. ``None`` unless the candidate covered
     # the reference's whole panel. MUST NOT default to 0.0: an unstamped 0.0 is indistinguishable
@@ -811,7 +811,8 @@ class RoundResult(StrictModel):
     # Per-candidate scored results — lets resume rescore under a changed scorer + replay decisions.
     all_candidate_results: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     # Each REFERENCE's rows on THIS round's subset, keyed by the individual an arm's
-    # `reference_id` names — the bar every arm was measured against. **Subsets move between
+    # `reference_id` names — one bar for every arm, or under `lift_reference: parents` each
+    # arm's parent on the cells its children measured. **Subsets move between
     # rounds**, so reconstructing a bar from an earlier round reads it on cells this round never
     # bought — which is how a sample-set mask came to re-score every arm on the selected cells
     # while leaving the bar they must clear at its full-set value (`mask/load.py`). Empty at round

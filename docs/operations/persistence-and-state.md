@@ -248,7 +248,7 @@ A hole is plugged with a **real measurement, never an archive row** — a cached
 
 **An inner cycle stops when its owner does.** An L4 inner campaign runs in a child task under its own sandbox, whose pause flag nobody writes; it inherits the outer's pause predicate at the run-control binding seam (`runner/entry.py::_bind_run_controls`) rather than overwriting it. Without that a pause on the outer waited out the whole inner campaign, because one outer *sample* is an entire inner run.
 
-**Make a slow round finish sooner — the look-ahead control.** The remote's **⇉** control runs the round with several calls in flight instead of one — its candidates walk together and decide in turn — cutting its scoring wall clock roughly in proportion. Suggest it whenever someone asks why a round is taking so long; it is the only speed lever needing no config change and no restart. **Every clause of it** — who may press, what one press buys, why the overshot sample is discarded — is owned by [`access-model.md`](access-model.md) § host-admin ↔ user. What this layer must hold is the on-disk half: the operator's *request* is `.runtime/sample_lookahead.json` and what the loop actually ran at is `dashboard.json::sample_lookahead`, never the flag served as that.
+**Make a slow round finish sooner — the look-ahead control.** The remote's **⇉** control runs the round with several calls in flight instead of one — its candidates walk together and decide where a serial round would — cutting its scoring wall clock roughly in proportion. Suggest it whenever someone asks why a round is taking so long; it is the only speed lever needing no config change and no restart. **Every clause of it** — who may press, what one press buys, why the overshot sample is discarded — is owned by [`access-model.md`](access-model.md) § host-admin ↔ user. What this layer must hold is the on-disk half: the operator's *request* is `.runtime/sample_lookahead.json` and what the loop actually ran at is `dashboard.json::sample_lookahead`, never the flag served as that.
 
 ## CLI flags — `new` and `resume`
 
@@ -295,7 +295,7 @@ Helpers are `scoring/formula/compiler.py::SAFE_BUILTINS`. Output clamped to `[0,
 
 **`target_prompt_chars` is a fact about the CANDIDATE, stamped on every one of its cells** — the characters of its prompt template on the node it renders onto, before the sample is interpolated, few-shot block included. A length penalty's normaliser is therefore a **constant written into the formula**, e.g. `fitness - 0.05 * target_prompt_chars / <origin chars>`, the literal being the origin's own reading on its round-0 rows (`evidence --metric 'expr:target_prompt_chars'` on the campaign subject serves it). Never a campaign-bound name: the scorer id hashes the formula text alone, so a reference that varies by campaign would pool two scales under one id on the δ ruler.
 
-The default composite renders in operator surfaces as `composite=0.6042 (Δ+0.1030 vs parent 0.5012)` per candidate — anchored on the row's matched parent, the same floor the accuracy Δ beside it uses — with the full formula text always in `log.md`.
+The default composite renders in operator surfaces as `composite_fitness=0.6042  (Δ+0.1030 vs reference 0.5012)` per candidate — anchored on the row's matched reference, the same floor the accuracy Δ beside it uses — with the full formula text always in `log.md`.
 
 ## Beta hosting state
 

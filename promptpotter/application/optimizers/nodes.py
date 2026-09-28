@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from promptpotter.application.optimization.resume_and_fork.replayers import Replayer
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.run_observers import RunCallbacks
-    from promptpotter.application.scoring.query_loop import Walk
+    from promptpotter.application.scoring.query_loop import BlockRace, Walk
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.optimizer_state import OptimizerState
@@ -278,14 +278,16 @@ class Population:
 
 @dataclass(frozen=True)
 class Measured:
-    """The measurement's output. ``scores`` carry each arm's reading against the round's reference
-    (``parent``); ``electable`` is who the round can read, coverage floor applied."""
+    """The measurement's output. ``parent`` is the round's best-so-far re-scored on the panel;
+    ``scores`` carry each arm's lift against its ``reference_id``, whose rows ``references``
+    holds; ``electable`` is who the round can read, coverage floor applied."""
 
     rows: dict[str, list[QueryMeasurement]]
     scores: list[ScoredCandidate]
     scored: list[OptSearchPoint]
     parent: ReferenceReading
     parent_rows: list[QueryMeasurement]
+    references: dict[str, list[QueryMeasurement]]
     electable: list[str]
     coverage_floor: int
 
@@ -334,14 +336,18 @@ class RaceSnapshot:
 
 
 class Race(CatchUps, Protocol):
-    """One round's elimination, as the measurement drives it. The catch-ups are the calls pairing
-    a prior with the arm on turn; ``judge`` reads a decided arm before ``admit`` makes it a prior,
-    returning the eliminator's own reading of an arm it stopped."""
+    """One round's elimination, as the measurement drives it. It stops a walk on its own rows
+    through ``rule``, or every live walk together at each block's close through ``blocks``. The
+    catch-ups are the calls pairing a prior with the arm on turn; ``judge`` reads a decided arm
+    before ``admit`` makes it a prior, returning the eliminator's own reading of an arm it stopped."""
 
     @property
     def n_priors(self) -> int: ...
 
-    def rule(self, ahead: Sequence[tuple[str, Walk | None]]) -> StopRule: ...
+    @property
+    def blocks(self) -> BlockRace | None: ...
+
+    def rule(self, ahead: Sequence[tuple[str, Walk | None]]) -> StopRule | None: ...
 
     def open_turn(self, candidate_id: str, idx: int, n: int) -> None: ...
 
@@ -370,6 +376,11 @@ class Eliminator(NodeMember, Protocol):
 
 
 class Selector(NodeMember, Protocol):
+    @property
+    def stamps_theta(self) -> bool:
+        """Whether ``select`` stamps each arm's θ — the column a round's scoreboard carries."""
+        ...
+
     def select(
         self, ctx: RoundContext, measured: Measured, population: Population
     ) -> Selection: ...

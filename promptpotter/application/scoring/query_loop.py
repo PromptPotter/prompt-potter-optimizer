@@ -1,7 +1,7 @@
 """The scoring walk — one search point's pass over its panel — and :func:`run_walks`, the one loop
 that drives every walk of a scoring phase: prior-cache reuse, stale-data recovery, error
 classification into an abort reason, look-ahead within the armed depth, and decisions in walk
-order. The gateway turns a decided walk into the archived run."""
+order or at a block race's closes. The gateway turns a decided walk into the archived run."""
 
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CatchUps", "Flight", "FlightGauge", "QueryLoopResult", "Walk", "run_walks"]
+__all__ = ["BlockRace", "CatchUps", "Flight", "FlightGauge", "QueryLoopResult", "Walk", "run_walks"]
 
 
 # The stops that still wait out the calls already sent — see :func:`run_walks`.
@@ -111,6 +111,16 @@ class CatchUps(Protocol):
     def bank_backfills(self, samples: Sequence[Sample]) -> None: ...
 
     def discard_backfills(self) -> None: ...
+
+
+class BlockRace(Protocol):
+    """A race that decides its walks together: every live walk takes a block of ``block_size``
+    cells, then ``close`` reads all their rows and names the walks it stops, by walk index."""
+
+    @property
+    def block_size(self) -> int: ...
+
+    def close(self, rows: Mapping[int, list[QueryMeasurement]]) -> Mapping[int, StopSignal]: ...
 
 
 @dataclass(frozen=True)
@@ -397,6 +407,8 @@ class Walk:
     # How many rows an operator's skip already let this walk take before a stop interrupted the
     # phase — replayed on resumption, so the skip outlives the pause that followed it.
     skip_at: int | None = None
+    # The rows at which a block race next closes, where it may stop this walk. ``None`` outside one.
+    boundary: int | None = None
 
     @property
     def n(self) -> int:
@@ -498,7 +510,8 @@ class Walk:
 
     def judge(self) -> QueryLoopResult | None:
         """The stop rules over the rows taken — cached rows too, or a candidate whose priors already
-        dominate it runs one extra real query — else complete once every cell is taken."""
+        dominate it runs one extra real query — else complete once every cell is taken, unless a
+        block race's last close still decides it."""
         for check in self.checks:
             if (signal := check.check(self.results)) is not None:
                 return QueryLoopResult(
@@ -507,7 +520,9 @@ class Walk:
                     stop_reason="stop_rule",
                     stop_signal=signal,
                 )
-        return QueryLoopResult(self.results) if len(self.results) == self.n else None
+        if len(self.results) == self.n and self.boundary is None:
+            return QueryLoopResult(self.results)
+        return None
 
     def horizon(self, last: int) -> int | None:
         """The fewest taken rows at which a stop rule could cut, looking no further than walk index
@@ -520,7 +535,9 @@ class Walk:
             (self.dataset[i], _returned_row(cell) if (cell := self.finished.get(i)) else None)
             for i in range(head, last + 1)
         ]
-        stops = (check.earliest_stop(self.results, upcoming) for check in self.checks)
+        stops = [check.earliest_stop(self.results, upcoming) for check in self.checks]
+        if self.boundary is not None and self.boundary <= last + 1:
+            stops.append(self.boundary)
         return min((m for m in stops if m is not None), default=None)
 
     def rows(self) -> list[QueryMeasurement]:
@@ -596,6 +613,7 @@ async def run_walks(
     session: Session,
     *,
     backfills: CatchUps | None = None,
+    blocks: BlockRace | None = None,
     on_turn: Callable[[int], None] | None = None,
     on_decided: Callable[[int], None] | None = None,
 ) -> None:
@@ -606,12 +624,16 @@ async def run_walks(
     its turn before its held launches are released; ``on_decided(i)`` runs once it is decided, before
     the next turn opens. A ``None`` walk has nothing to measure and is decided on its turn.
 
+    **Under a block race the turns cycle per block.** Each live walk in index order takes the block
+    and hands the turn on; once all have, ``blocks.close`` decides them together on the rows they
+    share, and the survivors start the next block — so a cut never waits on an arm's place in line.
+
     **The depth bounds every call the phase has out** — its cells, the PoBB catch-ups that pair
     them, and discarded calls still winding down — which a whole inner campaign per call makes a
     memory bound. Slots go in one order: the catch-ups the walk on turn waits on, then its own
-    cells, then the walks ahead in index order, which leave one slot free; and no call starts that
-    the spend book cannot hold beside every call out (:func:`_dearest`). A pause or a budget stop is
-    raised; a pause that already cancelled a call is the same pause.
+    cells, then the other live walks in index order, which leave one slot free; and no call starts
+    that the spend book cannot hold beside every call out (:func:`_dearest`). A pause or a budget
+    stop is raised; a pause that already cancelled a call is the same pause.
 
     **A sent call is cancelled only where that stops what it bills**
     (``Connector.cancel_stops_billing``). Elsewhere the backend finishes it and the provider bills
@@ -620,6 +642,7 @@ async def run_walks(
     gauge = session.flight
     draining: set[asyncio.Future[Any]] = set()
     turn = -1
+    block = 0
     cancels = session.backend_client.cancel_stops_billing
     book = bound_spend_book()
     cell = _dearest(
@@ -638,22 +661,57 @@ async def run_walks(
         return book.fits(cell, beside="backend") - out()
 
     def live() -> list[Walk]:
-        return [walk for walk in walks[max(turn, 0) :] if walk is not None and walk.outcome is None]
+        return [walk for walk in walks if walk is not None and walk.outcome is None]
 
     def out() -> int:
         cells = sum(len(walk.running) for walk in live())
         catching = len(backfills.backfills_in_flight()) if backfills is not None else 0
         return cells + len(draining) + catching
 
+    def reach(walk: Walk) -> None:
+        if blocks is not None:
+            walk.boundary = min(walk.n, (block + 1) * blocks.block_size)
+
+    def close() -> bool:
+        """Every live walk took the block: the race decides them together, and a walk through its
+        whole panel completes. False once no walk is left."""
+        nonlocal block
+        assert blocks is not None
+        racing = {
+            i: walk for i, walk in enumerate(walks) if walk is not None and walk.outcome is None
+        }
+        stops = blocks.close({i: walk.results for i, walk in racing.items()}) if racing else {}
+        for i, walk in racing.items():
+            if (signal := stops.get(i)) is not None:
+                verdict = QueryLoopResult(
+                    walk.results, completed=False, stop_reason="stop_rule", stop_signal=signal
+                )
+            elif len(walk.results) == walk.n:
+                verdict = QueryLoopResult(walk.results)
+            else:
+                continue
+            draining.update(walk.end(verdict, cancel=cancels))
+            if on_decided is not None:
+                on_decided(i)
+        block += 1
+        for walk in live():
+            reach(walk)
+        return bool(live())
+
     def advance() -> bool:
         nonlocal turn
         while True:
             turn += 1
             if turn >= len(walks):
-                return False
+                if blocks is None or not close():
+                    return False
+                turn = 0
+            walk = walks[turn]
+            # A block race turns every live walk once per block; a decided one had its last turn.
+            if (walk is None and block > 0) or (walk is not None and walk.outcome is not None):
+                continue
             if on_turn is not None:
                 on_turn(turn)
-            walk = walks[turn]
             if walk is not None:
                 walk.release()
                 if walk.dataset:
@@ -668,9 +726,21 @@ async def run_walks(
             on_decided(turn)
         return advance()
 
+    def judged(walk: Walk) -> bool:
+        """Decide the walk on turn where its rules say so, or hand the turn on at a block's end.
+        False once no walk is left."""
+        if (verdict := walk.judge()) is not None:
+            return decide(walk, verdict)
+        if walk.boundary is not None and len(walk.results) == walk.boundary:
+            return advance()
+        return True
+
     def fill(walk: Walk, cap: int, armed: int) -> None:
         room = min(cap - out(), affordable())
         last = min(walk.n if walk.skip_at is None else walk.skip_at, walk.submitted + room) - 1
+        if walk.boundary is not None:
+            # One cell past a pending close at most, whatever the rules allow.
+            last = min(last, walk.boundary)
         if last < walk.submitted:
             return
         horizon = walk.horizon(last - 2)
@@ -735,6 +805,8 @@ async def run_walks(
     if gauge is not None:
         gauge.open(reading)
     try:
+        for opened in live():
+            reach(opened)
         walking_on = advance()
         while walking_on:
             walk = walks[turn]
@@ -799,7 +871,7 @@ async def run_walks(
             if settled and settle is not None and backfills is not None:
                 walk.settling = None
                 backfills.commit_backfills(settle)
-                if (verdict := walk.judge()) is not None and not decide(walk, verdict):
+                if not judged(walk):
                     break
                 continue
             if head is not None:
@@ -813,7 +885,7 @@ async def run_walks(
                 ):
                     walk.settling = sample
                     continue
-                if (verdict := walk.judge()) is not None and not decide(walk, verdict):
+                if not judged(walk):
                     break
                 continue
 

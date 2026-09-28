@@ -9,8 +9,7 @@ import hashlib
 import inspect
 import random
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field, replace
-from functools import partial
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, cast
 
 from pydantic import Field
@@ -258,49 +257,28 @@ def _rank_survivors(
 
 
 def _readings(
-    arm: Mapping[str, float], priors: Mapping[str, Mapping[str, float]]
+    arm: Mapping[str, float], rivals: Mapping[str, Mapping[str, float]]
 ) -> dict[str, tuple[float, int]]:
-    """Each prior's one-sided paired-t p that it outscores *arm* on the cells both measured, and
-    that width. Below two shared cells nothing was tested, so the prior is absent."""
+    """Each rival's one-sided paired-t p that it outscores *arm* on the cells both measured, and
+    that width. Below two shared cells nothing was tested, so the rival is absent."""
     out: dict[str, tuple[float, int]] = {}
-    for pid, prior in priors.items():
-        shared = [sid for sid in arm if sid in prior]
+    for pid, rival in rivals.items():
+        shared = [sid for sid in arm if sid in rival]
         _, _, _, p, n = paired_reading(
-            [prior[s] for s in shared], [arm[s] for s in shared], tail="greater"
+            [rival[s] for s in shared], [arm[s] for s in shared], tail="greater"
         )
         if p is not None:
             out[pid] = (p, n)
     return out
 
 
-@dataclass
-class _ArmRule:
-    """The race as one arm's walk reads it. Arms ahead still being walked may yet become priors,
-    so the horizon counts them as comparators."""
-
-    race: PairedTRace
-    ahead: Sequence[tuple[str, Walk | None]]
-    name: str = field(init=False)
-
-    def __post_init__(self) -> None:
-        self.name = self.race.node
-
-    def check(self, results: list[QueryMeasurement]) -> StopSignal | None:
-        return self.race.check(results)
-
-    def earliest_stop(
-        self,
-        results: list[QueryMeasurement],
-        upcoming: Sequence[tuple[Sample, QueryMeasurement | None]],
-    ) -> int | None:
-        return self.race.earliest_stop(results, upcoming, self.ahead)
-
-
 class PairedTRace:
-    """Arms decided in turn, each tested at every block boundary against the arms before it that
-    finished the panel. Every prior walked the same panel, so no pair needs catching up."""
+    """Every live arm walks each block, then at its close each is tested against every other live
+    arm; the arms μ others beat are cut together, and once μ or fewer remain the race stops them
+    where they stand (App. B, `do_racing`). Every arm walks the same panel, so no pair catches up."""
 
     gate = "outscored"
+    settled = "settled"
 
     def __init__(
         self,
@@ -323,67 +301,81 @@ class PairedTRace:
         self._n_cells = n_cells
         self._round_num = round_num
         self._on_snapshot = on_snapshot
-        self._priors: dict[str, dict[str, float]] = {}
-        self._current_id = ""
-        self._emit: Callable[[RaceSnapshot], None] | None = None
+        self._arms: dict[int, str] = {}
+        self._n_arms = 0
+        self._racing: set[int] = set()
 
     @property
     def n_priors(self) -> int:
-        return len(self._priors)
+        # The arms this one races at the next close: every other one still racing.
+        return len(self._racing) - 1
 
-    def rule(self, ahead: Sequence[tuple[str, Walk | None]]) -> _ArmRule:
-        return _ArmRule(self, ahead)
+    @property
+    def blocks(self) -> PairedTRace:
+        return self
+
+    @property
+    def block_size(self) -> int:
+        return self._block_size
+
+    def rule(self, ahead: Sequence[tuple[str, Walk | None]]) -> None:
+        return None
 
     def open_turn(self, candidate_id: str, idx: int, n: int) -> None:
-        self._current_id = candidate_id
-        self._emit = partial(self._on_snapshot, self.node, self._round_num, idx, n)
+        self._arms[idx] = candidate_id
+        self._n_arms = n
+        self._racing.add(idx)
 
-    def check(self, results: list[QueryMeasurement]) -> StopSignal | None:
-        n = len(results)
-        if n == 0 or n % self._block_size or not self._priors:
-            return None
-        readings = _readings(_cell_objectives(results, self._objective), self._priors)
-        if not readings:
-            return None
-        # The one-sided p that a prior outscores the arm is also P(arm beats it) as a t fiducial,
-        # which is what the stream's `p_better` reads.
-        breakdown = {
-            pid: {"p_better": p, "n_paired": float(width)} for pid, (p, width) in readings.items()
-        }
-        p_best = min(p for p, _ in readings.values())
-        if self._emit is not None:
-            self._emit(nodes.RaceSnapshot(p_best, self._current_id, n, breakdown))
-        # Uncorrected for the multiple tests, as CAPO races: a correction makes early cuts rarer.
-        beaten_by = sorted(pid for pid, (p, _) in readings.items() if p < self._alpha)
-        if len(beaten_by) < self._survivors:
-            return None
-        return StopSignal(
-            self.node,
-            ArmOutcome.ELIMINATED,
-            {
-                "gate": self.gate,
-                "queries_scored": n,
-                "total_samples": self._n_cells,
-                "n_priors": len(self._priors),
-                "outscored_by": beaten_by,
-                "p_best": p_best,
-                "paired_breakdown": breakdown,
-            },
-        )
-
-    def earliest_stop(
-        self,
-        results: list[QueryMeasurement],
-        upcoming: Sequence[tuple[Sample, QueryMeasurement | None]],
-        ahead: Sequence[tuple[str, Walk | None]],
-    ) -> int | None:
-        comparators = len(self._priors) + sum(
-            1 for pid, walk in ahead if walk is not None and pid not in self._priors
-        )
-        if comparators < self._survivors:
-            return None
-        boundary = (len(results) // self._block_size + 1) * self._block_size
-        return boundary if boundary <= len(results) + len(upcoming) else None
+    def close(self, rows: Mapping[int, list[QueryMeasurement]]) -> dict[int, StopSignal]:
+        readings = {self._arms[i]: _cell_objectives(r, self._objective) for i, r in rows.items()}
+        stops: dict[int, StopSignal] = {}
+        for i, arm_rows in rows.items():
+            cid = self._arms[i]
+            rivals = {pid: reading for pid, reading in readings.items() if pid != cid}
+            tested = _readings(readings[cid], rivals)
+            if not tested:
+                continue
+            # The one-sided p that a rival outscores the arm is also P(arm beats it) as a t
+            # fiducial, which is what the stream's `p_better` reads.
+            breakdown = {
+                pid: {"p_better": p, "n_paired": float(width)} for pid, (p, width) in tested.items()
+            }
+            p_best = min(p for p, _ in tested.values())
+            snapshot = nodes.RaceSnapshot(p_best, cid, len(arm_rows), breakdown)
+            self._on_snapshot(self.node, self._round_num, i, self._n_arms, snapshot)
+            # Uncorrected for the multiple tests, as CAPO races: a correction makes cuts rarer.
+            beaten_by = sorted(pid for pid, (p, _) in tested.items() if p < self._alpha)
+            if len(beaten_by) >= self._survivors:
+                stops[i] = StopSignal(
+                    self.node,
+                    ArmOutcome.ELIMINATED,
+                    {
+                        "gate": self.gate,
+                        "queries_scored": len(arm_rows),
+                        "total_samples": self._n_cells,
+                        "raced_against": sorted(rivals),
+                        "outscored_by": beaten_by,
+                        "p_best": p_best,
+                        "paired_breakdown": breakdown,
+                    },
+                )
+        left = [i for i in rows if i not in stops]
+        if len(left) <= self._survivors:
+            # Every arm left is kept, so none walks on; one through its panel completes instead.
+            for i in left:
+                if len(rows[i]) < self._n_cells:
+                    stops[i] = StopSignal(
+                        self.node,
+                        ArmOutcome.LOCKED_IN,
+                        {
+                            "gate": self.settled,
+                            "queries_scored": len(rows[i]),
+                            "total_samples": self._n_cells,
+                            "raced_against": sorted(self._arms[j] for j in rows if j != i),
+                        },
+                    )
+        self._racing = set(left) - set(stops)
+        return stops
 
     def judge(
         self,
@@ -396,7 +388,15 @@ class PairedTRace:
         if signal is None or signal.check_name != self.node:
             return None
         cr = signal.check_result
-        # The priors are named, not their rows: a replay reads every arm off the rescored round.
+        context: dict[str, Any] = {
+            "gate": cr["gate"],
+            "queries_scored": cr["queries_scored"],
+            "total_queries": cr["total_samples"],
+            "n_priors": len(cr["raced_against"]),
+        }
+        if signal.outcome is not ArmOutcome.ELIMINATED:
+            return context
+        # The rivals are named, not their rows: a replay reads every arm off the rescored round.
         record_decision(
             self._decisions,
             CapoCheckpointKind.PAIRED_T_CUT,
@@ -408,23 +408,18 @@ class PairedTRace:
                 "survivors": self._survivors,
                 "length_penalty": self._objective.length_penalty,
                 "length_norm": self._objective.length_norm,
-                "prior_ids": sorted(self._priors),
+                "raced_against": list(cr["raced_against"]),
             },
             True,
             node=self.node,
             data={"outscored_by": list(cr["outscored_by"])},
             round=self._round_num,
         )
-        return {
-            "gate": self.gate,
-            "queries_scored": cr["queries_scored"],
-            "total_queries": cr["total_samples"],
-            "n_priors": cr["n_priors"],
-            "outscored_by": [labels.get(pid, pid) for pid in cr["outscored_by"]],
-        }
+        context["outscored_by"] = [labels.get(pid, pid) for pid in cr["outscored_by"]]
+        return context
 
     def admit(self, candidate_id: str, results: list[QueryMeasurement], sp: JobSearchPoint) -> None:
-        self._priors[candidate_id] = _cell_objectives(results, self._objective)
+        return None
 
     def start_backfill(self, sample: Sample, room: int) -> list[asyncio.Future[Any]]:
         return []
@@ -687,6 +682,7 @@ class PopulationSelector:
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     knobs: ClassVar[type[StrictModel]] = PopulationKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
+    stamps_theta: ClassVar[bool] = False
 
     def select(self, ctx: RoundContext, measured: Measured, population: Population) -> Selection:
         cycle = ctx.cycle
@@ -747,9 +743,9 @@ def _replay_paired_t_cut(
     arm = _cell_objectives(
         rows[inputs_ref["candidate_id"]][: int(inputs_ref["queries_scored"])], objective
     )
-    priors = {pid: _cell_objectives(rows[pid], objective) for pid in inputs_ref["prior_ids"]}
+    rivals = {pid: _cell_objectives(rows[pid], objective) for pid in inputs_ref["raced_against"]}
     alpha = float(inputs_ref["alpha"])
-    beaten = sum(1 for p, _ in _readings(arm, priors).values() if p < alpha)
+    beaten = sum(1 for p, _ in _readings(arm, rivals).values() if p < alpha)
     return beaten >= int(inputs_ref["survivors"])
 
 

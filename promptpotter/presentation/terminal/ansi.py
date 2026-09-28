@@ -140,7 +140,7 @@ def _render_measure_enter(v: MeasureEnterView) -> str:
 def _render_round_complete(v: RoundCompleteView) -> str:
     out: list[str] = []
     if len(v.scores) > 3:
-        if board := _scoreboard(v.scores, v.winner_label):
+        if board := _scoreboard(v.scores, v.winner_label, theta=v.stamps_theta):
             out.append(board)
     elif v.scores:
         parts = [
@@ -169,53 +169,44 @@ def _render_round_complete(v: RoundCompleteView) -> str:
         else ""
     )
 
-    # A winner that stopped short gets no "(was …)" clause rather than the full-set rate:
-    # subtracting a full panel from a prefix accuracy publishes lift nobody measured.
-    versus = (
-        f"was {v.reference_accuracy:.1%}, {_fmt_delta(v.delta)}"
-        if v.reference_accuracy is not None and v.delta is not None
-        else "no matched parent — winner stopped before covering the panel"
-    )
-
     # The campaign says WHICH number headlines this line. `ability` is what a resubset campaign
     # sets (`knobs.py::headline_subset_relative_under_resubset`), because the panel is re-picked
     # each round, so accuracy is subset-relative and a parent that did nothing still moves with it.
     # Accuracy does not disappear; it moves into the parenthetical, so declaring the other loses
     # no reading.
     acc_txt = fmt_pct(v.winner_accuracy)
-    if v.headline_metric == "ability" and v.ability_theta is not None:
-        headline = f"θ {v.ability_theta:+.3f}"
-        detail = f"{acc_txt}, {versus}"
-    else:
-        headline = acc_txt
-        detail = versus
+    ability = v.headline_metric == "ability" and v.ability_theta is not None
+    headline = f"θ {v.ability_theta:+.3f}" if ability else acc_txt
+    detail = [acc_txt] if ability else []
 
     if v.improved:
+        # An arm that stopped short gets no reference rate rather than the full-set one:
+        # subtracting a full panel from a prefix accuracy publishes lift nobody measured.
+        detail.append(
+            f"vs reference {v.reference_accuracy:.1%}, {_fmt_delta(v.delta)}"
+            if v.reference_accuracy is not None and v.delta is not None
+            else "no matched reference — stopped before covering its reference's cells"
+        )
         sig_tag = f"  {fmt_pvalue(v.p_value)}" if v.p_value is not None else ""
         out.append(
-            f"  {GREEN}{BOLD}✓ IMPROVED{RESET}  {headline}"
-            f" ({detail}){comp_tag}{sig_tag}"
-            f"  ->  next: {v.next_action}"
+            f"  {GREEN}{BOLD}✓ SELECTED {v.winner_label}{RESET}  {headline}"
+            f" ({', '.join(detail)}){comp_tag}{sig_tag}"
         )
     else:
-        out.append(
-            f"  {YELLOW}{BOLD}✗ NOT PROMOTED{RESET}  {headline}"
-            f" ({detail}, n={v.winner_total}){comp_tag}"
-        )
-    # The round is won on θ-lift, so the accuracy on the line above is never the number that
-    # decided it. The reason prints whichever way the round went — on a win as much as a hold, or
-    # "why did THIS one win?" is answered nowhere. The lift interval is NOT repeated here;
-    # `live/phase.py::render_round_stats` prints it once at round close.
+        detail += ["the best-so-far held", f"n={v.winner_total}"]
+        out.append(f"  {YELLOW}{BOLD}· HELD{RESET}  {headline} ({', '.join(detail)}){comp_tag}")
+    # The selector's own reason, whichever way the round went: the rate on the line above is never
+    # what an optimizer's selection read. Its lift interval prints once, in `render_round_stats`.
     if v.verdict_reason:
         out.append(f"  {DIM}why: {v.verdict_reason}{RESET}")
 
     if not show_inline and v.winner_composite_fitness is not None:
-        # No fallback to the cycle's origin composite — the substitution `versus` above refuses.
+        # No fallback to the cycle's origin composite — the substitution the verdict line refuses.
         for line in render_composite_fitness_block(
             v.winner_composite_fitness,
             v.winner_evaluators,
             formula,
-            parent=v.reference_composite,
+            reference=v.reference_composite,
             use_short_names=bool(v.composite_fitness_formula_short),
         ):
             out.append(f"  {line}")

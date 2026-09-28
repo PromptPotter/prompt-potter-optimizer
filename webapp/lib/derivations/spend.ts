@@ -1,5 +1,5 @@
 // The single parser for the dashboard `spend` block. A bucket may be ABSENT from the served file
-// (`diagnostic` usually is), so index a rollup through a guard, never an annotation.
+// (`diagnostic` and `bench` often are), so index a rollup through a guard, never an annotation.
 
 import type { SpendBucket, SpendRollup } from "@/lib/api/types";
 import type { DashboardSnapshot } from "@/lib/poll";
@@ -12,6 +12,7 @@ export const SPEND_BUCKETS = [
   { key: "loop", label: "Loop" },
   { key: "judge", label: "Judge" },
   { key: "diagnostic", label: "Diagnostic" },
+  { key: "bench", label: "Bench" },
 ] as const satisfies readonly { key: keyof SpendRollup; label: string }[];
 
 export interface SpendView {

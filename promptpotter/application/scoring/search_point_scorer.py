@@ -17,7 +17,9 @@ from promptpotter.application.scoring.query_loop import QueryLoopState, Walk, ru
 from promptpotter.application.scoring.selection import mean_fitness_ci
 from promptpotter.domain.results import ArmOutcome
 from promptpotter.domain.scoring import CellScorer, QueryMeasurement
+from promptpotter.domain.spend import ROLE_SPEND_KIND
 from promptpotter.domain.validators import StopRule, StopSignal
+from promptpotter.infrastructure.llm.telemetry import filed_as
 from promptpotter.infrastructure.store import archive_queries
 from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 from promptpotter.infrastructure.tracing.events import DatasetRun
@@ -277,18 +279,20 @@ async def score_search_point(
     """One search point scored on ``dataset``, alone in its phase. ``measured`` and the two
     per-sample callbacks are required keywords with NO default — each decides what the numbers
     MEAN, and the signature is the only enforcement."""
-    walk = open_walk(
-        search_point,
-        dataset,
-        session,
-        label=label,
-        on_sample_scored=on_sample_scored,
-        on_sample_starting=on_sample_starting,
-        axes=axes,
-        measured=measured,
-        force_fresh=force_fresh,
-    )
-    await run_walks([walk], session)
+    # Opened inside the filing too: the walk's cells run in a copy of the context taken here.
+    with filed_as(ROLE_SPEND_KIND.get(label)):
+        walk = open_walk(
+            search_point,
+            dataset,
+            session,
+            label=label,
+            on_sample_scored=on_sample_scored,
+            on_sample_starting=on_sample_starting,
+            axes=axes,
+            measured=measured,
+            force_fresh=force_fresh,
+        )
+        await run_walks([walk], session)
     return close_walk(walk)
 
 

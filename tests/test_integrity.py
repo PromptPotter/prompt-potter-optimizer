@@ -4292,6 +4292,105 @@ def test_first_mint_decomposes_once_and_bills_the_run_it_frames(
     assert bills == [0.002], "the check-in's bill never reached the run it was bought for"
 
 
+def test_the_bench_pass_bills_and_clocks_under_its_own_name(built_stores, tmp_path, monkeypatch):
+    """The held-out pass is the price of the headline every optimizer is compared on. Filed as
+    `diagnostic`, a head-to-head reads one optimizer's bench pass as re-measurement; unbracketed,
+    its clock lands among calls outside every phase. Silent: every total still sums, and a
+    ledger record's kind is fixed once it is written. Inside a diagnostic, other passes stay put."""
+    from promptpotter.application.initialization.session import Session
+    from promptpotter.application.runner.bench import score_on_bench
+    from promptpotter.application.scoring.formula import compile_scorer
+    from promptpotter.application.scoring.formula.rescore import rescore_results
+    from promptpotter.application.scoring.search_point_scorer import score_search_point
+    from promptpotter.domain.bench import DatasetSplit, partition_bank
+    from promptpotter.domain.pipeline_schema import NodePromptInfo, NodeType, PipelineNode
+    from promptpotter.domain.run_records import TokenUsageRecord
+    from promptpotter.domain.spend import SpendRollup, TokenAccount
+    from promptpotter.infrastructure.ledger import CycleEventLog
+    from promptpotter.infrastructure.llm import telemetry
+    from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+        scan_ledger_wall_clock,
+    )
+    from promptpotter.shared.clock import utcnow_iso
+
+    bank = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(8)]
+    schema = PipelineSchema(
+        name="bench-spend",
+        nodes=[
+            PipelineNode(
+                name="solve", node_type=NodeType.NONE, tunes_llm=False, prompt_info=NodePromptInfo()
+            )
+        ],
+    )
+    session = Session(
+        store=built_stores,
+        backend_id="",
+        backend_client=types.SimpleNamespace(  # type: ignore[arg-type]
+            max_cells_in_flight=1,
+            cancel_stops_billing=True,
+            holds_own_sends=True,
+            derives_spend_bounds=False,
+            backpressure=types.SimpleNamespace(reading=lambda: None),
+        ),
+        pipeline_schema=schema,
+        samples=bank,
+        dataset_name="bench-spend",
+    )
+    session.source = RunSource.OPTIMIZATION_LOOP
+    ledger = CycleEventLog.open(CycleDir(tmp_path / "cycle"))
+    session.scoring.scorer = compile_scorer(
+        "label_match(predicted, ground_truth)", None, verifier_graded=False
+    )
+    session.scoring.partition = partition_bank(bank, DatasetSplit(bench=3))
+
+    async def _measure(sample: Sample, _session: Any, *, pipeline_params: Any) -> dict:
+        await asyncio.sleep(0.02)
+        telemetry.emit_token_usage(
+            node="solve", kind="backend", usage=TokenAccount(input=9), duration_s=0.01
+        )
+        row = {"sample_id": sample.id, "query": sample.query, "ground_truth": "a"}
+        return rescore_results([{**row, "predicted": "a", "error": None}], session.scoring.scorer)[
+            0
+        ]
+
+    monkeypatch.setattr(query_loop, "measure_sample", _measure)
+    sp = OptSearchPoint(instruction="Answer.").to_job_search_point(
+        schema=schema, framing=TaskDecomposition(), demo=[]
+    )
+    cb = types.SimpleNamespace(
+        on_phase=lambda ev: ledger.append(
+            PhaseRecord(phase=str(ev.phase), event=ev.event, round=ev.round)
+        ),
+        on_sample_scored=lambda *_a: None,
+        on_sample_started=lambda *_a: None,
+    )
+
+    async def _passes() -> None:
+        await score_on_bench(session, sp, round_num=0, cb=cb, spend=SpendRollup())
+        with telemetry.filed_as("diagnostic"):
+            await score_search_point(
+                sp,
+                list(session.scoring.require_partition().search)[:1],
+                session,
+                label="verify",
+                measured=None,
+                on_sample_scored=None,
+                on_sample_starting=None,
+            )
+
+    started = utcnow_iso()
+    token = telemetry.set_cycle_ledger(ledger)
+    try:
+        asyncio.run(_passes())
+    finally:
+        telemetry.reset_cycle_ledger(token)
+    kinds = [r.kind for _, r in ledger.iter() if isinstance(r, TokenUsageRecord)]
+    assert kinds == ["bench"] * 3 + ["diagnostic"], kinds
+
+    clock = scan_ledger_wall_clock(ledger.path, started_at=started, finished_at=utcnow_iso())
+    assert clock.phase_s["bench"] > 0 and set(clock.unbracketed_call_s) == {"diagnostic"}, clock
+
+
 # 8. Where the package reads and writes
 
 # Bare scalars YAML 1.1 resolves to a non-string: the write-side hazard `write_yaml` must quote.

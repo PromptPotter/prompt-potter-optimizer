@@ -43,7 +43,7 @@ def fmt_individual_header(
     body = fmt_pipeline_overlay(pipeline_overlay)
     if not body and changes_description:
         body = truncate(changes_description.strip(), _HEADER_BODY_MAX)
-    body = f"{DIM}parent re-eval{RESET}" if not body else f"{CYAN}{body}{RESET}"
+    body = f"{DIM}no change described{RESET}" if not body else f"{CYAN}{body}{RESET}"
     return f"  {label}/{total}  {body}"
 
 
@@ -103,19 +103,19 @@ def individual_summary_from_dict(
     if n_cached:
         n_str += f" ({n_cached}📖)"
     # THE SERVED LIFT, never `acc - parent_acc` recomputed here: `reference_lift` is the
-    # paired difference on the cells the arm and the parent BOTH measured, `None` until round
+    # paired difference on the cells the arm and its reference BOTH measured, `None` until round
     # measurement stamps it (`runner/measurement.py`) or below two shared cells. Absent means absent —
-    # a cut arm's rate on its own prefix outruns the parent's on a fuller panel.
+    # a cut arm's rate on its own prefix outruns the reference's on a fuller panel.
     lift = scores.get("reference_lift")
-    vs_parent = ""
+    vs_reference = ""
     if isinstance(lift, int | float):
         band = fmt_ci(
             scores.get("reference_lift_ci_lo"),
             scores.get("reference_lift_ci_hi"),
             spec="{:+.1%}",
         )
-        vs_parent = f"  vs parent: {_fmt_delta(float(lift))} {band}"
-    body_line = f"{mutations_chunk}{n_str}{vs_parent}"
+        vs_reference = f"  vs reference: {_fmt_delta(float(lift))} {band}"
+    body_line = f"{mutations_chunk}{n_str}{vs_reference}"
 
     detail_lines: list[str] = []
     elim = scores.get("elimination_context") or {}
@@ -156,10 +156,10 @@ def individual_summary_from_dict(
     degraded = scores.get("degraded_samples", 0)
 
     if comp is not None:
-        # Same rule, same source: the parent's composite ON THIS ARM'S CELLS, or no Δ at all.
+        # Same rule, same source: the reference's composite ON THIS ARM'S CELLS, or no Δ at all.
         # The cycle-wide `parent_composite_fitness` was read over the parent's own panel.
         detail_lines.append(
-            render_composite_fitness_oneliner(comp, parent=scores.get("reference_composite"))
+            render_composite_fitness_oneliner(comp, reference=scores.get("reference_composite"))
         )
     if degraded:
         detail_lines.append(f"{YELLOW}⚠ {degraded}/{n} degraded{RESET}")

@@ -143,11 +143,11 @@ def render_round_stats(
         )
     )
 
-    # The winner's blocked lift over the matched parent WITH its interval — the served
+    # The selected arm's blocked lift over its reference WITH its interval — the served
     # `RoundResult` pair, not a recomputation. The header above prints a point estimate and every
     # other line reads the same on a round that resolved nothing as on one that resolved
-    # something; this is the line that separates them. Silent when the round crowned nobody or the
-    # panel held under two shared cells, where the absence is the honest answer.
+    # something; this is the line that separates them. Silent when the round selected nobody or
+    # the panel held under two shared cells, where the absence is the honest answer.
     selected = next(iter(round_result.selected_scores), None)
     lift = selected.reference_lift if selected else None
     lo = selected.reference_lift_ci_lo if selected else None
@@ -155,10 +155,12 @@ def render_round_stats(
     if lift is not None and lo is not None and hi is not None:
         spans_zero = lo <= 0.0 <= hi
         verdict = (
-            f"{YELLOW}spans 0 — not separable from the parent{RESET}" if spans_zero else "clears 0"
+            f"{YELLOW}spans 0 — not separable from its reference{RESET}"
+            if spans_zero
+            else "clears 0"
         )
         lines.append(
-            _node_line(f"lift vs matched parent: {lift:+.3f} [{lo:+.3f}, {hi:+.3f}]  |  {verdict}")
+            _node_line(f"lift vs reference: {lift:+.3f} [{lo:+.3f}, {hi:+.3f}]  |  {verdict}")
         )
 
     # The 1-to-1 series: the best-so-far line read on the cells all of it has answered. It is the

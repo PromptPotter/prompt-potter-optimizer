@@ -4,6 +4,7 @@ re-scored on the same panel, each arm read against it, and the ruler extended ov
 
 from __future__ import annotations
 
+import math
 from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
@@ -17,14 +18,20 @@ from promptpotter.application.scoring.candidate_report import (
     read_breakage,
     walk_outcome,
 )
+from promptpotter.application.scoring.classification import scoreable_rows
 from promptpotter.application.scoring.metrics import matched_parent_stats
 from promptpotter.application.scoring.query_loop import Walk, run_walks
 from promptpotter.application.scoring.search_point_scorer import (
     SCORING_ERROR_ABORT,
     close_walk,
     open_walk,
+    score_search_point,
 )
-from promptpotter.application.scoring.selection import distinct_valid_cells, matched_parent_lift
+from promptpotter.application.scoring.selection import (
+    distinct_valid_cells,
+    matched_parent_lift,
+    paired_fitness,
+)
 from promptpotter.domain.results import (
     ArmOutcome,
     CandidateProposal,
@@ -45,6 +52,8 @@ if TYPE_CHECKING:
         Race,
         RoundContext,
     )
+    from promptpotter.domain.opt_search_point import OptSearchPoint
+    from promptpotter.domain.results import ReferenceReading
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.domain.search_point import JobSearchPoint
@@ -83,7 +92,7 @@ async def measure_population(
     # The shared comparison anchor. Its single-draw noise is correlated across arms, so it floods
     # every comparison equally rather than favouring one.
     parent_rows = list(cast("list[QueryMeasurement]", parent.results))
-    reference_id = parent.opt_sp.lineage.id
+    read_against, references = await _lift_references(ctx, population, panel, rows, scored, parent)
     # Clamped so a tiny dataset stays electable.
     coverage_floor = min(cycle.config.optimization.elimination_n_min, len(panel.cells))
     cs_by_id = {cs.candidate_id: i for i, cs in enumerate(scores)}
@@ -93,20 +102,22 @@ async def measure_population(
         if cs_idx is None:
             continue
         cand_rows = rows[ind.lineage.id]
-        matched = matched_parent_stats(parent_rows, cand_rows, schema)
-        # Unconditional on ``matched``: the lift is defined on the cells both reached, so a
-        # truncated arm gets an honest (wider) interval instead of nothing.
-        lift = matched_parent_lift(cand_rows, parent_rows)
-        scores[cs_idx] = scores[cs_idx].model_copy(
-            update={
-                "reference_id": reference_id,
-                "reference_accuracy": matched["accuracy"] if matched else None,
-                "reference_composite": matched["composite_fitness"] if matched else None,
-                "reference_lift": lift[0] if lift else None,
-                "reference_lift_ci_lo": lift[1] if lift else None,
-                "reference_lift_ci_hi": lift[2] if lift else None,
-            }
-        )
+        if ind.lineage.id in read_against:
+            reference_id, reference_rows = read_against[ind.lineage.id]
+            matched = matched_parent_stats(reference_rows, cand_rows, schema)
+            # Unconditional on ``matched``: the lift is defined on the cells both reached, so a
+            # truncated arm gets an honest (wider) interval instead of nothing.
+            lift = matched_parent_lift(cand_rows, reference_rows)
+            scores[cs_idx] = scores[cs_idx].model_copy(
+                update={
+                    "reference_id": reference_id,
+                    "reference_accuracy": matched["accuracy"] if matched else None,
+                    "reference_composite": matched["composite_fitness"] if matched else None,
+                    "reference_lift": lift[0] if lift else None,
+                    "reference_lift_ci_lo": lift[1] if lift else None,
+                    "reference_lift_ci_hi": lift[2] if lift else None,
+                }
+            )
         # A collapsed arm is read here and still refused entry — it keeps its matched stamp.
         if not is_electable(scores[cs_idx], cand_rows):
             continue
@@ -125,9 +136,97 @@ async def measure_population(
         scored=scored,
         parent=parent,
         parent_rows=parent_rows,
+        references=references,
         electable=electable,
         coverage_floor=coverage_floor,
     )
+
+
+async def _lift_references(
+    ctx: RoundContext,
+    population: Population,
+    panel: Panel,
+    rows: dict[str, list[QueryMeasurement]],
+    scored: list[OptSearchPoint],
+    parent: ReferenceReading,
+) -> tuple[dict[str, tuple[str, list[QueryMeasurement]]], dict[str, list[QueryMeasurement]]]:
+    """Each scored arm's reference under ``lift_reference`` and the rows it is read on, then every
+    reference's rows as the round banks them."""
+    cycle = ctx.cycle
+    parent_rows = list(cast("list[QueryMeasurement]", parent.results))
+    bar_id = parent.opt_sp.lineage.id
+    if cycle.config.optimization.lift_reference == "best_so_far":
+        return {ind.lineage.id: (bar_id, parent_rows) for ind in scored}, {bar_id: parent_rows}
+
+    cells_of = {
+        ind.lineage.id: {int(r["sample_id"]) for r in rows[ind.lineage.id]} for ind in scored
+    }
+    needed: dict[str, set[int]] = {}
+    for ind in scored:
+        for pid in ind.lineage.parent_ids:
+            needed.setdefault(pid, set()).update(cells_of[ind.lineage.id])
+    configs = {
+        rr.opt_sp.lineage.id: (rr.opt_sp, rr.pipeline_params)
+        for rr in cycle.rounds
+        if rr.opt_sp is not None
+    }
+    configs.update(
+        (ind.lineage.id, (ind, params))
+        for ind, params in zip(population.individuals, population.pipeline_params, strict=True)
+    )
+    demo = cycle.session.scoring.require_partition().demo
+    references: dict[str, list[QueryMeasurement]] = {}
+    for pid, sids in needed.items():
+        if pid == bar_id:
+            references[pid] = [r for r in parent_rows if int(r["sample_id"]) in sids]
+            continue
+        if pid not in configs:
+            raise ValueError(
+                f"lift_reference 'parents': an arm names parent {pid}, which is neither in round "
+                f"{ctx.round_num}'s population nor any round's selected individual, so the bench "
+                "holds no configuration to re-measure it on the arm's cells"
+            )
+        osp, params = configs[pid]
+        walked = await score_search_point(
+            osp.to_job_search_point(
+                base_pipeline_params=params,
+                schema=cycle.session.pipeline_schema,
+                framing=cycle.framing,
+                demo=demo,
+            ),
+            [s for s in panel.cells if int(s.id) in sids],
+            cycle.session,
+            label=MeasurementRole.PARENT,
+            axes=cycle.axes,
+            on_sample_scored=partial(ctx.callbacks.on_sample_scored, NO_ROUND_SLOT, 0),
+            on_sample_starting=partial(ctx.callbacks.on_sample_started, NO_ROUND_SLOT, 0),
+            measured=MeasuredCandidate(
+                idx=NO_ROUND_SLOT,
+                candidate_id=pid,
+                label=f"parent:{pid[:8]}",
+                role=MeasurementRole.PARENT,
+            ),
+        )
+        references[pid] = walked.results
+
+    read_against: dict[str, tuple[str, list[QueryMeasurement]]] = {}
+    for ind in scored:
+        cells = cells_of[ind.lineage.id]
+        on_arm = {
+            pid: [r for r in references[pid] if int(r["sample_id"]) in cells]
+            for pid in ind.lineage.parent_ids
+        }
+        if on_arm:
+            # `max` keeps the first of a tie, so a tie falls to `parent_ids` order.
+            better = max(on_arm, key=lambda pid: _mean_on(rows[ind.lineage.id], on_arm[pid]))
+            read_against[ind.lineage.id] = (better, on_arm[better])
+    named = {pid for pid, _ in read_against.values()}
+    return read_against, {pid: rs for pid, rs in references.items() if pid in named}
+
+
+def _mean_on(arm_rows: list[QueryMeasurement], parent_rows: list[QueryMeasurement]) -> float:
+    _, parent_fit = paired_fitness(scoreable_rows(arm_rows), scoreable_rows(parent_rows))
+    return sum(parent_fit) / len(parent_fit) if parent_fit else -math.inf
 
 
 async def _walk_population(
@@ -142,7 +241,7 @@ async def _walk_population(
     proposals = population.proposals
     n = len(population.individuals)
     rows: dict[str, list[QueryMeasurement]] = {}
-    scores: list[ScoredCandidate] = []
+    reports: dict[int, ScoredCandidate] = {}
 
     def catch_up(sp: JobSearchPoint, sample: Sample, prior_id: str) -> CatchUp:
         # No display callbacks, which would mint a bogus `C{round}.0` row, and no stop rule, which
@@ -176,6 +275,7 @@ async def _walk_population(
 
     race: Race | None = eliminator.race(ctx, panel, catch_up) if eliminator is not None else None
     ids = [ind.lineage.id for ind in population.individuals]
+    labels = {cid: candidate_label(round_num, idx) for idx, cid in enumerate(ids)}
     order = [int(s.id) for s in panel.order]
     # Single merge site: each candidate's frozen searchpoint, shared by the in-flight dashboard
     # seed (resolved config-only) and the candidate's walk and report.
@@ -193,9 +293,10 @@ async def _walk_population(
     walks: list[Walk | None] = []
     for idx in range(n):
         checks: list[StopRule] = list(cycle.session.scoring.degradation_checks)
-        if race is not None:
-            # The candidates before this one still being walked may yet become priors.
-            checks.append(race.rule(list(zip(ids, walks, strict=False))))
+        # The candidates before this one still being walked may yet become priors.
+        rule = race.rule(list(zip(ids, walks, strict=False))) if race is not None else None
+        if rule is not None:
+            checks.append(rule)
         walk = _open_candidate(ctx, idx, n, proposals[idx], sps[idx], panel.order, checks)
         if walk is not None:
             walk.skip_at = skips.get(ids[idx])
@@ -228,16 +329,25 @@ async def _walk_population(
             panel.order,
             population.pipeline_params[idx],
             race,
-            {cs.candidate_id: cs.label for cs in scores},
+            labels,
         )
         rows[ids[idx]] = results
         if report.runtime_failures:
             proposal.runtime_failures = [*proposal.runtime_failures, *report.runtime_failures]
-        scores.append(report)
+        reports[idx] = report
         callbacks.on_candidate_scored(idx, n, report.model_dump())
 
-    await run_walks(walks, cycle.session, backfills=race, on_turn=on_turn, on_decided=on_decided)
-    return rows, scores
+    await run_walks(
+        walks,
+        cycle.session,
+        backfills=race,
+        blocks=race.blocks if race is not None else None,
+        on_turn=on_turn,
+        on_decided=on_decided,
+    )
+    # In walk order, which a block race decides out of.
+    ranked = sorted(reports)
+    return {ids[i]: rows[ids[i]] for i in ranked}, [reports[i] for i in ranked]
 
 
 def _open_candidate(

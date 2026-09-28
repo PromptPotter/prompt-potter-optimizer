@@ -66,7 +66,7 @@ closes with a scoreboard and one verdict line:
 
 ```
   Scoreboard: C3.1=74.0% | C3.2=71.0% | C3.3=68.0%
-  ✓ IMPROVED  74.0% (was 62.0%, +12.0%)  p=0.003 **  ->  next: continue
+  ✓ SELECTED C3.1  74.0% (vs reference 62.0%, +12.0%)  p=0.003 **
   why: …
 ```
 
@@ -75,10 +75,10 @@ closes with a scoreboard and one verdict line:
 | `ROUND 3/10` | Round number and ceiling. In lives mode the ceiling is replaced by a ♥ bank. |
 | `stall 0/3 → L2` | Rounds of no improvement, and how many trigger [L2](../concepts/the-loop.md). Reads `L2 every round` when patience is 0. |
 | `Prior critique` | Whether last round produced one — the input this round's candidates were built from. |
-| `Scoreboard` | Each candidate's accuracy. Above three candidates this becomes a full box adding composite fitness, 95% CI and delta, with the winner marked `*`. |
-| the verdict | `✓ IMPROVED` or `✗ NOT PROMOTED`. The accuracy on it never decided the round — θ did — so a `why:` line beneath states the reason whichever way it went. |
-| `(was 62.0%, +12.0%)` | The **matched-pair** parent: the parent restricted to the samples this winner actually measured. A winner that stopped before covering the panel gets no such clause, because subtracting the full-set parent from a prefix would publish lift nobody measured. |
-| `p=0.003 **` | Significance of the improvement; the stars are the band. |
+| `Scoreboard` | Each candidate's accuracy. Above three candidates this becomes a full box adding composite fitness, 95% CI and delta, with the selected arm marked `*` — and an `Ability θ` column where the optimizer's selector fits one per arm. |
+| the verdict | `✓ SELECTED <label>` or `· HELD` (the best-so-far stands). The accuracy on it never decided the round — the optimizer's selector did — so a `why:` line beneath states its reason whichever way it went. |
+| `(vs reference 62.0%, +12.0%)` | The **matched-pair** reference — the individual this arm's lift is read against (`lift_reference`) — restricted to the samples the arm actually measured. An arm that stopped before covering its reference's panel gets no such rate, because subtracting a full-set rate from a prefix would publish lift nobody measured. |
+| `p=0.003 **` | Significance of the lift over that reference; the stars are the band. |
 
 Candidate labels are `C0` for the origin and `C{round}.{n}` after it — so `C3.2` is the second candidate of round 3.
 

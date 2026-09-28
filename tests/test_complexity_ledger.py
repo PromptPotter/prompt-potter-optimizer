@@ -212,7 +212,10 @@ LEDGER_BASELINE = {
     # own leaf, and one on the campaign reaches every entry point that mints and rides the manifest.
     # +1: `paired_t.length_penalty` (γ) — CAPO's objective, declared once where the race reads it;
     # the campaign's `per_cell` formula cannot carry it without changing every arm's bench score.
-    "config_leaf_fields": 54,
+    # +1: `OptimizationConfig.lift_reference` — what an arm's lift is read against, the round's
+    # best-so-far or its own parents. The bench's, not a node's: every optimizer's arms carry the
+    # lift, and a paper comparing the two readings needs both runnable under one manifest.
+    "config_leaf_fields": 55,
     # +1: `QUEUE_MAX_WAIT_S` — how long a launch may wait in line before it is withdrawn. It is a
     # setting and not a constant because it is the one queue number a HOST has to be able to
     # answer for: on a shared box it decides when someone else's waiting launch is given up on.
@@ -288,7 +291,9 @@ LEDGER_BASELINE = {
     # ±0: `axis_memory_peaked` moved from potter's payload to the round — the bench writes it.
     # +1: `CapoRoundState.length_norm` — the longest initial prompt's length, measured once in
     # round 1; the initial population is gone by round 2, so no round field can re-derive it.
-    "cycle_result_fields": 258,
+    # +11: `SpendRollup.bench`, one `SpendBucket` — the held-out pass's price. `diagnostic` held it
+    # beside `verify`'s re-measures, so a head-to-head could not read what its headline cost.
+    "cycle_result_fields": 269,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
@@ -573,7 +578,11 @@ LEDGER_BASELINE = {
     # framed prompt, and the ablation reads as no effect (test_integrity § 1).
     # +1: a first mint that derives its id before committing the decomposition, or bills it on no
     # run's ledger, names a prompt nobody scores or spends money no meter sees (test_integrity § 7).
-    "test_functions": 212,
+    # +1: a bench pass filed under another bucket, or clocked outside every phase, prices one
+    # optimizer's headline as its search while every total still sums (test_integrity § 7).
+    # +1: a crossover read against its worse parent, or a parent re-measured beyond the child's
+    # cells, still prints a lift and an interval (test_numerics § 7).
+    "test_functions": 214,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

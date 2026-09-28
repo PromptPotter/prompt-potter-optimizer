@@ -167,8 +167,8 @@ def _separability(round_num: int, electable: list[ScoredCandidate]) -> bool | No
         message=(
             f"round {round_num} resolved nothing: every one of its {len(bracketed)} readable arms "
             f"has a lift interval spanning 0 (best reaches {widest.reference_lift_ci_hi:+.3f} "
-            "at its upper bound). An arm this round elects is the best of what it saw, not a "
-            "measured improvement over the parent"
+            "at its upper bound). An arm this round selects is the best of what it saw, not a "
+            "measured improvement over its reference"
         ),
         detail={"arms": len(bracketed), "best_ci_hi": widest.reference_lift_ci_hi},
     )
@@ -207,10 +207,11 @@ def _round_result(
         best_scores = dict(winner_cs.evaluators)
     base = _compute_accuracy(best_results)
     p_value: float | None = None
-    if base["total"] > 0 and winner_id:
+    winner_reference = cs_by_id[winner_id].reference_id if winner_id else None
+    if base["total"] > 0 and winner_reference is not None:
         # A recorded diagnostic; it gates nothing. Significance runs on the per-sample FITNESS
         # rather than binary hits, TWO-SIDED to match the winner's `reference_lift_ci_*` beside it.
-        cand_fit, parent_fit = paired_fitness(best_results, measured.parent_rows)
+        cand_fit, parent_fit = paired_fitness(best_results, measured.references[winner_reference])
         _d, _lo, _hi, p_value, _n = paired_reading(cand_fit, parent_fit)
     return RoundResult(
         round=ctx.round_num,
@@ -245,10 +246,11 @@ def _round_result(
         ),
         results=cast("list[dict[str, Any]]", best_results),
         all_candidate_results=cast("dict[str, list[dict[str, Any]]]", dict(measured.rows)),
-        # The bar, banked with the arms held to it: every scalar this round stamps about the
+        # Banked with the arms read against them: every scalar this round stamps about a
         # reference is read off exactly these rows.
         reference_results={
-            parent.opt_sp.lineage.id: cast("list[dict[str, Any]]", list(measured.parent_rows))
+            rid: cast("list[dict[str, Any]]", list(rows))
+            for rid, rows in measured.references.items()
         },
         candidates_scored=len(measured.scored),
         electable_count=len(measured.electable),
@@ -401,7 +403,8 @@ async def execute_round(
         CampaignPhase.SELECT,
         "exit",
         round=round_num,
-        winner_label=round_result.label,
+        winner_label=next(iter(round_result.selected_labels), ""),
+        stamps_theta=plan.selector.stamps_theta,
         winner_accuracy=round_result.accuracy,
         winner_composite_fitness=round_result.composite_fitness,
         winner_evaluators=dict(round_result.evaluators),

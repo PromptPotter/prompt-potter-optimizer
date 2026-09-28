@@ -155,19 +155,19 @@ def _parent(
     divergence. Re-derived from ``reference_results`` — the parent's own rows on THIS round's
     subset — instead.
 
-    A round with no such rows cannot answer on a subset at all — round 0 has no parent. Empty
-    evaluators, which ``masked_election`` already reads as ``decidable=False`` — the answer it
-    gives for every other parent it cannot score, rather than a bar it made up.
+    A round with no such rows cannot answer on a subset at all — round 0 has no parent — and nor
+    can one whose arms were read against several individuals (``lift_reference: parents``), which
+    has no single bar. Empty evaluators, which ``masked_election`` already reads as
+    ``decidable=False`` — the answer it gives for every other parent it cannot score, rather than
+    a bar it made up.
     """
     if samples is None:
         return carried
-    rows = [
-        r
-        for reference in round_file["reference_results"].values()
-        for r in reference
-        if r.get("sample_id") in samples
-    ]
-    if not rows or not carried[0]:
+    references = list(round_file["reference_results"].values())
+    if len(references) != 1 or not carried[0]:
+        return ({}, None)
+    rows = [r for r in references[0] if r.get("sample_id") in samples]
+    if not rows:
         return ({}, None)
     # The snapshot supplies the schema/opt_sp-bound names, the rows the derivable ones — the same
     # merge `_candidates` makes, because the parent IS one of those candidates one round back and

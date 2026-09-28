@@ -766,7 +766,7 @@ components:
       properties:
         kind:
           type: string
-          enum: [optimizer, backend]
+          enum: [optimizer, backend, judge, diagnostic, bench]
         node: { type: string, minLength: 1 }
         model: { type: [string, 'null'] }
         input_tokens:

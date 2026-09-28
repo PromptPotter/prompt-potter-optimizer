@@ -516,12 +516,13 @@ export interface SpendBucket {
   incurred_unpriced_tokens: number;
 }
 
-/** A cycle's spend: the four buckets, and the totals every consumer reads off them. */
+/** A cycle's spend: a bucket per spend kind, and the totals every consumer reads off them. */
 export interface SpendRollup {
   backend: SpendBucket;
   loop: SpendBucket;
   judge: SpendBucket;
   diagnostic: SpendBucket;
+  bench: SpendBucket;
   total_used_usd: number;
   total_incurred_usd: number;
   total_tokens_used: number;

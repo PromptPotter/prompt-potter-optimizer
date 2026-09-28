@@ -35,7 +35,7 @@ from promptpotter.infrastructure.llm.spend_book import (
 )
 from promptpotter.infrastructure.llm.telemetry import (
     active_cycle_ledger,
-    diagnostic_spend,
+    filed_as,
     reset_cycle_ledger,
     set_cycle_ledger,
 )
@@ -237,7 +237,7 @@ def diagnostic_trace(stores: Stores, hop: CycleHop | None) -> Iterator[None]:
     The ledger is opened only when none is bound. In the loop and behind the API one already is
     (the round's, and the dispatcher's), and a second handle on one file is a second appender."""
     if active_cycle_ledger() is not None:
-        with diagnostic_spend():
+        with filed_as("diagnostic"):
             yield
         return
     ledger = (
@@ -251,7 +251,7 @@ def diagnostic_trace(stores: Stores, hop: CycleHop | None) -> Iterator[None]:
         book.ledger = ledger
     token = set_cycle_ledger(ledger)
     try:
-        with diagnostic_spend():
+        with filed_as("diagnostic"):
             yield
     finally:
         reset_cycle_ledger(token)

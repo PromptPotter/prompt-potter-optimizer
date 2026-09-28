@@ -203,12 +203,10 @@ def _bench_scored(d: dict[str, Any], ctx: ViewContext) -> BenchScoredView:
 def _select_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
     score_entries = [score_entry_from_dict(s) for s in d.get("candidate_scores") or []]
 
-    # The promoted winner is elected by `elect_round_winner` (paired-delta LCB);
-    # read its identity straight off the round result, never re-elect by a
-    # point-estimate here — that could name a different candidate than the one
-    # actually promoted (whose accuracy is `winner_accuracy`), so the verdict
-    # line / SCOREBOARD `*` would disagree with the dashboard.
-    winner_label = str(d.get("winner_label") or "?")
+    # The selected arm's label straight off the round result, never re-chosen by a point estimate
+    # here — that could name a different candidate than the one the selector kept, so the verdict
+    # line / SCOREBOARD `*` would disagree with the dashboard. ``""`` on a held round.
+    winner_label = str(d["winner_label"])
     winner_total = int(d.get("winner_total", 0))
 
     # Read exactly as ``winner_reference_accuracy`` is read four lines down — the file
@@ -253,6 +251,7 @@ def _select_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
         parent_acc=parent_acc,
         scores=tuple(score_entries),
         winner_label=winner_label,
+        stamps_theta=bool(d["stamps_theta"]),
         winner_accuracy=w_acc,
         winner_composite_fitness=d.get("winner_composite_fitness"),
         winner_evaluators=dict(d["winner_evaluators"]),
@@ -261,7 +260,6 @@ def _select_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
         delta=delta,
         p_value=p_value,
         verdict_reason=d.get("verdict_reason"),
-        next_action=str(d.get("next_action", "?") or "?"),
         composite_fitness_formula=ctx.composite_fitness_formula,
         composite_fitness_formula_short=ctx.composite_fitness_formula_short,
         reference_accuracy=reference_acc,

@@ -223,6 +223,7 @@ class ThetaElection:
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     knobs: ClassVar[type[StrictModel]] = ThetaElectionKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
+    stamps_theta: ClassVar[bool] = True
 
     def select(self, ctx: RoundContext, measured: Measured, population: Population) -> Selection:
         return elect_on_theta(ctx, measured, population, node=self.name)

@@ -48,20 +48,23 @@ def active_cycle_ledger() -> CycleEventLog | None:
     return _CYCLE_LEDGER.get()
 
 
-_DIAGNOSTIC_SPEND: ContextVar[bool] = ContextVar("diagnostic_spend", default=False)
+_FILED_AS: ContextVar[TokenUsageKind | None] = ContextVar("filed_as", default=None)
 
 
 @contextmanager
-def diagnostic_spend() -> Iterator[None]:
-    """Every call emitted inside this block banks as ``diagnostic`` whatever it would otherwise
-    have been. Bound around a diagnostic verb rather than passed to each emit site, because the
-    call sites are the ordinary scoring path — a `verify` re-scores through exactly the code a
-    round does, and what makes the spend diagnostic is the QUESTION being asked, not the call."""
-    token = _DIAGNOSTIC_SPEND.set(True)
+def filed_as(kind: TokenUsageKind | None) -> Iterator[None]:
+    """Every call emitted inside this block banks as *kind* whatever it would otherwise have been;
+    ``None`` leaves the enclosing block's filing. Bound around a pass rather than passed to each
+    emit site, because the call sites are the ordinary scoring path — a `verify` re-scores through
+    exactly the code a round does, and what files the spend is the QUESTION asked, not the call."""
+    if kind is None:
+        yield
+        return
+    token = _FILED_AS.set(kind)
     try:
         yield
     finally:
-        _DIAGNOSTIC_SPEND.reset(token)
+        _FILED_AS.reset(token)
 
 
 def set_current_round(round_num: int | None) -> Token[int | None]:
@@ -126,7 +129,7 @@ def emit_token_usage(
     chronology every lifetime-spend read sums off raw JSON, so nesting the counts under a key
     would zero every account's history. ``cache_read=None`` lands as ``0`` here."""
     record = TokenUsageRecord(
-        kind="diagnostic" if _DIAGNOSTIC_SPEND.get() else kind,
+        kind=_FILED_AS.get() or kind,
         node=node,
         model=model,
         provider=provider,
@@ -202,7 +205,7 @@ def emit_spend_hold(
     keeps one, else the active ledger — in the bucket :func:`emit_token_usage` would file it in."""
     record = SpendHoldRecord(
         hold_id=hold_id,
-        kind="diagnostic" if _DIAGNOSTIC_SPEND.get() else kind,
+        kind=_FILED_AS.get() or kind,
         node=node,
         model=model,
         provider=provider,
@@ -295,12 +298,12 @@ def emit_round_warning(
 __all__ = [
     "active_cycle_ledger",
     "bill_usd",
-    "diagnostic_spend",
     "emit_command",
     "emit_command_ack",
     "emit_error_record",
     "emit_round_warning",
     "emit_token_usage",
+    "filed_as",
     "reset_current_round",
     "reset_cycle_ledger",
     "set_current_round",
