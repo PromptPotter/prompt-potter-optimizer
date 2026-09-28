@@ -10,7 +10,10 @@
 # paper's own (App. D), with its `<placeholder>`s spelled as `{{placeholder}}`.
 name: capo
 version: v1.0
+# Served to the optimizer picker: every knob value below is this paper's configuration.
+paper: 'Zehle et al., "CAPO: Cost-Aware Prompt Optimization", arXiv 2504.16005'
 available_models:
+  - openai/gpt-6-luna
   - deepseek/deepseek-v4-flash:nitro
   - openai/gpt-oss-20b:nitro
   - openai/gpt-oss-120b:nitro
@@ -33,7 +36,7 @@ nodes:
       reasoning_effort: low
       max_tokens: 8000
       provider: openrouter
-      model: deepseek/deepseek-v4-flash:nitro
+      model: openai/gpt-6-luna
       crossovers: 4
   capo_mutate:
     type: llm
@@ -44,7 +47,7 @@ nodes:
       reasoning_effort: low
       max_tokens: 8000
       provider: openrouter
-      model: deepseek/deepseek-v4-flash:nitro
+      model: openai/gpt-6-luna
   # k_max = 5 (App. C.4); the shot mutation adds, drops or keeps one shot, then shuffles (§4).
   few_shot:
     type: algorithm
@@ -80,7 +83,7 @@ nodes:
       reasoning_effort: low
       max_tokens: 8000
       provider: openrouter
-      model: deepseek/deepseek-v4-flash:nitro
+      model: openai/gpt-6-luna
 pipelines:
   default:
     - blocks

@@ -150,6 +150,10 @@
 .mech-row-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-12)}
 .mech-row-label{font-size:var(--text-base);font-weight:500;color:var(--color-text-primary)}
 .mech-row-desc{margin:var(--space-4) 0 0;font-size:var(--text-sm);line-height:1.5;color:var(--color-text-secondary)}
+.mech-row-default{display:flex;align-items:center;gap:var(--space-8);margin:var(--space-4) 0 0;font-size:var(--text-xs);color:var(--color-text-tertiary);font-variant-numeric:tabular-nums}
+.mech-knob-input,.mech-row-head select{flex:0 0 auto;padding:var(--space-4) var(--space-8);border:0.5px solid var(--color-border);border-radius:5px;background:var(--color-background-secondary);color:var(--color-text-primary);font:inherit;font-size:var(--text-sm)}
+.mech-knob-input{width:min(9rem,100%);text-align:right}
+.mech-knob-json{width:min(16rem,100%);text-align:left;font-family:var(--font-mono);resize:vertical}
 
 .cmap{display:flex;flex-direction:column;gap:var(--space-12)}
 .cmap-summary{margin:0 0 var(--space-10);font-size:var(--text-sm);line-height:1.6;color:var(--color-text-secondary)}

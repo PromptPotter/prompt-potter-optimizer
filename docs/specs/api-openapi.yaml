@@ -1321,7 +1321,8 @@ paths:
         per-campaign split of `GET /auth/quota-status`'s account total, so the
         sidebar prints dollars it never adds up itself. Each also carries
         `runs_with` — what the ROOT course runs with (models and every scalar
-        setting, each with the layer that won it, plus the DECLARED rounds cap)
+        setting, each with the layer that won it, the optimizer manifest it
+        selects, plus the DECLARED rounds cap)
         — a second transport of the `GET /campaigns/{id}/pipeline` answer at the
         root, never a second source; null when the root pipeline did not
         resolve, so one broken dataset drops its own row's answer only.
@@ -2323,6 +2324,44 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+
+  /optimizers:
+    get:
+      operationId: listOptimizers
+      summary: The optimizer manifests this install can run.
+      description: |
+        One entry per optimizer the registry holds a runtime for
+        (`application/optimizers::runtimes`, which the
+        `promptpotter.optimizer_runtimes` entry points extend), each resolved
+        through the same `resolve_optimizer` a run takes — so a menu offers
+        exactly what `optimization.optimizer` accepts, never a hand-written
+        list. `paper` is the citation a paper preset reproduces, whose declared
+        knob values are that paper's configuration; null for an optimizer that
+        reproduces none. Install content: no campaign scope.
+      tags: [campaigns]
+      responses:
+        '200':
+          description: The optimizer roster, the default first.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [default, optimizers]
+                properties:
+                  default:
+                    type: string
+                    description: What a campaign naming no `optimization.optimizer` runs.
+                  optimizers:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [name, version, paper]
+                      properties:
+                        name: { type: string }
+                        version: { type: string }
+                        paper: { type: [string, 'null'] }
 
   /optimizers/{name}/knobs:
     get:
@@ -4178,11 +4217,18 @@ components:
       type: object
       required:
         [campaign_id, cycle_id, dataset_name, connector, backend_type,
-         node_config_schema, node_output_schema, model_capabilities, params,
-         reach, is_single_node]
+         optimizer, node_config_schema, node_output_schema, model_capabilities,
+         params, reach, is_single_node]
       description: One campaign's resolved pipeline at one searchpoint — the answer, not the parts.
       properties:
         campaign_id: { type: string }
+        optimizer:
+          type: string
+          description: |
+            The optimizer manifest the addressed course runs
+            (`optimization.optimizer`), resolved through the same config layers
+            as `params` — the one answer a surface reads which optimizer's
+            graph, knobs and analytics apply by, a check-in's draft included.
         cycle_id:
           type: [string, 'null']
           description: The hop actually resolved; null for a campaign-level read.

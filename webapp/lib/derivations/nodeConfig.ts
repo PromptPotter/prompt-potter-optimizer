@@ -1,7 +1,8 @@
 // The one node-config row model and its two emitters, one per transport: search-space → the draft
 // `pipeline_overlay` (split at mint by `launcher.split_overlay`); values → `OperatorForkOverride.pipeline_overlay`.
+// An OPTIMIZER node's knobs are the third reading: a served `KnobRow` typed in as text.
 
-import type { DraftPatch, ModelCapability, NodeConfigParam } from "@/lib/api";
+import type { DraftPatch, KnobRow, ModelCapability, NodeConfigParam } from "@/lib/api";
 import type { NodeSearchNarrowing } from "@/lib/api/types";
 
 export type ConfigMode = "search-space" | "values";
@@ -348,4 +349,34 @@ export function seedOverlayFromRows(
     (overlay[r.node] ??= {})[r.key] = value;
   }
   return overlay;
+}
+
+// `optimization.nodes`: the campaign's overlay on its optimizer manifest, keyed by manifest node.
+export type OptimizerNodeOverlay = Record<string, { config: Record<string, unknown> }>;
+
+/** The value a knob runs at: the overlay's where it sets the key, else the manifest's. */
+export function knobValue(nodes: OptimizerNodeOverlay | null, node: string, knob: KnobRow): unknown {
+  const set = nodes?.[node]?.config;
+  return set && knob.key in set ? set[knob.key] : knob.value;
+}
+
+/** The text a knob's editor holds; a list or an object round-trips as JSON. */
+export function knobText(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+/** What *text* means under the knob's served type; `undefined` is text that cannot commit. Blank
+ * is `null` only where the knob is nullable — an opt-in knob, off. */
+export function parseKnob(knob: KnobRow, text: string): unknown {
+  const t = text.trim();
+  if (knob.type === "string") return t === "" && knob.nullable ? null : text;
+  if (t === "") return knob.nullable ? null : undefined;
+  if (knob.type === "integer" || knob.type === "number") {
+    const n = Number(t);
+    if (!Number.isFinite(n)) return undefined;
+    return knob.type === "integer" && !Number.isInteger(n) ? undefined : n;
+  }
+  const parsed = parseNested(t);
+  return parsed === "" ? undefined : parsed;
 }

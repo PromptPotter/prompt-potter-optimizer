@@ -27,7 +27,7 @@ OPENROUTER_API_KEY=your_key_here
 
 Installed from a wheel there is no repo root, so it goes in `$PROMPTPOTTER_HOME/.env` instead. `promptpotter new` offers to write it for you on first run if no key is set.
 
-The optimizer model defaults to `deepseek/deepseek-v4-flash:nitro` on OpenRouter. It is declared in `promptpotter/assets/optimizers/potter/pipeline.yaml` (per optimizer node's `config.model` / `config.provider`); edit that file to change it for every campaign, or set one campaign's `optimization.nodes.{node}.config.model`. Set the corresponding `*_API_KEY` for Groq/Anthropic/OpenAI. There is no env-var override.
+The optimizer model defaults to `openai/gpt-6-luna` on OpenRouter; `deepseek/deepseek-v4-flash:nitro` stays on each manifest's menu. It is declared in `promptpotter/assets/optimizers/potter/pipeline.yaml` (per optimizer node's `config.model` / `config.provider`); edit that file to change it for every campaign, or set one campaign's `optimization.nodes.{node}.config.model`. Set the corresponding `*_API_KEY` for Groq/Anthropic/OpenAI. There is no env-var override.
 
 Installed from a wheel rather than a clone, that file sits under `site-packages` and an edit there dies at the next upgrade. Put your copy at `$PROMPTPOTTER_HOME/optimizer/pipeline.yaml` instead: present, it replaces the shipped manifest whole. Full resolution rules — **owned by** [`../developer/stable-api.md § 4b`](../developer/stable-api.md).
 

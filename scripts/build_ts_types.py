@@ -61,7 +61,9 @@ from promptpotter.application.maintenance.archive_maintenance import ArchiveRepo
 from promptpotter.application.optimizer_manifest import (
     KnobRow,
     NodeKnobs,
+    OptimizerEntry,
     OptimizerKnobsResponse,
+    OptimizerRoster,
 )
 from promptpotter.application.pipeline_resolve import (
     CampaignPipelineResponse,
@@ -365,6 +367,8 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     OptimizerKnobsResponse,
     NodeKnobs,
     KnobRow,
+    OptimizerRoster,
+    OptimizerEntry,
     ConfigKnob,
     ConfigEstimandGroup,
     ConfigCoupling,

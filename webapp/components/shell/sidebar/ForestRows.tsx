@@ -330,7 +330,7 @@ function innerFacts(node: LineageNode | null, cycleId: string): [string, string]
 }
 
 function innerStats(node: LineageNode | null, origin: number | null, best: number | null) {
-  const stats: RowStat[] = [accuracyStat(origin, best)];
+  const stats: RowStat[] = [accuracyStat(origin, best, node)];
   if (node?.hearts != null && node.lives_cap != null) {
     stats.push({ label: "Lives", value: `${node.hearts} / ${node.lives_cap}` });
   }

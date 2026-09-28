@@ -14,9 +14,12 @@
 # paper's own (App. E.6, E.7), with its `{placeholder}`s spelled as `{{placeholder}}`.
 name: levi
 version: v1.0
+# Served to the optimizer picker: every knob value below is this paper's configuration.
+paper: 'Tanveer, "LEVI: Stronger Search Architectures Can Substitute for Larger LLMs in Evolutionary Search", arXiv 2605.09764'
 available_models:
   - qwen/qwen3-8b
   - google/gemini-3-flash-preview
+  - openai/gpt-6-luna
   - deepseek/deepseek-v4-flash:nitro
   - openai/gpt-oss-20b:nitro
   - openai/gpt-oss-120b:nitro

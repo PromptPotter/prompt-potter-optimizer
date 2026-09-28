@@ -28,6 +28,7 @@ import type {
   LineageNode,
   MachineStatusResponse,
   OptimizerKnobsResponse,
+  OptimizerRoster,
   MeResponse,
   Evidence,
   OriginListResponse,
@@ -91,8 +92,18 @@ export function fetchOrigins(signal?: AbortSignal): Promise<OriginListResponse> 
   return jget<OriginListResponse>(`${API}/origins`, signal);
 }
 
-export function fetchPipeline(signal?: AbortSignal): Promise<OptimizerPipelineResponse> {
-  return jget<OptimizerPipelineResponse>(`${API}/optimizer-pipeline`, signal);
+export function fetchPipeline(
+  optimizer: string,
+  signal?: AbortSignal,
+): Promise<OptimizerPipelineResponse> {
+  return jget<OptimizerPipelineResponse>(
+    `${API}/optimizer-pipeline?optimizer=${encodeURIComponent(optimizer)}`,
+    signal,
+  );
+}
+
+export function fetchOptimizerRoster(signal?: AbortSignal): Promise<OptimizerRoster> {
+  return jget<OptimizerRoster>(`${API}/optimizers`, signal);
 }
 
 // `at` takes the `parse_subject` grammar (absent = campaign root); the server refuses a scoring

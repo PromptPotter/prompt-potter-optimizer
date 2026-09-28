@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, cast
 from pydantic import Field
 
 from promptpotter.application import optimizers
-from promptpotter.application.campaign_config import DeterminismClamp
+from promptpotter.application.campaign_config import DeterminismClamp, OptimizationConfig
 from promptpotter.config.paths import (
     checkin_assets_root,
     checkin_manifest_path,
@@ -42,7 +42,6 @@ from promptpotter.infrastructure.store.io import read_json, read_yaml
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import OptimizationConfig
     from promptpotter.application.optimizers.nodes import OptimizerRuntime, Selector
 
 shapes_optimizer_prompt(__name__)
@@ -50,7 +49,9 @@ shapes_optimizer_prompt(__name__)
 __all__ = [
     "KnobRow",
     "NodeKnobs",
+    "OptimizerEntry",
     "OptimizerKnobsResponse",
+    "OptimizerRoster",
     "SelectedOptimizer",
     "bind_inner_optimizer",
     "bind_optimizer",
@@ -63,6 +64,7 @@ __all__ = [
     "llm_node_document",
     "optimizer_knobs",
     "optimizer_prompt",
+    "optimizer_roster",
     "resolve_node_override",
     "resolve_optimizer",
     "resolved_overrides",
@@ -118,6 +120,12 @@ class SelectedOptimizer:
     @property
     def version(self) -> str:
         return str(self.document.get("version") or "")
+
+    @property
+    def paper(self) -> str | None:
+        """The citation a paper preset reproduces: its declared knob values are that paper's."""
+        cited = self.document.get("paper")
+        return str(cited) if cited else None
 
     def node(self, name: str) -> PipelineNode:
         node = self.schema.get_node(name)
@@ -353,6 +361,36 @@ def optimizer_knobs(name: str) -> OptimizerKnobsResponse:
             wire_type = selected.node(node).wire_type
             nodes.append(NodeKnobs(node=node, kind=str(wire_type), knobs=rows))
     return OptimizerKnobsResponse(optimizer=selected.name, version=selected.version, nodes=nodes)
+
+
+class OptimizerEntry(StrictModel):
+    """One optimizer this install can run, as a picker offers it."""
+
+    name: str = Field(description="The manifest name, as `optimization.optimizer` names it")
+    version: str = Field(description="The manifest's own version")
+    paper: str | None = Field(
+        description="The citation a paper preset reproduces; its declared knob values are that "
+        "paper's configuration. Null for an optimizer reproducing none"
+    )
+
+
+class OptimizerRoster(StrictModel):
+    """The optimizers this install can run, the default first.
+
+    One per runtime the registry holds: the menu `optimization.optimizer` accepts, never a list."""
+
+    default: str = Field(description="What a campaign naming no `optimization.optimizer` runs")
+    optimizers: list[OptimizerEntry] = Field(description="The roster, the default first")
+
+
+def optimizer_roster() -> OptimizerRoster:
+    default = OptimizationConfig.model_fields["optimizer"].default
+    names = sorted(optimizers.runtimes(), key=lambda n: (n != default, n))
+    entries = []
+    for name in names:
+        selected = resolve_optimizer(name, {})
+        entries.append(OptimizerEntry(name=name, version=selected.version, paper=selected.paper))
+    return OptimizerRoster(default=default, optimizers=entries)
 
 
 @dataclass(frozen=True)

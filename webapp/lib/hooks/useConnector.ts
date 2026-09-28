@@ -33,6 +33,7 @@ import type { NodeDataLike, PipelineView } from "@/components/workflow";
 const EMPTY: ConnectorView = {
   connector: null,
   backendType: null,
+  optimizer: null,
   view: null,
   pipelineStatus: "unbound",
   active: null,
@@ -66,6 +67,7 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
   const [loaded, setLoaded] = useState<{ key: string; failed: boolean } | null>(null);
   const [connector, setConnector] = useState<string | null>(null);
   const [backendType, setBackendType] = useState<string | null>(null);
+  const [optimizer, setOptimizer] = useState<string | null>(null);
   const [nodeConfigSchema, setNodeConfigSchema] = useState<Record<
     string,
     NodeConfigParam[]
@@ -86,6 +88,7 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
     setView(null);
     setConnector(null);
     setBackendType(null);
+    setOptimizer(null);
     setNodeConfigSchema(null);
     setNodeOutputSchema(null);
     setModelCapabilities({});
@@ -133,6 +136,7 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
           setView((resp?.view ?? null) as PipelineView | null);
           setConnector(resp?.connector ?? null);
           setBackendType(resp?.backend_type ?? null);
+          setOptimizer(resp?.optimizer ?? null);
           setNodeConfigSchema(resp?.node_config_schema ?? null);
           setNodeOutputSchema(
             (resp?.node_output_schema ?? null) as Record<string, NodeOutputSchema | null> | null,
@@ -150,6 +154,7 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
           setView(null);
           setConnector(null);
           setBackendType(null);
+          setOptimizer(null);
           setNodeConfigSchema(null);
           setNodeOutputSchema(null);
           setModelCapabilities({});
@@ -213,6 +218,7 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
     return {
       connector,
       backendType,
+      optimizer,
       view,
       pipelineStatus,
       active,
@@ -234,6 +240,7 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
     key,
     connector,
     backendType,
+    optimizer,
     view,
     loaded,
     backends,

@@ -49,7 +49,7 @@ function run(over: {
 const runsWith = (
   params: CampaignRunsWith["params"],
   max_rounds: number | null,
-): CampaignRunsWith => ({ params, max_rounds });
+): CampaignRunsWith => ({ params, optimizer: "potter", max_rounds });
 
 describe("campaignLineParts", () => {
   // No served setting reaches the row: models ride the vendor mark, the rest the hover card.

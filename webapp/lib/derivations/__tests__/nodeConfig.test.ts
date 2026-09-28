@@ -5,7 +5,9 @@ import {
   DESCRIPTION_PREFIX,
   descriptionSubtree,
   effortLadder,
+  knobValue,
   nodeLockPatch,
+  parseKnob,
   nodeOverlayPatch,
   nodeSchemaPatch,
   overlayEdits,
@@ -13,7 +15,7 @@ import {
   seedOverlayFromRows,
   type ConfigRow,
 } from "../nodeConfig";
-import type { ModelCapability, NodeConfigParam } from "@/lib/api";
+import type { KnobRow, ModelCapability, NodeConfigParam } from "@/lib/api";
 
 function row(over: Partial<ConfigRow> & { key: string; kind: string }): ConfigRow {
   return {
@@ -601,6 +603,37 @@ describe("descriptionSubtree (one click on a schema-tree row)", () => {
     expect(descriptionSubtree(keys, "lines.amount")).toEqual([DESCRIPTION_PREFIX + "lines.amount"]);
     expect(descriptionSubtree(keys, "lines")).toEqual(keys.slice(0, 4));
     expect(descriptionSubtree(keys, "")).toEqual(keys);
+  });
+});
+
+describe("parseKnob / knobValue (an optimizer knob typed in on the check-in)", () => {
+  const knob = (over: Partial<KnobRow>): KnobRow => ({
+    key: "k",
+    description: "",
+    type: "integer",
+    options: null,
+    nullable: false,
+    value: 10,
+    ...over,
+  });
+
+  // What commits is what the run is configured with: a value the member's type reads as
+  // something else, or a blank read as 0, starts a campaign on a knob nobody chose.
+  it("commits only what the served type reads as the typed value", () => {
+    expect(parseKnob(knob({}), "4")).toBe(4);
+    expect(parseKnob(knob({}), "1.5")).toBeUndefined();
+    expect(parseKnob(knob({}), "")).toBeUndefined();
+    expect(parseKnob(knob({ type: "number" }), "0.05")).toBe(0.05);
+    expect(parseKnob(knob({ type: "number", nullable: true }), " ")).toBeNull();
+    expect(parseKnob(knob({ type: "array" }), "[0.3, 1.2]")).toEqual([0.3, 1.2]);
+    expect(parseKnob(knob({ type: "array" }), "[0.3,")).toBeUndefined();
+  });
+
+  it("reads the draft's value where it sets the key, the manifest's where it does not", () => {
+    const nodes = { paired_t: { config: { alpha: 0.1 } } };
+    expect(knobValue(nodes, "paired_t", knob({ key: "alpha", value: 0.2 }))).toBe(0.1);
+    expect(knobValue(nodes, "paired_t", knob({ key: "survivors", value: 10 }))).toBe(10);
+    expect(knobValue(null, "blocks", knob({ key: "block_size", value: 30 }))).toBe(30);
   });
 });
 

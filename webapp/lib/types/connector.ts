@@ -17,6 +17,8 @@ export type PipelineStatus = "unbound" | "loading" | "ok" | "error";
 export interface ConnectorView {
   connector: string | null;
   backendType: string | null;
+  // The optimizer manifest the course runs; null until the resolution lands.
+  optimizer: string | null;
   view: PipelineView | null;
   // Never infer the read's state from `view` being null.
   pipelineStatus: PipelineStatus;

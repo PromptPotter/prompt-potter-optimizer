@@ -1,5 +1,6 @@
 "use client";
-// The install-global optimizer manifest, read as one shape by every surface.
+// One optimizer manifest, read as one shape by every surface. The name is the served
+// `ConnectorView.optimizer` — which manifest the viewed course runs — or null to read nothing.
 
 import { fetchPipeline } from "@/lib/api";
 import type { PipelineDoc } from "@/components/workflow";
@@ -11,12 +12,12 @@ export interface OptimizerPipeline {
   error: string | null;
 }
 
-export function useOptimizerPipeline(enabled = true): OptimizerPipeline {
+export function useOptimizerPipeline(optimizer: string | null): OptimizerPipeline {
   const read = useRead(
-    enabled
+    optimizer
       ? {
-          key: "optimizer-pipeline",
-          fetch: (signal) => fetchPipeline(signal).then((p) => p as PipelineDoc),
+          key: `optimizer-pipeline|${optimizer}`,
+          fetch: (signal) => fetchPipeline(optimizer, signal).then((p) => p as PipelineDoc),
         }
       : null,
     { surface: "optimizer-pipeline" },

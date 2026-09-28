@@ -6,7 +6,6 @@ import type { IngestFlow } from "@/lib/hooks/useIngestFlow";
 import { cx } from "@/lib/cx";
 import { NumberField } from "@/components/forms/NumberField";
 import { SlugField } from "@/components/forms/SlugField";
-import { NodeKnobsPanel } from "@/components/dashboard/control/NodeKnobsPanel";
 import { RunSummaryItem } from "@/components/chat/RunCard";
 import { ColumnMappingPicker } from "./ColumnMappingPicker";
 import { DatasetPreview } from "./DatasetPreview";
@@ -393,10 +392,10 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
 
       <PipelineSetupSection draft={draft} onApply={flow.applyPatch} />
 
-      <OptimizerSetupSection />
+      <OptimizerSetupSection draft={draft} onApply={flow.applyPatch} />
 
       <details className="new-campaign-optional ingest-advanced">
-        {/* Two persistence classes on purpose: the knobs patch the draft's `OptimizationConfig`,
+        {/* Two persistence classes on purpose: max rounds patches the draft's `OptimizationConfig`,
             the caps ride the Start press and are saved nowhere. */}
         <summary>Run bounds (optional)</summary>
         <div className="new-campaign-optional-body">
@@ -409,11 +408,6 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
             onApply={(max_rounds) =>
               flow.applyPatch({ optimization_overrides: { max_rounds } })
             }
-          />
-          <NodeKnobsPanel
-            optimizer={draft.optimization_overrides.optimizer}
-            nodes={draft.optimization_overrides.nodes}
-            onChange={(nodes) => flow.applyPatch({ optimization_overrides: { nodes } })}
           />
         </div>
       </details>

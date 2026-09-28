@@ -79,12 +79,18 @@ export function benchStat(bench: BenchScore): RowStat {
   };
 }
 
-export function accuracyStat(origin: number | null, best: number | null): RowStat {
+// The θ clause only where the served node elects on θ: a peer optimizer's rounds are not.
+export function accuracyStat(
+  origin: number | null,
+  best: number | null,
+  node: LineageNode | null,
+): RowStat {
   const lifted = origin != null && best != null && best !== origin;
+  const which = lifted ? "origin → best" : origin != null ? "origin" : "best";
   return {
     label: "Accuracy",
     value: lifted ? `${fmtPct0(origin)} → ${fmtPct0(best)}` : fmtPct0(origin ?? best),
-    sub: `${lifted ? "origin → best" : origin != null ? "origin" : "best"} · rounds are won on θ`,
+    sub: node?.stamps_theta ? `${which} · rounds are won on θ` : which,
   };
 }
 
@@ -186,6 +192,7 @@ export function campaignCard(
   const runsWith = campaign.runs_with;
 
   const facts: [string, string][] = [["Dataset", campaign.dataset_name]];
+  if (runsWith) facts.push(["Optimizer", runsWith.optimizer]);
   facts.push(["Last activity", fmtAgo(run.updatedAt) || fmtDateTime(run.updatedAt)]);
   const created = fmtAgo(campaign.created_at);
   facts.push([
@@ -224,7 +231,11 @@ export function campaignCard(
             ? `of ${cap} — rounds cap`
             : undefined,
     },
-    accuracyStat(node?.origin_accuracy ?? null, run.bestAccuracy ?? node?.best_accuracy ?? null),
+    accuracyStat(
+      node?.origin_accuracy ?? null,
+      run.bestAccuracy ?? node?.best_accuracy ?? null,
+      node,
+    ),
   ];
   if (node?.hearts != null && node.lives_cap != null) {
     stats.push({ label: "Lives", value: `${node.hearts} / ${node.lives_cap}` });

@@ -19,6 +19,8 @@ export interface RunSummary {
   parentAccuracy: number | null;
   // Served lift over origin, in logits. Format as θ, never as a percent.
   abilityDelta: number | null;
+  // Whether that θ is the metric this run's winners were elected on — potter's selector, no peer's.
+  electsOnTheta: boolean;
   usedUsd: number | null;
   changes: string;
   // Lets a champion still at the origin tell "nothing tried" from "tried and lost". Round 0
@@ -48,6 +50,7 @@ export function runSummary(dash: DashboardSnapshot | null): RunSummary | null {
     accuracy: champion?.accuracy ?? null,
     parentAccuracy: champion?.reference_accuracy ?? null,
     abilityDelta,
+    electsOnTheta: dash.stamps_theta === true,
     usedUsd: readSpend(dash).usedUsd,
     changes: champion?.changes_description ?? "",
     lastRound: last

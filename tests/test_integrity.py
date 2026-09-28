@@ -2128,6 +2128,40 @@ def test_a_checkin_resolves_the_config_its_START_will_freeze() -> None:
     assert (model.value, model.source) == ("upstage/solar-pro4:nitro", "campaign")
 
 
+def test_the_terminal_and_the_picker_switch_a_checkin_to_one_optimizer(built_stores) -> None:
+    """`--set optimizer=… --set nodes.…` in one patch and the browser's pick-then-edit in two are
+    one edit: a spelling that diverged starts a run on knobs nobody chose. The switch drops the old
+    manifest's overlay, and the resolution every surface draws the optimizer by names the new one."""
+    from promptpotter.application.datasets.draft_patch import (
+        EditDraftPatch,
+        apply_draft_patch,
+        plan_draft_patch,
+    )
+    from promptpotter.application.pipeline_resolve import resolve_pipeline_for_draft
+    from promptpotter.presentation.cli.commands.new import _sets_to_patch
+
+    potter = _draft({}).patch(
+        optimization_overrides={
+            "max_rounds": 3,
+            "optimizer": "potter",
+            "nodes": {"pobb": {"config": {"epsilon": 0.1}}},
+        }
+    )
+
+    def edit(draft: Any, patch: EditDraftPatch) -> Any:
+        return apply_draft_patch(draft, plan_draft_patch(built_stores, draft, patch))
+
+    terminal = edit(potter, _sets_to_patch(["optimizer=capo", "nodes.paired_t.alpha=0.1"]))
+    browser = potter
+    for step in ({"optimizer": "capo"}, {"nodes": {"paired_t": {"config": {"alpha": 0.1}}}}):
+        browser = edit(browser, EditDraftPatch(optimization_overrides=step))
+
+    assert terminal.optimization_overrides == browser.optimization_overrides
+    assert browser.optimization_overrides["nodes"] == {"paired_t": {"config": {"alpha": 0.1}}}
+    resolved = resolve_pipeline_for_draft(browser, campaign_id=browser.draft_id, cycle_id="")
+    assert resolved.optimizer == "capo"
+
+
 def test_a_checkin_with_no_overlay_still_resolves_its_backend_floor() -> None:
     """A fresh upload before anything is touched: no dataset dir, no overlay, no rounds. The editor
     must render the connector's own declaration — `readable_dataset_dir` finds nothing, so before

@@ -963,6 +963,11 @@
             "title": "Node Output Schema",
             "type": "object"
           },
+          "optimizer": {
+            "description": "The optimizer manifest the addressed course runs — the one answer a surface reads which optimizer's graph, knobs and analytics apply by, a check-in's draft included",
+            "title": "Optimizer",
+            "type": "string"
+          },
           "params": {
             "additionalProperties": true,
             "description": "Resolved config as the engine holds it — the bytes a round document carries as `resolved_pipeline_params`, which makes that field this endpoint's check",
@@ -993,6 +998,7 @@
           "dataset_name",
           "connector",
           "backend_type",
+          "optimizer",
           "params",
           "node_config_schema",
           "view",
@@ -1021,6 +1027,11 @@
             "description": "The DECLARED rounds cap, not the armed one: 0 = origin only, null = unlimited",
             "title": "Max Rounds"
           },
+          "optimizer": {
+            "description": "The optimizer manifest the root course runs",
+            "title": "Optimizer",
+            "type": "string"
+          },
           "params": {
             "description": "Scalar settings in active-step order, `model` included; no prompt text",
             "items": {
@@ -1032,6 +1043,7 @@
         },
         "required": [
           "params",
+          "optimizer",
           "max_rounds"
         ],
         "title": "CampaignRunsWith",
@@ -4982,6 +4994,41 @@
         "title": "NodeReach",
         "type": "object"
       },
+      "OptimizerEntry": {
+        "additionalProperties": false,
+        "description": "One optimizer this install can run, as a picker offers it.",
+        "properties": {
+          "name": {
+            "description": "The manifest name, as `optimization.optimizer` names it",
+            "title": "Name",
+            "type": "string"
+          },
+          "paper": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The citation a paper preset reproduces; its declared knob values are that paper's configuration. Null for an optimizer reproducing none",
+            "title": "Paper"
+          },
+          "version": {
+            "description": "The manifest's own version",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "paper"
+        ],
+        "title": "OptimizerEntry",
+        "type": "object"
+      },
       "OptimizerKnobsResponse": {
         "additionalProperties": false,
         "description": "Every knob an optimizer manifest's nodes take, served so a settings surface draws a\ncontrol per knob and writes `optimization.nodes.{node}.config.{key}`.",
@@ -5088,6 +5135,31 @@
           "resolved_prompts"
         ],
         "title": "OptimizerPipelineResponse",
+        "type": "object"
+      },
+      "OptimizerRoster": {
+        "additionalProperties": false,
+        "description": "The optimizers this install can run, the default first.\n\nOne per runtime the registry holds: the menu `optimization.optimizer` accepts, never a list.",
+        "properties": {
+          "default": {
+            "description": "What a campaign naming no `optimization.optimizer` runs",
+            "title": "Default",
+            "type": "string"
+          },
+          "optimizers": {
+            "description": "The roster, the default first",
+            "items": {
+              "$ref": "#/components/schemas/OptimizerEntry"
+            },
+            "title": "Optimizers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "default",
+          "optimizers"
+        ],
+        "title": "OptimizerRoster",
         "type": "object"
       },
       "OrderConfound": {
@@ -9173,6 +9245,28 @@
           }
         },
         "summary": "Get Optimizer Pipeline",
+        "tags": [
+          "Optimizer"
+        ]
+      }
+    },
+    "/api/v1/optimizers": {
+      "get": {
+        "description": "The optimizers this install can run — one per registered runtime, each resolved through the\nmanifest a run would read — so a picker offers what ``optimization.optimizer`` accepts.",
+        "operationId": "get_optimizers_api_v1_optimizers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizerRoster"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Optimizers",
         "tags": [
           "Optimizer"
         ]

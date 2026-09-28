@@ -14,9 +14,12 @@
 # paper's own (App. C), with its `<placeholder>`s spelled as `{{placeholder}}`.
 name: gepa
 version: v1.0
+# Served to the optimizer picker: every knob value below is this paper's configuration.
+paper: 'Agrawal et al., "GEPA: Reflective Prompt Evolution Can Outperform Reinforcement Learning", arXiv 2507.19457'
 available_models:
   - qwen/qwen3-8b
   - openai/gpt-4.1-mini
+  - openai/gpt-6-luna
   - deepseek/deepseek-v4-flash:nitro
   - openai/gpt-oss-20b:nitro
   - openai/gpt-oss-120b:nitro

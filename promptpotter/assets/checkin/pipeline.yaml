@@ -7,6 +7,7 @@
 name: checkin
 version: v1.0
 available_models:
+  - openai/gpt-6-luna
   - deepseek/deepseek-v4-flash:nitro
   - openai/gpt-oss-20b:nitro
   - openai/gpt-oss-120b:nitro
@@ -26,7 +27,7 @@ nodes:
       reasoning_effort: high
       max_tokens: 10000
       provider: openrouter
-      model: deepseek/deepseek-v4-flash:nitro
+      model: openai/gpt-6-luna
 pipelines:
   default:
     - checkin

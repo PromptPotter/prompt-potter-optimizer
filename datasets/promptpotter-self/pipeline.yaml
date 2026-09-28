@@ -7,6 +7,7 @@ description: >-
 backend_name: PromptPotter
 backend_type: promptpotter
 available_models:
+  - openai/gpt-6-luna
   - deepseek/deepseek-v4-flash:nitro
   - qwen/qwen3.8-27b:nitro
   - openai/gpt-oss-120b

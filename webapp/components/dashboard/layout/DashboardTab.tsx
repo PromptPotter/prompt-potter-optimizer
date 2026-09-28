@@ -1,4 +1,5 @@
 "use client";
+import { useConnector } from "@/lib/hooks/useConnector";
 import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import { useWorkspace } from "@/lib/workspace";
 import { isSelfOptimization } from "@/lib/derivations";
@@ -14,7 +15,7 @@ import { ConfigMapPanel } from "@/components/dashboard/control/ConfigMapPanel";
 
 // The Dashboard tab's arrangement; only the one-shot pipeline topology is threaded.
 export function DashboardTab() {
-  const { doc: pipeline } = useOptimizerPipeline();
+  const { doc: pipeline } = useOptimizerPipeline(useConnector().optimizer);
 
   // `campaignId` is the ROOT hop and depth 1 is the outer view, so a drilled-in inner run gets
   // the plain dashboard.

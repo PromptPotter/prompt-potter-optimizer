@@ -85,12 +85,14 @@ function Lift({
   accuracy,
   parentAccuracy,
   theta,
+  electsOnTheta,
   scored,
   expected,
 }: {
   accuracy: number | null;
   parentAccuracy: number | null;
   theta: number | null;
+  electsOnTheta: boolean;
   scored: number | null;
   expected: number | null;
 }) {
@@ -107,8 +109,10 @@ function Lift({
             <>
               <p className="run-lift-theta">ability lift {fmtTheta(theta)}</p>
               <p className="run-lift-note">
-                The metric the winner is elected on — a logit on this cycle&rsquo;s
-                difficulty ruler, not a percentage.
+                {electsOnTheta
+                  ? "The metric the winner is elected on — a logit"
+                  : "Measured by the bench for every optimizer; this one does not elect on it. A logit"}{" "}
+                on this cycle&rsquo;s difficulty ruler, not a percentage.
               </p>
             </>
           ) : null}
@@ -182,6 +186,7 @@ function ConfigBox({
             accuracy={shownRow?.accuracy ?? null}
             parentAccuracy={shownRow?.referenceAccuracy ?? null}
             theta={observe.state === "best" ? summary.abilityDelta : null}
+            electsOnTheta={summary.electsOnTheta}
             scored={shownRow?.n_samples ?? null}
             expected={shownRow?.n_expected ?? null}
           />

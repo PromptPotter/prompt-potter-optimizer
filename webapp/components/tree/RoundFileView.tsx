@@ -49,7 +49,9 @@ export function RoundFileView({ doc, raw }: Props) {
           <span>composite {fmtNum(doc.composite_fitness)}</span>
           <span>n {doc.total ?? "—"}</span>
           {typeof doc.ability?.theta === "number" && (
-            <Term content="Ability of the adopted lineage on the cycle's fixed δ ruler — the subset-invariant series the round was won on. The cell count is how much of that ruler was real when this round was read.">
+            <Term
+              content={`Ability of the adopted lineage on the cycle's fixed δ ruler — ${stampsTheta ? "the subset-invariant series the round was won on" : "measured by the bench; this optimizer does not elect on it"}. The cell count is how much of that ruler was real when this round was read.`}
+            >
               θ {fmtSigned(doc.ability.theta, 3)}{doc.ability.ruler_n > 0 ? ` (${doc.ability.ruler_n} cells)` : ""}
             </Term>
           )}

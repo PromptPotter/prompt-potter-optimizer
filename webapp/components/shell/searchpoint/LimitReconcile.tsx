@@ -138,65 +138,73 @@ export function LimitReconcile({
         </small>
       </label>
 
-      <details className="limit-advanced">
-        <summary>Advanced — patience &amp; elimination</summary>
-        <div className="limit-advanced-body">
-          <label className="limit-row">
-            <span className="limit-label">L1 patience</span>
-            <input
-              type="number"
-              min={1}
-              step={1}
-              className="limit-input"
-              value={f.l1}
-              placeholder={ph(rl?.potter?.l1_patience, "inherit")}
-              aria-label="Fork L1 patience"
-              onChange={(e) => set({ ...f, l1: e.target.value })}
-            />
-          </label>
-          <label className="limit-row">
-            <span className="limit-label">L2 patience</span>
-            <input
-              type="number"
-              min={1}
-              step={1}
-              className="limit-input"
-              value={f.l2}
-              placeholder={ph(rl?.potter?.l2_patience, "inherit")}
-              aria-label="Fork L2 patience"
-              onChange={(e) => set({ ...f, l2: e.target.value })}
-            />
-          </label>
-          <label className="limit-row">
-            <span className="limit-label">L3 patience</span>
-            <input
-              type="number"
-              min={1}
-              step={1}
-              className="limit-input"
-              value={f.l3}
-              placeholder={ph(rl?.potter?.l3_patience, "inherit")}
-              aria-label="Fork L3 patience"
-              onChange={(e) => set({ ...f, l3: e.target.value })}
-            />
-          </label>
-          <label className="limit-row">
-            <span className="limit-label">PoBB ε</span>
-            <input
-              type="number"
-              min={0}
-              max={1}
-              step={0.01}
-              className="limit-input"
-              value={f.eps}
-              placeholder={ph(rl?.potter?.pobb_epsilon, "inherit")}
-              aria-label="Fork PoBB elimination epsilon"
-              onChange={(e) => set({ ...f, eps: e.target.value })}
-            />
-          </label>
-          <small className="limit-note">Blank inherits the parent&apos;s value.</small>
-        </div>
-      </details>
+      {/* Potter's nodes: served limits name them only where potter runs, and a peer's manifest
+          refuses an overlay on a node it does not declare. */}
+      {rl?.potter == null ? (
+        <small className="limit-note">
+          This optimizer has no patience or elimination ε; its own knobs are in the Optimizer card.
+        </small>
+      ) : (
+        <details className="limit-advanced">
+          <summary>Advanced — patience &amp; elimination</summary>
+          <div className="limit-advanced-body">
+            <label className="limit-row">
+              <span className="limit-label">L1 patience</span>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                className="limit-input"
+                value={f.l1}
+                placeholder={ph(rl.potter.l1_patience, "inherit")}
+                aria-label="Fork L1 patience"
+                onChange={(e) => set({ ...f, l1: e.target.value })}
+              />
+            </label>
+            <label className="limit-row">
+              <span className="limit-label">L2 patience</span>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                className="limit-input"
+                value={f.l2}
+                placeholder={ph(rl.potter.l2_patience, "inherit")}
+                aria-label="Fork L2 patience"
+                onChange={(e) => set({ ...f, l2: e.target.value })}
+              />
+            </label>
+            <label className="limit-row">
+              <span className="limit-label">L3 patience</span>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                className="limit-input"
+                value={f.l3}
+                placeholder={ph(rl.potter.l3_patience, "inherit")}
+                aria-label="Fork L3 patience"
+                onChange={(e) => set({ ...f, l3: e.target.value })}
+              />
+            </label>
+            <label className="limit-row">
+              <span className="limit-label">PoBB ε</span>
+              <input
+                type="number"
+                min={0}
+                max={1}
+                step={0.01}
+                className="limit-input"
+                value={f.eps}
+                placeholder={ph(rl.potter.pobb_epsilon, "inherit")}
+                aria-label="Fork PoBB elimination epsilon"
+                onChange={(e) => set({ ...f, eps: e.target.value })}
+              />
+            </label>
+            <small className="limit-note">Blank inherits the parent&apos;s value.</small>
+          </div>
+        </details>
+      )}
 
       <small className="limit-reconcile-foot">The fork numbers rounds from 1.</small>
     </div>

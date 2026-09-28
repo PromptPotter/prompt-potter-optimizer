@@ -1175,6 +1175,8 @@ export interface RunsWithParam {
 export interface CampaignRunsWith {
   /** Scalar settings in active-step order, `model` included; no prompt text */
   params: RunsWithParam[];
+  /** The optimizer manifest the root course runs */
+  optimizer: string;
   /** The DECLARED rounds cap, not the armed one: 0 = origin only, null = unlimited */
   max_rounds: number | null;
 }
@@ -1245,6 +1247,10 @@ export interface CampaignPipelineResponse {
   dataset_name: string;
   connector: string;
   backend_type: string;
+  /** The optimizer manifest the addressed course runs — the one answer a surface
+   * reads which optimizer's graph, knobs and analytics apply by, a check-in's
+   * draft included */
+  optimizer: string;
   /** Resolved config as the engine holds it — the bytes a round document carries as
    * `resolved_pipeline_params`, which makes that field this endpoint's check */
   params: Record<string, unknown>;
@@ -2217,6 +2223,25 @@ export interface KnobRow {
   nullable: boolean;
   /** The value the manifest declares — a campaign's floor */
   value: unknown;
+}
+
+/** The optimizers this install can run, the default first. */
+export interface OptimizerRoster {
+  /** What a campaign naming no `optimization.optimizer` runs */
+  default: string;
+  /** The roster, the default first */
+  optimizers: OptimizerEntry[];
+}
+
+/** One optimizer this install can run, as a picker offers it. */
+export interface OptimizerEntry {
+  /** The manifest name, as `optimization.optimizer` names it */
+  name: string;
+  /** The manifest's own version */
+  version: string;
+  /** The citation a paper preset reproduces; its declared knob values are that
+   * paper's configuration. Null for an optimizer reproducing none */
+  paper: string | null;
 }
 
 export interface ConfigKnob {

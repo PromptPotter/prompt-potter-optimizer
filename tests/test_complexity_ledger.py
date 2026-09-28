@@ -645,7 +645,10 @@ LEDGER_BASELINE = {
     # (test_numerics § 7).
     # +2: walks of one configuration in separate processes each buying the cells the others
     # measured, and a dead claimer's cell held forever, still score every arm (test_integrity § 2).
-    "test_functions": 220,
+    # +1: a terminal `--set optimizer=…` and the browser's pick-then-edit planning two different
+    # check-in configs for one intent, or the switch keeping the old manifest's overlay, starts a
+    # run on knobs nobody chose (test_integrity § 4).
+    "test_functions": 221,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -756,7 +759,11 @@ LEDGER_BASELINE = {
     # +6: `HeadToHeadRow`'s three ratios, `lift_per_incurred_usd` and `concurrent_with`, and
     # `HeadToHead.ratio_reference` — cost and speed compared across arms by the backend, on
     # INCURRED spend, with the shared-cache confound named per row; no surface divides.
-    "served_fields": 722,
+    # +7: `GET /optimizers` (`OptimizerRoster` 2, `OptimizerEntry` 3) — the picker's menu, derived
+    # from the runtime registry so a webapp list cannot drift from what `optimizer:` accepts — and
+    # `optimizer` on `CampaignPipelineResponse` and `CampaignRunsWith`: which manifest a course runs,
+    # served once so no surface draws potter's graph, knobs or θ copy for a peer's campaign.
+    "served_fields": 729,
 }
 
 

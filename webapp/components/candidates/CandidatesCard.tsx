@@ -408,19 +408,24 @@ export function CandidatesCard() {
           <ToolbarSep />
           {/* Display only — the engine gates on θ whatever is lit here. */}
           <ChipGroup label="Bars" joined>
-            {HEADLINE_METRICS.map((m) => (
-              <Chip
-                key={m.id}
-                icon
-                on={metrics.has(m.id)}
-                ink={`var(${metricInkToken(m.id, electedMetric)})`}
-                ariaLabel={headlineMetricLabel(m.id)}
-                title={m.title}
-                onClick={() => toggleMetric(m.id)}
-              >
-                {m.glyph}
-              </Chip>
-            ))}
+            {HEADLINE_METRICS.map((m) => {
+              // Rows carry θ only where the selector fits it; a lit chip would draw no bar.
+              const unfit = m.id === "ability" && !dash?.stamps_theta;
+              return (
+                <Chip
+                  key={m.id}
+                  icon
+                  on={metrics.has(m.id) && !unfit}
+                  disabled={unfit}
+                  ink={`var(${metricInkToken(m.id, electedMetric)})`}
+                  ariaLabel={headlineMetricLabel(m.id)}
+                  title={unfit ? "This optimizer does not elect on θ, so no candidate carries one" : m.title}
+                  onClick={() => toggleMetric(m.id)}
+                >
+                  {m.glyph}
+                </Chip>
+              );
+            })}
             <Chip
               icon
               on={rung > 0}
@@ -531,13 +536,14 @@ export function CandidatesCard() {
       }
     >
       <div className="fitness-body">
-        {!areCourses && (
+        {/* A θ caveat qualifies an election on θ, which a peer optimizer never holds. */}
+        {!areCourses && dash?.stamps_theta && (
           <ThetaCaveatNotice
             caveat={history.at(-1)?.ability?.caveat ?? null}
             ability={history.at(-1)?.ability ?? null}
           />
         )}
-        {!areCourses && floorPinned.length > 0 && (
+        {!areCourses && dash?.stamps_theta && floorPinned.length > 0 && (
           <>
             <ThetaCaveatNotice caveat="floor_pinned" />
             <div className="theta-caveat-arms">Affected: {floorPinned.join(", ")}.</div>

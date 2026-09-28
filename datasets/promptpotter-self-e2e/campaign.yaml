@@ -10,7 +10,7 @@ campaign_config:
     l1_generate: &e2e_models
       param_allowed_values:
         model:
-          - deepseek/deepseek-v4-flash:nitro
+          - openai/gpt-6-luna
     l1_critique: *e2e_models
     l2_context: *e2e_models
     l3_plan: *e2e_models

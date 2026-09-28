@@ -24,6 +24,7 @@ version: v1.0
 # (`infrastructure/llm/registry.py`) is where a model's max_tokens floor is declared, and
 # preflight HARD-blocks a node set below its own.
 available_models:
+  - openai/gpt-6-luna
   - deepseek/deepseek-v4-flash:nitro
   - openai/gpt-oss-20b:nitro
   - openai/gpt-oss-120b:nitro
@@ -68,33 +69,29 @@ nodes:
       # it is a ZERO-CANDIDATE round (`l1/generate.py` reads finish_reason=length as
       # `PARSE_FAILURE_MALFORMED`), so the round costs two calls and returns nothing.
       # A ceiling is not a spend — only emitted tokens bill — and 20000 still lands inside
-      # `OPTIMIZER_CALL_DEADLINE_S`: at the measured ~233 tok/s a full 20k answer is ~86s
-      # against the 180s per-round-trip wall.
+      # `OPTIMIZER_CALL_DEADLINE_S`: at deepseek-v4-flash's measured ~233 tok/s a full 20k answer
+      # is ~86s against the 180s per-round-trip wall; gpt-6-luna's rate is unmeasured.
       max_tokens: 20000
       provider: openrouter
-      model: deepseek/deepseek-v4-flash:nitro
+      model: openai/gpt-6-luna
       # The proposer's own knobs, beside its call config (`optimizers/potter/knobs.py`).
       n_variants: 5
       k_max: 5
       prompt_block_catalogue: guidance
       schema_field_rename: false
-    description: &nitro_probe >-
-      ':nitro' — OpenRouter's fastest-provider routing — is ON here, and the model is what made that safe.
-      On `openai/gpt-oss-120b:nitro` the route lands on Cerebras, which at our prompt length intermittently
-      returns the JSON SCHEMA itself instead of an instance of it (valid JSON, finish_reason=stop, no
-      `variants`): it corrupts the search silently rather than raising. Rule: never point a schema-bearing
-      node at a new :nitro route without first spending ONE call that asks for the real schema and checking
-      the answer is an instance of it — this failure mode does not error, so nothing else will tell you.
-      `deepseek/deepseek-v4-flash:nitro` — the 0423 snapshot — was probed that way and answered
-      with an instance, and has since served 126 banked optimizer calls without one schema-shaped
-      lie. Its successor 0731 was probed too and ran 268.
-      PRICE :nitro OFF THE WIRE, NEVER THE CATALOGUE — the two disagree by more than the choice
-      between these models. OpenRouter LISTS 0731 below 0423 ($0.135 vs $0.217 per Mtok, blended
-      at our 45/55 input/output split), yet its `:nitro` route BILLED us $0.386/Mtok over 2.05M
-      tokens — 2.9x its own list. 0423's `:nitro` rate is unmeasured: all 126 of its rows predate
-      the wire-cost extraction, so they carry `cost_usd: null`, and the next run on it is the
-      first that can settle the comparison. The pin sits on 0423 until it does. Latency is the
-      only measured difference so far: 16.1s vs 23.0s median.
+    description: &model_route >-
+      `openai/gpt-6-luna` on OpenRouter's plain route, the default optimizer model: it supports
+      structured outputs, and on a 3-candidate JSON task it spent ~400 reasoning and ~350 output
+      tokens. No ':nitro' — OpenRouter's fastest-provider routing may land on a host that drops
+      `response_format` rather than refusing the route. On `openai/gpt-oss-120b:nitro` that host is
+      Cerebras, which at our prompt length intermittently returns the JSON SCHEMA itself instead of
+      an instance of it (valid JSON, finish_reason=stop, no `variants`): it corrupts the search
+      silently rather than raising. Rule: never point a schema-bearing node at a new :nitro route
+      without first spending ONE call that asks for the real schema and checking the answer is an
+      instance of it — this failure mode does not error, so nothing else will tell you.
+      `deepseek/deepseek-v4-flash:nitro`, still on the menu, was probed that way and answered with
+      an instance. PRICE :nitro OFF THE WIRE, NEVER THE CATALOGUE: its 0731 snapshot's route billed
+      $0.386/Mtok over 2.05M tokens, 2.9x its own list.
   # The MEASUREMENT node: it runs the whole campaign pipeline against the panel and makes no
   # optimizer call of its own — no model, no prompt, no tunable, so `config` stays empty and the
   # menus alias does not belong here. `node_config_schema` derives a node's params from
@@ -141,8 +138,8 @@ nodes:
       # the tail projects to ~14.4k, so this clears it. `max_tokens` is a ceiling, not a spend.
       max_tokens: 16000
       provider: openrouter
-      model: deepseek/deepseek-v4-flash:nitro
-    description: *nitro_probe
+      model: openai/gpt-6-luna
+    description: *model_route
   l2_context:
     type: llm
     optimizer: *node_menus
@@ -154,8 +151,8 @@ nodes:
       reasoning_effort: medium
       max_tokens: 8000
       provider: openrouter
-      model: deepseek/deepseek-v4-flash:nitro
-    description: *nitro_probe
+      model: openai/gpt-6-luna
+    description: *model_route
   l3_plan:
     type: llm
     optimizer: *node_menus
@@ -167,8 +164,8 @@ nodes:
       reasoning_effort: medium
       max_tokens: 8000
       provider: openrouter
-      model: deepseek/deepseek-v4-flash:nitro
-    description: *nitro_probe
+      model: openai/gpt-6-luna
+    description: *model_route
   # The controller — the stall ladder that picks, round by round, whether the next round is
   # `default` alone or one of the alternatives below, and when potter stops.
   escalation:

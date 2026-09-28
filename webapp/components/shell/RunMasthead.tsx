@@ -116,7 +116,11 @@ export function RunMasthead({
                 <VendorLogo key={v.vendor} vendor={v.vendor} models={v.models} />
               ))}
             </span>
-            {[...campaignModels(run).map(shortModel), ...campaignLineParts(run)].join(" · ")}
+            {[
+              ...(run.campaign.runs_with ? [`${run.campaign.runs_with.optimizer} optimizer`] : []),
+              ...campaignModels(run).map(shortModel),
+              ...campaignLineParts(run),
+            ].join(" · ")}
           </div>
         )}
         {/* Every chip reads `dash` for the VIEWED LEAF, the one per-cycle source. */}

@@ -575,6 +575,10 @@ class CampaignPipelineResponse(StrictModel):
     dataset_name: str
     connector: str
     backend_type: str
+    optimizer: str = Field(
+        description="The optimizer manifest the addressed course runs — the one answer a surface "
+        "reads which optimizer's graph, knobs and analytics apply by, a check-in's draft included"
+    )
     params: dict[str, Any] = Field(
         description="Resolved config as the engine holds it — the bytes a round document carries "
         "as `resolved_pipeline_params`, which makes that field this endpoint's check"
@@ -867,6 +871,7 @@ def resolve_pipeline_for_draft(
         dataset_name=draft.slug,
         connector=draft.connector,
         backend_type=draft.connector,
+        optimizer=m.cfg.optimization.optimizer,
         params=params,
         node_config_schema=rows,
         view=m.filtered.view,
@@ -939,6 +944,7 @@ def resolve_pipeline_for_campaign(
         connector=str((m.raw or {}).get("backend_name") or campaign.dataset_name),
         # The campaign's FROZEN kind — one `pipeline.yaml` serves every campaign on the slug.
         backend_type=campaign.backend_type,
+        optimizer=m.cfg.optimization.optimizer,
         params=params,
         node_config_schema=rows,
         view=m.filtered.view,
@@ -966,6 +972,7 @@ class CampaignRunsWith(StrictModel):
     params: list[RunsWithParam] = Field(
         description="Scalar settings in active-step order, `model` included; no prompt text"
     )
+    optimizer: str = Field(description="The optimizer manifest the root course runs")
     max_rounds: int | None = Field(
         description="The DECLARED rounds cap, not the armed one: 0 = origin only, null = unlimited"
     )
@@ -1051,7 +1058,9 @@ def _runs_with(stores: Stores, campaign: Campaign, draft: DraftCampaign | None) 
                         node=name, key=key, value=cfg[key], source=m.provenance[name][key]
                     )
                 )
-    return CampaignRunsWith(params=out, max_rounds=m.cfg.optimization.max_rounds)
+    return CampaignRunsWith(
+        params=out, optimizer=m.cfg.optimization.optimizer, max_rounds=m.cfg.optimization.max_rounds
+    )
 
 
 def configure_and_apply_pipeline(

@@ -48,7 +48,9 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
 
   const cv = useConnector();
   const { dash, isLive, dashRound: liveRound } = useDashboard();
-  const { doc: optimizer, loading: pipelineLoading } = useOptimizerPipeline(isOptimizer);
+  const { doc: optimizer, loading: pipelineLoading } = useOptimizerPipeline(
+    isOptimizer ? cv.optimizer : null,
+  );
   const observe = useObserveSearchPoint(id, !isOptimizer && !authoring);
 
   const view = isOptimizer ? optimizer?.view : cv.view;
@@ -60,7 +62,11 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
   const schema = isOptimizer ? (optimizer?.node_config_schema ?? null) : cv.nodeConfigSchema;
   // Two fetches back this panel; `cv.pipelineStatus` answers for the campaign's alone.
   const schemaStatus = isOptimizer
-    ? pipelineReadStatus({ bound: true, loading: pipelineLoading, failed: !optimizer })
+    ? pipelineReadStatus({
+        bound: cv.pipelineStatus !== "unbound",
+        loading: pipelineLoading || cv.pipelineStatus === "loading",
+        failed: !optimizer,
+      })
     : cv.pipelineStatus;
   const outputSchema = isOptimizer
     ? (optimizer?.node_output_schema ?? null)

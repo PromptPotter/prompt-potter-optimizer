@@ -13,7 +13,9 @@ from promptpotter.application.campaign_config import OptimizationConfig
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.optimizer_manifest import (
     OptimizerKnobsResponse,
+    OptimizerRoster,
     optimizer_knobs,
+    optimizer_roster,
     resolve_optimizer,
 )
 from promptpotter.config.settings import settings
@@ -389,6 +391,13 @@ def get_optimizer_pipeline(
         model_capabilities=resolve_schema_menu(schema, workspace=Path(stores.base_dir)),
         resolved_prompts={str(k): dict(v) for k, v in prompts.items()},
     )
+
+
+@active_router.get("/optimizers", tags=["Optimizer"], response_model=OptimizerRoster)
+def get_optimizers() -> OptimizerRoster:
+    """The optimizers this install can run — one per registered runtime, each resolved through the
+    manifest a run would read — so a picker offers what ``optimization.optimizer`` accepts."""
+    return optimizer_roster()
 
 
 @active_router.get(
