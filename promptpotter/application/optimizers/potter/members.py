@@ -49,7 +49,7 @@ from promptpotter.application.optimizers.potter.resume import (
 )
 from promptpotter.application.optimizers.potter.state import PotterState, potter_state
 from promptpotter.application.scoring.candidate_report import fatal_validation_failures
-from promptpotter.domain.optimizer_state import POTTER_MANIFEST
+from promptpotter.domain.optimizer_state import POTTER_MANIFEST, potter_round_state
 from promptpotter.domain.phases import StopLoop
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import CandidateProposal
@@ -136,7 +136,8 @@ class AdaptiveQueue:
             }
         order = build_round_order(parent_grades, cycle.ruler, [int(s.id) for s in cells])
         by_id = {int(s.id): s for s in cells}
-        return nodes.Panel(cells=cells, order=[by_id[sid] for sid in order])
+        # Every cell closes a block: PoBB decides after each one.
+        return nodes.Panel(cells=cells, order=[by_id[sid] for sid in order], block_size=1)
 
 
 def _fold_strict_rejections(
@@ -258,7 +259,7 @@ class L1Critique:
                     round_num=ctx.round_num,
                     ledger=session.state.ledger,
                 )
-            round_result.optimizer_state.payload.critique = critique
+            potter_round_state(round_result.optimizer_state).critique = critique
 
 
 class Escalation:
@@ -296,7 +297,9 @@ class Escalation:
         )
         # The same structural l1_generate fault, which the identical prompt reproduces; its
         # `candidate_scores` are empty, so the round carries it on `l1_parse_failure`.
-        l1_zero_candidates = round_result.optimizer_state.payload.l1_parse_failure is not None
+        l1_zero_candidates = (
+            potter_round_state(round_result.optimizer_state).l1_parse_failure is not None
+        )
         # Derived from the SAME helper the degradation grade reads, so routing and verdict can't
         # diverge. Health is stamped only at the close, so the rates are read directly here.
         evidence_starved = (

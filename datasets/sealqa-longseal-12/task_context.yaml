@@ -1,4 +1,4 @@
-# Ships with the dataset rather than being decomposed from `task_description.md` at first run.
+# Ships with the dataset rather than being decomposed from `task_description.md` by a check-in.
 # The decomposition produced five empty fields and left only `raw_description`, so the panel L1
 # reads carried nothing a candidate could cite — and an origin that replays from cache never
 # re-runs it, so the emptiness is sticky. Declared, it cannot fall through.

@@ -149,7 +149,10 @@ LEDGER_BASELINE = {
     # state object alone, and this half reads the dispatch hub and the critique node.
     # +2: `optimizers/capo/{__init__,members}.py` — CAPO's members, `few_shot` first. The registry
     # finds a preset's members by its subpackage, so the first member opens the package.
-    "modules": 374,
+    # +2: `optimizers/capo/state.py` — CAPO's working state, the population, apart from `members.py`
+    # for potter's reason; `optimizers/capo/operators.py` — what CAPO's llm nodes send and read
+    # back, apart because it is the code `CapoRuntime.source_digest` hashes and nothing else.
+    "modules": 376,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     # +2: `application/optimizers/__init__.py` (the member registry) and its `potter/`, empty.
@@ -198,7 +201,13 @@ LEDGER_BASELINE = {
     # it rides that node's knobs; no existing knob says how long a shot list may grow.
     # +1: `few_shot.k_max` — the same bound on CAPO's algorithm node, which a manifest sets apart
     # from any proposer's: CAPO's mutation and potter's generator are separate nodes.
-    "config_leaf_fields": 46,
+    # +4: CAPO's race at its paper values — `blocks.block_size` / `max_blocks` (b, z_max) and
+    # `paired_t.alpha` / `survivors` (α, μ). Each is a paper hyperparameter a manifest declares;
+    # potter's sampler and eliminator decide per cell on a posterior, so no existing knob holds them.
+    # +2: `capo_crossover.crossovers` (c) and `population.size` (μ) — CAPO's paper values on the
+    # nodes that spend them. `size` is `paired_t.survivors`' number, one YAML anchor in the
+    # manifest, kept apart because the paper's no-racing ablation keeps a population and no race.
+    "config_leaf_fields": 52,
     # +1: `QUEUE_MAX_WAIT_S` — how long a launch may wait in line before it is withdrawn. It is a
     # setting and not a constant because it is the one queue number a HOST has to be able to
     # answer for: on a shared box it decides when someone else's waiting launch is given up on.
@@ -268,7 +277,11 @@ LEDGER_BASELINE = {
     # -3: `ScoredCandidate.outcome` replaces `escalation_aborted`, `elimination_stopped`, `invalid`
     # and `partial_reason` — one fact, how the walk ended, told four ways, none saying BROKEN.
     # -2: the individual's shots are demo-pool ids, reached through each round's `opt_sp`.
-    "cycle_result_fields": 243,
+    # +14: `CapoRoundState` under `optimizer_state.payload` — the population (the individual's 12
+    # leaves) and its rounds without advance. CAPO's state between rounds, which a resume re-seats
+    # off the round document; potter's payload holds nothing it could ride.
+    # ±0: `axis_memory_peaked` moved from potter's payload to the round — the bench writes it.
+    "cycle_result_fields": 257,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
@@ -541,7 +554,13 @@ LEDGER_BASELINE = {
     # +1: a prompt-length term read off the interpolated prompt charges each cell for its own
     # query, so arms on different subsets rank by the cells they drew; read without the shots it
     # exempts what CAPO's term prices. Every number renders (test_numerics § 2).
-    "test_functions": 207,
+    # +1: CAPO's race cutting on `> μ`, on correctness, or inside a block keeps or drops the wrong
+    # arm, and every number still renders (test_numerics § 5).
+    # +1: a verifier-graded miss reaching the generator as nothing leaves it editing blind to which
+    # cells failed, why and at what token bill, while every panel renders (test_integrity § 5).
+    # +1: a CAPO round keeping its population by the wrong rule, racing offspring without it, or
+    # drawing a parent from outside it still elects a winner (test_numerics § 4).
+    "test_functions": 210,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

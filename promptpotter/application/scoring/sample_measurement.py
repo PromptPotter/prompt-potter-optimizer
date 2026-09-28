@@ -139,6 +139,7 @@ _INFRA_KEYS: frozenset[str] = frozenset(
         # it: a dataset does not declare an `observation_mapping` for how its backend talks, and
         # a formula must never read a turn — see `domain/scoring.py::TurnRecord`.
         "turns",
+        "outcome_note",
         # Where an episode's wall clock went, by harness phase (`PipelineData.step_phases`).
         "step_phases",
         # L4: the arm's own half of a paired cell difference (`domain/l4/proxies.py`). It rides

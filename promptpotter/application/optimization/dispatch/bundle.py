@@ -103,6 +103,7 @@ INNER_NARRATIVE_RENDER_CAP = 6
 MISS_QUERY_CAP = 100
 MISS_PREDICTED_CAP = 60
 MISS_GT_CAP = 40
+MISS_NOTE_CAP = 120
 MEMORY_ROUND_CAP = 4
 MEMORY_FIELD_CAP = 2
 # Chars of each changed field's EDIT — the words it wrote and cut, never a stem of the new value,
@@ -389,6 +390,7 @@ __all__ = [
     "MEMORY_ROUND_CAP",
     "MEMORY_VALUE_CAP",
     "MISS_GT_CAP",
+    "MISS_NOTE_CAP",
     "MISS_PREDICTED_CAP",
     "MISS_QUERY_CAP",
     "NEAR_MISS_RENDER_CAP",

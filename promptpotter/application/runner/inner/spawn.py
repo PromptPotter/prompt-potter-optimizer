@@ -46,6 +46,7 @@ from promptpotter.domain.l4.proxies import (
     parent_level_series,
 )
 from promptpotter.domain.launch_limits import LaunchLimits
+from promptpotter.domain.optimizer_state import PotterRoundState
 from promptpotter.domain.phases import REFUSAL_STOPS, RunPhase, StopReason
 from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.results import ArmOutcome, candidate_label, invariant_collapses
@@ -173,11 +174,17 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
         _lift_shape(result),
     ]
     by_round = {rnd.round: rnd for rnd in result.rounds}
+    # Only potter's rounds carry a critique; an inner cycle on another optimizer narrates none.
+    critiques = {
+        r: payload.critique
+        for r, rnd in by_round.items()
+        if isinstance(payload := rnd.optimizer_state.payload, PotterRoundState)
+    }
     highlight = next(
         (
             h
             for r in sorted(by_round)
-            if (c := by_round[r].optimizer_state.payload.critique)
+            if (c := critiques.get(r))
             for h in c.get("failure_highlights") or []
             if h.strip()
         ),
@@ -192,8 +199,7 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
         parts = []
         if 0 <= r - 1 < len(levels):
             parts.append(f"level {levels[r - 1]:.3f} (D{levels[r - 1] - origin:+.3f})")
-        prior = by_round.get(r - 1)
-        steer = prior.optimizer_state.payload.critique if prior is not None else None
+        steer = critiques.get(r - 1)
         if steer and steer.get("priority_fix"):
             parts.append(f"steer: {_clip(steer['priority_fix'], 130)}")
         scored = [c for c in rnd.candidate_scores if c.outcome is not ArmOutcome.INVALID]

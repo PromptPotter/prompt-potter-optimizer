@@ -330,7 +330,8 @@ class RoundDigestView:
     composite_fitness: float
     changes_description: str
     l1_critique_text: str
-    l1_yield: float
+    # ``None`` on another optimizer's round, which has no generator yield.
+    l1_yield: float | None
     l1_n_no_op: int
     l1_n_duplicate: int
     l1_n_repeat: int

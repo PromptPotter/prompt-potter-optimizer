@@ -2735,6 +2735,75 @@ def test_a_solved_cell_the_edits_keep_losing_reaches_the_critique_and_the_genera
     )
 
 
+def test_a_verifier_graded_miss_reaches_the_generator_with_its_reason() -> None:
+    """Six rounds of `spreadsheetbench-s20` where the critique read `Value diff at BN6` and the
+    generator read no miss at all: `failing_samples` went silent on any round without labels, and
+    nothing else on the generator's floor carries one. It oscillated between "verify more" and
+    "verify less" with nothing saying which cells either lost, or at what token bill."""
+    from factories import measurement
+
+    from promptpotter.application.optimization.dispatch.bundle import (
+        CycleSlice,
+        InjectionBundle,
+        RoundDigest,
+    )
+    from promptpotter.application.optimization.dispatch.facade import DispatchHub
+    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+        load_optimizer_prompt,
+    )
+    from promptpotter.domain.opt_search_point import OptSearchPoint
+    from promptpotter.domain.round_diagnostics import RoundDiagnostics
+
+    def episode(sid: int, fitness: float, **pd: Any) -> dict[str, Any]:
+        tokens = {"agent": {"input": 64_000, "output": 6_000, "estimated": False}}
+        return measurement(
+            sid,
+            fitness,
+            query=f"task-{sid}",
+            ground_truth="",
+            predicted="",
+            pipeline_data={"step_tokens": tokens, **pd},
+        )
+
+    note = "FAIL Value diff at BN6: gt='OCOGS', proc=None"
+    rows = [
+        episode(0, 1.0, outcome_note="should never render: this cell passed"),
+        episode(1, 0.0, outcome_note=note, turns=[{}] * 12),
+        episode(2, 0.0),
+    ]
+    bundle = InjectionBundle(
+        opt_sp=OptSearchPoint(),
+        memory=L2L3Memory(),
+        framing=TaskDecomposition(),
+        pipeline_schema=None,
+        cycle_slice=CycleSlice(
+            round_num=1,
+            l1_stall_count=0,
+            l2_round=0,
+            l2_stall_count=0,
+            l3_round=0,
+            l3_stall_count=0,
+            exploration_budget="tight",
+        ),
+        digest=RoundDigest(
+            diagnostics=RoundDiagnostics(n_valid=0, samples=[]),
+            critique=None,
+            latest_sample_ids=frozenset({0, 1, 2}),
+        ),
+        axes=None,
+        trajectory_results=rows,
+    )
+
+    filled, *_ = DispatchHub.fill(load_optimizer_prompt("l1_generate"), bundle, node="l1_generate")
+    prompt = filled.render()
+    assert "[#1]" in prompt and "[#2]" in prompt, (
+        "a verifier-graded miss never reached the generator"
+    )
+    assert "Value diff at BN6" in prompt, "the verifier's reason for the miss was dropped"
+    assert "12 turns, 70k tokens" in prompt, "the generator cannot see what a miss cost"
+    assert "[#0]" not in prompt and "should never render" not in prompt, "a pass rendered as a miss"
+
+
 def test_digest_reads_the_ruler_off_the_cycle_not_the_unabsorbed_round() -> None:
     """`absorb_round` stamps a round's ruler identity AFTER the critique call, so on that path the
     round document still reads cold. Sourced from it, `confounds` told the distiller "COLD RULER"

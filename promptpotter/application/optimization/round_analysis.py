@@ -13,6 +13,7 @@ from promptpotter.application.scoring.row_diagnostics import (
     extract_sample_diagnostics,
     rank_ground_truth,
 )
+from promptpotter.domain.optimizer_state import PotterRoundState
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.round_diagnostics import (
@@ -54,6 +55,9 @@ def compute_round_diagnostics(
     trend, trend_desc = _trend(rounds_history)
     diff_lines = _cross_candidate_diff(round_result)
     samples = _sample_diagnostics(results, ranked_item_keys, pipeline_schema)
+    # A generator yield is potter's readout; another optimizer's round keeps the silent 1.0.
+    payload = round_result.optimizer_state.payload
+    diversity = payload.l1_yield if isinstance(payload, PotterRoundState) else 1.0
 
     return RoundDiagnostics(
         rank_buckets=rank_buckets,
@@ -67,7 +71,7 @@ def compute_round_diagnostics(
         trend_description=trend_desc,
         anomalies=anomalies,
         cross_candidate_diff=diff_lines,
-        l1_diversity=float(round_result.optimizer_state.payload.l1_yield),
+        l1_diversity=float(diversity),
         samples=samples,
     )
 

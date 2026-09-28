@@ -35,7 +35,7 @@ class ValidatorContext:
     # ``axis_memory`` to justify mutating a peaked axis without naming a
     # rebut (the critique naming that axis, or exploration_budget=wide).
     # Populated by ``l1/stats.py::review_reading`` from each round's
-    # ``axis_memory_peaked`` field, stashed by ``persist_round``.
+    # ``RoundResult.axis_memory_peaked``, stashed by ``persist_round``.
     peaked_axes: frozenset[str] = field(default_factory=frozenset)
 
 

@@ -46,6 +46,7 @@ from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.domain import ruler
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
+from promptpotter.domain.optimizer_state import potter_round_state
 from promptpotter.domain.results import merge_known_outcomes
 from promptpotter.domain.results_health import compute_node_failure_rates
 from promptpotter.infrastructure.llm.telemetry import (
@@ -306,7 +307,9 @@ def build_bundle(
     if latest_round is None and cycle.rounds:
         latest_round = cycle.rounds[-1]
     latest_diag = latest_round.diagnostics if latest_round else None
-    latest_crit = latest_round.optimizer_state.payload.critique if latest_round else None
+    latest_crit = (
+        potter_round_state(latest_round.optimizer_state).critique if latest_round else None
+    )
     round_num = latest_round.round + 1 if latest_round else 1
 
     current_sp = cycle.tracking.current_sp

@@ -20,7 +20,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
 )
 from promptpotter.application.optimization.dispatch.schemas import L1CritiqueOutput
 from promptpotter.application.run_phase_control import declare_run_phase
-from promptpotter.domain.optimizer_state import CritiqueReadout
+from promptpotter.domain.optimizer_state import CritiqueReadout, potter_round_state
 from promptpotter.domain.phases import RunPhase, StopLoop, StopReason
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 from promptpotter.shared.errors import SendRefusedError, graceful
@@ -56,18 +56,16 @@ async def ensure_prior_critique(cycle: Cycle, state: PotterState) -> None:
     The stop is ``PAUSED``, the same resumable halt a holed panel takes: nothing is lost, and the
     operator resumes into a round that re-sends against a provider that has recovered."""
     prior = cycle.rounds[-1] if cycle.rounds else None
-    if (
-        prior is None
-        or prior.round == 0
-        or prior.optimizer_state.payload.critique
-        or not prior.results
-    ):
+    if prior is None or prior.round == 0 or not prior.results:
+        return
+    payload = potter_round_state(prior.optimizer_state)
+    if payload.critique:
         return
     session = cycle.session
     last: Exception | None = None
     for attempt in range(1, CRITIQUE_RESEND_ATTEMPTS + 1):
         try:
-            prior.optimizer_state.payload.critique = await run_l1_critique(
+            payload.critique = await run_l1_critique(
                 cycle, state, prior, round_num=prior.round, ledger=session.state.ledger
             )
             break
@@ -84,7 +82,7 @@ async def ensure_prior_critique(cycle: Cycle, state: PotterState) -> None:
                 CRITIQUE_RESEND_ATTEMPTS,
                 exc,
             )
-    if not prior.optimizer_state.payload.critique:
+    if not payload.critique:
         emit_round_warning(
             kind="l1_critique_unavailable",
             message=(

@@ -15,6 +15,7 @@ from promptpotter.application.optimization.pobb.checks import EliminationGate
 from promptpotter.application.optimization.resume_and_fork.decisions import GatingMode
 from promptpotter.application.optimizers.potter.state import potter_state
 from promptpotter.application.scoring.selection import elect_round_winner, elimination_p_best
+from promptpotter.domain.optimizer_state import potter_round_state
 from promptpotter.domain.run_records import PotterCheckpointKind, ResumeCheckpointKind
 from promptpotter.domain.scoring import is_answer_collapsed
 from promptpotter.infrastructure.llm.telemetry import reset_current_round, set_current_round
@@ -194,7 +195,8 @@ async def rederive_critiques(
     saved = cycle.rounds
     try:
         for rr in drifted:
-            if not rr.optimizer_state.payload.critique or rr.round == 0:
+            payload = potter_round_state(rr.optimizer_state)
+            if not payload.critique or rr.round == 0:
                 continue
             cycle.rounds = [p for p in saved if p.round < rr.round]
             # `emit_token_usage` stamps from this ContextVar, which outside the round loop
@@ -202,7 +204,7 @@ async def rederive_critiques(
             token = set_current_round(rr.round)
             try:
                 with graceful(f"round {rr.round} critique re-derivation failed"):
-                    rr.optimizer_state.payload.critique = await run_l1_critique(
+                    payload.critique = await run_l1_critique(
                         cycle,
                         potter_state(cycle.working_state),
                         rr,

@@ -135,7 +135,7 @@ def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
         parts.append(cost)
     if rd.changes_description:
         parts.append(f"- changes: {rd.changes_description}")
-    if rd.l1_yield < 1.0:
+    if rd.l1_yield is not None and rd.l1_yield < 1.0:
         n_total = rd.candidates_scored
         n_valid = max(0, n_total - rd.l1_n_no_op - rd.l1_n_duplicate - rd.l1_n_repeat)
         bits: list[str] = []

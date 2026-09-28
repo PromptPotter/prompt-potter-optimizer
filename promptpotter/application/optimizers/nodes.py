@@ -257,10 +257,12 @@ class RoundContext:
 @dataclass(frozen=True)
 class Panel:
     """The round's cells, and the order every arm walks them in. The parent's re-score reads
-    ``cells``; the walks read ``order``."""
+    ``cells``; the walks read ``order``, whose every ``block_size`` cells close a block — the
+    points an eliminator decides at."""
 
     cells: list[Sample]
     order: list[Sample]
+    block_size: int
 
 
 @dataclass(frozen=True)

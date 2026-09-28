@@ -426,14 +426,19 @@ export interface PotterRoundState {
   critique: unknown | null;
   l1_yield: number;
   l1_parse_failure: string | null;
-  axis_memory_peaked: string[];
+}
+
+/** CAPO's payload: the population its selector kept. */
+export interface CapoRoundState {
+  population: OptSearchPoint[];
+  rounds_without_advance: number;
 }
 
 /** ``{manifest, prompt_hashes, payload}`` — the one envelope every optimizer's state rides. */
 export interface OptimizerState {
-  manifest: 'potter';
+  manifest: 'potter' | 'capo';
   prompt_hashes: Record<string, string>;
-  payload: PotterRoundState;
+  payload: PotterRoundState | CapoRoundState;
 }
 
 /** The individual: prompt structure + lineage. */
@@ -481,6 +486,7 @@ export interface RoundResult {
   overlap: OverlapReading | null;
   overlap_results: Record<string, Record<string, unknown>[]>;
   diagnostics: unknown | null;
+  axis_memory_peaked: string[];
   health: DegradationHealth | null;
   opt_sp: OptSearchPoint | null;
   optimizer_state: OptimizerState;

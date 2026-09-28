@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import ConfigDict, Field
 
-from promptpotter.domain.optimizer_state import L1_PARSE_FAILURE_TOOLING
+from promptpotter.domain.optimizer_state import L1_PARSE_FAILURE_TOOLING, PotterRoundState
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.results import CycleResult, RoundResult
 from promptpotter.domain.strict_model import StrictModel
@@ -134,7 +134,11 @@ def mean_parent_level_se(result: CycleResult) -> float | None:
 def _is_evidential(rnd: RoundResult) -> bool:
     """``L1_PARSE_FAILURE_TOOLING`` means the round lost its candidates to an empty optimizer
     response — missing data, not a bad mutation. Scoring it dirty grades provider flakiness."""
-    return rnd.optimizer_state.payload.l1_parse_failure != L1_PARSE_FAILURE_TOOLING
+    payload = rnd.optimizer_state.payload
+    return not (
+        isinstance(payload, PotterRoundState)
+        and payload.l1_parse_failure == L1_PARSE_FAILURE_TOOLING
+    )
 
 
 def no_evidence_reason(result: CycleResult) -> str | None:

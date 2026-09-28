@@ -18,6 +18,7 @@ from promptpotter.application.optimization.dispatch.bundle import (
     MEMORY_ROUND_CAP,
     MEMORY_VALUE_CAP,
     MISS_GT_CAP,
+    MISS_NOTE_CAP,
     MISS_PREDICTED_CAP,
     MISS_QUERY_CAP,
     NEAR_MISS_RENDER_CAP,
@@ -35,7 +36,7 @@ from promptpotter.application.optimization.dispatch.bundle import (
 )
 from promptpotter.application.optimization.escalation.state import ExplorationBudget
 from promptpotter.application.optimization.pobb.checks import EliminationGate
-from promptpotter.application.scoring.evaluators import compute_accuracy
+from promptpotter.application.scoring.evaluators import DEFAULT_CELL_FORMULA, compute_accuracy
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.candidate_diff import (
@@ -59,6 +60,7 @@ from promptpotter.domain.scoring import (
     is_hit,
     is_verifier_graded,
 )
+from promptpotter.domain.spend import TokenAccount
 from promptpotter.shared.composite import render_composite_fitness_block
 from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.statistics import min_detectable_effect
@@ -700,6 +702,21 @@ def _miss_difficulty(b: InjectionBundle, row: dict[str, Any]) -> float | None:
     return ruler.delta.get(int(sid))
 
 
+def _verifier_outcome(row: dict[str, Any]) -> str:
+    """A verifier-graded miss's twin of said/true: its score, the environment's note on why
+    (``PipelineData.outcome_note``), and what the episode spent — the tokens a ``per_cell`` reads."""
+    pd = row.get("pipeline_data") or {}
+    parts = [f"score {row.get('fitness')}"]
+    if note := pd.get("outcome_note"):
+        parts.append(str(note)[:MISS_NOTE_CAP])
+    spent = [f"{len(turns)} turns"] if (turns := pd.get("turns")) else []
+    if (account := TokenAccount.from_step_tokens(pd)) is not None:
+        spent.append(f"{account.total / 1000:.0f}k tokens")
+    if spent:
+        parts.append(", ".join(spent))
+    return "".join(f" | {p}" for p in parts)
+
+
 @signal(
     "failing_samples",
     kind=InjectionKind.MEASUREMENT,
@@ -709,8 +726,9 @@ def _miss_difficulty(b: InjectionBundle, row: dict[str, Any]) -> float | None:
 def _r_failing_samples(b: InjectionBundle) -> list[Item]:
     """Ordered easiest-first — the one thing here L1 cannot compute for itself. A cold ruler renders
     the misses unordered rather than quoting a difficulty that would move next round."""
-    if _no_labels(b):
+    if _inner_narrated(b):
         return []
+    verifier = _no_labels(b)
     rows = _misses(b)
     errored = _errored(b)
     if not rows:
@@ -774,8 +792,12 @@ def _r_failing_samples(b: InjectionBundle) -> list[Item]:
                 f"  [#{r.get('sample_id')}] "
                 + ("δ=?" if delta is None else ("δ=tied" if delta in tied else f"δ={delta:+.2f}"))
                 + f" | {_query_stem(r, MISS_QUERY_CAP)}"
-                + f" | said: {str(r.get('predicted') or '')[:MISS_PREDICTED_CAP]}"
-                + f" | true: {str(r.get('ground_truth') or '')[:MISS_GT_CAP]}",
+                + (
+                    _verifier_outcome(r)
+                    if verifier
+                    else f" | said: {str(r.get('predicted') or '')[:MISS_PREDICTED_CAP]}"
+                    f" | true: {str(r.get('ground_truth') or '')[:MISS_GT_CAP]}"
+                ),
                 trusted=False,
             )
             for delta, r in ordered
@@ -933,6 +955,13 @@ def _candidate_fate(cand: ScoredCandidate, unit: MeasuredUnit) -> str:
     return "scored in full"
 
 
+def _theta_fit_on_formula(b: InjectionBundle) -> bool:
+    """Whether θ is fit on a ``per_cell`` score other than correctness (``CellScorer.objective``),
+    so a cost term the formula charges moves the election while accuracy stays level."""
+    formula = b.cycle_slice.composite_formula
+    return formula is not None and formula != DEFAULT_CELL_FORMULA
+
+
 @signal(
     "mutation_memory",
     kind=InjectionKind.DERIVED,
@@ -958,11 +987,13 @@ def _r_mutation_memory(b: InjectionBundle) -> list[Item]:
     # link, and it names a ROUND, so it stays true whatever the composition affords.
     lines: list[str] = []
     seen: list[tuple[int, frozenset[str]]] = []
+    charged = _theta_fit_on_formula(b)
     for edit in edits:
         echoes = [r for r, prev in seen if same_idea(edit.idea, prev, threshold=IDEA_MATCH_MARK)]
         mark = f"  ↺ same idea as r{echoes[0]} (x{len(echoes) + 1})" if echoes else ""
         seen.append((edit.round.round, edit.idea))
-        lines.append(f"  r{edit.round.round} {_edit_row(edit, b.measured_unit)}{mark}")
+        row = _edit_row(edit, b.measured_unit, charged=charged)
+        lines.append(f"  r{edit.round.round} {row}{mark}")
     lines.reverse()
     items = [Item(header), *(Item(ln, trusted=False) for ln in lines)]
     if lost := _repeatedly_lost(edits):
@@ -971,7 +1002,7 @@ def _r_mutation_memory(b: InjectionBundle) -> list[Item]:
     return items
 
 
-def _edit_row(edit: _Edit, unit: MeasuredUnit) -> str:
+def _edit_row(edit: _Edit, unit: MeasuredUnit, *, charged: bool) -> str:
     cand = edit.candidate
     mutation = "; ".join(f"{field}: {value[:MEMORY_VALUE_CAP]}" for field, value in edit.changed)
     # `total == 0` is checked BEFORE the paired quote: a never-measured candidate can still carry
@@ -982,6 +1013,9 @@ def _edit_row(edit: _Edit, unit: MeasuredUnit) -> str:
         if cand.total and cand.reference_accuracy is not None
         else _candidate_fate(cand, unit)
     )
+    # Where θ reads the formula, a loss on its cost terms at equal accuracy is still a loss.
+    if charged and cand.total and cand.reference_composite is not None:
+        scored += f", composite {cand.composite_fitness:.3f} vs {cand.reference_composite:.3f}"
     delta = edit.round.cell_delta(cand.candidate_id)
     cells = "".join(
         f" · {verb} {', '.join(f'#{sid}' for sid in sids)}"
@@ -1085,7 +1119,12 @@ def _r_measurand(b: InjectionBundle) -> list[Item]:
     body = render_composite_fitness_block(
         fitness, b.digest.evaluators, b.cycle_slice.composite_formula
     )
-    lines = ["ELECTION — a round is won on θ lift over the parent, and on nothing else."]
+    lines = [
+        "ELECTION — a round is won on θ lift over the parent, and θ is fit on each cell's "
+        "composite under the formula below, not on accuracy."
+        if _theta_fit_on_formula(b)
+        else "ELECTION — a round is won on θ lift over the parent, and on nothing else."
+    ]
     if (a := b.digest.ability) is not None:
         lines.append(f"  this round: θ {a.theta:+.3f}  ({a.scale()})")
     lines.append("REPORTED FITNESS — the headline number and the degradation scale:")

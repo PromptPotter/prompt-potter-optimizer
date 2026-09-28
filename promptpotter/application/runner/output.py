@@ -27,6 +27,7 @@ from promptpotter.application.views.view_models import (
     RoundDigestView,
 )
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.optimizer_state import PotterRoundState
 from promptpotter.domain.results import HardSampleOrder, RoundResult, invariant_collapses
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
@@ -186,6 +187,8 @@ def from_disk_log(
         lineage = t.opt_sp.lineage if t.opt_sp else None
         collapses = invariant_collapses(t.candidate_scores)
         selected = next(iter(t.selected_scores), None)
+        # The critique and the generator yield are potter's readouts; another optimizer has none.
+        potter = p if isinstance(p := t.optimizer_state.payload, PotterRoundState) else None
         round_views.append(
             RoundDigestView(
                 round=t.round,
@@ -195,8 +198,8 @@ def from_disk_log(
                 total=t.total,
                 composite_fitness=t.composite_fitness,
                 changes_description=(lineage.changes_description if lineage else "").strip(),
-                l1_critique_text=format_l1_critique_for_prompt(t.optimizer_state.payload.critique),
-                l1_yield=t.optimizer_state.payload.l1_yield,
+                l1_critique_text=format_l1_critique_for_prompt(potter.critique if potter else None),
+                l1_yield=potter.l1_yield if potter else None,
                 l1_n_no_op=collapses.get("no_op_variant", 0),
                 l1_n_duplicate=collapses.get("duplicate_variant", 0),
                 l1_n_repeat=collapses.get("repeat_variant", 0),

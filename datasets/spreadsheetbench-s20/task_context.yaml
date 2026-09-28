@@ -1,0 +1,27 @@
+# Ships with the dataset: a bare `new <name>` decomposes nothing (only `--task-file` /
+# `--task-text` runs the check-in), so without this file every campaign here runs unframed.
+#
+# `upstream_context` / `downstream_context` are deliberately absent: they splice into the TARGET
+# prompt, which on this dataset is the skill the agent reads, and C0 is s10's skill unchanged.
+#
+# BUDGETED — 600 chars a field, 1500 across the five (`TaskDecomposition.check_budget`), because
+# every one renders VERBATIM into every optimizer prompt. Detail belongs in `task_description.md`.
+domain: >-
+  Spreadsheet editing by an unattended terminal agent: one containerized SpreadsheetBench episode
+  per cell, graded by the task's own verifier.
+pipeline_purpose: >-
+  The candidate is an Agent Skill the agent reads before acting — general working habits for
+  inspecting a workbook, making the edit and confirming it landed. It names no task, workbook or
+  cell range, or the benchmark leaks into the arm every lift is measured against.
+data_characteristics: >-
+  Each cell is a workbook plus a natural-language edit instruction. The verifier recalculates
+  formulas with LibreOffice and compares the saved output cell by cell: 0 or 1, no partial credit,
+  so a value written as text, the wrong sheet or the input edited in place all score zero.
+optimization_goals: >-
+  Solve more cells without inflating the episode. A cell's composite shrinks once its tokens pass
+  a fixed allowance, so a habit that adds turns must pay for itself in cells solved — and the cells
+  that fail are the ones that flail, not the short ones.
+key_challenges: >-
+  Declaring done without reopening the output to confirm the edit; writing a value where a formula
+  was asked for, or the reverse; editing the input workbook instead of the output path; re-running
+  a failed command instead of reading its error.

@@ -20,7 +20,11 @@ from promptpotter.application.views.render.optimizer_prompt_text import (
     format_l1_critique_for_prompt,
 )
 from promptpotter.domain.opt_search_point import node_source
-from promptpotter.domain.optimizer_state import L1_PARSE_FAILURE_CHARGED, POTTER_MANIFEST
+from promptpotter.domain.optimizer_state import (
+    L1_PARSE_FAILURE_CHARGED,
+    POTTER_MANIFEST,
+    potter_round_state,
+)
 from promptpotter.domain.results import RoundResult
 
 if TYPE_CHECKING:
@@ -103,7 +107,7 @@ def review_reading(
         ),
         variants=[extract_l1_variants(audit) for audit in audits],
         feedback=[
-            format_l1_critique_for_prompt(r.optimizer_state.payload.critique).strip()
+            format_l1_critique_for_prompt(potter_round_state(r.optimizer_state).critique).strip()
             for r in rounds
         ],
     )
@@ -138,10 +142,10 @@ def _behavior_per_round(
         ctx = ValidatorContext(
             round_num=round_num,
             prior_rounds=list(prior_audits),
-            l1_layout=round_data.optimizer_state.payload.memory.l1_layout,
+            l1_layout=potter_round_state(round_data.optimizer_state).memory.l1_layout,
             context_object=context_object,
             exploration_budget=budget,
-            peaked_axes=frozenset(round_data.optimizer_state.payload.axis_memory_peaked),
+            peaked_axes=frozenset(round_data.axis_memory_peaked),
         )
         l1_out.append(run_all_checks(audit, ctx))
         l2_out.append(run_all_l2_checks(audit, ctx))
@@ -159,7 +163,7 @@ def _compute_round_1_verdict(
     if not rounds:
         return "unknown"
 
-    parse_failure = rounds[0].optimizer_state.payload.l1_parse_failure
+    parse_failure = potter_round_state(rounds[0].optimizer_state).l1_parse_failure
     if parse_failure in L1_PARSE_FAILURE_CHARGED:
         return "broken"
     # The remaining reason is TOOLING — an empty or truncated provider response. This verdict is
@@ -186,7 +190,7 @@ def _mean_yield_rate(rounds: list[RoundResult]) -> float | None:
     fall short of."""
     if not rounds:
         return None
-    return sum(r.optimizer_state.payload.l1_yield for r in rounds) / len(rounds)
+    return sum(potter_round_state(r.optimizer_state).l1_yield for r in rounds) / len(rounds)
 
 
 def _top_lifts(rounds: list[RoundResult], origin_composite_fitness: float | None) -> list[float]:

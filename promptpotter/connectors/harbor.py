@@ -864,6 +864,10 @@ _TERMINAL_ESC = re.compile(
 _AGENT_DECISION_CAP = 1200
 _TERMINAL_TAIL_CAP = 600
 _VERIFIER_TAIL_CAP = 600
+# A failed check as a verifier prints one: SpreadsheetBench's `Test case 1: FAIL … Value diff at
+# U5`, pytest's `FAILED path::test - …`. The LAST, because pytest closes on the line naming why.
+_VERIFIER_FAILURE = re.compile(r"^.*\bFAIL.*$", re.MULTILINE)
+_OUTCOME_NOTE_CAP = 300
 
 
 def _tail(text: str, cap: int) -> str:
@@ -1290,6 +1294,18 @@ def _digest(
     return "\n".join(lines)
 
 
+def _outcome_note(result: TrialResult) -> str | None:
+    """``pipeline_data.outcome_note``, which ``failing_samples`` renders where a labelled cell
+    shows what was said against the truth. ``None`` where the verifier printed no failed check."""
+    root = _TRIALS_ROOT / str(getattr(result, "trial_name", "") or "")
+    try:
+        text = (root / "verifier" / "test-stdout.txt").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    failures = _VERIFIER_FAILURE.findall(_TERMINAL_ESC.sub("", text))
+    return failures[-1].strip()[:_OUTCOME_NOTE_CAP] if failures else None
+
+
 def _step_tokens(result: TrialResult, model_name: str | None) -> dict[str, StepTokenUsage]:
     """The episode's spend on the SAME channel a remote backend's rides — the ROW's account of what
     the cell cost, never its bill: an agent in this process was billed send by send as it ran
@@ -1564,6 +1580,8 @@ async def _in_process_run(
     # scored nothing. A single-step task has neither concept.
     if turns:
         data["turns"] = turns
+    if note := _outcome_note(result):
+        data["outcome_note"] = note
     if phases := _phase_timings(result, elapsed):
         data["step_phases"] = phases
     # Only where a skill was actually injected. With no prompt there is no artifact to open, so

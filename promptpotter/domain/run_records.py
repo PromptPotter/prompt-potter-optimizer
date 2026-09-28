@@ -17,6 +17,7 @@ __all__ = [
     "RESUME_CHECKPOINT_KINDS",
     "BenchCheckpointKind",
     "CandidateMintedRecord",
+    "CapoCheckpointKind",
     "CommandAckRecord",
     "CommandRecord",
     "ConfigOverrides",
@@ -64,10 +65,18 @@ class PotterCheckpointKind(enum.StrEnum):
     L3_ESCALATION_TRIGGER = "l3_escalation_trigger"
 
 
-ResumeCheckpointKind = BenchCheckpointKind | PotterCheckpointKind
+class CapoCheckpointKind(enum.StrEnum):
+    """Decisions CAPO's members take: its eliminator's cut (paired_t), its selector's population."""
+
+    PAIRED_T_CUT = "paired_t_cut"
+    POPULATION_KEPT = "population_kept"
+
+
+ResumeCheckpointKind = BenchCheckpointKind | PotterCheckpointKind | CapoCheckpointKind
 RESUME_CHECKPOINT_KINDS: tuple[ResumeCheckpointKind, ...] = (
     *BenchCheckpointKind,
     *PotterCheckpointKind,
+    *CapoCheckpointKind,
 )
 
 

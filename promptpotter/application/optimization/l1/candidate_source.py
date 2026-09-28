@@ -15,6 +15,7 @@ from promptpotter.application.optimization.validators.l1_invariants import (
     detect_invariants,
 )
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
+from promptpotter.domain.optimizer_state import potter_round_state
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent, emit_phase
 from promptpotter.domain.results import CandidateProposal, candidate_label, round_document_digest
 from promptpotter.domain.run_records import CandidateMintedRecord, LLMCallRecord
@@ -80,7 +81,9 @@ async def generate_or_load_candidates(
         creativity=_creativity,
         model=cycle.optimizer.model(),
         has_l1_critique=(
-            bool(cycle.rounds[-1].optimizer_state.payload.critique) if cycle.rounds else False
+            bool(potter_round_state(cycle.rounds[-1].optimizer_state).critique)
+            if cycle.rounds
+            else False
         ),
         pipeline_params=parent_pipeline_params,
         parent_prompt_fields={k: v for k, v in cycle.opt_sp.prompt_field_dict().items() if v},

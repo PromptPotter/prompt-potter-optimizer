@@ -128,6 +128,9 @@ class PipelineData(LedgerPipelineData, total=False):
     # prose blob every backend composes, this is the record a judge segments by step. Absent means
     # "this backend has no turn concept"; `[]` would mean "it had none", and only one is ever true.
     turns: list[TurnRecord]
+    # A verifier-graded cell's one-line account of its grade in the environment's own words — the
+    # failed check. Absent where it gave none.
+    outcome_note: str
     # Where a cell's WALL CLOCK went, inside the one node that produced it. ``step_timings`` keys
     # by node and is what ``recorded_cost_s`` sums, so it cannot also carry sub-node structure
     # without double-counting the cell against itself; this is that structure, and it is summed by

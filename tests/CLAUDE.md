@@ -40,7 +40,7 @@ A file states its subject and holds only that. A test that fits no section does 
 
 | File | Its subject |
 |------|-------------|
-| `test_numerics.py` | A wrong score or a wrong selection. The run completes, the dashboard looks fine, every result is subtly wrong. Ten sections: scorer formulas · composite fitness · the δ ruler · electing a round winner · PoBB elimination · which cells a round buys · paired readings · the L4 outer proxy · L1 proposal validators · escalation and spend. |
+| `test_numerics.py` | A wrong score or a wrong selection. The run completes, the dashboard looks fine, every result is subtly wrong. Ten sections: scorer formulas · composite fitness · the δ ruler · electing a round winner · candidate elimination · which cells a round buys · paired readings · the L4 outer proxy · L1 proposal validators · escalation and spend. |
 | `test_integrity.py` | A wrong identity or a quiet cross-contamination. Eight sections: measurement identity · replay eligibility · contamination of a scored prompt · the searchpoint's param surface · the dispatch frame · L4 steering · money · where the package reads and writes. |
 | `test_security.py` | A leak, or money. A key reaching the logs, dataset content reaching the optimizer LLM unfenced, a path segment escaping its tenant dir, a spend ceiling that stops binding. Irreversible in a multi-tenant product. |
 | `test_resume.py` | Lost or corrupted measurement. A rescore that corrupts prior fitness, a replay that misses a flipped outcome, a fork that inherits the wrong origin, a compaction that drops a paid row. |

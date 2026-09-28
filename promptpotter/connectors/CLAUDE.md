@@ -322,6 +322,9 @@ no wire, so declaring a token on one fails the registry guard.
   `wiring.py::_verify_required_observation_keys` RAISES at init instead. Unlike
   revision pinning below this is a wrong number, not drift — so it fails the run.
   Empty (default) = the backend guarantees no key.
+- **A verifier-graded cell says WHY it scored as it did on `pipeline_data.outcome_note`** — one
+  line in the environment's own words, absent where it gave none. With no label there is no
+  said/true for `failing_samples` to show, so this line is all the generator learns about a miss.
 - **Revision pinning is opt-in.** A connector can set
   `Connector.expected_revision` (the backend SHA/version this rev was
   developed against) and a `Connector.version_check(http, base_url) -> str | None`

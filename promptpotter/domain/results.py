@@ -853,6 +853,8 @@ class RoundResult(StrictModel):
     overlap_results: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     # --- computed post-scoring ---
     diagnostics: RoundDiagnostics | None = None
+    # The bench's AxisIndex peaked set at close, which no round document could otherwise rebuild.
+    axis_memory_peaked: list[str] = Field(default_factory=list)
     # Stamped at round close — the sole compute site; every surface renders this one.
     health: DegradationHealth | None = None
     # --- stamped as the round closes (the document's own fields) ---

@@ -521,7 +521,7 @@ def persist_round(
         cycle.pending_decisions.clear()
 
     if cycle.axes is not None:
-        round_result.optimizer_state.payload.axis_memory_peaked = sorted(cycle.axes.peaked_axes())
+        round_result.axis_memory_peaked = sorted(cycle.axes.peaked_axes())
 
     if (ledger := session.state.ledger) is not None:
         for d in flushed:
