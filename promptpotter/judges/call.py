@@ -1,6 +1,6 @@
 """The one place a judge reaches a model.
 
-Deliberately a SECOND chokepoint rather than a reuse of ``dispatch/llm_call/call.py``: that one is
+Deliberately a SECOND chokepoint rather than a reuse of ``bench/llm_call.py``: that one is
 the optimizer's and meters ``kind="optimizer"``, so routing grading spend through it would put
 judge cost in the loop's bucket — the one boundary a judge may not cross.
 

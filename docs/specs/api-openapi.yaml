@@ -4080,7 +4080,7 @@ components:
         movable_by:
           type: array
           items: { type: string }
-          description: Who may move this axis now (`l1`, `l2`); EMPTY is the only true lock.
+          description: Who may move this axis now (`proposer`, `optimizer`); EMPTY is the only true lock.
         never_axis:
           type: string
           enum: ['', cost_lever, schema_owned]

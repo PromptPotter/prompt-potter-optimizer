@@ -268,10 +268,10 @@ def _is_reexport_shim(init_file: Path) -> bool:
 
 def compute_ledger() -> dict[str, int]:
     from promptpotter.application.knobs import KNOBS, member_knob_count
-    from promptpotter.application.optimization.dispatch.injections.registry import (
+    from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
         injection_table,
     )
-    from promptpotter.application.optimization.escalation.rules import DEFAULT_ESCALATION_RULES
+    from promptpotter.application.optimizers.potter.escalation.rules import DEFAULT_ESCALATION_RULES
     from promptpotter.config import settings as settings_mod
     from promptpotter.config.settings import PROMPT_STRING_FIELDS, Settings
     from promptpotter.domain.opt_search_point import OptSearchPoint

@@ -29,6 +29,10 @@ from unittest import mock
 import pytest
 import yaml
 
+from promptpotter.application.optimizers.potter.dispatch.layout import (
+    NODE_LAYOUTS,
+    default_l1_layout,
+)
 from promptpotter.application.scoring import query_loop
 from promptpotter.application.scoring.search_point_scorer import _replayable_on
 from promptpotter.connectors import harbor
@@ -194,19 +198,50 @@ def test_sp_hash_is_not_recoverable_from_the_stripped_config() -> None:
     assert restored.sp_hash(schema) == sp.sp_hash(schema)
 
 
-def test_layout_only_override_moves_optimizer_prompt_hash() -> None:
+def test_an_l4_override_moves_the_prompt_and_hash_of_every_preset() -> None:
     """A layout-only L4 edit changes which evidence a node sees, so it must move
     that node's ``optimizer_prompt_hash`` — otherwise cross-cycle audits joining
     on the hash silently pool layout-differing inner cycles (run b786e9: C1.3's
     inner campaigns stamped the origin's hash). Prose-hash behavior is untouched:
-    no override → identical hashes."""
-    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-        compute_optimizer_prompt_hashes,
-    )
+    no override → identical hashes.
+
+    A paper preset's prompt-field edit must reach the request it sends: an inner cell under a
+    mutated CAPO prompt otherwise re-measures the parent under the arm's own id and hash."""
     from promptpotter.application.optimizer_manifest import (
         resolve_optimizer,
         set_optimizer_prompt_overrides,
     )
+    from promptpotter.application.optimizers import paper_templates
+    from promptpotter.application.optimizers.potter.dispatch.prompts import (
+        compute_optimizer_prompt_hashes,
+    )
+    from promptpotter.application.runner.inner.spawn import inner_campaign_id
+    from promptpotter.application.runner.inner.tasks import InnerTaskSpec
+
+    capo = resolve_optimizer("capo", {})
+    cycle = types.SimpleNamespace(optimizer=capo)
+    values = {"task_description": "sort the list", "instruction": "Sort it."}
+    mutated = {
+        "capo_mutate": {"instruction": "Rephrase [{{instruction}}] to {{task_description}}."}
+    }
+    try:
+        set_optimizer_prompt_overrides(None)
+        sent, hashes = paper_templates.fill(cycle, "capo_mutate", **values), capo.prompt_hashes()
+        set_optimizer_prompt_overrides(mutated)
+        assert (
+            paper_templates.fill(cycle, "capo_mutate", **values)
+            == ("Rephrase [Sort it.] to sort the list.")
+            != sent
+        ), "the mutated CAPO prompt never reached the request it sends"
+        moved = capo.prompt_hashes()
+        assert moved["capo_mutate"] != hashes["capo_mutate"]
+        assert {k: v for k, v in moved.items() if k != "capo_mutate"} == {
+            k: v for k, v in hashes.items() if k != "capo_mutate"
+        }
+    finally:
+        set_optimizer_prompt_overrides(None)
+    spec = InnerTaskSpec(inner_dataset="justlogic-d234", seed=3, n_samples=28, n_rounds=4)
+    assert inner_campaign_id(spec, mutated) != inner_campaign_id(spec, {})
 
     potter = resolve_optimizer("potter", {})
     try:
@@ -246,8 +281,8 @@ async def test_the_determinism_clamp_outranks_every_other_layer_and_keys_the_ban
     the life of the cache — unrecoverable, because the row on disk is indistinguishable from one
     the pinned route really produced.
     """
+    from promptpotter.application.bench import llm_call as call_mod
     from promptpotter.application.campaign_config import DeterminismClamp
-    from promptpotter.application.optimization.dispatch.llm_call import call as call_mod
     from promptpotter.application.optimizer_manifest import set_determinism_clamp
     from promptpotter.infrastructure.llm.response import LLMResponse
     from promptpotter.infrastructure.store.stores import LLMReuseCache
@@ -909,13 +944,13 @@ def test_unframed_ablation_renders_no_framing_where_one_is_committed(built_store
     dataset's committed framing, and its manifest keeps saying so. A leak renders the framing into
     a run declared unframed: both arms then measure one prompt and the ablation reads as no effect,
     with nothing on any surface to say why. A resume that dropped the declaration runs framed."""
+    from promptpotter.application.bench.task_context import campaign_framing
     from promptpotter.application.campaign_config import (
         CampaignConfig,
         OptimizationConfig,
         freeze_campaign_config,
         load_campaign_config,
     )
-    from promptpotter.application.optimization.task_context import campaign_framing
 
     built_stores.tenant_datasets.save_task_context("gsm8k", {"domain": "grade-school arithmetic"})
     framed = CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05))
@@ -1272,12 +1307,12 @@ def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing() -> 
     next render splices the context around that copy — a strict accumulator, no error, and every
     candidate after it scored on the grown prompt. Ten banked rounds of one campaign carried the
     same 58-char ``upstream_context`` while ``problem_description`` ran 906 → 5,024 chars."""
-    from promptpotter.application.optimization.dispatch.bundle import (
+    from promptpotter.application.optimizers.potter.dispatch.bundle import (
         CycleSlice,
         InjectionBundle,
         RoundDigest,
     )
-    from promptpotter.application.optimization.dispatch.injections.layer_state import (
+    from promptpotter.application.optimizers.potter.dispatch.injections.layer_state import (
         _r_rendered_prompt,
         _r_task_context,
     )
@@ -1295,7 +1330,7 @@ def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing() -> 
     )
     bundle = InjectionBundle(
         opt_sp=opt_sp,
-        memory=L2L3Memory(),
+        memory=L2L3Memory(l1_layout=default_l1_layout()),
         framing=framing,
         pipeline_schema=None,
         cycle_slice=CycleSlice(
@@ -1514,8 +1549,10 @@ def test_no_held_out_row_reaches_a_round_panel_or_an_archive_view() -> None:
         select_round_subset,
     )
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
-    from promptpotter.application.optimization.validators.l1_strict import L1_SHOTS_IN_DEMO_POOL
     from promptpotter.application.optimizers.capo.members import cross_shots, mutate_shots
+    from promptpotter.application.optimizers.potter.validators.l1_strict import (
+        L1_SHOTS_IN_DEMO_POOL,
+    )
     from promptpotter.domain.bench import DatasetSplit, partition_bank
 
     bank = [Sample(id=i, query=f"claim {i}", ground_truth="TRUE") for i in range(60)]
@@ -1588,10 +1625,10 @@ def test_emittable_params_are_declared_and_an_invented_one_is_rejected() -> None
     the candidate's fitness is attributed to an axis that does not exist. Same set, two
     readers: a graft on one side alone is either an unhonoured edit or an unguarded one.
     """
-    from promptpotter.application.optimization.dispatch.l1_wire_schema import (
+    from promptpotter.application.optimizers.potter.dispatch.l1_wire_schema import (
         build_l1_response_schema,
     )
-    from promptpotter.application.optimization.validators.l1_strict import validate_overrides
+    from promptpotter.application.optimizers.potter.validators.l1_strict import validate_overrides
 
     schema = _pipeline_schema("promptpotter-self")
     emitted = build_l1_response_schema(schema, citable_fields=())["properties"]["variants"][
@@ -1632,7 +1669,7 @@ def test_l1_is_offered_no_slot_whose_panel_it_never_saw() -> None:
     artifact that outlives it — the ledger, the SP diff table, `round_0001.json` — records the field the
     model named rather than the one it changed, so no later reader can attribute the result.
     """
-    from promptpotter.application.optimization.dispatch.l1_wire_schema import (
+    from promptpotter.application.optimizers.potter.dispatch.l1_wire_schema import (
         _SLOT_PANEL,
         build_l1_response_schema,
     )
@@ -1663,10 +1700,10 @@ def test_a_held_prompt_field_is_neither_offered_nor_accepted() -> None:
     """A prompt field the campaign left out of `param_keys` is the operator's text. Offered or
     accepted anyway, the rewrite is scored like any variant and can win the round, while the
     check-in still shows the field locked."""
-    from promptpotter.application.optimization.dispatch.l1_wire_schema import (
+    from promptpotter.application.optimizers.potter.dispatch.l1_wire_schema import (
         build_l1_response_schema,
     )
-    from promptpotter.application.optimization.l1.population import parse_population
+    from promptpotter.application.optimizers.potter.l1.population import parse_population
     from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
     from promptpotter.domain.results import CandidateProposal
 
@@ -1703,7 +1740,7 @@ def test_a_description_lock_holds_its_subtree_and_the_fold_reaches_nested_fields
     names. A field ADDED under a held one stays held — opened by default, it would hand L1 prose
     inside a subtree the operator locked, and the round would score it as an ordinary mutation."""
     from promptpotter.application.datasets.draft_patch import _narrowing_follows_schema
-    from promptpotter.application.optimization.dispatch.l1_wire_schema import (
+    from promptpotter.application.optimizers.potter.dispatch.l1_wire_schema import (
         build_l1_response_schema,
     )
     from promptpotter.domain.pipeline_overlay import fold_output_contract
@@ -1974,8 +2011,8 @@ def test_an_axis_no_agent_moves_is_SHUT_rather_than_exempt() -> None:
     assert node_reach(guards).state == node_reach([]).state == "nothing"
     partial = node_reach(
         [
-            param("temperature", movable_by=["l2"]),
-            param("instruction", kind="prompt", movable_by=["l1", "l2"]),
+            param("temperature", movable_by=["optimizer"]),
+            param("instruction", kind="prompt", movable_by=["proposer", "optimizer"]),
             param("max_tokens"),
         ]
     )
@@ -1983,7 +2020,7 @@ def test_an_axis_no_agent_moves_is_SHUT_rather_than_exempt() -> None:
         "partial",
         2,
         3,
-        ["l1", "l2"],
+        ["proposer", "optimizer"],
     )
 
 
@@ -2241,7 +2278,7 @@ def test_every_tuned_llm_node_is_offered_the_text_or_structured_toggle() -> None
     rows = {
         node: {p.key: p for p in params} for node, params in schema.node_config_schema().items()
     }
-    assert rows["structured"][SCHEMA_TOGGLE_PARAM].movable_by == ["l1"]
+    assert rows["structured"][SCHEMA_TOGGLE_PARAM].movable_by == ["proposer"]
     # UNSET is a value the node RUNS, not a value nobody chose — an empty row would report a
     # JSON-answering node as answering in prose.
     assert rows["structured"][SCHEMA_TOGGLE_PARAM].value == ANSWER_AS_JSON
@@ -2438,18 +2475,18 @@ def test_evidence_channel_clips_are_visible_and_tail_preserving(
     reasoning-trace head-keep dropped the CONCLUSION — the one step the critique
     is ordered to quote; (3) an over-cap `task_context` field hard-sliced mid-word
     at the render site. All three produce wrong prompt content with no error."""
-    from promptpotter.application.optimization.dispatch.bundle import (
+    from promptpotter.application.optimizers.potter.dispatch.bundle import (
         CycleSlice,
         InjectionBundle,
         RoundDigest,
     )
-    from promptpotter.application.optimization.dispatch.injections.layer_state import (
+    from promptpotter.application.optimizers.potter.dispatch.injections.layer_state import (
         _r_task_context,
     )
-    from promptpotter.application.optimization.dispatch.injections.panels import (
+    from promptpotter.application.optimizers.potter.dispatch.injections.panels import (
         _edges_at_line,
     )
-    from promptpotter.application.optimization.dispatch.schemas import L1CritiqueOutput
+    from promptpotter.application.optimizers.potter.dispatch.schemas import L1CritiqueOutput
     from promptpotter.domain.optimizer_state import L2L3Memory
     from promptpotter.domain.round_diagnostics import RoundDiagnostics
 
@@ -2481,7 +2518,7 @@ def test_evidence_channel_clips_are_visible_and_tail_preserving(
     long_field = "data_characteristics: " + "pattern word " * 30
     bundle = InjectionBundle(
         opt_sp=OptSearchPoint(),
-        memory=L2L3Memory(),
+        memory=L2L3Memory(l1_layout=default_l1_layout()),
         framing=TaskDecomposition(key_challenges=long_field),
         pipeline_schema=None,
         cycle_slice=CycleSlice(
@@ -2517,13 +2554,10 @@ def test_composition_selects_round_robin_so_no_panel_starves_the_frame() -> None
     Round-robin over ITEMS is what fixes it: every panel places its first item before any panel
     places its second. Ordering greedily instead — the obvious implementation — fails this.
     """
-    from promptpotter.application.optimization.dispatch.bundle import (
-        FENCE_CLOSE,
-        FENCE_OPEN_PREFIX,
-        Item,
-    )
-    from promptpotter.application.optimization.dispatch.compose import select
-    from promptpotter.application.optimization.dispatch.injections.registry import (
+    from promptpotter.application.optimizers.fence import FENCE_CLOSE, FENCE_OPEN_PREFIX
+    from promptpotter.application.optimizers.potter.dispatch.bundle import Item
+    from promptpotter.application.optimizers.potter.dispatch.compose import select
+    from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
         injection_table,
     )
 
@@ -2609,20 +2643,19 @@ def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
     Composes the real floor layout against an L4-shaped schema, so it fails if the mandatory floor
     ever stops being admitted whatever it costs.
     """
-    from promptpotter.application.optimization.dispatch.bundle import (
+    from promptpotter.application.optimizers.potter.dispatch.bundle import (
         OPTIMIZER_DISCRETIONARY_CHARS,
         CycleSlice,
         InjectionBundle,
         RoundDigest,
     )
-    from promptpotter.application.optimization.dispatch.facade import (
+    from promptpotter.application.optimizers.potter.dispatch.facade import (
         DispatchHub,
         injection_coverage_counts,
     )
-    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+    from promptpotter.application.optimizers.potter.dispatch.prompts import (
         load_optimizer_prompt,
     )
-    from promptpotter.domain.l1_layout import NODE_LAYOUTS
     from promptpotter.domain.opt_search_point import PROMPT_STRING_FIELDS, OptSearchPoint
     from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
     from promptpotter.domain.round_diagnostics import RoundDiagnostics
@@ -2645,7 +2678,7 @@ def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
     )
     bundle = InjectionBundle(
         opt_sp=OptSearchPoint(),
-        memory=L2L3Memory(),
+        memory=L2L3Memory(l1_layout=default_l1_layout()),
         framing=TaskDecomposition(),
         pipeline_schema=schema,
         cycle_slice=CycleSlice(
@@ -2693,13 +2726,13 @@ def test_a_solved_cell_the_edits_keep_losing_reaches_the_critique_and_the_genera
     node fails here too."""
     from factories import measurements, round_result, scored_candidate
 
-    from promptpotter.application.optimization.dispatch.bundle import (
+    from promptpotter.application.optimizers.potter.dispatch.bundle import (
         CycleSlice,
         InjectionBundle,
         RoundDigest,
     )
-    from promptpotter.application.optimization.dispatch.facade import DispatchHub
-    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+    from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub
+    from promptpotter.application.optimizers.potter.dispatch.prompts import (
         load_optimizer_prompt,
     )
     from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -2736,7 +2769,7 @@ def test_a_solved_cell_the_edits_keep_losing_reaches_the_critique_and_the_genera
     )
     bundle = InjectionBundle(
         opt_sp=OptSearchPoint(),
-        memory=L2L3Memory(),
+        memory=L2L3Memory(l1_layout=default_l1_layout()),
         framing=TaskDecomposition(),
         pipeline_schema=None,
         cycle_slice=CycleSlice(
@@ -2781,13 +2814,13 @@ def test_a_verifier_graded_miss_reaches_the_generator_with_its_reason() -> None:
     "verify less" with nothing saying which cells either lost, or at what token bill."""
     from factories import measurement
 
-    from promptpotter.application.optimization.dispatch.bundle import (
+    from promptpotter.application.optimizers.potter.dispatch.bundle import (
         CycleSlice,
         InjectionBundle,
         RoundDigest,
     )
-    from promptpotter.application.optimization.dispatch.facade import DispatchHub
-    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+    from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub
+    from promptpotter.application.optimizers.potter.dispatch.prompts import (
         load_optimizer_prompt,
     )
     from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -2812,7 +2845,7 @@ def test_a_verifier_graded_miss_reaches_the_generator_with_its_reason() -> None:
     ]
     bundle = InjectionBundle(
         opt_sp=OptSearchPoint(),
-        memory=L2L3Memory(),
+        memory=L2L3Memory(l1_layout=default_l1_layout()),
         framing=TaskDecomposition(),
         pipeline_schema=None,
         cycle_slice=CycleSlice(
@@ -2851,10 +2884,10 @@ def test_digest_reads_the_ruler_off_the_cycle_not_the_unabsorbed_round() -> None
 
     from factories import round_result
 
+    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
-    from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.dispatch.facade import build_bundle
-    from promptpotter.application.optimization.dispatch.injections.panels import _r_confounds
+    from promptpotter.application.optimizers.potter.dispatch.facade import build_bundle
+    from promptpotter.application.optimizers.potter.dispatch.injections.panels import _r_confounds
     from promptpotter.application.optimizers.potter.state import PotterState
     from promptpotter.domain.ruler import DeltaRuler
 
@@ -2907,9 +2940,9 @@ def test_a_round_missing_its_critique_is_re_sent_before_the_generator_reads() ->
 
     from factories import round_result
 
+    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
-    from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.l1 import critique as critique_mod
+    from promptpotter.application.optimizers.potter.l1 import critique as critique_mod
     from promptpotter.application.optimizers.potter.state import PotterState
     from promptpotter.domain.phases import StopLoop, StopReason
 
@@ -3047,7 +3080,7 @@ def test_an_illegal_inner_steer_is_rejected_and_a_real_steer_is_not() -> None:
 
     The other half is the one that costs more to get wrong: a REJECTION is destructive and leaves
     no trace, so legitimate steers carrying the same words must survive."""
-    from promptpotter.application.optimization.validators.l1_strict import (
+    from promptpotter.application.optimizers.potter.validators.l1_strict import (
         L1_INNER_STEER_IS_LEGAL,
     )
 
@@ -3101,7 +3134,7 @@ def test_a_gutted_prompt_field_is_rejected_and_a_tightening_is_not() -> None:
 
     The parent is resolved the way the run resolves it, so the length compared against is the
     text the generator was shown — parent override first, manifest template otherwise."""
-    from promptpotter.application.optimization.validators.l1_strict import (
+    from promptpotter.application.optimizers.potter.validators.l1_strict import (
         _GUTTABLE_MIN_CHARS,
         L1_PROMPT_FIELD_NOT_GUTTED,
         _parent_field_text,
@@ -3262,7 +3295,7 @@ async def _walk(
     record from before a stop. Every cell is admitted at, and bills, $1, against ``cap_usd``."""
     from factories import pobb_knobs
 
-    from promptpotter.application.optimization.pobb.checks import PoBBCheck
+    from promptpotter.application.optimizers.potter.pobb.checks import PoBBCheck
     from promptpotter.application.runner.termination import BudgetGate
     from promptpotter.domain.pipeline_schema import WebSpendBound
     from promptpotter.domain.spend import TokenAccount
@@ -4245,9 +4278,9 @@ def test_first_mint_decomposes_once_and_bills_the_run_it_frames(
     framing is on disk before the id is derived, or the id names a prompt the run never scores; the
     check-in's bill lands on the minted cycle's ledger, or the run's meter never sees money it cost;
     and a later mint reads the committed file rather than buying the decomposition again."""
+    from promptpotter.application.bench import task_context
     from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
     from promptpotter.application.jobs import mint
-    from promptpotter.application.optimization import task_context
     from promptpotter.domain.run_records import TokenUsageRecord
     from promptpotter.domain.spend import TokenAccount
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -4499,7 +4532,7 @@ def test_committed_framing_never_writes_into_install_content(built_stores: Any) 
     install refuses the write. The ROW half of this rule got a test when the rows moved out; this
     is the half that shipped without one.
     """
-    from promptpotter.application.optimization.task_context import committed_task_context
+    from promptpotter.application.bench.task_context import committed_task_context
 
     install = built_stores.benchmarks_root / "gsm8k"
     install.mkdir(parents=True)

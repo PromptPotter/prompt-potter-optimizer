@@ -5,8 +5,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from promptpotter.application.bench.resume_and_fork.decisions import record_decision
 from promptpotter.application.intelligence.exploration import PARENT_ABILITY_ID
-from promptpotter.application.optimization.resume_and_fork.decisions import record_decision
 from promptpotter.application.optimizers.nodes import Selection
 from promptpotter.application.scoring.selection import (
     elect_round_winner,

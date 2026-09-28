@@ -25,7 +25,7 @@ broke", "bug-hunting", an operator already mid-investigation.
 - Authority: halt a run, fix at its ROOT, relaunch — within the autonomy mode (root `CLAUDE.md`
   § Working principles). Name the structural cause
   before touching code; default the fix to potter's optimizer prompts
-  (`promptpotter/assets/optimizers/potter/pipeline.yaml::resolved_prompts`) (`<root-fix>`; `<dispatch-first>` in `promptpotter/application/optimization/CLAUDE.md`).
+  (`promptpotter/assets/optimizers/potter/pipeline.yaml::resolved_prompts`) (`<root-fix>`; `<dispatch-first>` in `promptpotter/application/optimizers/potter/CLAUDE.md`).
 - **Never commit.** Fixes accumulate uncommitted; name every path touched so the operator can
   `git add` by path (a second session commits to `main` concurrently).
 
@@ -229,7 +229,7 @@ leaderboard picks.
 ## References
 
 - [reference/onboarding.md](reference/onboarding.md) — new-dataset flow (web + CLI), Claude-simulated check-in, cold-machine bootstrap
-- [`promptpotter/application/optimization/CLAUDE.md`](../../../promptpotter/application/optimization/CLAUDE.md) — the L1/L2/L3 agent contracts: what each layer reads, writes and decides
+- [`promptpotter/application/optimizers/potter/CLAUDE.md`](../../../promptpotter/application/optimizers/potter/CLAUDE.md) — the L1/L2/L3 agent contracts: what each layer reads, writes and decides
 - [`docs/operations/persistence-and-state.md`](../../../docs/operations/persistence-and-state.md) § Diagnosing a live or stuck run — the triage order when a run is stuck; stop-reason recovery
 - `/potter-self` — running + supervising `promptpotter-self`; [`docs/specs/l4-outer-loop.md`](../../../docs/specs/l4-outer-loop.md) for what its numbers may claim
 - [`docs/concepts/the-loop.md`](../../../docs/concepts/the-loop.md) · [`docs/developer/self-healing-internals.md`](../../../docs/developer/self-healing-internals.md) · [`docs/operations/persistence-and-state.md`](../../../docs/operations/persistence-and-state.md)

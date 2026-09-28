@@ -11,15 +11,15 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+from promptpotter.application.bench.cycle import Cycle
+from promptpotter.application.bench.resume_and_fork.fork_siblings import (
+    _mint_fork,
+    cleanup_stub_fork_if_empty,
+)
 from promptpotter.application.campaign_config import CampaignConfig, merge_node_overlays
 from promptpotter.application.initialization.loop_start import init_optimization_loop
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.exploration import parent_level_trajectory
-from promptpotter.application.optimization.cycle import Cycle
-from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
-    _mint_fork,
-    cleanup_stub_fork_if_empty,
-)
 from promptpotter.application.optimizer_manifest import (
     bind_optimizer,
     bound_optimizer,
@@ -411,7 +411,7 @@ def _build_cycle_result(
         )
     return CycleResult(
         rounds=cycle_rounds,
-        n_l1_rounds=len(cycle_rounds),
+        n_rounds_after_origin=len(cycle_rounds),
         result_accuracy=picked.accuracy if picked is not None else None,
         result_round=picked.round if picked is not None else 0,
         origin_accuracy=origin.report.accuracy if origin is not None else None,
@@ -713,7 +713,7 @@ async def _run_single_cycle(
     forked_in_this_run = (
         pre_loop_cycle_id and session.state.cycle_id and pre_loop_cycle_id != session.state.cycle_id
     )
-    if forked_in_this_run and cycle_result.n_l1_rounds == 0:
+    if forked_in_this_run and cycle_result.n_rounds_after_origin == 0:
         cleanup_stub_fork_if_empty(
             campaign_store=session.store.campaigns,
             hop=session.hop,
@@ -1000,7 +1000,7 @@ def _finalize_run(
         langfuse_trace_id = obs.end_campaign(
             session.state.tracing_campaign_id,
             result_accuracy=cycle_result.result_accuracy,
-            n_l1_rounds=cycle_result.n_l1_rounds,
+            n_rounds_after_origin=cycle_result.n_rounds_after_origin,
             stop_reason=stop_reason,
             result_round=cycle_result.result_round,
         )

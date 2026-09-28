@@ -16,12 +16,12 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar, cast
 import numpy as np
 from pydantic import Field
 
-from promptpotter.application.campaign_config import Estimand, Knob, Scope
-from promptpotter.application.optimization.resume_and_fork.decisions import (
+from promptpotter.application.bench.resume_and_fork.decisions import (
     GatingMode,
     record_decision,
 )
-from promptpotter.application.optimizers import nodes, paper_templates
+from promptpotter.application.campaign_config import Estimand, Knob, Scope
+from promptpotter.application.optimizers import fence, nodes, paper_templates
 from promptpotter.application.optimizers.descriptors import (
     DescriptorFeature,
     behaviour_descriptor,
@@ -46,13 +46,13 @@ from promptpotter.shared.statistics import greedy_column_subset
 if TYPE_CHECKING:
     from types import ModuleType
 
-    from promptpotter.application.campaign_config import CampaignConfig
-    from promptpotter.application.initialization.session import Session
-    from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.resume_and_fork.replayers import (
+    from promptpotter.application.bench.cycle import Cycle
+    from promptpotter.application.bench.resume_and_fork.replayers import (
         ReplayContext,
         Replayer,
     )
+    from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
         Measured,
@@ -584,16 +584,19 @@ class LeviRuntime:
         return LeviState()
 
     def prompt_hashes(self, selected: SelectedOptimizer) -> dict[str, str]:
-        return dict(selected.node_digests)
+        return selected.running_digests()
 
     def complete(self) -> None:
         return None
 
     def source_digest(self, *covered: ModuleType) -> str:
         # AST-normalized, so a comment or a reflow does not move it.
-        shaping = [m for m in (paper_templates, operators) if m not in covered]
+        shaping = [m for m in (fence, paper_templates, operators) if m not in covered]
         tree = "".join(ast.dump(ast.parse(inspect.getsource(m))) for m in shaping)
         return hashlib.sha256(tree.encode("utf-8")).hexdigest()[:16]
+
+    def override_levers(self, node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
+        return {}
 
     @property
     def checkpoint_gating(self) -> Mapping[ResumeCheckpointKind, GatingMode]:

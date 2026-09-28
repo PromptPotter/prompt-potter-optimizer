@@ -80,7 +80,10 @@ manifest must satisfy are owned by [`developer/node-standard.md`](developer/node
 § Node capabilities.** Every node the bench walks but the measurement is backed by an
 implementation registered under its node name through the one entry-point registry connectors
 and judges use, so a third party ships an optimizer as a manifest plus its implementations, with
-no edit inside this tree.
+no edit inside this tree. **In code the bench never imports an optimizer**: an optimizer's
+implementations live under `application/optimizers/{name}/`, and the bench reaches them through
+that registry alone ([`../promptpotter/application/CLAUDE.md`](../promptpotter/application/CLAUDE.md)
+§ Layer rule).
 
 **The bench walks the manifest's `default` pipeline, once per round.** Every other `pipelines:`
 entry is the optimizer's own, and its controller chooses between them (potter's, § Escalation —
@@ -860,7 +863,7 @@ the PR description.
 
 - **`l1_signal_catalogue` + `pipeline_param_catalogue` + `prompt_block_catalogue`
   injections**
-  (`application/optimization/dispatch/injections/catalogues.py`) — the
+  (`application/optimizers/potter/dispatch/injections/catalogues.py`) — the
   discoverability scaffolding: the cross-slot rule L2 reads to write
   `l1_layout` (its vocabulary is on that field's own schema),
   the param menu L1 reads, and the reusable prompt-field blocks L1

@@ -228,7 +228,7 @@ class Connector:
     through, the resolved dataset config dir and the resolved experiment, so a connector can
     fold dataset-scoped inner behavior into the fingerprint. The canonical user is the
     in-process ``promptpotter`` connector: its backend IS the inner optimizer (optimizer
-    prompt origin + layouts + engine + the inner benchmark's config), so
+    prompt origin + the code shaping its prompts + engine + the inner benchmark's config), so
     without this an origin edit silently reuses stale measurements recorded
     under the old behavior. The connector's ``wire_adapter`` must strip these
     reserved keys from the outbound payload. ``None`` = the backend's revision

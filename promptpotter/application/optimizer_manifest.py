@@ -27,13 +27,7 @@ from promptpotter.config.paths import (
     optimizer_manifest_path,
     optimizers_root,
 )
-from promptpotter.domain.l1_layout import (
-    NODE_LAYOUTS,
-    L1Layout,
-    coerce_l1_layout,
-    validate_l1_layout,
-)
-from promptpotter.domain.opt_search_point import PromptTemplate
+from promptpotter.domain.opt_search_point import OptimizerPromptTemplate, PromptTemplate
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     MEMBER_KINDS,
@@ -43,7 +37,6 @@ from promptpotter.domain.pipeline_schema import (
     PipelineSchema,
 )
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure.store.io import read_json, read_yaml
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
@@ -61,15 +54,16 @@ __all__ = [
     "bind_optimizer",
     "bound_optimizer",
     "checkin_manifest",
+    "declared_node_override",
     "get_optimizer_config_overrides",
     "llm_node_config",
     "llm_node_document",
     "optimizer_knobs",
-    "resolve_layout_override",
-    "resolve_node_layout",
+    "optimizer_prompt",
     "resolve_node_override",
     "resolve_optimizer",
     "resolved_overrides",
+    "running_prompt",
     "select_optimizer",
     "set_determinism_clamp",
     "set_optimizer_prompt_overrides",
@@ -183,35 +177,30 @@ class SelectedOptimizer:
     def model(self, node: str | None = None) -> str:
         return str(self.node_config(node or self.proposer)["model"])
 
-    def prompt_body(self, node: str, *, base: bool) -> dict[str, Any] | None:
-        """``base`` reads the family the FILE names, which is what an L4 mutation is laid onto;
-        otherwise the family this campaign's overlay runs."""
-        return _prompt_body(
-            self.document, self.file_config(node) if base else self.node_config(node)
+    def _node_digest(self, node: str, prompt_fields: Mapping[str, Any]) -> str:
+        cfg = self.node_config(node)
+        body = _prompt_body(self.document, cfg)
+        schema_key = _resolved_key(cfg.get("schema_family"), cfg.get("schema_version"))
+        return _digest(
+            [
+                {**body, **prompt_fields} if body is not None and prompt_fields else body,
+                self.resolved_schemas.get(schema_key) if schema_key else None,
+                cfg,
+            ]
         )
 
     @functools.cached_property
     def node_digests(self) -> dict[str, str]:
         """Per llm node: the prompt it runs, its output schema and its resolved config — what
         decides the node's output, off the manifest alone."""
-        out: dict[str, str] = {}
-        for node in self.llm_nodes:
-            cfg = self.node_config(node)
-            schema_key = _resolved_key(cfg.get("schema_family"), cfg.get("schema_version"))
-            out[node] = _digest(
-                [
-                    self.prompt_body(node, base=False),
-                    self.resolved_schemas.get(schema_key) if schema_key else None,
-                    cfg,
-                ]
-            )
-        return out
+        return {node: self._node_digest(node, {}) for node in self.llm_nodes}
 
-    @functools.cached_property
-    def digest(self) -> str:
-        """The manifest's identity: its name, version and every node's resolved config and
-        prompt. An audit join key — never part of a campaign id."""
-        return _digest([self.name, self.version, self.node_digests, self.schema.pipelines])[:12]
+    def running_digests(self) -> dict[str, str]:
+        """:attr:`node_digests` under the prompt-field edit an L4 inner cell runs its nodes with."""
+        return {
+            node: self._node_digest(node, resolve_node_override(node).prompt_fields)
+            for node in self.llm_nodes
+        }
 
 
 def _resolved_key(family: object, version: object) -> str | None:
@@ -224,6 +213,28 @@ def _prompt_body(document: Mapping[str, Any], config: Mapping[str, Any]) -> dict
     key = _resolved_key(config.get("prompt_family"), config.get("prompt_version"))
     body = (document.get("resolved_prompts") or {}).get(key) if key else None
     return dict(body) if isinstance(body, dict) else None
+
+
+def optimizer_prompt(
+    node: str, config: Mapping[str, Any], document: Mapping[str, Any]
+) -> OptimizerPromptTemplate:
+    body = _prompt_body(document, config)
+    if body is None:
+        raise KeyError(
+            f"Optimizer prompt for node {node!r} not found in resolved_prompts "
+            f"(check nodes.{node}.config.prompt_family/version)."
+        )
+    return OptimizerPromptTemplate(**body)
+
+
+def running_prompt(
+    node: str, config: Mapping[str, Any], document: Mapping[str, Any]
+) -> OptimizerPromptTemplate:
+    """The prompt *node* runs under *config*, with an L4 inner cell's prompt-field edit laid on."""
+    template = optimizer_prompt(node, config, document)
+    if fields := resolve_node_override(node).prompt_fields:
+        template = template.model_copy(update=fields)
+    return template
 
 
 def _knobs(name: str, kind: NodeKind | None, config: Mapping[str, Any]) -> StrictModel:
@@ -393,9 +404,10 @@ def llm_node_config(node: str) -> dict[str, Any]:
 
 
 # The L4 inner-cycle runner binds the OUTER's per-node MUTATIONS here (inside the inner asyncio
-# task), keyed by optimizer node → a partial `PromptTemplate`-field dict plus the structural
-# `layout` / `output_schema_field_names` / `model` levers, resolved by `resolve_node_override`.
-# A ContextVar — not a global — so every recursion level carries its own. `None` = no override.
+# task), keyed by optimizer node → a partial `PromptTemplate`-field dict plus the
+# `output_schema_field_names` / `model` levers `resolve_node_override` resolves, and any lever the
+# node's own optimizer resolves (`OptimizerRuntime.override_levers`). A ContextVar — not a
+# global — so every recursion level carries its own. `None` = no override.
 _OPTIMIZER_PROMPT_OVERRIDES: contextvars.ContextVar[dict[str, dict[str, Any]] | None] = (
     contextvars.ContextVar("optimizer_prompt_overrides", default=None)
 )
@@ -436,7 +448,8 @@ class ResolvedNodeOverride:
     provider: str | None
 
 
-def _node_override(node: str) -> dict[str, Any]:
+def declared_node_override(node: str) -> dict[str, Any]:
+    """One node's override as the outer DECLARED it — what an optimizer reads its own levers off."""
     raw = (_OPTIMIZER_PROMPT_OVERRIDES.get() or {}).get(node)
     return raw if isinstance(raw, dict) else {}
 
@@ -472,73 +485,18 @@ def _resolved_prompt_parts(raw: dict[str, Any]) -> tuple[dict[str, Any], dict[st
 
 
 def resolve_node_override(node: str) -> ResolvedNodeOverride:
-    prompt_fields, names = _resolved_prompt_parts(_node_override(node))
+    prompt_fields, names = _resolved_prompt_parts(declared_node_override(node))
     model, provider = _single_model(_OPTIMIZER_PROMPT_OVERRIDES.get() or {})
     return ResolvedNodeOverride(
         prompt_fields=prompt_fields, schema_field_names=names, model=model, provider=provider
     )
 
 
-def resolve_layout_override(
-    node: str, raw_layout: object
-) -> tuple[L1Layout, list[ValidatorOutcome]]:
-    """One node's floor with an L4 ``{panel: slot}`` edit applied, and the outcomes that edit
-    breaks — empty on a clean apply, where the returned layout is what the inner cycle renders.
-
-    ONE derivation asked at two boundaries. `validators/l1_strict.py` convicts the PROPOSAL, where
-    the arm can be told and costs a synthetic 0; this module re-asks at render time, one recursion
-    level down, where nothing can be told and the arm has already paid for a whole inner campaign.
-    Two derivations would let the boundary that rejects and the boundary that applies disagree
-    about which edits are legal."""
-    spec = NODE_LAYOUTS[node]
-    # The `editor` field is a contract, so it is asked rather than assumed. `l1_generate`'s
-    # layout is L2's in-campaign surface (`PotterState.memory.l1_layout`) and nothing here applies
-    # to it — reaching this with that node means a caller believes in an L4 lever that has no
-    # code path, and silence would let the belief survive.
-    if spec.editor != "l4":
-        raise ValueError(
-            f"resolve_layout_override({node!r}): this node's layout is edited by {spec.editor!r}, "
-            "not L4. Only `editor='l4'` nodes resolve a layout through the per-node override "
-            "channel; l1_generate's rides PotterState.memory.l1_layout instead."
-        )
-    merged = coerce_l1_layout(raw_layout, base=spec.floor)
-    if merged is None:
-        # Absent is "no layout edit"; a non-empty declaration that coerces to nothing asked for one
-        # in a shape no slot can hold. Both land here, and treating them alike is the defect
-        # `escalation/firing.py::_parse_l2` already carries the L2 twin of — `l1_layout_unparseable`
-        # is that arm's id, shared so one shape cannot be a breach on one path and silence on the other.
-        if not raw_layout:
-            return spec.floor, []
-        return spec.floor, [
-            ValidatorOutcome(
-                validator_id="l1_layout_unparseable",
-                evidence={"keys": sorted(raw_layout) if isinstance(raw_layout, dict) else []},
-            )
-        ]
-    result = validate_l1_layout(merged, spec=spec)
-    if not result.is_valid:
-        return spec.floor, list(result.outcomes)
-    return merged, []
-
-
-def resolve_node_layout(node: str) -> L1Layout:
-    """The layout this node renders under. A declaration that does not apply RAISES: an L1 proposal
-    is convicted upstream by `l1_inner_layout_applies`, so what reaches here is operator-authored,
-    and rendering the floor for it would attribute the measurement to a layout nobody ran."""
-    layout, breaches = resolve_layout_override(node, _node_override(node).get("layout"))
-    if breaches:
-        raise ValueError(
-            f"resolve_node_layout({node!r}): the declared layout edit breaks "
-            f"{sorted(o.validator_id for o in breaches)} and cannot be applied"
-        )
-    return layout
-
-
 def resolved_overrides(overrides: dict[str, dict[str, Any]]) -> dict[str, Any]:
     """What a declaration RESOLVES to — the identity `inner_campaign_id` hashes. Everything the
-    resolvers above drop (a key no template carries, a rename that could not be applied, a layout
-    edit that lands back on the floor) is dropped here too, so two declarations that render ONE
-    prompt hash alike. Hashing the declaration instead bought two inner campaigns for one
+    resolvers drop (a key no template carries, a rename that could not be applied, an optimizer's
+    own lever landing back where it started) is dropped here too, so two declarations that render
+    ONE prompt hash alike. Hashing the declaration instead bought two inner campaigns for one
     configuration and left neither able to continue the rounds the other banked.
 
     The model rides OUTSIDE the per-node map because that is where it renders: `_single_model` fans
@@ -553,11 +511,10 @@ def resolved_overrides(overrides: dict[str, dict[str, Any]]) -> dict[str, Any]:
         resolved: dict[str, Any] = dict(prompt_fields)
         if names:
             resolved["output_schema_field_names"] = names
-        spec = NODE_LAYOUTS.get(node)
-        if spec is not None and spec.editor == "l4":
-            layout, _breaches = resolve_layout_override(node, raw.get("layout"))
-            if layout != spec.floor:
-                resolved["layout"] = layout.model_dump(mode="json")
+        # Asked of every runtime: the outer cannot know which manifest the inner cell selects,
+        # and each answers only for the nodes its own manifest declares.
+        for runtime in optimizers.runtimes().values():
+            resolved.update(runtime.override_levers(node, raw))
         if resolved:
             nodes[node] = resolved
     model, provider = _single_model(overrides)

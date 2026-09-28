@@ -8,13 +8,13 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.optimization.pobb.checks import (
+from promptpotter.application.bench.resume_and_fork.decisions import record_decision
+from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
+from promptpotter.application.optimizers.potter.pobb.checks import (
     EliminationContext,
     EliminationGate,
     PoBBCheck,
 )
-from promptpotter.application.optimization.resume_and_fork.decisions import record_decision
-from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
 from promptpotter.domain.results import ArmOutcome
 from promptpotter.domain.run_records import PotterCheckpointKind
 

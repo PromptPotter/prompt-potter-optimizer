@@ -9,6 +9,11 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from promptpotter.application.bench.task_context import (
+    CheckinOutput,
+    checkin_campaign_call_context,
+    run_checkin,
+)
 from promptpotter.application.datasets.draft_campaign import DraftCampaign
 from promptpotter.application.datasets.origin_readiness import (
     field_values,
@@ -17,11 +22,6 @@ from promptpotter.application.datasets.origin_readiness import (
 )
 from promptpotter.application.jobs.launcher.checkin import save_checkin_draft
 from promptpotter.application.jobs.quota import admit_spend
-from promptpotter.application.optimization.task_context import (
-    CheckinOutput,
-    checkin_campaign_call_context,
-    run_checkin,
-)
 from promptpotter.application.scoring.formula.matchers import extraction_note_for_scoring
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.origin_provenance import Provenance

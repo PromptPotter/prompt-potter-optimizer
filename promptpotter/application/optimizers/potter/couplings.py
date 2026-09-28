@@ -138,7 +138,7 @@ ESCALATION = (
         name="lives_no_headroom",
         knobs=("lives",),
         bench_knobs=("optimization.max_rounds",),
-        estimand=Estimand.ESCALATION,
+        estimand=Estimand.CONTROLLER,
         relation=(
             "lives stops a stalling run early, but only when the bank can empty before the "
             "calendar cap does."

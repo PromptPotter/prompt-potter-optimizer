@@ -1,18 +1,18 @@
 """The ``ab`` verb's session half: open a session on ANY campaign by id and replay it. The replay itself is
-``optimization/resume_and_fork/ab_replay.py``, beside the replayers it shares with resume."""
+``bench/resume_and_fork/ab_replay.py``, beside the replayers it shares with resume."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from promptpotter.application.initialization.loop_start import arm_diagnostic_scoring
-from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.optimization.resume_and_fork.ab_replay import (
+from promptpotter.application.bench.resume_and_fork.ab_replay import (
     AbReplayError,
     AbReport,
     ab_replay_cycle,
 )
+from promptpotter.application.initialization.loop_start import arm_diagnostic_scoring
+from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.domain.measurement_provenance import RunSource
 

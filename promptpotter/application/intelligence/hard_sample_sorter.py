@@ -95,7 +95,7 @@ def _resolve_round_order(
             int(o.sample_id): float(o.response) for o in observations if o.candidate_id == best_cid
         }
     # A PREVIEW ruler off this artifact's own re-fit — deliberately not the cycle's locked one,
-    # which this module must never read (`optimization/CLAUDE.md`: the panel orders on the LOCKED
+    # which this module must never read (`optimizers/potter/CLAUDE.md`: the panel orders on the LOCKED
     # δ, and `hard_samples.json`'s is re-anchored on every regeneration).
     preview = posterior.anchored("1PL")
     return build_round_order(best_grades, preview, sorted(posterior.delta.keys()))

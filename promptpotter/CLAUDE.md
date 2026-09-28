@@ -10,7 +10,8 @@ A thin index over the per-layer `CLAUDE.md` tree for the `promptpotter/` Python 
 |---|---|---|
 | `domain/` | Frozen Pydantic models, pure types, `JobSearchPoint` / `OptSearchPoint` / `PromptTemplate`, `PipelineSchema`. No I/O. | [`domain/CLAUDE.md`](domain/CLAUDE.md) |
 | `application/` | Use-case layer: initialization, runner, scoring, intelligence. | [`application/CLAUDE.md`](application/CLAUDE.md) |
-| `application/optimization/` | The L1 / L2 / L3 **agent contracts** + Cycle + dispatch + escalation + PoBB. What each layer reads / writes / decides, when each escalates / heals. | [`application/optimization/CLAUDE.md`](application/optimization/CLAUDE.md) |
+| `application/bench/` | The harness every optimizer runs inside: `Cycle`, the `llm_call` chokepoint, the bench's `checkin` node, generic resume / fork. | [`application/bench/CLAUDE.md`](application/bench/CLAUDE.md) |
+| `application/optimizers/potter/` | The L1 / L2 / L3 **agent contracts** + dispatch + escalation + PoBB. What each layer reads / writes / decides, when each escalates / heals. | [`application/optimizers/potter/CLAUDE.md`](application/optimizers/potter/CLAUDE.md) |
 | `application/evidence/` | The cross-subject read (`GET /evidence`, CLI `evidence`): what a subject is, what a cell can be asked for, and what the roster jointly says. | [`application/evidence/CLAUDE.md`](application/evidence/CLAUDE.md) |
 | `infrastructure/` | I/O contracts: persistence (`CycleEventLog`), projections (`LiveDashboardProjection` / `AuditTrailProjection` / `RacingStreamProjection`), stores, LLM clients, backend wire, tracing. | [`infrastructure/CLAUDE.md`](infrastructure/CLAUDE.md) |
 | `presentation/` | Entry-point adapters: CLI, FastAPI, view formatters. Read-only over `application/`. | [`presentation/CLAUDE.md`](presentation/CLAUDE.md) |
@@ -19,7 +20,7 @@ A thin index over the per-layer `CLAUDE.md` tree for the `promptpotter/` Python 
 
 ## What the chain costs
 
-Each subpackage's `CLAUDE.md` auto-loads by directory proximity and **deepest wins**, so working in `application/optimization/` pulls root, this index, `application/` and the layer's own — every word spent before you type a character. Two rules follow.
+Each subpackage's `CLAUDE.md` auto-loads by directory proximity and **deepest wins**, so working in `application/optimizers/potter/` pulls root, this index, `application/` and the layer's own — every word spent before you type a character. Two rules follow.
 
 **A page you add to a layer is paid by everyone who edits there**, not just the reader who wanted it. So a fact belongs in the layer's `CLAUDE.md` only if it is a RULE binding a set of symbols; mechanism belongs at its definition site, in the module's own docstring, where it costs nothing until someone opens the file.
 
@@ -28,7 +29,7 @@ Each subpackage's `CLAUDE.md` auto-loads by directory proximity and **deepest wi
 ## Where L4 lives
 
 **Keep L4's law and its machinery in separate packages — the split is the point.**
-**`domain/l4/`** is the LAW: `proxies` — what one finished inner cycle says about the optimizer prompt that ran it, the floor / exclude / measure trichotomy. It sits in `domain/` because it is pure over `CycleResult`, and that purity is what stops the law growing a file read or a session dependency. **`application/runner/inner/`** is the MACHINERY: `tasks` (the panel a dataset declares, and the validator that IS its type), `spawn_context` (what a task spawns under — and **the one carrier of that panel during a run**: it takes the panel run init resolved through the connector, the same document the samples and the fingerprint read, so an edit to `inner_tasks.yaml` mid-run cannot split a run's cells across two panels) + `spawn` (how one cell is run) and `ruler` (the ONE δ scale every cell of a round reads on, fit at the outer boundary — a cell left to fit its own derives it from the arms under test). That L4 is a recursion rather than a 4th `LayerStrategy` — and the `l4_*.py` ban that follows from it — is owned by [`application/optimization/CLAUDE.md`](application/optimization/CLAUDE.md) § Add no 4th LayerStrategy. Spec: [`../docs/specs/l4-outer-loop.md`](../docs/specs/l4-outer-loop.md).
+**`domain/l4/`** is the LAW: `proxies` — what one finished inner cycle says about the optimizer prompt that ran it, the floor / exclude / measure trichotomy. It sits in `domain/` because it is pure over `CycleResult`, and that purity is what stops the law growing a file read or a session dependency. **`application/runner/inner/`** is the MACHINERY: `tasks` (the panel a dataset declares, and the validator that IS its type), `spawn_context` (what a task spawns under — and **the one carrier of that panel during a run**: it takes the panel run init resolved through the connector, the same document the samples and the fingerprint read, so an edit to `inner_tasks.yaml` mid-run cannot split a run's cells across two panels) + `spawn` (how one cell is run) and `ruler` (the ONE δ scale every cell of a round reads on, fit at the outer boundary — a cell left to fit its own derives it from the arms under test). That L4 is a recursion rather than a 4th `LayerStrategy` — and the `l4_*.py` ban that follows from it — is owned by [`application/optimizers/potter/CLAUDE.md`](application/optimizers/potter/CLAUDE.md) § Add no 4th LayerStrategy. Spec: [`../docs/specs/l4-outer-loop.md`](../docs/specs/l4-outer-loop.md).
 
 ## Ask the typed predicate, never a set of names
 
@@ -38,6 +39,6 @@ Each subpackage's `CLAUDE.md` auto-loads by directory proximity and **deepest wi
 
 ## Owned elsewhere
 
-- **The L1 / L2 / L3 agent contracts** — owned by [`application/optimization/CLAUDE.md`](application/optimization/CLAUDE.md), beside the code they govern.
-- **Layer-import rule** — owned by [`application/CLAUDE.md`](application/CLAUDE.md) § Layer rule. `application/intelligence/` may not import `application/optimization/`, and the bench may not import an optimizer.
+- **The L1 / L2 / L3 agent contracts** — owned by [`application/optimizers/potter/CLAUDE.md`](application/optimizers/potter/CLAUDE.md), beside the code they govern.
+- **Layer-import rule** — owned by [`application/CLAUDE.md`](application/CLAUDE.md) § Layer rule. `application/intelligence/` may not import `application/bench/` or an optimizer, and the bench may not import an optimizer.
 - **Info-flow: channels, signal routing, the rendered wound signals** — owned by [`../docs/developer/dispatch-hub.md`](../docs/developer/dispatch-hub.md).

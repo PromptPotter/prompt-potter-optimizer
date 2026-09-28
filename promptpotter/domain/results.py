@@ -937,7 +937,7 @@ class RoundResult(StrictModel):
 class CycleResult(StrictModel):
     rounds: list[RoundResult]
     # Origin-EXCLUSIVE, unlike the persisted `index.json::n_rounds`, which counts round 0.
-    n_l1_rounds: int
+    n_rounds_after_origin: int
     result_accuracy: float | None
     result_round: int
     # They travel together because a consumer reading one against a composite computed on some

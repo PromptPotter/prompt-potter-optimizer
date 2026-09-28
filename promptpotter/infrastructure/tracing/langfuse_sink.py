@@ -312,7 +312,7 @@ class LangfuseSink:
             trace_id=trace_id,
             output={
                 "result_accuracy": event.result_accuracy,
-                "n_l1_rounds": event.n_l1_rounds,
+                "n_rounds_after_origin": event.n_rounds_after_origin,
                 "stop_reason": event.stop_reason,
             },
             metadata={"stop_reason": event.stop_reason, "result_round": event.result_round},

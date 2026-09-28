@@ -7,9 +7,9 @@ from __future__ import annotations
 import logging
 import traceback
 
+from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimizers.nodes import RoundContext
 from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.application.run_phase_control import declare_run_phase, pause_requested

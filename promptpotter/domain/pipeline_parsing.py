@@ -157,9 +157,10 @@ def derive_pipeline_view(
 
     ``default`` is the chain a sample runs. A node declared but named by no pipeline runs
     once ahead of it, so it joins the chain without being a member of anything that
-    repeats. Every other pipeline is an ESCALATION: the nodes it introduces are placed at
-    its depth, and the depths order by containment, since a deeper escalation re-runs the
-    shallower one's steps. A pipeline with no escalations is one straight tier.
+    repeats. Every other pipeline is an ALTERNATIVE a controller picks at the round
+    boundary: the nodes it introduces are placed at its depth, and the depths order by
+    containment, since a deeper alternative re-runs the shallower one's steps. A pipeline
+    with no alternatives is one straight tier.
     """
     declared = list(nodes)
     chain = [n for n in (pipelines.get("default") or declared) if n in nodes]
@@ -171,13 +172,13 @@ def derive_pipeline_view(
     )
     # Sharing no step with the chain makes a pipeline a separate PHASE — its own occasion,
     # ahead of the chain and outside anything that repeats. Sharing steps makes it an
-    # ESCALATION, which re-runs the chain rather than standing beside it. A node named by
+    # ALTERNATIVE, which re-runs the chain rather than standing beside it. A node named by
     # NO pipeline is not in the flow at all and is drawn nowhere.
     spine = [*(s for _n, seq in others if not (set(seq) & in_chain) for s in seq), *chain]
     rank_of = {name: i for i, name in enumerate(spine)}
     placed: dict[str, tuple[int, int]] = {n: (0, i) for i, n in enumerate(spine)}
 
-    # Shortest first: an escalation that re-runs another's steps is the deeper of the two,
+    # Shortest first: an alternative that re-runs another's steps is the deeper of the two,
     # so length IS the containment order for a chain of them.
     ordered = sorted(
         ((name, seq) for name, seq in others if set(seq) & in_chain),
@@ -220,7 +221,7 @@ def derive_pipeline_view(
     sequence = ["input", *spine, "output"]
     for i in range(len(sequence) - 1):
         _edge(sequence[i], sequence[i + 1], "forward")
-    # An escalation re-runs the chain, which is what makes the chain repeat — so a view
+    # An alternative re-runs the chain, which is what makes the chain repeat — so a view
     # carrying any tier above 0 always carries this edge too, and a renderer may lay a
     # loopless view out as a straight rail knowing every node on it is tier 0.
     if introduced and chain:
@@ -228,7 +229,7 @@ def derive_pipeline_view(
     for fresh, seq in introduced:
         for step in fresh:
             if chain:
-                _edge(chain[-1], step, "escalate")
+                _edge(chain[-1], step, "alternative")
             after = seq[seq.index(step) + 1 :]
             if after:
                 _edge(step, after[0], "directive")
@@ -384,7 +385,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
     # Step order from pipelines.default, fallback to nodes dict order
     step_order = config.get("pipelines", {}).get("default", list(nodes.keys()))
 
-    # EVERY declared node, because the escalation pipelines name nodes beside the chain and
+    # EVERY declared node, because the alternative pipelines name nodes beside the chain and
     # both the view and the config surface reach them. `steps` below stays the chain alone,
     # which is what keeps `active_steps` — and so `sp_hash` — a fact about the round.
     parsed: dict[str, PipelineNode] = {}

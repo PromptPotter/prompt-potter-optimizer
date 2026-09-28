@@ -125,7 +125,7 @@ class JobSearchPoint(SearchPoint):
 
 # The FRAMING half: operator-authored, never measured, budgeted at mint. The whole
 # `TaskDecomposition` is frozen for the run — no layer's wire schema has a field of it. Why:
-# `application/optimization/CLAUDE.md` § L2.
+# `application/optimizers/potter/CLAUDE.md` § L2.
 FRAMING_FIELDS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
     {
         "domain",

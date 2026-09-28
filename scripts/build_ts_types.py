@@ -86,7 +86,6 @@ from promptpotter.domain.dashboard_rows import (
     RoundSummary,
     RoundSummaryCandidate,
 )
-from promptpotter.domain.l1_layout import L1Layout
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.opt_search_point import (
     EvidenceGrounding,
@@ -98,6 +97,7 @@ from promptpotter.domain.optimizer_state import (
     DescriptorStats,
     GepaCandidate,
     GepaRoundState,
+    L1Layout,
     L2L3Memory,
     LeviCalibration,
     LeviElite,
@@ -587,7 +587,7 @@ def _emit_abort_lens_labels() -> str:
     ε one. Emitting it in ORDER matters: this is a picklist, and the dict's order is the order the
     operator reads.
     """
-    from promptpotter.application.optimization.pobb.checks import ABORT_LENS_LABELS
+    from promptpotter.application.optimizers.potter.pobb.checks import ABORT_LENS_LABELS
 
     rows = "\n".join(f"  {variant!r}: {label!r}," for variant, label in ABORT_LENS_LABELS.items())
     return (

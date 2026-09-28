@@ -1,15 +1,14 @@
 """An optimizer's own working state, which rides the round document and never the individual.
 
 The bench persists it as ``RoundResult.optimizer_state``, restores it from there on resume and
-fork, and reads nothing inside ``payload``."""
+fork, and reads nothing inside ``payload`` beyond what :class:`_RoundPayload` asks of it."""
 
 from __future__ import annotations
 
-from typing import Any, Literal, Self, TypedDict
+from typing import Any, Literal, Self, TypedDict, cast
 
 from pydantic import Field, model_validator
 
-from promptpotter.domain.l1_layout import L1Layout, default_l1_layout
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
@@ -19,17 +18,18 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 __all__ = [
     "CAPO_MANIFEST",
     "GEPA_MANIFEST",
-    "L1_PARSE_FAILURE_CHARGED",
-    "L1_PARSE_FAILURE_MALFORMED",
-    "L1_PARSE_FAILURE_TOOLING",
-    "L1_PARSE_FAILURE_WRONG_TYPE",
     "LEVI_MANIFEST",
+    "PARSE_FAILURE_CHARGED",
+    "PARSE_FAILURE_MALFORMED",
+    "PARSE_FAILURE_TOOLING",
+    "PARSE_FAILURE_WRONG_TYPE",
     "POTTER_MANIFEST",
     "CapoRoundState",
     "CritiqueReadout",
     "DescriptorStats",
     "GepaCandidate",
     "GepaRoundState",
+    "L1Layout",
     "L2L3Memory",
     "LeviCalibration",
     "LeviElite",
@@ -56,14 +56,14 @@ GEPA_MANIFEST: GepaManifest = "gepa"
 #                for, not the transport. Charged like MALFORMED.
 #   TOOLING    — empty/truncated content. Missing data, not a verdict: charging it scores
 #                provider flakiness as a bad mutation, so the round must be EXCLUDED.
-L1_PARSE_FAILURE_MALFORMED = "optimizer_prompt_parse_failure"
-L1_PARSE_FAILURE_WRONG_TYPE = "optimizer_prompt_unexpected_type"
-L1_PARSE_FAILURE_TOOLING = "l1_provider_empty_response"
+PARSE_FAILURE_MALFORMED = "optimizer_prompt_parse_failure"
+PARSE_FAILURE_WRONG_TYPE = "optimizer_prompt_unexpected_type"
+PARSE_FAILURE_TOOLING = "l1_provider_empty_response"
 # The reasons a CHARGING reader may hold against the optimizer prompt. Asked as this predicate,
 # never as `is not None` — that is the bool the block above forbids, and it reads TOOLING as a
 # verdict the round never reached. A ROUTING reader is a different question and may ask either.
-L1_PARSE_FAILURE_CHARGED: frozenset[str] = frozenset(
-    {L1_PARSE_FAILURE_MALFORMED, L1_PARSE_FAILURE_WRONG_TYPE}
+PARSE_FAILURE_CHARGED: frozenset[str] = frozenset(
+    {PARSE_FAILURE_MALFORMED, PARSE_FAILURE_WRONG_TYPE}
 )
 
 
@@ -86,6 +86,28 @@ class WoundChannels(StrictModel):
     l3_guard_breaches: list[ValidatorOutcome] = Field(default_factory=list)
 
 
+class L1Layout(StrictModel):
+    """Per-slot list of placeholder names that the dispatch hub resolves
+    when filling L1's PromptTemplate. Empty lists ⇒ the slot's static text only."""
+
+    # The fields ARE the slots, declared in render order: `model_dump()` puts this order on disk,
+    # and potter's `dispatch/layout.py` asserts it against `OptimizerPromptTemplate.RENDER_ORDER`.
+    persona: list[str] = Field(default_factory=list)
+    task_intent: list[str] = Field(default_factory=list)
+    thinking_style: list[str] = Field(default_factory=list)
+    problem_description: list[str] = Field(default_factory=list)
+
+    @shapes_optimizer_prompt
+    def all_placeholders(self) -> list[str]:
+        """Every placed panel, in RENDER order."""
+        return [name for slot in type(self).model_fields for name in self.slot(slot)]
+
+    def slot(self, name: str) -> list[str]:
+        if name not in type(self).model_fields:
+            raise KeyError(f"Unknown L1 layout slot: {name}")
+        return cast("list[str]", getattr(self, name))
+
+
 class L2L3Memory(StrictModel):
     """Potter's persistent frame, carried across every adoption.
 
@@ -102,7 +124,6 @@ class L2L3Memory(StrictModel):
         ),
     )
     l1_layout: L1Layout = Field(
-        default_factory=default_l1_layout,
         description=(
             "L2-authored ordered list of injection slots that "
             "``DispatchHub.fill`` walks to compose the L1 optimizer prompt. "
@@ -127,7 +148,22 @@ class L2L3Memory(StrictModel):
     )
 
 
-class PotterRoundState(StrictModel):
+class _RoundPayload(StrictModel):
+    """The three questions a harness reader asks of any optimizer's payload; an optimizer that
+    keeps no such readout answers with absence."""
+
+    def feedback(self) -> CritiqueReadout | None:
+        return None
+
+    def proposal_yield(self) -> float | None:
+        return None
+
+    def lost_to_empty_response(self) -> bool:
+        """Every candidate lost to an empty optimizer response: missing data, never a verdict."""
+        return False
+
+
+class PotterRoundState(_RoundPayload):
     """Potter's payload: the memory the round ended on and the readouts only potter reads."""
 
     memory: L2L3Memory
@@ -139,8 +175,17 @@ class PotterRoundState(StrictModel):
     # a parse failure yields no candidate to charge. One of the three constants above.
     l1_parse_failure: str | None = None
 
+    def feedback(self) -> CritiqueReadout | None:
+        return self.critique
 
-class CapoRoundState(StrictModel):
+    def proposal_yield(self) -> float:
+        return self.l1_yield
+
+    def lost_to_empty_response(self) -> bool:
+        return self.l1_parse_failure == PARSE_FAILURE_TOOLING
+
+
+class CapoRoundState(_RoundPayload):
     """CAPO's payload: the population its selector kept.
 
     The next round draws its parents from it and races it again beside their offspring."""
@@ -181,7 +226,7 @@ class LeviElite(StrictModel):
     individual: OptSearchPoint
 
 
-class LeviRoundState(StrictModel):
+class LeviRoundState(_RoundPayload):
     """LEVI's payload: its CVT-MAP-Elites archive and what calibration fixed for it."""
 
     # ``None`` on the origin's document: round 1 is the calibration round that sets it.
@@ -198,7 +243,7 @@ class GepaCandidate(StrictModel):
     scores: dict[str, float]
 
 
-class GepaRoundState(StrictModel):
+class GepaRoundState(_RoundPayload):
     """GEPA's payload: its candidate pool scored on the Pareto set, and the parent the next round
     mutates."""
 

@@ -6,6 +6,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
+from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
@@ -15,7 +16,6 @@ from promptpotter.application.datasets.loaders import resolve_dataset_items, sam
 from promptpotter.application.datasets.prompts import has_dataset_prompts, load_node_prompt
 from promptpotter.application.initialization.loop_start import populate_session_scoring
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.optimization.task_context import campaign_framing
 from promptpotter.application.pipeline_resolve import (
     experiment_outside_run,
     resolve_pipeline_config_params,
@@ -56,7 +56,7 @@ from promptpotter.shared.instrument import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.run_observers import RunCallbacks
 
 
@@ -449,10 +449,6 @@ def prospective_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) 
     ``resolve_pipeline_config_params``, which is what keeps this id from diverging from the one a
     real run stamps. It lived in the origins ROUTER, which put a hash computation behind an
     adapter no other entry point could reach."""
-    # Function-local for the reason the two callers above are: `application/optimization/` imports
-    # this module, so a module-level edge here would close the cycle. Pre-existing shape, not one
-    # this move introduced.
-
     try:
         raw = read_yaml(dataset_pipeline_path(dataset_dir))
         schema = parse_pipeline_response(raw)

@@ -4,6 +4,7 @@ import {
   nodeKind,
   nodeSubLabel,
   type PipelineView,
+  type PipelineViewEdge,
   type PipelineViewNode,
 } from "@/components/workflow";
 import type { NodeReach } from "@/lib/api";
@@ -25,9 +26,13 @@ import { cx } from "@/lib/cx";
 
 // One level of the pipeline stack; `PipelineStack` owns the chain of levels.
 
-// Each kind is styled in `chat.css`; the wire's `kind` is a bare string, so an unknown one
-// draws as `forward`.
-const EDGE_KINDS: readonly string[] = ["forward", "loop", "escalate", "directive"];
+// Each kind is styled in `chat.css`; one arrowhead marker per member of the served set.
+const EDGE_KINDS = Object.keys({
+  forward: true,
+  loop: true,
+  alternative: true,
+  directive: true,
+} satisfies Record<PipelineViewEdge["kind"], true>) as PipelineViewEdge["kind"][];
 
 const LABEL_BELOW_EXTENT = 38;
 
@@ -283,16 +288,15 @@ function PipelineBox({
           const a = posOf.get(e.from);
           const b = posOf.get(e.to);
           if (!a && !b) return null;
-          const kind = EDGE_KINDS.includes(e.kind) ? e.kind : "forward";
           // Only the outgoing end gets a stub; the Input chip owns the incoming one.
           if (!a) return null;
           const d = b ? edgeD(a, b) : terminalD(a);
           return (
             <path
               key={`${e.from}>${e.to}`}
-              className={cx("edge", `kind-${kind}`, (a.muted || b?.muted) && "muted")}
+              className={cx("edge", `kind-${e.kind}`, (a.muted || b?.muted) && "muted")}
               d={d}
-              markerEnd={`url(#wf-arrow-${kind})`}
+              markerEnd={`url(#wf-arrow-${e.kind})`}
             />
           );
         })}

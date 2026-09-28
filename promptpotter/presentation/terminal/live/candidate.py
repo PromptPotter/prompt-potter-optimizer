@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from promptpotter.application.optimization.pobb.checks import EliminationGate
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.domain.candidate_diff import flatten_sp_summary
 from promptpotter.domain.connector import MeasuredUnit, unit_count
@@ -132,14 +131,15 @@ def individual_summary_from_dict(
     n_priors = int(elim.get("n_priors", 0))
     priors = f"(of {n_priors} prior{'' if n_priors == 1 else 's'})"
     p_best = float(elim.get("p_best", 0.0))
-    if gate == EliminationGate.LOCK_IN:
+    # PoBB's three gates (`pobb/checks.py::EliminationGate`), read as the strings served.
+    if gate == "lock_in":
         detail_lines.append(f"{GREEN}✓ leader locked {q}{RESET}  p_best={p_best:.1%} {priors}")
-    elif gate == EliminationGate.COLLAPSED:
+    elif gate == "collapsed":
         detail_lines.append(
             f"{YELLOW}✂ answer collapsed {q}{RESET}  "
             f"one label for every {unit} — no measurement of ability to score"
         )
-    elif gate == EliminationGate.EPSILON:
+    elif gate == "epsilon":
         leader = elim.get("leader_label") or (elim.get("leader_id", "?") or "?")[:8]
         eps = float(elim["epsilon"])
         detail_lines.append(

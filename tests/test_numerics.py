@@ -20,6 +20,8 @@ from typing import Any
 import numpy as np
 import pytest
 
+from promptpotter.application.bench.cycle import Cycle
+from promptpotter.application.bench.resume_and_fork.replayers import replay_all_mismatches
 from promptpotter.application.campaign_config import load_campaign_config
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.evidence.subjects import SubjectSpec
@@ -41,12 +43,6 @@ from promptpotter.application.mask.record import (
     MaskRound,
     SpineCycle,
 )
-from promptpotter.application.optimization.cycle import Cycle
-from promptpotter.application.optimization.pobb.checks import EliminationGate, PoBBCheck
-from promptpotter.application.optimization.resume_and_fork.replayers import replay_all_mismatches
-from promptpotter.application.optimization.validators.l1_invariants import (
-    detect_invariants,
-)
 from promptpotter.application.optimizer_manifest import bind_optimizer
 from promptpotter.application.optimizers import paper_templates
 from promptpotter.application.optimizers.capo.state import CapoState, capo_state
@@ -54,6 +50,10 @@ from promptpotter.application.optimizers.gepa.members import draw_parent, pareto
 from promptpotter.application.optimizers.gepa.state import GepaState
 from promptpotter.application.optimizers.levi.state import LeviState
 from promptpotter.application.optimizers.nodes import Population, RoundContext
+from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate, PoBBCheck
+from promptpotter.application.optimizers.potter.validators.l1_invariants import (
+    detect_invariants,
+)
 from promptpotter.application.runner.bench import bench_selection, score_on_bench
 from promptpotter.application.runner.entry import _build_cycle_result
 from promptpotter.application.runner.measurement import measure_population
@@ -492,7 +492,7 @@ def test_a_labelless_round_reports_absence_not_zero() -> None:
     set by a dataset's ``node_role`` declarations and fires on Harbor but not on L4, which
     declares ``l1_critique`` a ranker.
     """
-    from promptpotter.application.optimization.round_analysis import compute_round_diagnostics
+    from promptpotter.application.bench.round_analysis import compute_round_diagnostics
     from promptpotter.application.scoring.evaluators import materialize_round_values
 
     schema = _recall_schema()
@@ -673,8 +673,8 @@ def test_a_correct_but_costly_cell_is_a_HIT_everywhere_it_is_thresholded() -> No
     the parent-hit stratum emptied, so `build_round_order`'s regression probe never fired and the
     round bought cells the composite penalised rather than cells the arm got wrong.
     """
+    from promptpotter.application.bench.round_analysis import _sample_diagnostics
     from promptpotter.application.intelligence.adaptive_queue_mechanism import build_round_order
-    from promptpotter.application.optimization.round_analysis import _sample_diagnostics
     from promptpotter.domain.scoring import is_hit
 
     # One cell the arm got RIGHT and was charged for: correctness 1.0, composite 0.4.
@@ -1070,8 +1070,8 @@ def test_delta_ruler_stays_flat_until_a_second_arm_exists() -> None:
     # It cost two campaigns: rounds carrying +14.3pp at p<0.05 were stamped `improved=False`.
     # The warm attempt now also runs BEFORE the round's election (`warm_ruler_if_cold`), which
     # relaxes the TIMING only — this is what pins the rule itself as untouched.
+    from promptpotter.application.bench.cycle import _calibrate_delta_ruler
     from promptpotter.application.intelligence.exploration import Observation
-    from promptpotter.application.optimization.cycle import _calibrate_delta_ruler
 
     n_min = 4
     arm_a = [Observation("a", sid, 1.0 if sid % 3 else 0.0) for sid in range(8)]
@@ -1124,7 +1124,7 @@ def test_an_instrument_reads_on_the_scale_its_spawner_fixed(tmp_path: Path) -> N
     import contextvars
     import types
 
-    from promptpotter.application.optimization.cycle import _given_ruler
+    from promptpotter.application.bench.cycle import _given_ruler
     from promptpotter.shared.instrument import enter_instrument_mode
 
     given = _ruler({1: 0.5, 2: -0.25, 3: 0.0})
@@ -1179,14 +1179,14 @@ def test_best_theta_is_re_read_on_the_warm_ruler_it_will_be_differenced_against(
     # Nothing raises; the numbers all render.
     from types import SimpleNamespace
 
-    from promptpotter.application.intelligence.exploration import Observation
-    from promptpotter.application.optimization.cycle import (
+    from promptpotter.application.bench.cycle import (
         Cycle,
         CycleRoundState,
         _calibrate_delta_ruler,
         _cumulative_theta,
         _reading,
     )
+    from promptpotter.application.intelligence.exploration import Observation
 
     def rows(hit: set[int]) -> list[dict[str, Any]]:
         return [
@@ -2274,7 +2274,9 @@ def test_a_collapse_cut_is_never_reported_as_an_epsilon_cut() -> None:
 
     Silent harm: nothing errors, every field renders, and the number diagnosed from was never
     measured."""
-    from promptpotter.application.optimization.dispatch.injections.panels import _candidate_fate
+    from promptpotter.application.optimizers.potter.dispatch.injections.panels import (
+        _candidate_fate,
+    )
 
     rows = [
         {
@@ -2361,7 +2363,7 @@ def test_only_an_epsilon_cut_banks_an_idea_as_measured_and_lost() -> None:
 
     Silent harm: banking any of the three blacklists an idea no round ever judged, and every later
     re-proposal is rejected as `repeat_variant` for the rest of the cycle with nothing raised."""
-    from promptpotter.application.optimization.validators.l1_invariants import lost_ideas
+    from promptpotter.application.optimizers.potter.validators.l1_invariants import lost_ideas
 
     def banked(ctx: dict | None) -> bool:
         history = lost_history(
@@ -3721,6 +3723,13 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
     with pytest.raises(CellUnscoreableError):
         compute_outer_proxies(floorless)
 
+    # The same all-tooling cycle ending on its own terms is FLOORED, not excluded: losing every
+    # round's candidates to an empty response is reproducible, so it is the optimizer prompt's.
+    tooling = cycle_result(
+        [0.40], 0.30, [round_result(1, parse_failure="l1_provider_empty_response")]
+    )
+    assert compute_outer_proxies(tooling).mean_round_delta == -1.0
+
     # ...and a cycle that DID produce evidence still scores, on the same predicate.
     ok = cycle_result([0.40, 0.55], 0.30, [round_result(1), round_result(2)])
     ok_px = compute_outer_proxies(ok)
@@ -3818,7 +3827,7 @@ def test_a_blank_answer_is_no_edit_at_either_boundary():
     """A model spells "unchanged" as ``""`` or ``{node: {}}``. Read as an edit, the parse guard skips
     the repair re-ask and the round scores clones as candidates, one blank measured as an arm. Both
     boundaries read one ``candidate_delta``, so they must convict the same variants."""
-    from promptpotter.application.optimization.dispatch.schemas import build_l1_response_model
+    from promptpotter.application.optimizers.potter.dispatch.schemas import build_l1_response_model
 
     parent = _parent()
     parent_params = {"llm_only": {"temperature": 0.0}}
@@ -3927,10 +3936,10 @@ def test_parse_population_flags_dropped_optimizer_prompt_port():
     The citable menu sits in `problem_description` rather than `answer_format` because it is the
     one per-ROUND value in an otherwise static template, and `problem_description` renders last —
     holding it ahead of that voided the provider prefix cache for everything behind it."""
-    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+    from promptpotter.application.optimizers.potter.dispatch.prompts import (
         base_optimizer_template,
     )
-    from promptpotter.application.optimization.l1.population import parse_population
+    from promptpotter.application.optimizers.potter.l1.population import parse_population
 
     schema = PipelineSchema(
         name="promptpotter-self",
@@ -3994,7 +4003,7 @@ def test_an_axis_is_bounded_by_the_model_that_would_run_it_not_by_the_yaml() -> 
     that costs the candidate its whole panel; a rung wrongly withheld deletes a real search
     position and the round still elects. The over-narrowed case is why the answer is three-state:
     read falsy, an axis with nothing legal left becomes an unbounded one."""
-    from promptpotter.application.optimization.validators.l1_strict import validate_overrides
+    from promptpotter.application.optimizers.potter.validators.l1_strict import validate_overrides
     from promptpotter.domain.pipeline_schema import ModelCapability, NodeSearchNarrowing
 
     def _caps(efforts: list[str] | None) -> ModelCapability:
@@ -4174,7 +4183,10 @@ def test_a_theta_stall_verdict_must_clear_its_own_error() -> None:
 
     Silent harm: nothing distinguishes "L2 keeps firing because it is working" from "L2 keeps
     firing because noise keeps clearing its stall counter"."""
-    from promptpotter.application.optimization.escalation.state import EscalationFSM, NextAction
+    from promptpotter.application.optimizers.potter.escalation.state import (
+        EscalationFSM,
+        NextAction,
+    )
     from promptpotter.application.optimizers.potter.knobs import EscalationLadder
 
     # (composite, θ, θ_se) per round, from the live run: composite frozen from round 2 on, θ
@@ -4225,7 +4237,10 @@ def test_the_campaign_ends_only_where_the_objective_is_spent_and_the_round_resol
     cells at p=0.33, `separable: false`, ended at 27% of budget, `index.json` then naming round 8
     its best. Silent by construction: `perfect_score` is a SUCCESS outcome and every number
     renders."""
-    from promptpotter.application.optimization.escalation.state import EscalationFSM, NextAction
+    from promptpotter.application.optimizers.potter.escalation.state import (
+        EscalationFSM,
+        NextAction,
+    )
     from promptpotter.application.optimizers.potter.knobs import EscalationLadder
 
     def outcome(objective: float, separable: bool | None) -> NextAction:
@@ -4501,11 +4516,11 @@ def test_the_l1_only_arm_can_reach_no_layer_above_it() -> None:
     nobody thought about."""
     from itertools import product
 
-    from promptpotter.application.optimization.escalation.rules import (
+    from promptpotter.application.optimizers.potter.escalation.rules import (
         EscalationInputs,
         decide_escalation,
     )
-    from promptpotter.application.optimization.escalation.state import NextAction
+    from promptpotter.application.optimizers.potter.escalation.state import NextAction
     from promptpotter.application.optimizers.potter.knobs import EscalationLadder
 
     grid = list(

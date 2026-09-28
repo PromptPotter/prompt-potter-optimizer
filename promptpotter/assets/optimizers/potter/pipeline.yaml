@@ -66,7 +66,7 @@ nodes:
       # banked call billed 24,000 completion tokens — two 12,000 round-trips, the first attempt
       # truncating and the paid schema repair truncating behind it. That is not a short answer,
       # it is a ZERO-CANDIDATE round (`l1/generate.py` reads finish_reason=length as
-      # `L1_PARSE_FAILURE_MALFORMED`), so the round costs two calls and returns nothing.
+      # `PARSE_FAILURE_MALFORMED`), so the round costs two calls and returns nothing.
       # A ceiling is not a spend — only emitted tokens bill — and 20000 still lands inside
       # `OPTIMIZER_CALL_DEADLINE_S`: at the measured ~233 tok/s a full 20k answer is ~86s
       # against the 180s per-round-trip wall.
@@ -170,7 +170,7 @@ nodes:
       model: deepseek/deepseek-v4-flash:nitro
     description: *nitro_probe
   # The controller — the stall ladder that picks, round by round, whether the next round is
-  # `default` alone or one of the escalations below, and when potter stops.
+  # `default` alone or one of the alternatives below, and when potter stops.
   escalation:
     type: controller
     config:

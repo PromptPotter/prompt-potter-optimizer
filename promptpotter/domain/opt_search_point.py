@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Self
 from pydantic import ConfigDict, Field
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
-from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, VOLATILE_SLOT
 from promptpotter.domain.pipeline_overlay import fold_output_contract
 from promptpotter.domain.search_point import JobSearchPoint, SearchPoint, TaskDecomposition
 from promptpotter.domain.strict_model import StrictModel
@@ -134,22 +133,16 @@ class OptimizerPromptTemplate(PromptTemplate):
     """Ordered for the provider's prefix cache, apart from the target's order so shaping a cache
     prefix here cannot re-cut a banked measurement.
 
-    ``problem_description`` renders LAST because it is where the evidence goes: it is
-    `l1_layout.py::VOLATILE_SLOT`, the slot every `NODE_LAYOUTS` floor fills, so anything rendered
-    after it would sit behind panels that change every round and could never be served off a
-    provider's prefix cache.
+    ``problem_description`` renders LAST because it is where the evidence goes — the slot potter's
+    layout floors fill (`optimizers/potter/dispatch/layout.py::VOLATILE_SLOT`, asserted there) —
+    so anything rendered after it would sit behind panels that change every round and could never
+    be served off a provider's prefix cache.
 
     **The corollary binds the prompts, not just this tuple: a value that CHANGES between rounds
     belongs in ``problem_description``, never in a field ahead of it** — a moving menu substituted
     one slot early voids the stable prefix from inside a static template. Ordering the fields is
-    half the contract; keeping the
-    moving values behind the boundary is the other half, and the half nothing can assert: the
-    layout axis addresses the earlier slots too, so `validate_l1_layout` REPORTS a panel placed
-    ahead of the boundary (`l1_layout_voids_prefix`) rather than the order alone guaranteeing it.
-
-    A constant ahead of the boundary is free, and the exemption is declared rather than assumed —
-    `PREFIX_STABLE_PANELS`, whose one member is `task_context`; the shared prefix measurably
-    survives all of `task_intent`."""
+    half the contract; keeping the moving values behind the boundary is the other half, and the
+    half nothing can assert."""
 
 
 class EvidenceGrounding(StrictModel):
@@ -319,22 +312,3 @@ class OptSearchPoint(PromptTemplate):
 
 
 _check_render_order(PromptTemplate)
-
-# The prefix-cache half of the same contract, true of the optimizer prompt alone — the target's
-# order answers to the archive key, not a cache.
-#
-# `l1_layout.py` cannot assert this itself (domain import direction: it is imported BY this
-# module), so the reading lives on the importer. Two claims, both load-bearing: the volatile slot
-# renders last, and the layout's slot sequence is the render sequence — without the second,
-# `L1_LAYOUT_SLOTS[:-1]` is not "the slots ahead of the boundary" and `validate_l1_layout`'s
-# prefix check reads the wrong ones.
-_OPTIMIZER_ORDER = OptimizerPromptTemplate.RENDER_ORDER
-assert _OPTIMIZER_ORDER[-1] == VOLATILE_SLOT, (
-    f"the optimizer prompt must render {VOLATILE_SLOT!r} last — it is where every NODE_LAYOUTS "
-    f"floor puts its evidence, so a field behind it can never sit in a provider's stable prefix."
-)
-assert [f for f in _OPTIMIZER_ORDER if f in L1_LAYOUT_SLOTS] == list(L1_LAYOUT_SLOTS), (
-    f"L1_LAYOUT_SLOTS {L1_LAYOUT_SLOTS} must be a subsequence of RENDER_ORDER "
-    f"{_OPTIMIZER_ORDER} — the layout is declared in render order so that "
-    f"'ahead of the boundary' means the same thing in both modules."
-)

@@ -10,13 +10,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.initialization.session import auto_mint_session
-from promptpotter.application.jobs.quota import admit_spend
-from promptpotter.application.optimization.task_context import (
+from promptpotter.application.bench.task_context import (
     campaign_framing,
     commit_task_framing,
     committed_task_context,
 )
+from promptpotter.application.initialization.session import auto_mint_session
+from promptpotter.application.jobs.quota import admit_spend
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.pipeline_resolve import (
     configure_and_apply_pipeline,

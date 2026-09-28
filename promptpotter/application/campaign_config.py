@@ -55,7 +55,7 @@ class Estimand(StrEnum):
     ABILITY = "ability"
     GATE = "gate"
     STOPPING = "stopping"
-    ESCALATION = "escalation"
+    CONTROLLER = "controller"
     SEARCH = "search"
     SPEND = "spend"
     DISPLAY = "display"
@@ -68,7 +68,7 @@ _ESTIMAND_DOC: dict[Estimand, str] = {
     Estimand.ABILITY: "The candidate ability θ — difficulty-adjusted skill, the metric the gate compares.",
     Estimand.GATE: "The round-promotion / improvement gate — what counts as 'better' and is kept.",
     Estimand.STOPPING: "The early-abort / elimination rules that stop measuring a candidate before budget.",
-    Estimand.ESCALATION: "Potter's L1/L2/L3 patience ladder (its controller) — when it escalates strategy or halts.",
+    Estimand.CONTROLLER: "An optimizer's controller — when it changes strategy or halts (potter's L1/L2/L3 patience ladder).",
     Estimand.SEARCH: "The optimizer search space + data binding the loop explores.",
     Estimand.SPEND: "The budget ceilings (USD / tokens) that halt the cycle.",
     Estimand.DISPLAY: "What number the operator reads — no effect on the data or the decision.",

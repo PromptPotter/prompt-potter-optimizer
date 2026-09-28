@@ -14,8 +14,8 @@ from promptpotter.domain.results import resolved_fitness
 from promptpotter.shared.instrument import NO_ROUND_SLOT, MeasurementRole
 
 if TYPE_CHECKING:
+    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.domain.search_point import JobSearchPoint

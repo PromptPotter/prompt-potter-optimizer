@@ -7,12 +7,12 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.dispatch.bundle import fence_untrusted
+from promptpotter.application.optimizers.fence import fence_untrusted
 from promptpotter.application.optimizers.paper_templates import fill
 from promptpotter.application.scoring.row_diagnostics import cell_feedback
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.application.bench.cycle import Cycle
 
 __all__ = ["fenced", "reflection_prompt"]
 

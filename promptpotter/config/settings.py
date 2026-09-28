@@ -89,7 +89,7 @@ WELL_KNOWN_PARAM_TYPES: Annotated[dict[str, str], shapes_optimizer_prompt] = {
 # Wall-clock ceiling on one optimizer round-trip. The provider SDK's own timeout is a
 # per-read-gap timeout, not a total one, so a reasoning model streaming slowly never trips it
 # and the call hangs indefinitely. Per round trip: the logical call's wall multiplies it by the
-# round trips its parse ladder may take (`llm_call/call.py::_MAX_ROUND_TRIPS_PER_CALL`). A call past
+# round trips its parse ladder may take (`bench/llm_call.py::_MAX_ROUND_TRIPS_PER_CALL`). A call past
 # that wall halts the loop with ``StopReason.OPTIMIZER_TIMEOUT`` — it is never sent again.
 OPTIMIZER_CALL_DEADLINE_S: float = 180.0
 

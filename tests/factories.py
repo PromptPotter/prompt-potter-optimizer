@@ -22,6 +22,7 @@ from collections.abc import Sequence
 from typing import Any, cast
 
 from promptpotter.application.optimizer_manifest import resolve_optimizer
+from promptpotter.application.optimizers.potter.dispatch.layout import default_l1_layout
 from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
 from promptpotter.domain.optimizer_state import (
     POTTER_MANIFEST,
@@ -148,7 +149,10 @@ def optimizer_state(
 ) -> OptimizerState:
     return OptimizerState(
         manifest=POTTER_MANIFEST,
-        payload=PotterRoundState(memory=memory or L2L3Memory(), l1_parse_failure=parse_failure),
+        payload=PotterRoundState(
+            memory=memory or L2L3Memory(l1_layout=default_l1_layout()),
+            l1_parse_failure=parse_failure,
+        ),
     )
 
 
@@ -244,7 +248,7 @@ def cycle_result(
     """
     return CycleResult(
         rounds=rounds,
-        n_l1_rounds=len(rounds),
+        n_rounds_after_origin=len(rounds),
         result_accuracy=0.5,
         result_round=len(rounds),
         origin_accuracy=origin or 0.0,

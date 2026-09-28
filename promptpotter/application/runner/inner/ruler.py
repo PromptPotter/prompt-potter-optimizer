@@ -12,10 +12,10 @@ import logging
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from promptpotter.application.bench.cycle import _calibrate_delta_ruler
 from promptpotter.application.datasets.authored import dataset_cell_scorer
 from promptpotter.application.intelligence.exploration import extend_ruler
 from promptpotter.application.intelligence.hard_sample_archive import build_archive_observations
-from promptpotter.application.optimization.cycle import _calibrate_delta_ruler
 from promptpotter.application.runner.inner.spawn_context import (
     inner_spawn_context,
     set_inner_rulers,

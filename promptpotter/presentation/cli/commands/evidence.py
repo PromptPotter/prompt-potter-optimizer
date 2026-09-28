@@ -45,7 +45,7 @@ _UNIT_SPEC: dict[MetricUnit, str] = {
 
 # Adding a `MetricUnit` without a format here is a KeyError on the first campaign that resolves to
 # it — on the operator's terminal, mid-table. Fail at import instead, the way
-# `optimization/resume_and_fork/decisions.py` gates its own kind→policy map.
+# `bench/resume_and_fork/decisions.py` gates its own kind→policy map.
 _unformatted = sorted(set(get_args(MetricUnit)) - set(_UNIT_SPEC))
 if _unformatted:
     raise RuntimeError(f"MetricUnit members with no terminal format: {_unformatted}")

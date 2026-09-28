@@ -18,11 +18,11 @@ if TYPE_CHECKING:
     import asyncio
     from types import ModuleType
 
+    from promptpotter.application.bench.cycle import Cycle
+    from promptpotter.application.bench.resume_and_fork.decisions import GatingMode
+    from promptpotter.application.bench.resume_and_fork.replayers import Replayer
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.resume_and_fork.decisions import GatingMode
-    from promptpotter.application.optimization.resume_and_fork.replayers import Replayer
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.application.scoring.query_loop import BlockRace, Walk
@@ -203,6 +203,12 @@ class OptimizerRuntime(Protocol):
     def source_digest(self, *covered: ModuleType) -> str:
         """The code that decides what its prompts SAY, digested; ``covered`` are modules another
         digest already hashes. An L4 inner cell's identity folds it in."""
+        ...
+
+    def override_levers(self, node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
+        """The levers of one node's L4 override this optimizer resolves itself — beyond the prompt
+        fields, schema renames and model the bench resolves — as they RESOLVE, for the inner cell's
+        identity. ``{}`` for a node its manifest does not declare, or where none is set."""
         ...
 
     @property

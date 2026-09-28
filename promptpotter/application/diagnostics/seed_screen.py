@@ -17,6 +17,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.campaign_config import load_campaign_config
 from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
@@ -28,7 +29,6 @@ from promptpotter.application.initialization.loop_start import (
     diagnostic_trace,
 )
 from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.optimization.task_context import campaign_framing
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.measurement_provenance import RunSource

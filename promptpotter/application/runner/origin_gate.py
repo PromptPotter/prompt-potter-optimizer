@@ -25,9 +25,9 @@ from promptpotter.infrastructure.store.layout import CycleLayout
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.domain.sample import Sample
 

@@ -21,9 +21,9 @@ Every figure below carries its corpus size and date. **Recompute before citing**
 
 ## Mental model
 
-The optimizer is three nested generation loops (`promptpotter/application/optimization/CLAUDE.md`):
+The optimizer is three nested generation loops (`promptpotter/application/optimizers/potter/CLAUDE.md`):
 
-- **L1** (`l1_generate`) generates candidate prompts with cause from its evidence surface — the panels its live layout renders (`NODE_LAYOUTS["l1_generate"].floor`, `domain/l1_layout.py` — read the membership there) — under `plan` from L3 and the operator's frozen `task_context`.
+- **L1** (`l1_generate`) generates candidate prompts with cause from its evidence surface — the panels its live layout renders (`NODE_LAYOUTS["l1_generate"].floor`, `optimizers/potter/dispatch/layout.py` — read the membership there) — under `plan` from L3 and the operator's frozen `task_context`.
 - **L2** (`l2_context`) fires on L1 stall and moves L1's surface — `l1_layout` (which panels L1 sees) and `l1_overrides` (how hard it explores). **It cannot write `task_context`**: `L2ContextOutput` has no such field, so a fire that changed neither lever bought nothing.
 - **L3** (`l3_plan`) replans on L2 stall, writing `PotterState.memory.plan`.
 
@@ -135,7 +135,7 @@ Whether to cut the panel from 6 seeds to 1 turns entirely on the **arm×seed int
 
 ### 1. Read the current L1 optimizer prompt
 
-Open `promptpotter/assets/optimizers/potter/pipeline.yaml` and locate the `l1_generate/1` body under `resolved_prompts`. Note which `{{slots}}` it references. Cross-check against `application/optimization/dispatch/injections/registry.py::injection_table` so you can name what data each slot delivers. A slot the template never references is wasted load; a slot the template references but `injection_table()` does not register raises at load time (already caught by `validate_template`).
+Open `promptpotter/assets/optimizers/potter/pipeline.yaml` and locate the `l1_generate/1` body under `resolved_prompts`. Note which `{{slots}}` it references. Cross-check against `application/optimizers/potter/dispatch/injections/registry.py::injection_table` so you can name what data each slot delivers. A slot the template never references is wasted load; a slot the template references but `injection_table()` does not register raises at load time (already caught by `validate_template`).
 
 ### 2. Read the round's audit trail
 
@@ -191,7 +191,7 @@ Parse failure, no-ops and verbatim duplicates: **zero** over 6 inner campaigns /
 
 Skipping these has historically let evidence-free or rule-violating proposals through unflagged. None
 is blanket-rejected by code; **for the unenforced ones your analysis IS the gate.** The enforced set is
-the registry itself (`optimization/validators/l1_strict.py`) plus `validate_overrides()`, which rejects
+the registry itself (`optimizers/potter/validators/l1_strict.py`) plus `validate_overrides()`, which rejects
 `PARAM_FORBIDDEN_KEYS` unconditionally — read the registry before assuming a check is unenforced.
 
 - **Evidence availability.** For round 1 (especially a fresh fork), does the rendered input actually
@@ -258,7 +258,7 @@ Write the edit as a unified diff against `resolved_prompts["l1_generate/1"]`. St
 
 Paths below are repo-relative; this file sits at `.claude/skills/potter-self/`.
 
-- **L1/L2/L3 agent contracts** — `promptpotter/application/optimization/CLAUDE.md` (what each layer reads, writes and decides).
+- **L1/L2/L3 agent contracts** — `promptpotter/application/optimizers/potter/CLAUDE.md` (what each layer reads, writes and decides).
 - **Dispatch hub + info flow** — `docs/developer/dispatch-hub.md`. How slots reach optimizer prompts.
 - **The measurand, the invariants, what a panel may claim** — `docs/specs/l4-outer-loop.md`. Read it before trusting any outer number, and before touching a file mid-run.
 - **Persistence + the identity fingerprint** — `docs/operations/persistence-and-state.md` (fact 4 owns what `_identity_config` reads).

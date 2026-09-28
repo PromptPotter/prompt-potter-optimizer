@@ -13,24 +13,18 @@ from promptpotter.application.intelligence.exploration import (
     select_round_subset,
 )
 from promptpotter.application.intelligence.indexes.axis import NOISE_THRESHOLD
-from promptpotter.application.optimization.dispatch.facade import injection_source_digest
-from promptpotter.application.optimization.dispatch.injections.registry import injection_table
-from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-    compute_optimizer_prompt_hashes,
-)
-from promptpotter.application.optimization.dispatch.schemas import L2_NODE_AXES
-from promptpotter.application.optimization.escalation.firing import escalate_l2
-from promptpotter.application.optimization.escalation.state import NextAction
-from promptpotter.application.optimization.l1.candidate_source import generate_or_load_candidates
-from promptpotter.application.optimization.l1.critique import run_l1_critique
-from promptpotter.application.optimization.l1.population import parse_population
-from promptpotter.application.optimization.l1.stats import review_reading
-from promptpotter.application.optimization.pobb.checks import ABORT_LENS_SUPPRESS
-from promptpotter.application.optimization.validators.l1_invariants import L1YieldStats
-from promptpotter.application.optimization.validators.l1_strict import DROPPED_MANDATORY_PLACEHOLDER
 from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.potter import couplings
+from promptpotter.application.optimizers.potter.dispatch.facade import injection_source_digest
+from promptpotter.application.optimizers.potter.dispatch.injections.registry import injection_table
+from promptpotter.application.optimizers.potter.dispatch.layout import layout_levers
+from promptpotter.application.optimizers.potter.dispatch.prompts import (
+    compute_optimizer_prompt_hashes,
+)
+from promptpotter.application.optimizers.potter.dispatch.schemas import L2_NODE_AXES
 from promptpotter.application.optimizers.potter.election import elect_on_theta
+from promptpotter.application.optimizers.potter.escalation.firing import escalate_l2
+from promptpotter.application.optimizers.potter.escalation.state import NextAction
 from promptpotter.application.optimizers.potter.generation_only import run_generation_only_round
 from promptpotter.application.optimizers.potter.knobs import (
     AdaptiveQueueKnobs,
@@ -40,6 +34,13 @@ from promptpotter.application.optimizers.potter.knobs import (
     ThetaElectionKnobs,
     potter_knobs,
 )
+from promptpotter.application.optimizers.potter.l1.candidate_source import (
+    generate_or_load_candidates,
+)
+from promptpotter.application.optimizers.potter.l1.critique import run_l1_critique
+from promptpotter.application.optimizers.potter.l1.population import parse_population
+from promptpotter.application.optimizers.potter.l1.stats import review_reading
+from promptpotter.application.optimizers.potter.pobb.checks import ABORT_LENS_SUPPRESS
 from promptpotter.application.optimizers.potter.race import PoBBRace
 from promptpotter.application.optimizers.potter.resume import (
     POTTER_CHECKPOINT_GATING,
@@ -48,6 +49,10 @@ from promptpotter.application.optimizers.potter.resume import (
     round_packages,
 )
 from promptpotter.application.optimizers.potter.state import PotterState, potter_state
+from promptpotter.application.optimizers.potter.validators.l1_invariants import L1YieldStats
+from promptpotter.application.optimizers.potter.validators.l1_strict import (
+    DROPPED_MANDATORY_PLACEHOLDER,
+)
 from promptpotter.application.scoring.candidate_report import fatal_validation_failures
 from promptpotter.domain.optimizer_state import POTTER_MANIFEST, potter_round_state
 from promptpotter.domain.phases import StopLoop
@@ -61,11 +66,11 @@ from promptpotter.shared.errors import graceful, is_error_result
 if TYPE_CHECKING:
     from types import ModuleType
 
+    from promptpotter.application.bench.cycle import Cycle
+    from promptpotter.application.bench.resume_and_fork.decisions import GatingMode
+    from promptpotter.application.bench.resume_and_fork.replayers import Replayer
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.resume_and_fork.decisions import GatingMode
-    from promptpotter.application.optimization.resume_and_fork.replayers import Replayer
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
         Boundary,
@@ -365,6 +370,9 @@ class PotterRuntime:
 
     def source_digest(self, *covered: ModuleType) -> str:
         return injection_source_digest(*covered)
+
+    def override_levers(self, node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
+        return layout_levers(node, declared)
 
     @property
     def checkpoint_gating(self) -> Mapping[ResumeCheckpointKind, GatingMode]:

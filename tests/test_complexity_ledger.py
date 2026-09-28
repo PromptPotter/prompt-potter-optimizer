@@ -167,6 +167,12 @@ LEDGER_BASELINE = {
     # +1: `evidence/head_to_head.py` — the campaigns' bench headlines and the one-instrument guard
     # over them. It reads the finished cycle's bench files and archive runs, which `read.py`'s
     # round-0 walk never opens, and folds into `comparison.py` only by giving that pure module I/O.
+    # -1: `application/optimization/__init__.py` — the package is gone, its harness half to
+    # `bench/`, its algorithm to `optimizers/potter/`; `bench/__init__.py` replaced the
+    # `dispatch/llm_call/__init__.py` that went with `call.py` to `bench/llm_call.py`.
+    # +1: `optimizers/fence.py` — the untrusted-content fence potter, GEPA and LEVI wrap dataset
+    # text in. It sat in potter's `bundle.py`, so two peers imported potter; `paper_templates.py`
+    # is the paper presets' alone, and a fencing preset's `source_digest` must hash the fence.
     "modules": 387,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
@@ -175,7 +181,8 @@ LEDGER_BASELINE = {
     # +1: `optimizers/capo/__init__.py`, empty, as `potter/`'s is.
     # +1: `optimizers/levi/__init__.py`, empty, as `capo/`'s is.
     # +1: `optimizers/gepa/__init__.py`, empty, as `levi/`'s is.
-    "init_files": 57,
+    # -1: `application/optimization/__init__.py`, the split package's, as `modules` says.
+    "init_files": 56,
     # +1: `judges/__init__.py` — flagged for the same reason `connectors/__init__.py` is, and by
     # the same text test: a registry module has both an `__all__` and imports. Named rather than
     # emptied; the protocol types are deliberately NOT re-exported through it.
@@ -386,7 +393,9 @@ LEDGER_BASELINE = {
     # context slot's only writer, and a copy of the delta the child OSP already carries.
     # -1: `TaskDecomposition.coerce(v: … | dict[str, Any] | None)` — its one caller was the
     # memory's field validator, and the framing no longer rides the memory.
-    "domain_any_maps": 88,
+    # -1: `layout_json_schema(...) -> dict[str, Any]` — potter's layout left `domain/` for its
+    # dispatch hub; the map it builds is potter's wire schema, not a domain type.
+    "domain_any_maps": 87,
     "models_lax": 3,
     "prompt_string_fields": 6,
     # +1: `demo_pool` — the value space of the `shot_ids` slot and the one carrier of the parent's
@@ -431,7 +440,10 @@ LEDGER_BASELINE = {
     # formula term — and that rule is what stops six re-derivation sites re-billing the archive.
     # +1: `application/evidence/CLAUDE.md` — the evidence rules, apart from `application/CLAUDE.md`
     # so only a reader editing that package pays for them.
-    "claude_md": 9,
+    # +1: `application/bench/CLAUDE.md` — the check-in rule, out of potter's page because
+    # `checkin` is the bench's node: a reader editing potter stops paying for it, and one editing
+    # the bench, who can add a second decomposition node, starts.
+    "claude_md": 10,
     # SIX by charter (`tests/CLAUDE.md` § What each file is for). This row never rises: a test
     # rides an existing file's existing section, or it is not written.
     "test_files": 6,

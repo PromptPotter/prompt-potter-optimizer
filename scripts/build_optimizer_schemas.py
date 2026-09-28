@@ -1,6 +1,6 @@
 """Regenerate every ``resolved_schemas.json`` beside a manifest under ``promptpotter/assets/`` —
 one per optimizer (``optimizers/{name}/``) and the bench's check-in (``checkin/``) — from
-``promptpotter.application.optimization.dispatch.schemas``. Idempotent.
+``promptpotter.application.optimizers.potter.dispatch.schemas``. Idempotent.
 
 Each file holds the schemas of the nodes its own manifest DECLARES, so a node's schema ships
 beside the manifest that runs it. It reads the manifests' node names and writes nothing else:
@@ -16,10 +16,10 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from promptpotter.application.optimization.dispatch.schemas import (
+from promptpotter.application.bench.task_context import CheckinOutput
+from promptpotter.application.optimizers.potter.dispatch.schemas import (
     OPTIMIZER_RESPONSE_MODELS,
 )
-from promptpotter.application.optimization.task_context import CheckinOutput
 from promptpotter.config.paths import checkin_assets_root, optimizers_root
 from promptpotter.infrastructure.store.io import read_yaml
 

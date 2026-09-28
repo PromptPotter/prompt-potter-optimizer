@@ -11,11 +11,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application import optimizers
+from promptpotter.application.bench.cycle import Cycle
+from promptpotter.application.bench.resume_and_fork.decisions import record_decision
+from promptpotter.application.bench.round_analysis import compute_round_diagnostics
 from promptpotter.application.diagnostics.verify import verify_on_saturation
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.optimization.cycle import Cycle
-from promptpotter.application.optimization.resume_and_fork.decisions import record_decision
-from promptpotter.application.optimization.round_analysis import compute_round_diagnostics
 from promptpotter.application.optimizers.nodes import RoundContext
 from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.application.run_phase_control import declare_run_phase

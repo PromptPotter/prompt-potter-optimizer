@@ -53,10 +53,10 @@ export function permittedModels(
 }
 
 export function agentLabel(agent: string): string {
-  return agent === "l1"
-    ? "the generator, every round"
-    : agent === "l2"
-      ? "escalation, when a round stalls"
+  return agent === "proposer"
+    ? "the optimizer's proposer, every round"
+    : agent === "optimizer"
+      ? "the optimizer itself, mid-run"
       : agent;
 }
 

@@ -8,12 +8,12 @@ import random
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.dispatch.bundle import fence_untrusted
+from promptpotter.application.optimizers.fence import fence_untrusted
 from promptpotter.application.optimizers.paper_templates import fill, task_description
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.domain.opt_search_point import OptSearchPoint
 
 __all__ = ["paradigm_shift_prompt", "refine_prompt"]

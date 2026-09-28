@@ -980,7 +980,7 @@ export interface PipelineViewNode {
 export interface PipelineViewEdge {
   from: string;
   to: string;
-  kind: string;
+  kind: 'forward' | 'loop' | 'directive' | 'alternative';
 }
 
 /** The webapp-facing graph projection, derived from a manifest's nodes and pipelines. */

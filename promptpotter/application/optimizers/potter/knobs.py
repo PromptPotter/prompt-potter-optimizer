@@ -56,12 +56,12 @@ class LivesConfig(StrictModel):
     """Improvement-banked round budget: banks a life each round that improves, loses one each round
     that doesn't, on the SAME ``improved`` verdict. ``max_rounds`` and spend stay the ceilings."""
 
-    start: Annotated[int, Knob(Scope.POLICY, Estimand.ESCALATION, Estimand.SPEND)] = Field(
+    start: Annotated[int, Knob(Scope.POLICY, Estimand.CONTROLLER, Estimand.SPEND)] = Field(
         2,
         ge=1,
         description="Lives a run starts with (a fully-stalling run does exactly this many L1 rounds).",
     )
-    cap: Annotated[int, Knob(Scope.POLICY, Estimand.ESCALATION, Estimand.SPEND)] = Field(
+    cap: Annotated[int, Knob(Scope.POLICY, Estimand.CONTROLLER, Estimand.SPEND)] = Field(
         4,
         ge=1,
         description="Bank ceiling — lives never exceed this no matter how long the improving streak runs.",
@@ -205,17 +205,17 @@ class ThetaElectionKnobs(StrictModel):
 class EscalationKnobs(StrictModel):
     """The controller's: when potter escalates, how far, and when it stops on its own."""
 
-    l1_patience: Annotated[int, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(
+    l1_patience: Annotated[int, Knob(Scope.POLICY, Estimand.CONTROLLER)] = Field(
         ge=0, description="Consecutive non-improving L1 rounds before L2 fires."
     )
-    l2_patience: Annotated[int, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(
+    l2_patience: Annotated[int, Knob(Scope.POLICY, Estimand.CONTROLLER)] = Field(
         ge=0,
         description=(
             "Consecutive non-improving L2 fires before the cycle escalates to L3. "
             "How DEEP the ladder runs is ``escalation_ladder``, never a patience."
         ),
     )
-    l3_patience: Annotated[int | None, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(
+    l3_patience: Annotated[int | None, Knob(Scope.POLICY, Estimand.CONTROLLER)] = Field(
         ge=0,
         description=(
             "Consecutive non-improving L3 fires before the cycle stops on "
@@ -223,7 +223,7 @@ class EscalationKnobs(StrictModel):
             "spend ceilings as the only stops."
         ),
     )
-    escalation_ladder: Annotated[EscalationLadder, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(
+    escalation_ladder: Annotated[EscalationLadder, Knob(Scope.POLICY, Estimand.CONTROLLER)] = Field(
         description=(
             "How far up the L1 → L2 → L3 ladder this campaign may climb — the ablation "
             "switch. ``full`` is the whole ladder. ``l1_l2`` lets L2 re-frame "
@@ -249,7 +249,7 @@ class EscalationKnobs(StrictModel):
             "on potter's own ``improved`` verdict — its selector's."
         ),
     )
-    rebase_capability: Annotated[bool, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(
+    rebase_capability: Annotated[bool, Knob(Scope.POLICY, Estimand.CONTROLLER)] = Field(
         description=(
             "L2/L3 fork_proposal emission. When True, the ``rebase_capability`` "
             "injection renders the rare-escape-hatch instruction into L2 + L3 "
@@ -263,7 +263,7 @@ class EscalationKnobs(StrictModel):
             "(default None) so on-disk audit shape doesn't drift between modes."
         ),
     )
-    terminate_capability: Annotated[bool, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(
+    terminate_capability: Annotated[bool, Knob(Scope.POLICY, Estimand.CONTROLLER)] = Field(
         description=(
             "L2/L3 terminate_proposal emission. When True, the "
             "``terminate_capability`` injection renders the stop-the-cycle "

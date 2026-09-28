@@ -13,10 +13,11 @@ from promptpotter.application.intelligence.earned_blocks import (
     earned_library_for,
 )
 from promptpotter.application.intelligence.sibling_wounds import gather_sibling_runtime_failures
-from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+from promptpotter.application.optimizers.potter.dispatch.layout import default_l1_layout
+from promptpotter.application.optimizers.potter.dispatch.prompts import (
     compute_optimizer_prompt_hashes,
 )
-from promptpotter.application.optimization.escalation.state import EscalationFSM
+from promptpotter.application.optimizers.potter.escalation.state import EscalationFSM
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
 from promptpotter.domain.optimizer_state import (
     POTTER_MANIFEST,
@@ -41,12 +42,16 @@ logger = logging.getLogger(__name__)
 __all__ = ["PotterState", "potter_state"]
 
 
+def _origin_memory() -> L2L3Memory:
+    return L2L3Memory(l1_layout=default_l1_layout())
+
+
 @dataclass
 class PotterState:
     """``memory`` carries across every adoption and is snapshotted onto each round; the FSM's
     counters are rebuilt from the ledger on resume, since no round document banks them."""
 
-    memory: L2L3Memory = field(default_factory=L2L3Memory)
+    memory: L2L3Memory = field(default_factory=_origin_memory)
     escalation: EscalationFSM = field(default_factory=EscalationFSM)
     # Reusable field values that earned credible lift on a run with the SAME answer-space
     # signature, mined once at run init (the walk is cross-campaign). Never the static seed set.
@@ -56,7 +61,7 @@ class PotterState:
     def start(
         cls, session: Session, config: CampaignConfig, origin_results: list[dict[str, Any]]
     ) -> PotterState:
-        memory = L2L3Memory()
+        memory = _origin_memory()
         _inherit_sibling_runtime_failures(memory, session)
         # Silent when no block earned credible lift on a matching shape — the dispatch-first
         # "signal or silence" rule.

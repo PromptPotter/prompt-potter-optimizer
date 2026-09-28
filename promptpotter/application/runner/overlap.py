@@ -20,7 +20,7 @@ from promptpotter.domain.results import (
 from promptpotter.shared.instrument import MeasuredCandidate, MeasurementRole
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement

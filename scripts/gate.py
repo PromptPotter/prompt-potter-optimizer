@@ -171,18 +171,10 @@ _LAYERING_ALLOW = re.compile(r"presentation\.terminal\.live\.display import Live
 
 
 # The bench reaches an optimizer only through the registry (`application/optimizers/__init__.py`)
-# and the contract it checks (`optimizers/nodes.py`); these are potter's modules, the subpackages
-# of `optimization/` that are potter's included.
-_IMPORTS_POTTER = re.compile(
-    r"(?:from|import) promptpotter\.application\."
-    r"(?:optimizers\.potter|optimization\.(?:escalation|l1|pobb|dispatch|validators))\b"
-)
-# Besides the optimizers and the not-yet-split `optimization/`: the ledger, which prices every
-# optimizer's declared surface, and the live readout's cut lines, which name PoBB's own gates.
-_MAY_IMPORT_POTTER = re.compile(
-    r"^promptpotter/(?:application/(?:optimization|optimizers)/|complexity_ledger\.py$"
-    r"|presentation/terminal/live/candidate\.py$)"
-)
+# and the contract it checks (`optimizers/nodes.py`).
+_IMPORTS_POTTER = re.compile(r"(?:from|import) promptpotter\.application\.optimizers\.potter\b")
+# Besides the optimizers: the ledger, which prices every optimizer's declared surface.
+_MAY_IMPORT_POTTER = re.compile(r"^promptpotter/(?:application/optimizers/|complexity_ledger\.py$)")
 
 
 def _layering(_: Sel) -> Outcome:

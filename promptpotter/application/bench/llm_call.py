@@ -1,0 +1,458 @@
+"""The optimizer LLM call itself. ``llm_call`` is the chokepoint every optimizer prompt call goes
+through for the wall-clock deadline, the heartbeat, the ledger and the cache; the client admits,
+retries and meters each send."""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import logging
+import time
+import uuid
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
+
+from pydantic import BaseModel, ConfigDict
+
+from promptpotter.application.optimizer_manifest import (
+    get_optimizer_config_overrides,
+    llm_node_config,
+    resolve_node_override,
+)
+from promptpotter.config.settings import OPTIMIZER_CALL_DEADLINE_S
+from promptpotter.domain.opt_search_point import PromptTemplate
+from promptpotter.domain.run_records import (
+    LLMCallRecord,
+    LLMCallStartRecord,
+)
+from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.llm.base import LLMClientBase
+from promptpotter.infrastructure.llm.heartbeat import heartbeat, waiting_on
+from promptpotter.infrastructure.llm.json_parse import (
+    OptimizerPromptParseError,
+    extract_parsed_json,
+)
+from promptpotter.infrastructure.llm.rate_limit import throttle_stall_given_to
+from promptpotter.infrastructure.llm.registry import get_llm_client
+from promptpotter.infrastructure.llm.response import LLMResponse
+from promptpotter.infrastructure.llm.spend_book import CallLabel
+from promptpotter.infrastructure.llm.telemetry import emit_token_usage
+from promptpotter.infrastructure.store.stores import LLMReuseCache, hash_call
+from promptpotter.shared.hashing import shapes_optimizer_prompt
+
+if TYPE_CHECKING:
+    from promptpotter.infrastructure.ledger import CycleEventLog
+
+logger = logging.getLogger(__name__)
+
+__all__ = ["LLMCallContext", "OptimizerResponseModel", "llm_call", "run_optimizer_node"]
+
+
+@shapes_optimizer_prompt
+def _drop_class_description(schema: dict[str, Any], _model: type[BaseModel]) -> None:
+    """Strip the class docstring Pydantic hoists into a model's JSON-Schema ``description``."""
+    schema.pop("description", None)
+
+
+@shapes_optimizer_prompt
+class OptimizerResponseModel(StrictModel):
+    """Base for every model whose JSON Schema goes on the wire; class descriptions are dropped. Config is inherited and
+    MERGED, so nested models are covered without restating ``extra="forbid"``."""
+
+    model_config = ConfigDict(json_schema_extra=_drop_class_description)
+
+
+@dataclass(frozen=True)
+class LLMCallContext:
+    """Audit + cache context for one optimizer LLM call — the kwargs that always travel
+    together. ``cache`` is consulted only when non-``None``, so omitting it silently re-spends."""
+
+    ledger: CycleEventLog | None = None
+    round_num: int | None = None
+    candidate_idx: int | None = None
+    cache: LLMReuseCache | None = None
+    # `DispatchHub.fill`'s third return value, measured — the composition behind `prompt_chars`.
+    # It rides the context rather than `trace_meta` because it belongs on the START record: the
+    # over-budget warning fires there, and a breakdown that lands only after the call cannot
+    # explain the warning the operator is reading.
+    injection_chars: dict[str, int] = field(default_factory=dict)
+    # The other half of that breakdown, and the half `injection_chars` can never carry: what the
+    # ceiling REFUSED (per panel, in sections) and which layout panels produced nothing at all.
+    # A panel reading 300 chars says nothing about whether that was all it had; a panel absent
+    # from the breakdown reads identically to one nobody put in the layout.
+    injection_dropped: dict[str, int] = field(default_factory=dict)
+    injection_silent: tuple[str, ...] = ()
+
+
+_LLM_DEFAULTS: dict[str, Any] = {"temperature": 0.0}
+
+
+# One logical call may climb the parse ladder inside `chat()` — a schema repair, then a clean re-ask
+# (`openai_compat.py`), each a whole round trip. `OPTIMIZER_CALL_DEADLINE_S` is the per-round-trip
+# ceiling, so the logical-call wall must budget all three or a healthy-but-slow reasoning model that
+# needs the ladder false-halts with no round trip having hung.
+_MAX_ROUND_TRIPS_PER_CALL = 3
+
+# Cap on the thinking channel before it rides the ledger: a reasoning model can emit tens of KB
+# per call into every round file. Head AND tail — the head states the approach, the tail the
+# decision that explains what the call emitted. ANALYTICAL ONLY — see
+# ``LLMResponse.reasoning``: nothing may branch on this value.
+_REASONING_LEDGER_CAP = 4000
+
+
+def _ledger_reasoning(text: str) -> str:
+    if len(text) <= _REASONING_LEDGER_CAP:
+        return text
+    half = _REASONING_LEDGER_CAP // 2
+    return f"{text[:half]}\n[… {len(text) - 2 * half} chars …]\n{text[-half:]}"
+
+
+async def _chat_under_deadline(
+    llm_client: LLMClientBase,
+    *,
+    node_label: str,
+    **chat_kwargs: Any,
+) -> LLMResponse:
+    """The provider SDK's ``timeout`` is a per-read-gap bound, so a slowly streaming reasoning model
+    never trips it; this is the wall clock. A call past it is not sent again — the provider may
+    still be generating the first, and its admission is charged in full — so the run halts on it.
+
+    It bounds the provider WORKING: time the call is held — by a throttle's backpressure, the
+    shared rate limiter, a 5xx backoff — is given back, as a cell's envelope does. Counted, a
+    throttled provider halted the run here within minutes, as a deadline, before its own refusal
+    could stop it for what it was."""
+    budget_s = OPTIMIZER_CALL_DEADLINE_S * _MAX_ROUND_TRIPS_PER_CALL
+    try:
+        async with asyncio.timeout(budget_s) as deadline:
+
+            def give_back(seconds: float) -> None:
+                when = deadline.when()
+                if when is None:
+                    return
+                with contextlib.suppress(RuntimeError):  # already expiring: nothing to extend
+                    deadline.reschedule(when + seconds)
+
+            with throttle_stall_given_to(give_back):
+                return await llm_client.chat(**chat_kwargs)
+    except TimeoutError:
+        logger.error(
+            "optimizer call %s exceeded the %.0fs deadline — halting", node_label, budget_s
+        )
+        raise
+
+
+def _replay(cache: LLMReuseCache, key: str, *, label: str) -> LLMResponse | None:
+    """The stored response for *key*, or ``None`` for anything that is not one — a miss, an
+    unreadable file and an entry an older build wrote are ONE answer, because the caller re-samples
+    on all three.
+
+    The same rule the grader's replay follows (``judges/call.py::_replay``). This sits inside the
+    chokepoint every optimizer call passes mid-round, and a cache exists to make a call cheaper —
+    nothing in it may ever cost a run."""
+    try:
+        payload = cache.load(key)
+        if payload is None:
+            return None
+        return LLMResponse.model_validate(payload)
+    except Exception as exc:
+        logger.warning("optimizer_reuse entry for %s unusable, re-sampling — %s", label, exc)
+        return None
+
+
+def _ledger_response_payload(response: LLMResponse) -> Any:
+    """Materialize ``response.parsed`` into a JSON-safe shape for the ledger — typed instances dump,
+    raw dicts pass through, and a text-mode call falls back to the raw content string."""
+    if response.parsed is None:
+        return response.content
+    if isinstance(response.parsed, BaseModel):
+        return response.parsed.model_dump()
+    return response.parsed
+
+
+async def llm_call(
+    messages: list[dict[str, str]],
+    *,
+    node: str | None = None,
+    config: dict[str, Any] | None = None,
+    trace_meta: dict[str, Any] | None = None,
+    response_model: type[BaseModel] | None = None,
+    response_schema: dict[str, Any] | None = None,
+    context: LLMCallContext | None = None,
+    **overrides: Any,
+) -> LLMResponse:
+    """LLM call with config-driven defaults; precedence ``_LLM_DEFAULTS < config < overrides``, and
+    ``provider``/``model`` resolve from the node's config, so the client is built here, not passed."""
+    if context is None:
+        context = LLMCallContext()
+    label = node or "llm_call"
+    if config is None:
+        config = llm_node_config(node) if node else {}
+    merged = {**_LLM_DEFAULTS, **config, **overrides}
+    # The outer L4 cycle evolving the inner OPTIMIZER's model as a searchpoint: ONE model the
+    # outer carrier node set, fanned onto every inner node. Beats the node's file config, stays
+    # UNDER the determinism clamp below, which pins no model. `hash_call` already keys on
+    # `merged["model"]`, so the swap gets its own cache key for free.
+    if node and (specimen := resolve_node_override(node)).model:
+        merged["model"] = specimen.model
+        if specimen.provider:
+            merged["provider"] = specimen.provider
+    # The campaign's determinism clamp, applied LAST so it beats both the node's file config and
+    # any per-call override — notably `l1_generate`'s `temperature=creativity`, the dominant
+    # run-to-run noise source. Before `route_kwargs` and `hash_call`: a pinned route must reach
+    # the wire AND key the reply it banks.
+    if config_overrides := get_optimizer_config_overrides():
+        merged = {**merged, **config_overrides}
+    llm_client = get_llm_client(merged["provider"])
+    # Passed ONLY when set. A client with no routing concept (Anthropic) takes an unknown named
+    # arg into `**kwargs`, and a key it cannot use is a key it may forward to its own SDK — so the
+    # absence has to be an absent argument, not a `None` one.
+    route_kwargs: dict[str, Any] = {"route_order": ro} if (ro := merged.get("route_order")) else {}
+
+    cache_key: str | None = None
+    replayed: LLMResponse | None = None
+    if context.cache is not None:
+        cache_key = hash_call(
+            messages=messages,
+            model=merged.get("model"),
+            provider=merged["provider"],
+            temperature=merged["temperature"],
+            json_schema=response_schema,
+            response_model=response_model.__name__ if response_model else None,
+            seed=merged.get("seed"),
+            max_tokens=merged.get("max_tokens"),
+            reasoning_effort=merged.get("reasoning_effort"),
+            top_p=merged.get("top_p"),
+            route_order=merged.get("route_order"),
+        )
+        replayed = _replay(context.cache, cache_key, label=label)
+
+    _t0 = time.monotonic()
+
+    # Pairs the LLMCallStartRecord — appended BEFORE the SDK call, so `in_flight` is readable
+    # mid-call — with the eventual LLMCallRecord. Empty when no ledger is bound.
+    call_id = uuid.uuid4().hex if context.ledger is not None else ""
+
+    if replayed is not None:
+        response = replayed
+        # ``parsed`` is typed ``Any``, so `model_validate` leaves the saved dict a dict.
+        # Re-validate against the known model so consumers keep attribute access.
+        if response_model is not None and isinstance(response.parsed, dict):
+            response.parsed = response_model.model_validate(response.parsed)
+        duration_s = round(time.monotonic() - _t0, 2)
+        logger.debug("optimizer_reuse hit for %s (%s)", label, cache_key)
+    else:
+        prompt_chars = sum(len(m.get("content") or "") for m in messages)
+        start_record = LLMCallStartRecord(
+            call_id=call_id,
+            node=label,
+            round=context.round_num,
+            candidate_idx=context.candidate_idx,
+            model=merged.get("model"),
+            started_at_ms=int(time.time() * 1000),
+            prompt_chars=prompt_chars,
+            injection_chars=dict(context.injection_chars),
+            injection_dropped=dict(context.injection_dropped),
+            injection_silent=list(context.injection_silent),
+        )
+        if context.ledger is not None:
+            context.ledger.append(start_record)
+        # The alarm is a REFUSED panel, never the prompt's size: a node's mandatory floor is
+        # admitted whatever it costs (`dispatch/compose.py::select`), so size is a fact about the
+        # task while a refusal is a node reasoning as though it had nothing to report.
+        no_room = start_record.refused_panels
+        log = logger.warning if no_room else logger.info
+        # The heaviest three are printed only on the warning path, so a healthy call stays one line.
+        heaviest = (
+            " · heaviest: "
+            + ", ".join(
+                f"{name} {chars:,}c"
+                for name, chars in sorted(context.injection_chars.items(), key=lambda kv: -kv[1])[
+                    :3
+                ]
+            )
+            if no_room and context.injection_chars
+            else ""
+        )
+        # Never one line for both: a panel refused WHOLE is absent; a thinned one showed less and
+        # says so, which is the normal, healthy way a budget reports what it cost.
+        by_size = sorted(context.injection_dropped.items(), key=lambda kv: -kv[1])
+        thinned = [f"{n} -{c}" for n, c in by_size if n not in no_room][:3]
+        # `refused_panels` sorts by NAME, so truncating it reports the alphabet rather than the
+        # loss. Re-ranked here, and the remainder counted, so a cut list reads as cut.
+        worst = sorted(no_room, key=lambda n: -context.injection_dropped.get(n, 0))
+        more = f" (+{len(worst) - 4} more)" if len(worst) > 4 else ""
+        dropped = (" · NO ROOM: " + ", ".join(worst[:4]) + more if worst else "") + (
+            " · thinned: " + ", ".join(thinned) if thinned else ""
+        )
+        log(
+            "→ optimizer call: %s · %s · %d-char prompt%s%s",
+            label,
+            merged["model"],
+            prompt_chars,
+            heaviest,
+            dropped,
+        )
+        # Keeps a live elapsed counter on both surfaces while the SDK call blocks for minutes.
+        # Cancelled on every path by the `finally` below.
+        # Created unconditionally: the tick is optional, `on_suspend` and the wall it guards are
+        # not, and a ledger-less call can now be given time back without bound. A guard here is how
+        # a telemetry sink comes to disarm a deadline that has nothing to do with telemetry.
+        heartbeat_task: asyncio.Task[None] = asyncio.create_task(
+            heartbeat(
+                context.ledger,
+                call_id=call_id,
+                node=label,
+                round_num=context.round_num,
+                start_monotonic=_t0,
+                # WHO the wait belongs to. A bare tick proves the process is alive and says
+                # nothing about why it is quiet, so a slow provider read as a stalled loop on
+                # every surface — an operator called a healthy 4-minute call a hang, which is the
+                # whole reason this argument exists. The model is knowable only here.
+                detail_fn=lambda: waiting_on(llm_client, merged.get("model"), role="provider"),
+            )
+        )
+        # Metered at the send, attempt by attempt (`LLMClientBase._admitted_send`) — a call that
+        # failed to parse was billed like one that parsed, and is already on the ledger.
+        try:
+            response = await _chat_under_deadline(
+                llm_client,
+                node_label=label,
+                messages=messages,
+                model=merged.get("model"),
+                label=CallLabel(label, "optimizer"),
+                temperature=merged["temperature"],
+                max_tokens=merged.get("max_tokens"),
+                response_model=response_model,
+                response_schema=response_schema,
+                reasoning_effort=merged.get("reasoning_effort"),
+                top_p=merged.get("top_p"),
+                seed=merged.get("seed"),
+                **route_kwargs,
+            )
+        except OptimizerPromptParseError as parse_err:
+            logger.error(
+                "%s: optimizer call failed to parse — %s",
+                label,
+                parse_err.diagnosis(),
+            )
+            raise
+        finally:
+            # Whether the call succeeded or raised — an in-flight task would otherwise survive
+            # the function exit and keep appending against a closed call.
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                # The cancel is expected; anything else is a real fault (a failed ledger
+                # append) that would otherwise vanish on this teardown path.
+                logger.warning(
+                    "heartbeat task for %s raised on teardown",
+                    label,
+                    exc_info=True,
+                )
+
+        duration_s = round(time.monotonic() - _t0, 2)
+
+    # A cache hit is metered too, flagged — it spends nothing, but the search still MADE the call,
+    # so incurred cost stays invariant to our cache history and the always-warmest L4 origin arm
+    # does not read as free. A fresh call was metered at its send, before anything here can fail.
+    if replayed is not None:
+        emit_token_usage(
+            node=label,
+            kind="optimizer",
+            usage=response.usage,
+            provider=merged["provider"],
+            served_by=response.served_by,
+            duration_s=duration_s,
+            model=response.model,
+            cost_usd=response.cost_usd,
+            cached=True,
+        )
+
+    # Never cache a response carrying no payload. Empty content is a TRANSIENT provider
+    # failure, and storing it makes it PERMANENT: the key is the prompt hash, so every later
+    # call replays the emptiness and the caller sees a zero-candidate round forever. The cache
+    # is tenant-global, so this outlives the run that hit it.
+    usable = bool(response.content.strip()) or response.parsed is not None
+    if replayed is None and context.cache is not None and cache_key is not None and usable:
+        context.cache.save(cache_key, response.model_dump())
+
+    if context.ledger is not None:
+        payload: dict[str, Any] = {
+            "type": label,
+            "config": {
+                "model": merged.get("model"),
+                "temperature": merged["temperature"],
+                "max_tokens": merged.get("max_tokens"),
+            },
+            "response": _ledger_response_payload(response),
+            "usage": response.usage.model_dump(),
+            "model": response.model,
+            "duration_s": duration_s,
+            # Non-zero ⇒ the JSON only landed after an extra round-trip — the audit trail's
+            # read on prompt parse quality, rolled up per cycle in ``review.md``.
+            "schema_repair_errors": response.schema_repair_errors,
+        }
+        # EVIDENCE FOR A HUMAN, never an input to the loop: nothing downstream reads this key
+        # and nothing may start. Omitted when empty so a non-reasoning model's block stays clean.
+        if response.reasoning:
+            payload["reasoning"] = _ledger_reasoning(response.reasoning)
+        if replayed is not None:
+            payload["cached"] = True
+        if trace_meta:
+            payload.update(trace_meta)
+        else:
+            payload["messages"] = messages
+        context.ledger.append(
+            LLMCallRecord(
+                node=label,
+                round=context.round_num,
+                candidate_idx=context.candidate_idx,
+                call_id=call_id,
+                payload=payload,
+            )
+        )
+
+    return response
+
+
+async def run_optimizer_node(
+    *,
+    template_name: str,
+    template: PromptTemplate,
+    prompt_vars: dict[str, Any],
+    response_model: type[BaseModel] | None,
+    temperature: float | None = None,
+    response_schema: dict[str, Any] | None = None,
+    user_content: str | None = None,
+    context: LLMCallContext | None = None,
+) -> tuple[Any, str, int]:
+    """Compile, call → ``(parsed, prompt_text, repair_attempts)``. A non-zero third element means a
+    full schema-repair round-trip was paid — roughly twice the cost."""
+    prompt = template.compile_prompt(**prompt_vars)
+    if user_content is not None:
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": user_content},
+        ]
+    else:
+        messages = [{"role": "user", "content": prompt}]
+    overrides: dict[str, Any] = {}
+    if temperature is not None:
+        overrides["temperature"] = temperature
+    response = await llm_call(
+        messages=messages,
+        node=template_name,
+        response_model=response_model,
+        response_schema=response_schema,
+        context=context,
+        trace_meta={
+            "template_name": template_name,
+            "template_fields": template.prompt_fields(),
+            "variables": prompt_vars,
+        },
+        **overrides,
+    )
+    return extract_parsed_json(response), prompt, len(response.schema_repair_errors)

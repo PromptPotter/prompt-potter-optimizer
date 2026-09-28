@@ -46,7 +46,6 @@ from promptpotter.domain.l4.proxies import (
     parent_level_series,
 )
 from promptpotter.domain.launch_limits import LaunchLimits
-from promptpotter.domain.optimizer_state import PotterRoundState
 from promptpotter.domain.phases import REFUSAL_STOPS, RunPhase, StopReason
 from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.results import ArmOutcome, candidate_label, invariant_collapses
@@ -170,16 +169,11 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
         f"INNER {spec.inner_dataset} seed-{spec.seed}: origin {origin:+.2f}"
         f" -> mean-over-rounds D{mean - origin:+.3f} (the scored lift)"
         f", ended {levels[-1]:+.2f} (D{levels[-1] - origin:+.3f}), peak {max(levels):+.2f}"
-        f" over {result.n_l1_rounds} of {len(series)} rounds; stop={result.stop_reason}.",
+        f" over {result.n_rounds_after_origin} of {len(series)} rounds; stop={result.stop_reason}.",
         _lift_shape(result),
     ]
     by_round = {rnd.round: rnd for rnd in result.rounds}
-    # Only potter's rounds carry a critique; an inner cycle on another optimizer narrates none.
-    critiques = {
-        r: payload.critique
-        for r, rnd in by_round.items()
-        if isinstance(payload := rnd.optimizer_state.payload, PotterRoundState)
-    }
+    critiques = {r: rnd.optimizer_state.payload.feedback() for r, rnd in by_round.items()}
     highlight = next(
         (
             h

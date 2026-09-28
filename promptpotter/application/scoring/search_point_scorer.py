@@ -223,12 +223,12 @@ def _resolve_prior_cache(
     return cached_sample_results, deprecated_samples, dataset_sample_ids
 
 
-def _resolve_partial_escalation(batch: QueryLoopResult) -> StopSignal | None:
-    """The escalation signal a decided walk carries. A skip is the operator's early-abort of THIS
-    search point: its partial is on disk and scores like a PoBB cut, with no signal. Any other
-    unsignalled stop is a scoring-error abort (consecutive 5xx, client 4xx, pipeline ERROR), made a
-    candidate-scoped escalation so the caller can attach a RuntimeFailure and go on — never killing
-    the round."""
+def _walk_stop_signal(batch: QueryLoopResult) -> StopSignal | None:
+    """The stop signal a decided walk carries. A skip is the operator's early-abort of THIS
+    search point: its partial is on disk and scores like an eliminator's cut, with no signal. Any
+    other unsignalled stop is a scoring-error abort (consecutive 5xx, client 4xx, pipeline ERROR),
+    made a candidate-scoped signal so the caller can attach a RuntimeFailure and go on — never
+    killing the round."""
     if batch.completed or batch.stop_signal is not None or batch.stop_reason == "skip":
         return batch.stop_signal
     return _build_scoring_error_signal(results=batch.results, stop_reason=batch.stop_reason or "")
@@ -477,6 +477,4 @@ def close_walk(walk: Walk) -> ScoredWalk:
         scores["partial_reason"] = "skip"
     walk.ctx.record_run(results, scores)
     stopped = None if len(results) == walk.n else outcome.stop_reason
-    return ScoredWalk(
-        results, scores, _resolve_partial_escalation(outcome), stopped, walk.ctx.run_id
-    )
+    return ScoredWalk(results, scores, _walk_stop_signal(outcome), stopped, walk.ctx.run_id)

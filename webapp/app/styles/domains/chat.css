@@ -133,12 +133,12 @@
 }
 .wf-hero-multi-svg .edge{stroke:var(--color-accent);stroke-opacity:.55;stroke-width:1.5;fill:none;filter:drop-shadow(0 0 3px var(--color-accent-glow))}
 .wf-hero-multi-svg .edge.kind-loop{stroke:var(--color-success);stroke-dasharray:5 3}
-.wf-hero-multi-svg .edge.kind-escalate{stroke:var(--color-accent-strong);stroke-dasharray:2 3}
+.wf-hero-multi-svg .edge.kind-alternative{stroke:var(--color-accent-strong);stroke-dasharray:2 3}
 .wf-hero-multi-svg .edge.kind-directive{stroke:var(--color-accent);stroke-dasharray:4 3}
 .wf-hero-multi-svg .edge.muted{stroke-opacity:.22}
 .wf-hero-multi-svg .wf-arrow{fill:var(--color-accent);fill-opacity:.55}
 .wf-hero-multi-svg .wf-arrow.kind-loop{fill:var(--color-success)}
-.wf-hero-multi-svg .wf-arrow.kind-escalate{fill:var(--color-accent-strong)}
+.wf-hero-multi-svg .wf-arrow.kind-alternative{fill:var(--color-accent-strong)}
 .wf-hero-multi-svg .wf-arrow.kind-directive{fill:var(--color-accent)}
 .wf-hero-multi-node{cursor:pointer;outline:none}
 .wf-hero-multi-node:focus-visible .node{filter:drop-shadow(0 0 6px var(--color-accent-glow))}

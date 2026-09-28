@@ -4,9 +4,11 @@ document carries ``status='generation_only'``, the word every reader of it alrea
 
 from __future__ import annotations
 
+from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.optimization.cycle import Cycle
-from promptpotter.application.optimization.l1.candidate_source import generate_or_load_candidates
+from promptpotter.application.optimizers.potter.l1.candidate_source import (
+    generate_or_load_candidates,
+)
 from promptpotter.application.optimizers.potter.state import PotterState
 from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.application.runner.output import (

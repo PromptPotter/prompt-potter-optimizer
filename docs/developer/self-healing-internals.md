@@ -51,7 +51,7 @@ The measurement (`scoring/candidate_report.py::read_breakage`) synthesises `Runt
 
 ## Wound 3 — what L3 reads and writes
 
-L3 fires when `state.escalation.l2_stall_count >= opt.l2_patience`, subject to its own `l3_patience`. What its prompt reads is its layout, `domain/l1_layout.py::NODE_LAYOUTS["l3_plan"]` — read the membership there; what it writes is `dispatch/schemas.py::L3PlanOutput` (`plan`, `note` → `wounds.l3_note`, `rationale`, `fork_proposal`, `terminate_proposal`). The new `plan` feeds every node whose layout places it, L1 and the next L2 fire included. The only wound with cross-layer authority — L3 changes the strategy L2 and L1 work within.
+L3 fires when `state.escalation.l2_stall_count >= opt.l2_patience`, subject to its own `l3_patience`. What its prompt reads is its layout, `dispatch/layout.py::NODE_LAYOUTS["l3_plan"]` — read the membership there; what it writes is `dispatch/schemas.py::L3PlanOutput` (`plan`, `note` → `wounds.l3_note`, `rationale`, `fork_proposal`, `terminate_proposal`). The new `plan` feeds every node whose layout places it, L1 and the next L2 fire included. The only wound with cross-layer authority — L3 changes the strategy L2 and L1 work within.
 
 ## Wound 4 — immediate, never patient
 
@@ -105,6 +105,6 @@ Pick the storage stream by detector + score-effect; the owner falls out of the r
 - New gen-time check on L1's output → **Wound 1**. Add a validator next to `L1_SCHEMA_COMPLIANCE`.
 - New runtime measurement pointing at a candidate config region → **Wound 2**. Add a check that emits `RuntimeFailure` from `scoring/candidate_report.py::read_breakage`; stamp `owner=NurseOwner.L1` when L1 can retune it, `owner=NurseOwner.OPERATOR` when only the operator can.
 - New strategic-stall trigger → **Wound 3** isn't a registry; it's the patience timer.
-- New post-parse check on L2/L3's output → **Wound 4**. L3's side has a registry (`L3_OUTPUT_VALIDATORS`, `validators/l3_output.py`); L2's is the layout check itself (`domain/l1_layout.py::validate_l1_layout`) — there is no `L2_OUTPUT_VALIDATORS` to append to, so a new L2 check means extending that validator or standing a registry up.
+- New post-parse check on L2/L3's output → **Wound 4**. L3's side has a registry (`L3_OUTPUT_VALIDATORS`, `validators/l3_output.py`); L2's is the layout check itself (`dispatch/layout.py::validate_l1_layout`) — there is no `L2_OUTPUT_VALIDATORS` to append to, so a new L2 check means extending that validator or standing a registry up.
 
 For each: declare `LLMOutputValidator` with a stable id, write the `check` callable, append to the appropriate registry. Prompt-section render and persistence path are already wired — they iterate the registry, not a hard-coded list. Only add a `NurseOwner` member when a producer actually stamps it (today only `RuntimeFailure` does).

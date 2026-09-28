@@ -50,7 +50,7 @@ The roster is the directory listing; each dataset's connector is read off its ow
 
 `datasets/promptpotter-self/` is the **recursive case**: the outer cycle mutates the inner cycle's optimizer prompt template fields, exposed via `pipeline.yaml::nodes.{node}.optimizer.param_keys` — every node the file DECLARES (`PipelineSchema.config_nodes`), never only the ones a round runs, or an escalation node reached on a stall could never be told to improve. Its `pipelines` block mirrors the optimizer manifest's, so both describe ONE graph and an edit evolved on either layer lifts onto the other.
 
-L4 is **not** a 4th `LayerStrategy` — it is the same PromptPotter applied to itself via the `promptpotter` connector, a recursion, not a new layer driver (full statement: [`../promptpotter/application/optimization/CLAUDE.md`](../promptpotter/application/optimization/CLAUDE.md)).
+L4 is **not** a 4th `LayerStrategy` — it is the same PromptPotter applied to itself via the `promptpotter` connector, a recursion, not a new layer driver (full statement: [`../promptpotter/application/optimizers/potter/CLAUDE.md`](../promptpotter/application/optimizers/potter/CLAUDE.md)).
 
 **The inner instrument is `justlogic-d234`, and a cut switch is never advice.** Each depth cut is a separate `dataset_name` with its own δ scale, so comparing "bands" across cuts reads a difference of rulers as a capability difference. A new cut is a new directory and nothing else — `justlogic_depths` reads the depths off the name — so widening difficulty means adding `justlogic-dNNN/`, never re-cutting this one.
 
@@ -77,7 +77,7 @@ never because of this file.
 
 ## Conventions
 
-- **Origin = conservative floor** — owned by [`../promptpotter/application/optimization/CLAUDE.md`](../promptpotter/application/optimization/CLAUDE.md) § Origin = conservative floor. Every tunable in this directory's overlay starts at its floor.
+- **Origin = conservative floor** — owned by [`../promptpotter/application/optimizers/potter/CLAUDE.md`](../promptpotter/application/optimizers/potter/CLAUDE.md) § Origin = conservative floor. Every tunable in this directory's overlay starts at its floor.
 - **`task_description.md` is L1's framing input** — written for the LLM that will generate candidates, not for human readers (though it should be readable).
 - **`task_context.yaml` is that description DECOMPOSED, and it is optional here.** An ingested dataset gets one at commit from its check-in; a benchmark may ship one. When it is absent, the first mint of a framed campaign decomposes `task_description.md` — one `checkin` call, billed on that run's ledger, at every entry point that mints (`application/jobs/mint.py::mint_framed_cycle`) — and every later mint reads the result; `--task-file` / `--task-text` re-commit from the operator's own text. It lands in `.promptpotter/{tenant}/task-context/{name}.yaml`, **not** back into this directory, which is read-only under a wheel. Same definition-vs-derived split as `cache.json` above, and for the same reason. Resolved tenant-then-install by `readable_task_context`; hand-editing either tier's copy is supported (the run reads whichever wins).
 - **Unframed is a declaration, never an absence.** `campaign_config.task_framing: off` runs with no framing even where one is committed — the ablation arm — and the campaign manifest keeps the delta, so a result never reads as a framed one.

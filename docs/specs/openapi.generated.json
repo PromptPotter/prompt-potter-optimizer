@@ -5268,6 +5268,12 @@
           },
           "kind": {
             "default": "forward",
+            "enum": [
+              "forward",
+              "loop",
+              "directive",
+              "alternative"
+            ],
             "title": "Kind",
             "type": "string"
           },
@@ -5285,7 +5291,7 @@
       },
       "PipelineViewNode": {
         "additionalProperties": false,
-        "description": "One node's place in the flow, as a tier and a rank rather than as pixels.\n\nTier 0 is the chain a sample runs and tier n>0 is a node reached only by escalating n\nlevels; rank is the tier-0 position it acts on. A renderer maps them to rows and\ncolumns.",
+        "description": "One node's place in the flow, as a tier and a rank rather than as pixels.\n\nTier 0 is the chain a sample runs and tier n>0 is a node reached only through the n-th\nnested alternative pipeline; rank is the tier-0 position it acts on. A renderer maps them\nto rows and columns.",
         "properties": {
           "id": {
             "title": "Id",

@@ -14,7 +14,7 @@ from promptpotter.shared.errors import SendRefusedError, is_repairable_hole
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.domain.results import DegradationHealth
     from promptpotter.infrastructure.llm.spend_book import SpendBook
 

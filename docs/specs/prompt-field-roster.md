@@ -20,7 +20,7 @@ The SET is a module constant and the ORDER is a class variable, and a check marr
 **The order is already per-class, and there are already two of them.** `PromptTemplate`'s is the
 TARGET prompt's — `PROMPT_STRING_FIELDS` order, inside the measurement archive's key, so moving it
 re-cuts every banked cell. `OptimizerPromptTemplate` overrides it for the optimizer prompt, ending at
-`l1_layout.py::VOLATILE_SLOT` — why is owned by its own docstring. So the seam this spec asks for
+`dispatch/layout.py::VOLATILE_SLOT` — why is owned by its own docstring. So the seam this spec asks for
 **exists for the order and is load-bearing**; what it does not have is a per-CAMPAIGN value, only a
 per-class one. The set has no seam at all.
 
@@ -43,9 +43,9 @@ Seven readers, and they are not equally hard:
 |---|---|---|
 | `dispatch/l1_wire_schema.py` (~L197) | builds the L1 response JSON Schema — `{field: {"type": "string"}}` for every key | **The expensive one.** The schema is prompt text (`<simplify-the-problem>`), so every added field is paid on every L1 call, every round, forever. |
 | `application/datasets/origin_resolve.py` (~L293) | the check-in decomposition asks the LLM for exactly these keys | roster-driven; same token argument |
-| `optimization/validators/l1_behavior.py`, `l1_invariants.py` | diff parent vs child over the set | mechanical — iterate the roster |
+| `optimizers/potter/validators/l1_behavior.py`, `l1_invariants.py` | diff parent vs child over the set | mechanical — iterate the roster |
 | `opt_search_point.py::mutate`, `prompt_fields`, `prompt_field_dict` | `getattr(self, f)` per field | **structural** — the six are Pydantic *attributes*. A dynamic set means a dict field, and `StrictModel` forbids extras. |
-| `optimization/cycle.py` (~L540) | `setattr(opt_sp, f, …)` per field on resume | structural, with `mutate` |
+| `bench/cycle.py` (~L540) | `setattr(opt_sp, f, …)` per field on resume | structural, with `mutate` |
 | `dispatch/injections/panels.py` (~L252) | `prompt_axes` — which axes a panel may name | mechanical |
 | `webapp/lib/prompt-fields.ts` | the TS half of the seam: LABELS only | **already generated, so nearly free.** The SET is emitted by `build_ts_types.py::_emit_prompt_string_fields` and re-exported from `types.generated.ts`; this file keeps the on-screen labels, which have no Python counterpart. A roster reaches the browser by regeneration, and only the label table needs a home. |
 
@@ -101,7 +101,7 @@ Move the order off the ClassVar and onto the searchpoint, as the target-prompt t
 the optimizer already has for its own prompt:
 
 ```
-domain/l1_layout.py::L1Layout        # exists — L2-authored slot order for the OPTIMIZER prompt
+domain/optimizer_state.py::L1Layout   # exists — L2-authored slot order for the OPTIMIZER prompt
 domain/prompt_layout.py::PromptLayout  # proposed — the same idea for the TARGET prompt
 ```
 

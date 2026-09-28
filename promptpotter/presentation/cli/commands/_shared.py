@@ -11,6 +11,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter import connectors
+from promptpotter.application.bench.resume_and_fork.decisions import (
+    GatingMode,
+    resume_checkpoint_gating,
+)
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.launcher.admission import (
@@ -21,10 +25,6 @@ from promptpotter.application.jobs.launcher.admission import (
     request_launch,
 )
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.optimization.resume_and_fork.decisions import (
-    GatingMode,
-    resume_checkpoint_gating,
-)
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.config.logging import setup_logging

@@ -173,7 +173,7 @@ async def _run(args: argparse.Namespace) -> int:
     else:
         print(
             f"\n[smoke] dataset={args.dataset} "
-            f"rounds={result.n_l1_rounds} "
+            f"rounds={result.n_rounds_after_origin} "
             f"best_acc={result.result_accuracy:.3f} (round {result.result_round}) "
             f"cycle={cycle_id or 'unknown'} "
             f"stop={result.stop_reason} "

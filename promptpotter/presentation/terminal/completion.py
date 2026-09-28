@@ -48,7 +48,7 @@ def render_completion(
         else f"{GREEN}{BOLD}OPTIMIZATION COMPLETE{RESET}"
     )
 
-    headline = f"Rounds       {result.n_l1_rounds:<15d}"
+    headline = f"Rounds       {result.n_rounds_after_origin:<15d}"
     if result.result_accuracy is not None:
         headline += f"Selected     {result.result_accuracy:.1%} (round {result.result_round})"
     fields: list[str] = []

@@ -5,7 +5,6 @@ from typing import Any
 
 from pydantic import ConfigDict, Field
 
-from promptpotter.domain.optimizer_state import L1_PARSE_FAILURE_TOOLING, PotterRoundState
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.results import CycleResult, RoundResult
 from promptpotter.domain.strict_model import StrictModel
@@ -94,7 +93,7 @@ def inner_cell_facts(result: CycleResult, campaign_id: str) -> InnerCellFacts | 
         inner_origin_level=origin,
         inner_final_lift=levels[-1] - origin,
         inner_peak_lift=max(levels) - origin,
-        inner_rounds_ran=result.n_l1_rounds,
+        inner_rounds_ran=result.n_rounds_after_origin,
         inner_round_budget=len(parent_level_series(result)),
         inner_stop_reason=str(result.stop_reason),
         inner_spend_usd=result.spend.total_used_usd if result.spend else None,
@@ -132,13 +131,9 @@ def mean_parent_level_se(result: CycleResult) -> float | None:
 
 
 def _is_evidential(rnd: RoundResult) -> bool:
-    """``L1_PARSE_FAILURE_TOOLING`` means the round lost its candidates to an empty optimizer
-    response — missing data, not a bad mutation. Scoring it dirty grades provider flakiness."""
-    payload = rnd.optimizer_state.payload
-    return not (
-        isinstance(payload, PotterRoundState)
-        and payload.l1_parse_failure == L1_PARSE_FAILURE_TOOLING
-    )
+    """A round that lost its candidates to an empty optimizer response is missing data, not a bad
+    mutation. Scoring it dirty grades provider flakiness."""
+    return not rnd.optimizer_state.payload.lost_to_empty_response()
 
 
 def no_evidence_reason(result: CycleResult) -> str | None:

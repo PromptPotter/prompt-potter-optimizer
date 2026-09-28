@@ -8,13 +8,13 @@ import random
 import re
 from typing import TYPE_CHECKING
 
-from promptpotter.application.optimization.dispatch.llm_call.call import LLMCallContext, llm_call
-from promptpotter.domain.opt_search_point import PromptTemplate
-from promptpotter.domain.optimizer_state import L1_PARSE_FAILURE_MALFORMED
+from promptpotter.application.bench.llm_call import LLMCallContext, llm_call
+from promptpotter.application.optimizer_manifest import running_prompt
+from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED
 from promptpotter.domain.wounds import ValidationFailure
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.optimizers.nodes import RoundContext
 
 __all__ = ["ask", "fill", "marked", "task_description", "unmarked", "walk_rng"]
@@ -39,12 +39,9 @@ def task_description(cycle: Cycle) -> str:
 
 
 def fill(cycle: Cycle, node: str, **values: str) -> str:
-    body = cycle.optimizer.prompt_body(node, base=False)
-    if body is None:
-        raise KeyError(
-            f"optimizer {cycle.optimizer.name!r}: node {node!r} names no resolved prompt"
-        )
-    return PromptTemplate(**body).compile_prompt(**values)
+    selected = cycle.optimizer
+    template = running_prompt(node, selected.node_config(node), selected.document)
+    return template.compile_prompt(**values)
 
 
 async def ask(ctx: RoundContext, node: str, idx: int | None, prompt: str) -> str:
@@ -70,7 +67,7 @@ def marked(text: str) -> str | None:
 
 def unmarked(node: str, raw: str) -> ValidationFailure:
     return ValidationFailure(
-        axis=f"{node}.output", value=raw[:300], allowed=[], reason=L1_PARSE_FAILURE_MALFORMED
+        axis=f"{node}.output", value=raw[:300], allowed=[], reason=PARSE_FAILURE_MALFORMED
     )
 
 

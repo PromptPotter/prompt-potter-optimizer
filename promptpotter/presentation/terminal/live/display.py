@@ -216,7 +216,7 @@ class LiveDisplay(Projection):
         round_tag = f"r{record.round}" if record.round is not None else ""
         node_label = f"{record.node}_{round_tag}" if round_tag else record.node
         # A REFUSED panel, not a big prompt — same alarm the run log raises, for the reason stated
-        # at `dispatch/llm_call/call.py`: a mandatory floor is admitted whatever it costs.
+        # at `bench/llm_call.py`: a mandatory floor is admitted whatever it costs.
         refused = record.refused_panels
         marker = "⚠ " if refused else "↻ "
         bits = [f"{marker}optimizer call: {node_label} · {model}"]

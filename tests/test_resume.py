@@ -16,11 +16,11 @@ from typing import Any
 
 import pytest
 
+from promptpotter.application.bench.resume_and_fork.replayers import replay_decisions
 from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
     restore_measurement_archive,
 )
-from promptpotter.application.optimization.resume_and_fork.replayers import replay_decisions
 from promptpotter.application.scoring.classification import scoreable_rows
 from promptpotter.application.scoring.formula import (
     ScoringFormulaError,
@@ -170,7 +170,7 @@ def test_round_winner_replay_ranks_against_the_recorded_parent() -> None:
 
     # A decision carrying no parent is REFUSED, never answered against a reconstructed one —
     # guessing quietly is the whole defect, so the replayer must raise rather than pick a panel.
-    from promptpotter.application.optimization.resume_and_fork.replayers import ReplayContext
+    from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext
     from promptpotter.application.optimizers.potter.resume import _replay_round_winner
 
     with pytest.raises(ValueError, match="parent_cells"):
@@ -466,7 +466,10 @@ def test_lives_resume_fold_matches_live_observe() -> None:
     ``improved`` sequence (``EscalationFSM.fold``) must equal the live in-run count
     (``observe_round``). A mismatch is silent — a resumed run would grant a different
     round budget than the un-interrupted run, quietly changing how long it optimizes."""
-    from promptpotter.application.optimization.escalation.state import EscalationFSM, NextAction
+    from promptpotter.application.optimizers.potter.escalation.state import (
+        EscalationFSM,
+        NextAction,
+    )
     from promptpotter.application.optimizers.potter.knobs import EscalationLadder, LivesConfig
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.run_records import PhaseRecord
@@ -561,7 +564,7 @@ def test_unresolved_round_stalls_and_replays_as_one() -> None:
     whole budget re-asking a question the panel could not answer, with no error anywhere. If the
     replay disagrees with the live run, a resumed cycle escalates on a different round than the
     one it interrupted, which silently changes what the campaign measured."""
-    from promptpotter.application.optimization.escalation.state import EscalationFSM
+    from promptpotter.application.optimizers.potter.escalation.state import EscalationFSM
     from promptpotter.application.optimizers.potter.knobs import EscalationLadder
     from promptpotter.domain.run_records import PhaseRecord
 
@@ -626,7 +629,7 @@ def test_l2_l3_escalation_state_survives_resume() -> None:
     the resumed run a fresh escalation budget and re-firing layers it had already spent. Silent
     in the resume sense: nothing raises, the counters just read zero.
     """
-    from promptpotter.application.optimization.escalation.state import EscalationFSM
+    from promptpotter.application.optimizers.potter.escalation.state import EscalationFSM
     from promptpotter.application.optimizers.potter.knobs import EscalationLadder
     from promptpotter.application.views.view_models import L2RefineExitView, PlanExitView
     from promptpotter.domain.phases import PotterPhase
@@ -728,7 +731,7 @@ def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) ->
     """
     from types import SimpleNamespace
 
-    from promptpotter.application.optimization.resume_and_fork.decisions import (
+    from promptpotter.application.bench.resume_and_fork.decisions import (
         record_decision,
     )
     from promptpotter.application.run_observers import RunCallbacks
@@ -1105,7 +1108,7 @@ def test_a_fork_inherits_the_decisions_of_the_rounds_it_lifted(built_stores: Sto
     same copy for the same reason. Records at or after the cut are the parent's own future and
     must NOT come along, or the branch replays a decision it never made.
     """
-    from promptpotter.application.optimization.resume_and_fork.decisions import (
+    from promptpotter.application.bench.resume_and_fork.decisions import (
         record_decision,
     )
     from promptpotter.domain.cycle_paths import CycleDir
@@ -1155,10 +1158,10 @@ def test_an_applied_scenario_forks_at_its_round_and_carries_the_criterion(
     bucket in `_apply_config_overrides` — folded into the nested copy beside the run limits it
     would vanish with every gate green.
     """
-    from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
-    from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
+    from promptpotter.application.bench.resume_and_fork.fork_siblings import (
         mint_operator_fork,
     )
+    from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
     from promptpotter.application.runner.entry import _apply_config_overrides
     from promptpotter.domain.run_records import ConfigOverrides
     from promptpotter.shared.errors import PayloadInvalidError
@@ -1342,7 +1345,7 @@ def test_a_halted_cell_is_not_a_hole_a_resume_can_plug() -> None:
     attempt at the same place. Counted as a hole, every resume branches the cycle, re-buys the cell
     at full price and lands the identical row, so the fork and the spend repeat without bound.
     """
-    from promptpotter.application.optimization.resume_and_fork.repair import repair_cut
+    from promptpotter.application.bench.resume_and_fork.repair import repair_cut
     from promptpotter.shared.errors import ErrorCategory
     from tests.factories import measurement, round_result
 

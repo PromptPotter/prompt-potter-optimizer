@@ -169,7 +169,7 @@ Productive patterns:
 
 **NOT debt — skip on sight:** intentional UI placeholders (each names itself in its own component
 header); per-injection `char_cap`; domain vocabulary policed elsewhere (`origin` not `baseline`);
-the `application/intelligence/ ↮ application/optimization/` layer split; ABC `@abstractmethod` /
+the `application/intelligence/ ↮ application/bench/` layer split; ABC `@abstractmethod` /
 `Protocol` `...` bodies; `from __future__ import annotations`; boundary guards at external-input
 sites (file I/O, JSON ingest); validators on `extra='forbid'` user-config models; `_*` private
 helpers used by one caller **in the same file**.

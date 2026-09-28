@@ -9,8 +9,8 @@ import json
 import sys
 from pathlib import Path
 
+from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.campaign_config import load_campaign_config
-from promptpotter.application.optimization.task_context import campaign_framing
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.runner.review_md import render_review_md
 from promptpotter.domain.results import RoundResult

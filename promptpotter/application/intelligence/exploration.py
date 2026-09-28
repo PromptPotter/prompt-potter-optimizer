@@ -821,7 +821,7 @@ def select_round_subset(
 
     Never ``fit_rasch`` here: a fresh re-anchoring per round makes the δ that CHOOSES the samples
     a different scale from the δ that SCORES them. The L1 panel is already forbidden that
-    (``optimization/CLAUDE.md``); selection is bound by the same rule.
+    (``optimizers/potter/CLAUDE.md``); selection is bound by the same rule.
 
     Cold ruler ⇒ the deterministic bank prefix, unchanged: a δ fit needs at least TWO arms or
     selecting on it is a difficulty ratchet, and freezing the subset is what lets the ruler warm.

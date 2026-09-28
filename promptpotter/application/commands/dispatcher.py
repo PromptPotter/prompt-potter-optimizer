@@ -13,6 +13,10 @@ from typing import Any, Literal, assert_never
 
 from pydantic import ConfigDict, ValidationError
 
+from promptpotter.application.bench.resume_and_fork.fork_siblings import (
+    cleanup_stub_fork_if_empty,
+    mint_operator_fork,
+)
 from promptpotter.application.commands.payloads import (
     KIND_OF_PAYLOAD,
     ArchiveCampaignPayload,
@@ -65,10 +69,6 @@ from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
     purge_cold_store,
     restore_measurement_archive,
-)
-from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
-    cleanup_stub_fork_if_empty,
-    mint_operator_fork,
 )
 from promptpotter.application.runner.origin_gate import GateDecision, submit_gate_decision
 from promptpotter.domain.backend import BackendConnection

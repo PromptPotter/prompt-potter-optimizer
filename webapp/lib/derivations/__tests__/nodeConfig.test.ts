@@ -155,7 +155,7 @@ const schema: Record<string, NodeConfigParam[]> = {
       options: ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
       description: "",
       never_axis: "",
-      movable_by: ["l1"],
+      movable_by: ["proposer"],
       held: false,
       source: "dataset",
       permitted: null,
@@ -167,7 +167,7 @@ const schema: Record<string, NodeConfigParam[]> = {
       options: ["low", "medium", "high"],
       description: "",
       never_axis: "",
-      movable_by: ["l1"],
+      movable_by: ["proposer"],
       held: false,
       source: "dataset",
       permitted: null,
@@ -179,7 +179,7 @@ const schema: Record<string, NodeConfigParam[]> = {
       options: [],
       description: "",
       never_axis: "",
-      movable_by: ["l1"],
+      movable_by: ["proposer"],
       held: false,
       source: "dataset",
       permitted: null,
@@ -191,7 +191,7 @@ const schema: Record<string, NodeConfigParam[]> = {
       options: [],
       description: "",
       never_axis: "",
-      movable_by: ["l1"],
+      movable_by: ["proposer"],
       held: false,
       source: "dataset",
       permitted: null,
@@ -218,7 +218,7 @@ describe("configRows (search-space mode)", () => {
   it("takes lock, value and permitted set from the SERVED row, ignoring the overlay", () => {
     const served = {
       n: [
-        param({ key: "temperature", value: 0.4, movable_by: ["l1"] }),
+        param({ key: "temperature", value: 0.4, movable_by: ["proposer"] }),
         param({ key: "max_tokens", value: 900 }),
       ],
     };
@@ -300,7 +300,7 @@ describe("configRows (values mode)", () => {
       options: [],
       description: "",
       never_axis: "",
-      movable_by: ["l1"],
+      movable_by: ["proposer"],
       held: false,
       source: "dataset",
       permitted: null,
@@ -308,7 +308,7 @@ describe("configRows (values mode)", () => {
     const withNested = { llm_only: [...schema.llm_only!, nested] };
     const rows = configRows(withNested, {}, "values");
     const drawn = rows.find((r) => r.key === "layout")!;
-    expect(drawn.movableBy).toEqual(["l1"]);
+    expect(drawn.movableBy).toEqual(["proposer"]);
     expect(JSON.parse(drawn.value)).toEqual({ instruction: ["plan"] });
     expect(seedOverlayFromRows(rows, {})).toEqual({});
     const edited = seedOverlayFromRows(rows, { "llm_only.layout": '{"instruction":["critique"]}' });
@@ -366,7 +366,7 @@ describe("configRows (values mode)", () => {
       options: [],
       description: "",
       never_axis: "",
-      movable_by: open ? ["l1"] : [],
+      movable_by: open ? ["proposer"] : [],
       held: !open,
       source: "dataset",
       permitted: null,

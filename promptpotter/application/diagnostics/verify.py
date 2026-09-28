@@ -11,13 +11,13 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
+from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.initialization.loop_start import (
     arm_diagnostic_scoring,
     diagnostic_pass,
     diagnostic_trace,
 )
 from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.optimization.task_context import campaign_framing
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.pipeline_resolve import (
     merge_pipeline_params,

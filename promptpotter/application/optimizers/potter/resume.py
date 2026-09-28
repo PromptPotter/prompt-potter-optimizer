@@ -1,6 +1,6 @@
 """Potter's half of resume and fork: how each of its decision kinds is gated and re-derived, what
 its nodes were handed per round, and re-distilling the critique a repair left stale. The generic
-half — replay, repair, fork — is ``optimization/resume_and_fork/``, which reaches this only
+half — replay, repair, fork — is ``bench/resume_and_fork/``, which reaches this only
 through ``OptimizerRuntime``."""
 
 from __future__ import annotations
@@ -8,11 +8,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
+from promptpotter.application.bench.resume_and_fork.decisions import GatingMode
 from promptpotter.application.intelligence.exploration import graded_response
-from promptpotter.application.optimization.dispatch.facade import build_bundle, node_packages
-from promptpotter.application.optimization.l1.critique import run_l1_critique
-from promptpotter.application.optimization.pobb.checks import EliminationGate
-from promptpotter.application.optimization.resume_and_fork.decisions import GatingMode
+from promptpotter.application.optimizers.potter.dispatch.facade import build_bundle, node_packages
+from promptpotter.application.optimizers.potter.l1.critique import run_l1_critique
+from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
 from promptpotter.application.optimizers.potter.state import potter_state
 from promptpotter.application.scoring.selection import elect_round_winner, elimination_p_best
 from promptpotter.domain.optimizer_state import potter_round_state
@@ -22,12 +22,12 @@ from promptpotter.infrastructure.llm.telemetry import reset_current_round, set_c
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
-    from promptpotter.application.initialization.session import Session
-    from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.resume_and_fork.replayers import (
+    from promptpotter.application.bench.cycle import Cycle
+    from promptpotter.application.bench.resume_and_fork.replayers import (
         ReplayContext,
         Replayer,
     )
+    from promptpotter.application.initialization.session import Session
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.scoring import QueryMeasurement

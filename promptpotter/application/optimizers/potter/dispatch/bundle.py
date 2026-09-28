@@ -1,0 +1,387 @@
+"""Bundle types — the per-call state every renderer reads. Stays ``Cycle``-free by contract so renderer tests can construct one
+directly; the ``Cycle``-snapshot path lives in ``facade.py``."""
+
+from __future__ import annotations
+
+import enum
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
+
+from promptpotter.domain.connector import MeasuredUnit
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.optimizer_state import CritiqueReadout, L2L3Memory
+from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.results import ArmOutcome, RoundResult
+from promptpotter.domain.round_diagnostics import RoundDiagnostics
+from promptpotter.domain.ruler import AbilityReading, DeltaRuler
+from promptpotter.domain.sample import Sample
+from promptpotter.domain.search_point import TaskDecomposition
+
+if TYPE_CHECKING:
+    from promptpotter.application.intelligence.indexes.axis import AxisIndex
+    from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
+
+
+# Every constant below decides what a prompt RECEIVES, and `injection_source_digest` hashes this
+# module: one shaping a prompt from outside that hash pools corpora the fingerprint keeps apart.
+#
+# What the DISCRETIONARY panels may spend. The mandatory floor and the static template are spent
+# before one is placed and neither is bounded here: the floor is the dataset's — on the recursion it
+# is the inner optimizer prompts — so a whole-prompt ceiling can only guess at it, and guessing low
+# refuses the node its own subject. A runaway is `char_cap`'s job, at render.
+OPTIMIZER_DISCRETIONARY_CHARS: dict[str, int] = {
+    "l1_generate": 7_000,
+    # A whole sample transcript is indivisible, so this allowance alone decides how many the
+    # distiller sees; set where two still fit beside the frame.
+    "l1_critique": 7_500,
+    "l2_context": 5_500,
+    "l3_plan": 6_400,
+}
+
+
+# Declared to the model in the wire schema so it can aim at a length rather than be trimmed to one.
+# A cap on growth, not pressure to compress; a field with no entry is emitted unbounded.
+OPTIMIZER_PROMPT_FIELD_MAX_CHARS: dict[str, int] = {
+    "instruction": 3_200,
+}
+
+SCHEMA_DESCRIPTION_MAX_CHARS = 400
+
+SCHEMA_DESCRIPTIONS_INSTRUCTION = (
+    "Each `output_schema_descriptions.<path>` key rewrites the JSON-Schema "
+    "`description` of that field on this node's OWN output schema. This prose sits "
+    "adjacent to the slot it governs, inside the field-filling loop, so it steers the "
+    "model harder per token than the instruction does. Paths are FIXED — you describe "
+    "a field, you never rename or add one. Describe only where the current prose "
+    "underspecifies what the field should hold."
+)
+
+SCHEMA_RENAME_INSTRUCTION = (
+    "Rename a field on the inner optimizer's own output schema. The model holds "
+    "strong priors about what belongs under a given key, so the name steers "
+    "before a single token of the value is written. Keys are the existing field "
+    "names; values are the new wire names. Rename only when the current name "
+    "misdescribes what the field should hold — a rename the model then fails to "
+    "honour makes the round unparseable and scores it maximally dirty."
+)
+
+LAYOUT_SCHEMA_INSTRUCTION = (
+    "Which prompt slot each evidence panel fills. Name a panel to MOVE it to that "
+    "slot; a panel you omit stays where it is, and a panel is only ever in one "
+    "place. Keyed by PANEL, one slot string each — the inverse of the CURRENT L1 "
+    'LAYOUT listing: {"critique": "thinking_style", "failing_samples": '
+    '"thinking_style"} moves two panels into one slot. Slot order within the prompt '
+    "is the floor's and does not move — what you choose is which slot a panel speaks from."
+)
+
+
+# Per-injection caps — bound LLM-authored output to keep individual blocks tight.
+AXES_ENUM_PREVIEW = 4
+# How many arms `precision` quotes an interval for. The leader and its nearest rivals answer
+# "is this separable"; the tail is already in `mutation_memory` and repeating it here would spend
+# the frame's whole budget on the arms least likely to win.
+PRECISION_ARM_ROWS = 3
+NEAR_MISS_RENDER_CAP = 2
+SAMPLE_RENDER_CAP = 2
+TRANSCRIPT_RENDER_CAP = 3
+TRANSCRIPT_QUERY_CAP = 1200
+TRANSCRIPT_REASONING_CAP = 2200
+TRANSCRIPT_PREDICTED_CAP = 60
+INNER_NARRATIVE_CAP = 1150
+# How many cells keep the WHOLE story. A cell that is doing fine narrates the same thing every
+# round, so it is near-identical bytes; an optimizer prompt edit is aimed at the cells that are
+# NOT, which lead and keep their detail while the rest cost a line each.
+INNER_NARRATIVE_FULL_CELLS = 3
+INNER_NARRATIVE_SUMMARY_CAP = 160
+# How many cells render AT ALL. Only the depth was tiered before, so every seed still cost a
+# section and the panel grew with the panel's WIDTH: measured at ~315 chars/seed, which is 1.9k
+# at six seeds and ~7.6k at the pp-self default of twenty-four. The tail is the weakest evidence
+# by the panel's own ranking, and where nothing separates from the origin the header already says
+# the order carries no information — so the tail is filler in exactly the round it is longest.
+INNER_NARRATIVE_RENDER_CAP = 6
+MISS_QUERY_CAP = 100
+MISS_PREDICTED_CAP = 60
+MISS_GT_CAP = 40
+MISS_NOTE_CAP = 120
+MEMORY_ROUND_CAP = 4
+MEMORY_FIELD_CAP = 2
+# Chars of each changed field's EDIT — the words it wrote and cut, never a stem of the new value,
+# which for an edit keeping the parent's opening is the parent's own text. Short by design: the
+# row exists so the generator RECOGNISES a prior attempt, not to reproduce it, and a small one is
+# what lets every retained round fit — so the anti-re-proposal record stays COMPLETE.
+MEMORY_VALUE_CAP = 90
+# How many edits must lose one parent-solved cell before it is evidence about EDITING rather than
+# a noisy cell's chance flip — and so earns a line in `mutation_memory` and a transcript.
+LOST_CELL_MIN = 2
+# Worst-N nodes the evidence_health panel lists — enough to show a dead enricher
+# plus a couple of collateral nodes, never a full pipeline dump.
+NODE_FAILURE_RENDER_CAP = 3
+# `runtime_failures` signal only emits first-seen failures in the last K rounds; older entries
+# collapse to a suppression line so long campaigns + small models stay within budget.
+RUNTIME_FAILURE_RECENCY_WINDOW = 6
+# Its parse-time peer: `validation_failures` accumulates on the searchpoint with no window of
+# its own, so the render grew with the cycle. Most-RECENT K, because a wound heals in the round
+# after it was made — an older one has already been answered or has stopped mattering.
+VALIDATION_RENDER_CAP = 8
+# Chars of each label the `answer_distribution` tallies show. A classification label is short;
+# anything longer is a hedging model's run-on answer, and the panel's question — which label
+# dominates — is answered by the stem.
+ANSWER_LABEL_STEM = 40
+# How many PREDICTED buckets that panel lists before collapsing the tail to a count. Only the
+# head carries the collapse signal; the ground-truth line beside it is a value space and is
+# never row-limited.
+ANSWER_TALLY_ROWS = 5
+# Demo rows the shot menu lists per round beside the parent's own shots; the window rotates
+# through the pool across rounds, so a 200-row pool is offered whole without being sent whole.
+DEMO_POOL_RENDER_CAP = 12
+DEMO_QUERY_STEM = 80
+
+
+class InjectionKind(enum.StrEnum):
+    """Kind tag for each registered injection. See package docstring."""
+
+    MEASUREMENT = "measurement"
+    DERIVED = "derived"
+    TRACE = "trace"
+    DIRECTIVE = "directive"
+
+    @property
+    def divisible(self) -> bool:
+        """Whether a composition may place SOME of this panel's sections and leave the rest.
+
+        Evidence thins gracefully — three misses instead of six is a smaller sample of the same
+        story — and state does not: half of the artifact under edit (TRACE) or half an instruction
+        (DIRECTIVE) is a different and wrong thing, not a smaller one. Every mutation is a
+        WHOLE-field replacement, so a field the generator cannot see is one it overwrites blind.
+        Asked of the kind every signal already declares rather than of a set of names, which
+        silently skips whatever it failed to list.
+        """
+        return self in (InjectionKind.MEASUREMENT, InjectionKind.DERIVED)
+
+
+@dataclass(frozen=True)
+class _Injection:
+    """One registry entry. Neither ``char_cap`` nor ``citable`` has a default — a new signal must decide both.
+    ``citable`` is False for the value-space menus and the prompt under edit: citing those grounds a mutation in itself."""
+
+    name: str
+    kind: InjectionKind
+    render: Renderer
+    char_cap: int | None
+    citable: bool
+
+
+@dataclass(frozen=True)
+class CycleSlice:
+    """Frozen cycle-state snapshot for renderers — keeps them ``Cycle``-free + unit-testable.
+    ``pipeline_params`` snapshotted so wound renderers filter ACCUMULATED rows by current backend config."""
+
+    # No accuracy here, deliberately: cycle tracking's `current`/`best` are subset-relative and lag
+    # the round being rendered, so a panel carrying them holds a second, staler copy of the
+    # EVOLUTION column. The series is `RoundDiagnostics.evolution_rows`, which carries `elected`.
+    round_num: int
+    l1_stall_count: int
+    l2_round: int
+    l2_stall_count: int
+    l3_round: int
+    l3_stall_count: int
+    # `tight`/`normal`/`wide`, widening with `l1_stall_count` — the value the escalation_panel
+    # renders and l1_generate's rules cite, computed once in `build_bundle`.
+    exploration_budget: str
+    pipeline_params: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # The ACTIVE composite-fitness formula, so a node can state what it is optimizing rather than
+    # infer it from a column. Resolved once here because the resolution chain reads `Session`.
+    composite_formula: str | None = None
+    composite_formula_short: str | None = None
+    # `frozen` (campaign-start prefix) or `adaptive` (acquisition re-picks per round). The real
+    # predicate is `per_round_resubset and ruler is not None`, and a renderer deriving that for
+    # itself is how a panel and the sampler come to disagree about what chose the rows.
+    subset_mode: str | None = None
+    elimination_n_min: int | None = None
+    sp_budget_round: int | None = None
+    max_rounds: int | None = None
+    spend_budget_usd: float | None = None
+    # A FLOOR while unpriced tokens are outstanding — `SpendRollup` says so, and a panel quoting
+    # it must not round the word "spent" into a certainty the rollup does not carry.
+    spend_used_usd: float | None = None
+    # `(name, severity, consequence)` from `knobs.py::check_couplings` — the SAME text preflight
+    # shows the operator at INIT, so the one statement of when θ is not ability reaches the
+    # optimizer that reasons from θ and not only the terminal.
+    couplings: tuple[tuple[str, str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class ArmReading:
+    """One scored arm, narrowed to what a panel may quote. Deliberately not `ScoredCandidate`, which
+    carries `prompt_fields` and `resolved_pipeline_params` — a panel that can reach a rival's whole
+    prompt will eventually quote it, and ``bundle.py`` is contractually light."""
+
+    label: str
+    theta: float | None
+    theta_se: float | None
+    mean_fitness_ci_lo: float | None
+    mean_fitness_ci_hi: float | None
+    scored_samples: int
+    expected_samples: int
+    outcome: ArmOutcome
+    # WHICH of PoBB's gates stopped it, where PoBB did.
+    gate: EliminationGate | None
+
+
+@dataclass(frozen=True)
+class RoundDigest:
+    """Post-scoring readouts for one round. The FAILURE renderers read ``bundle.memory`` instead, because failures
+    accumulate across rounds while these do not."""
+
+    diagnostics: RoundDiagnostics | None
+    critique: CritiqueReadout | None
+    l1_yield: float = 1.0
+    # The same aggregate the degradation grade reads, computed BEFORE ``health`` is stamped —
+    # so the critique cannot read the grade.
+    node_failure_rates: dict[str, float] = field(default_factory=dict)
+    # Which samples THIS round scored — the freshness key for ``sample_transcripts``.
+    latest_sample_ids: frozenset[Any] = field(default_factory=frozenset)
+    # The round BEFORE this one, for "did the subset move?". Filled in `build_bundle`, the one
+    # place that knows which round is under render on each path.
+    prev_sample_ids: frozenset[Any] = field(default_factory=frozenset)
+    # THIS round's numbers. `build_bundle(cycle, latest_round=…)` runs before `absorb_round` folds
+    # the round into `cycle`, whose own tracking is therefore a round behind on the critique.
+    # Every panel that states an objective or a precision reads these.
+    composite_fitness: float | None = None
+    evaluators: dict[str, float] = field(default_factory=dict)
+    ability: AbilityReading | None = None
+    arms: tuple[ArmReading, ...] = ()
+
+
+@dataclass(frozen=True)
+class InjectionBundle:
+    """Per-call state container — every signal renderer reads off this. ``origin_per_sample`` is the frozen round-0
+    snapshot behind ``origin_strengths``; the live cumulative results drive the failure panels."""
+
+    opt_sp: OptSearchPoint
+    memory: L2L3Memory
+    framing: TaskDecomposition
+    pipeline_schema: PipelineSchema | None
+    cycle_slice: CycleSlice
+    digest: RoundDigest
+    axes: AxisIndex | None
+    origin_per_sample: list[dict[str, Any]] = field(default_factory=list)
+    # EVERY scored sample, hits included, not just the misses: the failure panels filter it,
+    # but ``answer_distribution`` needs the hits too, because a pipeline collapsed onto one
+    # label is only visible against the labels it is NOT emitting.
+    trajectory_results: list[dict[str, Any]] = field(default_factory=list)
+    # The cycle's LOCKED ruler, and the only per-sample difficulty a panel may quote:
+    # `hard_samples.json`'s δ is re-fitted and re-anchored on every regeneration, so it moves
+    # under the reader. Empty while the ruler is still cold.
+    ruler: DeltaRuler | None = None
+    # Every round measured so far, the one under render LAST on every path — the critique's own
+    # round included, which is the round it is asked about. Each carries its parent prompt, every
+    # candidate's evolved one and both sides' rows, so "what was tried, how did it score and which
+    # of the parent's solved cells did it break" is a diff away.
+    measured_rounds: list[RoundResult] = field(default_factory=list)
+    # Picks the block-library header (guidance = reuse-or-invent, restrict = library-only) or
+    # renders nothing when off.
+    prompt_block_catalogue: str = "guidance"
+    # Mined for this task's answer-space shape at cycle start. `guidance` renders these and
+    # falls back to the task-agnostic PromptWizard set when empty.
+    earned_blocks: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Gates its injection, so L2/L3 prompts are bit-for-bit identical to a no-rebase ablation.
+    rebase_capability: bool = True
+    # Same, for a no-terminate ablation.
+    terminate_capability: bool = True
+    # Already unlocked ⇒ the rebase_capability directive drops the unlock clause, since there
+    # is nothing left to ask for.
+    schema_field_rename: bool = False
+    # The round under render IS the origin, so `origin_per_sample` and `trajectory_results` are
+    # the same rows. Any panel differencing the two would render a cell against itself.
+    is_origin_round: bool = False
+    # `Connector.measured_unit` — every panel counting rows renders through it.
+    measured_unit: MeasuredUnit = "sample"
+    # The campaign's demo pool and the most shots a variant may carry; either empty silences the
+    # shot menu, which withdraws the `shot_ids` slot with it.
+    demo_pool: tuple[Sample, ...] = ()
+    shot_k_max: int = 0
+
+
+@dataclass(frozen=True)
+class Item:
+    """One placeable unit of a panel — a row, a header, a paragraph.
+
+    The unit the COMPOSITION works in, and the reason a panel never budgets itself: one large
+    block can only be starved whole, where rows thin. ``trusted=False`` marks dataset-derived
+    text — a sample query, a model echo, a ground truth — and the fence around it is the
+    composition's to emit, so a renderer never mentions one.
+    """
+
+    text: str
+    trusted: bool = True
+
+
+Renderer = Callable[[InjectionBundle], list[Item]]
+
+# Filled by the @signal decorator at each renderer's definition site. `registry.injection_table()`
+# imports the renderer modules to trigger registration, then snapshots this.
+_REGISTRY: dict[str, _Injection] = {}
+
+
+def signal(
+    name: str,
+    *,
+    kind: InjectionKind,
+    char_cap: int | None,
+    citable: bool,
+) -> Callable[[Renderer], Renderer]:
+    """Register a renderer into the injection registry at its definition site, so the slot key and its body are one grep
+    apart. The function is returned unchanged; a duplicate key raises at IMPORT, loud rather than last-wins."""
+
+    def deco(fn: Renderer) -> Renderer:
+        if name in _REGISTRY:
+            raise ValueError(f"duplicate injection signal {name!r}")
+        _REGISTRY[name] = _Injection(name, kind, fn, char_cap, citable)
+        return fn
+
+    return deco
+
+
+def injection_registry() -> dict[str, _Injection]:
+    """Snapshot of every ``@signal``-registered injection. Call only after every renderer module is imported — which
+    ``registry.injection_table()`` does, then raises on an orphan before anything reads the table."""
+    return dict(_REGISTRY)
+
+
+__all__ = [
+    "ANSWER_LABEL_STEM",
+    "ANSWER_TALLY_ROWS",
+    "AXES_ENUM_PREVIEW",
+    "DEMO_POOL_RENDER_CAP",
+    "DEMO_QUERY_STEM",
+    "INNER_NARRATIVE_CAP",
+    "INNER_NARRATIVE_FULL_CELLS",
+    "INNER_NARRATIVE_RENDER_CAP",
+    "INNER_NARRATIVE_SUMMARY_CAP",
+    "LOST_CELL_MIN",
+    "MEMORY_FIELD_CAP",
+    "MEMORY_ROUND_CAP",
+    "MEMORY_VALUE_CAP",
+    "MISS_GT_CAP",
+    "MISS_NOTE_CAP",
+    "MISS_PREDICTED_CAP",
+    "MISS_QUERY_CAP",
+    "NEAR_MISS_RENDER_CAP",
+    "NODE_FAILURE_RENDER_CAP",
+    "RUNTIME_FAILURE_RECENCY_WINDOW",
+    "SAMPLE_RENDER_CAP",
+    "TRANSCRIPT_PREDICTED_CAP",
+    "TRANSCRIPT_QUERY_CAP",
+    "TRANSCRIPT_REASONING_CAP",
+    "TRANSCRIPT_RENDER_CAP",
+    "VALIDATION_RENDER_CAP",
+    "CycleSlice",
+    "InjectionBundle",
+    "InjectionKind",
+    "Renderer",
+    "RoundDigest",
+    "injection_registry",
+    "signal",
+]

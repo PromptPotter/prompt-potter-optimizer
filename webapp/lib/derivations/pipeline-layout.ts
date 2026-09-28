@@ -55,10 +55,10 @@ export function flowOrder(nodes: PipelineViewNode[], cycle: string[]): PipelineV
     .filter((n) => n.tier === 0 && !onSpine.has(n.id))
     .sort((a, b) => a.rank - b.rank);
   const spine = cycle.map((id) => byId.get(id)).filter((n): n is PipelineViewNode => !!n);
-  const escalations = nodes
+  const alternatives = nodes
     .filter((n) => n.tier > 0)
     .sort((a, b) => a.tier - b.tier || a.rank - b.rank);
-  return [...entry, ...spine, ...escalations];
+  return [...entry, ...spine, ...alternatives];
 }
 
 export function layoutGrid(

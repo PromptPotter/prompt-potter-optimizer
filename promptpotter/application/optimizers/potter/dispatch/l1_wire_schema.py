@@ -1,0 +1,272 @@
+"""The L1 wire schema the optimizer's own ``l1_generate`` call is answered against — EMISSION, not
+validation. Its twin is ``schemas.py::build_l1_response_model``, called on the adjacent line in
+``l1/generate.py``: one produces the JSON Schema sent to the provider, the other the Pydantic model
+the reply is parsed with, and both derive their rename map from ``effective_l1_field_names`` here,
+because a disagreement between them fails every parse of every round.
+
+It sits in ``dispatch/`` rather than ``validators/`` because it neither REJECTS nor SCORES
+(`../CLAUDE.md` § A validator either REJECTS or SCORES) — it composes a prompt surface, which is
+this package's job. Its deterministic counterpart, the backstop for a provider that does not
+honour the schema it was handed, is ``validators/l1_strict.py::validate_overrides``."""
+
+from __future__ import annotations
+
+import copy
+from collections.abc import Collection, Sequence
+from typing import Any, cast
+
+from promptpotter.application.optimizer_manifest import resolve_node_override
+from promptpotter.application.optimizers.potter.dispatch.bundle import (
+    LAYOUT_SCHEMA_INSTRUCTION,
+    OPTIMIZER_PROMPT_FIELD_MAX_CHARS,
+    SCHEMA_DESCRIPTION_MAX_CHARS,
+    SCHEMA_DESCRIPTIONS_INSTRUCTION,
+    SCHEMA_RENAME_INSTRUCTION,
+)
+from promptpotter.application.optimizers.potter.dispatch.layout import (
+    NODE_LAYOUTS,
+    layout_json_schema,
+)
+from promptpotter.application.optimizers.potter.dispatch.schemas import L1GenerateOutput, L1Variant
+from promptpotter.config.settings import PROMPT_STRING_FIELDS
+from promptpotter.domain.pipeline_schema import (
+    NESTED_PARAM_TYPES,
+    SCHEMA_RENAME_PARAM,
+    PipelineNode,
+    PipelineSchema,
+)
+from promptpotter.shared.hashing import shapes_optimizer_prompt
+
+shapes_optimizer_prompt(__name__)
+
+__all__ = [
+    "build_l1_response_schema",
+    "effective_l1_field_names",
+]
+
+# A ceiling is prompt text declared on a REWRITABLE PROMPT FIELD; an entry naming anything else
+# declares a bound the `.get(param)` below can never fire on, so it reads as a live cap while
+# binding nothing. The two tables are authored in two modules, and this is the one place both
+# are in scope — so the subset is asserted here rather than pinned by a test.
+assert set(OPTIMIZER_PROMPT_FIELD_MAX_CHARS) <= set(PROMPT_STRING_FIELDS), (
+    "OPTIMIZER_PROMPT_FIELD_MAX_CHARS declares a ceiling on a non-prompt field: "
+    f"{sorted(set(OPTIMIZER_PROMPT_FIELD_MAX_CHARS) - set(PROMPT_STRING_FIELDS))}"
+)
+
+
+def _inline_refs(node: Any, defs: dict[str, dict[str, Any]]) -> Any:
+    """Provider ``response_format`` wants a self-contained schema, so Pydantic's ``$defs`` table is
+    inlined in place; ``title`` metadata is stripped with it (auto-emitted, no LLM-side benefit)."""
+    if isinstance(node, dict):
+        if "$ref" in node:
+            key = node["$ref"].split("/")[-1]
+            return _inline_refs(copy.deepcopy(defs[key]), defs)
+        return {k: _inline_refs(v, defs) for k, v in node.items() if k != "title"}
+    if isinstance(node, list):
+        return [_inline_refs(v, defs) for v in node]
+    return node
+
+
+def effective_l1_field_names() -> dict[str, str]:
+    """The ONE source the emitted schema and the response model both derive from. Unconditional —
+    gating on the INNER cycle's own config would emit a rename nothing applied, then score it."""
+    proposed = resolve_node_override("l1_generate").schema_field_names
+    if not proposed:
+        return {}
+    survivors = set(L1Variant.model_fields) - set(proposed)
+    return {f: w for f, w in proposed.items() if f in L1Variant.model_fields and w not in survivors}
+
+
+def _rename_variant_schema(variant: dict[str, Any], field_names: dict[str, str]) -> None:
+    props = variant["properties"]
+    variant["properties"] = {field_names.get(k, k): v for k, v in props.items()}
+    required = variant.get("required")
+    if isinstance(required, list):
+        variant["required"] = [field_names.get(k, k) for k in required]
+
+
+def _nested_param_property(node: PipelineNode, param: str) -> dict[str, Any] | None:
+    """Each lever is keyed by a CLOSED set, so the optimizer can edit but never invent; ``None``
+    where the node declares none."""
+    if param == "layout":
+        spec = NODE_LAYOUTS.get(node.name)
+        return (
+            None
+            if spec is None
+            else layout_json_schema(spec, description=LAYOUT_SCHEMA_INSTRUCTION)
+        )
+    if param == SCHEMA_RENAME_PARAM and NODE_LAYOUTS.get(node.name) is not None:
+        return {
+            "type": "object",
+            "description": SCHEMA_RENAME_INSTRUCTION,
+            "properties": {f: {"type": "string"} for f in L1Variant.model_fields},
+            "additionalProperties": False,
+        }
+    return None
+
+
+# Which panel shows the CURRENT value of each writable slot; a slot whose panel produced nothing is
+# withdrawn. Why that rule and what it cost before it existed: `optimizers/potter/CLAUDE.md` § L1.
+_SLOT_PANEL: dict[str, str] = {
+    "prompt_fields_updates": "rendered_prompt",
+    "pipeline_overlay": "pipeline_param_catalogue",
+    "shot_ids": "demo_pool",
+}
+
+
+def build_l1_response_schema(
+    pipeline_schema: PipelineSchema,
+    *,
+    citable_fields: Sequence[str],
+    silent_panels: Collection[str] = (),
+    schema_field_rename: bool = False,
+    n_variants: int | None = None,
+) -> dict[str, Any]:
+    """Returns the BARE JSON Schema — ``chat()``'s ``response_schema`` IS the wire schema, and an
+    envelope here nests it where the provider reads no ``type`` and every constraint goes inert."""
+    raw_schema = L1GenerateOutput.model_json_schema()
+    defs = raw_schema.pop("$defs", {})
+    inlined = _inline_refs(raw_schema, defs)
+
+    # The ceiling the prompt states, stated again where the decoder can enforce it. Without it
+    # the only bound was `l1/generate.py`'s `variants_list[:n_variants]` slice — so an
+    # over-generating model was BILLED for every extra variant and the overflow was then thrown
+    # away. Per-round, like the citable enum below, because `n_variants` is per-round.
+    if n_variants is not None:
+        inlined["properties"]["variants"]["maxItems"] = n_variants
+
+    variant_items = inlined["properties"]["variants"]["items"]
+    variant_props = variant_items["properties"]
+
+    # 1. pipeline_overlay — per-node tunables.
+    pipeline_overlay = variant_props["pipeline_overlay"]
+    pipeline_overlay.setdefault("properties", {})
+    pipeline_overlay["additionalProperties"] = False
+    pp_properties = pipeline_overlay["properties"]
+
+    # The emittable per-node param surface is `node_param_keys()` — the ONE source
+    # the catalogue + validator share. It strips `provider`/`route_order`
+    # (PARAM_FORBIDDEN_KEYS), so those locks stay structural: the LLM cannot emit a key
+    # the schema never declares, and they need no per-round rejection.
+    #
+    # `model` arrives here like any other axis — `param_options` answers for all of them, so this
+    # loop carries no per-param special case. The enum is the whole guard (an unbounded `model`
+    # string would let the LLM invent an id), which is why an EMPTY space emits no property.
+    #
+    # Intersected with the nodes the GRAPH reaches, which is the same rule the two slots below
+    # state — never offer a slot L1 cannot act on. Not `active_steps`: `default` is the round, not
+    # the tunable set, and an escalation node sitting off the chain (`l2_context`, `l3_plan`) is
+    # exactly what L4 exists to tune. The set that is genuinely unreachable is the one
+    # `derive_pipeline_view` already refuses to draw — "a node named by NO pipeline is not in the
+    # flow at all" — which on a backend declaring a large roster behind a short chain is most of
+    # the schema: TermNorm declares eight nodes, a `[llm_only]` dataset can reach one, and the
+    # seven it cannot were 66% of the bytes L1 read every round to emit `{}` into. No view means
+    # no projection to narrow by, never "narrow to nothing".
+    reachable = {n.id for n in pipeline_schema.view.nodes} if pipeline_schema.view else None
+    for node_name, keys in pipeline_schema.node_param_keys().items():
+        node = pipeline_schema.get_node(node_name)
+        if node is None or (reachable is not None and node_name not in reachable):
+            continue
+        # Scalars first, then the nested params, each alphabetical, then the description keys in
+        # schema order. Field ORDER is what this schema teaches
+        # (`docs/concepts/structured-output.md`), so the groups are emitted in a fixed sequence
+        # rather than one interleaved sort — the optimizer levers read after the surface they act on.
+        nested = {p for p in keys if node.param_types.get(p) in NESTED_PARAM_TYPES}
+        described = [k for k in node.description_keys if k in keys]
+        param_props: dict[str, dict[str, Any]] = {}
+        for param in sorted(keys - nested - set(described)):
+            allowed = pipeline_schema.param_options(node, param)
+            declared_type = node.param_types.get(param)
+            # `[]` (declared, nothing legal) is not `None` (no space declared): the first emits no
+            # property, never a bare string the LLM fills with something the endpoint rejects.
+            if allowed is not None and not allowed:
+                continue
+            if allowed:
+                param_props[param] = {"type": "string", "enum": list(allowed)}
+            elif declared_type:
+                param_props[param] = {"type": declared_type}
+            else:
+                param_props[param] = {}
+            # Only on a node carrying a layout — an optimizer node, whose `instruction` is the
+            # long-form artifact. Elsewhere the declaration is prompt text that never binds.
+            ceiling = OPTIMIZER_PROMPT_FIELD_MAX_CHARS.get(param)
+            if ceiling is not None and NODE_LAYOUTS.get(node.name) is not None:
+                param_props[param]["maxLength"] = ceiling
+        # The field-NAME lever is the strongest and the only one that can break a parser,
+        # so the campaign must unlock it: dropped from the emitted schema when locked, and
+        # the LLM cannot emit a key the schema omits. Structural, never policed per round.
+        # Unlocked, the rename is a presentation transform — `build_l1_response_model`
+        # aliases the wire key back onto the real field, so no downstream reader observes it.
+        if not schema_field_rename:
+            nested.discard(SCHEMA_RENAME_PARAM)
+        for param in sorted(nested):
+            prop = _nested_param_property(node, param)
+            if prop is not None:
+                param_props[param] = prop
+        # Bounded HERE, the only production site this prose has. It rides forward — the winner's
+        # descriptions become the next round's parent — so an unbounded one compounds exactly like
+        # `l3_plan.plan` did.
+        for key in described:
+            param_props[key] = {"type": "string", "maxLength": SCHEMA_DESCRIPTION_MAX_CHARS}
+        if not param_props:
+            continue
+        pp_properties[node_name] = {
+            "type": "object",
+            **({"description": SCHEMA_DESCRIPTIONS_INSTRUCTION} if described else {}),
+            "properties": param_props,
+            "additionalProperties": False,
+        }
+
+    # 2. The prompt slot — emitted only where the evolved prompt has a node to land on:
+    # `to_job_search_point` gates its whole render on the same `open_prompt_fields()`, so with none
+    # the slot would be write-only. A held prompt field is simply not a property, so the lock is
+    # structural. `minLength` because "" is not an edit (`candidate_delta`): a model with nothing to
+    # write in a field omits it, and a variant writing nothing anywhere is re-asked.
+    if open_fields := pipeline_schema.open_prompt_fields():
+        variant_props["prompt_fields_updates"].update(
+            properties={field: {"type": "string", "minLength": 1} for field in open_fields},
+            additionalProperties=False,
+        )
+    else:
+        del variant_props["prompt_fields_updates"]
+    # Shots render into that same prompt, so they are write-only without it too. No `null` arm:
+    # omitting the key already keeps the parent's shots.
+    shots = variant_props["shot_ids"]
+    if pipeline_schema.prompt_node_names():
+        array_arm = next(a for a in shots["anyOf"] if a.get("type") == "array")
+        variant_props["shot_ids"] = {**array_arm, "description": shots["description"]}
+    else:
+        del variant_props["shot_ids"]
+
+    for slot, panel in _SLOT_PANEL.items():
+        if panel in silent_panels:
+            variant_props.pop(slot, None)
+
+    # 3. evidence_grounding — the panels THIS round's prompt renders, and the one field this
+    # schema makes STRICTER than its parse twin. The model stays optional on purpose (a provider
+    # omitting the citation must not crash a whole round's variants), but the WIRE offered `null`
+    # as a legal answer to a question the loop treats as mandatory, and 2 of 19 live rounds took
+    # it — for every variant in the call, since one response is one decision. `citable_fields` is
+    # never empty, so the object arm alone is always satisfiable.
+    eg = variant_props["evidence_grounding"]
+    object_arm = next(a for a in eg["anyOf"] if a.get("type") == "object")
+    object_arm["properties"]["field"]["enum"] = list(citable_fields)
+    # The null arm and the `default: null` beside it go together — either one alone still reads
+    # as "you may skip this".
+    variant_props["evidence_grounding"] = object_arm
+    required = variant_items.setdefault("required", [])
+    if "evidence_grounding" not in required:
+        required.insert(0, "evidence_grounding")
+    # Same split as above: tolerated missing at the parse boundary, never OFFERED as skippable.
+    if "targets_cluster" not in required:
+        required.append("targets_cluster")
+
+    # 4. Rename LAST. `build_l1_response_model` aliases the same map back so no downstream
+    # reader observes the wire name. (The `description` lever no longer touches THIS schema:
+    # it rewrites each TARGET node's own `output_schema` at the wire seam
+    # `OptSearchPoint.to_job_search_point`, keyed by that node's fields — the core case.)
+    field_names = effective_l1_field_names()
+    if field_names:
+        _rename_variant_schema(variant_items, field_names)
+
+    return cast("dict[str, Any]", inlined)

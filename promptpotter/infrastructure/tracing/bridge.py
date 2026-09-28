@@ -248,7 +248,7 @@ class ObservabilityBridge:
         tracing_campaign_id: str,
         *,
         result_accuracy: float | None,
-        n_l1_rounds: int,
+        n_rounds_after_origin: int,
         stop_reason: str,
         result_round: int,
     ) -> str | None:
@@ -258,7 +258,7 @@ class ObservabilityBridge:
                 CampaignEnd(
                     campaign_id=tracing_campaign_id,
                     result_accuracy=result_accuracy,
-                    n_l1_rounds=n_l1_rounds,
+                    n_rounds_after_origin=n_rounds_after_origin,
                     stop_reason=stop_reason,
                     result_round=result_round,
                 )

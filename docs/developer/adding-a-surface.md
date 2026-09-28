@@ -85,7 +85,7 @@ Contract: [`application/CLAUDE.md`](../../promptpotter/application/CLAUDE.md) §
 ## 2. A prompt injection
 
 A `{{slot}}` the optimizer LLM sees. The registry is `injection_table()`
-(`application/optimization/dispatch/injections/registry.py`); every renderer
+(`application/optimizers/potter/dispatch/injections/registry.py`); every renderer
 is a pure `(InjectionBundle) -> list[Item]`.
 
 **Recipe:**
@@ -185,7 +185,7 @@ A replayable or archival decision (a checkpoint kind + its gating mode).
 1. Add the kind to the deciding party's enum — `BenchCheckpointKind` or the optimizer's own
    (`PotterCheckpointKind`), both `domain/run_records.py` — **and** a gating
    entry beside the party that decides it: `BENCH_CHECKPOINT_GATING`
-   (`application/optimization/resume_and_fork/decisions.py`) or the optimizer runtime's
+   (`application/bench/resume_and_fork/decisions.py`) or the optimizer runtime's
    `checkpoint_gating` (potter's is `optimizers/potter/resume.py`). `resume_checkpoint_gating`
    merges them — the gating SoT.
 2. If replayable, add it to that party's replayers; if archival, leave it out.
@@ -242,7 +242,7 @@ The hard half, and the one that has no default. Five questions, each with a cons
 - **What must it never move?** Anything that is a cost rail rather than a search axis stays
   pinned in `config` and out of `param_keys` (Harbor's `max_turns` moves a cell's cost by an
   order of magnitude). `model` and `provider` are structurally unreachable and need no decision —
-  [`optimization/CLAUDE.md`](../../promptpotter/application/optimization/CLAUDE.md).
+  [`optimizers/potter/CLAUDE.md`](../../promptpotter/application/optimizers/potter/CLAUDE.md).
 
 And one question that is theirs, not ours: **which slice have they reserved as test?** Never
 optimize on the rows they will later report on. [`dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md)
@@ -254,7 +254,7 @@ published benchmarks and does not apply to a private backend, but steps 2–4 do
 The connector file, then the dataset directory
 ([`datasets/CLAUDE.md`](../../datasets/CLAUDE.md) § Canonical layout). Every tunable starts at its
 **floor**, never its centre —
-[`optimization/CLAUDE.md`](../../promptpotter/application/optimization/CLAUDE.md)
+[`optimizers/potter/CLAUDE.md`](../../promptpotter/application/optimizers/potter/CLAUDE.md)
 § Origin = conservative floor.
 
 ### Step 4 — Screen the instrument before funding a campaign
@@ -299,7 +299,7 @@ adding a slot it needs is §2.
 
 **Guard (at template load):** `validate_template()` at `load_optimizer_prompt` rejects any
 `{{slot}}` the node's template references that isn't in `injection_table()`. Keep every
-optimizer LLM call on the one `dispatch/llm_call/call.py::llm_call` path — an
+optimizer LLM call on the one `bench/llm_call.py::llm_call` path — an
 unwrapped LLM call is an automatic block at review (pre-flight gate), not a test.
 
 ---

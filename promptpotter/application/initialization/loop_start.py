@@ -7,12 +7,12 @@ from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.initialization.session import Session, open_cycle_ledger
-from promptpotter.application.intelligence.indexes.axis import AxisIndex
-from promptpotter.application.optimization.cycle import Cycle
-from promptpotter.application.optimization.resume_and_fork.resume import (
+from promptpotter.application.bench.cycle import Cycle
+from promptpotter.application.bench.resume_and_fork.resume import (
     resume_with_divergence_check,
 )
+from promptpotter.application.initialization.session import Session, open_cycle_ledger
+from promptpotter.application.intelligence.indexes.axis import AxisIndex
 from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.preflight import check_model_reasoning_floors, run_preflight_checks

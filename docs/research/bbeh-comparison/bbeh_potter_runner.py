@@ -179,7 +179,7 @@ async def run_bbeh_campaign(
                 "origin_train_accuracy": (
                     round(origin_train_acc, 4) if origin_train_acc is not None else None
                 ),
-                "rounds": cycle_result.n_l1_rounds,
+                "rounds": cycle_result.n_rounds_after_origin,
                 "methodology": (
                     "Single global prompt optimized on the pooled per-task train halves of "
                     "BBEH mini; evaluated on the held-out test halves, the same rows every "

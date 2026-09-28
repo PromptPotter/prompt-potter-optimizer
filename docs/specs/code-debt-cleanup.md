@@ -149,7 +149,7 @@ predicates, and later readers accept nothing else.
   `OptSearchPoint.from_prompt_fields(round0)` — a second origin recovery beside
   `origin.py::resolve_origin_opt_search_point`, without the framing; `ab` then splits the origin
   into two arms on its δ ruler. `grep -n "from_prompt_fields(origin.prompt_fields)\|from_prompt_fields(round_file.prompt_fields)"
-  promptpotter/application/optimization/resume_and_fork/ab_replay.py promptpotter/application/diagnostics/noise_floor.py`.
+  promptpotter/application/bench/resume_and_fork/ab_replay.py promptpotter/application/diagnostics/noise_floor.py`.
 - `infrastructure/store/measurement_archive.py::load_reusable_results` tests `predicted == "ERROR"`
   (a display token) instead of `is_error_result`, and `domain/sample.py::Measurement` has no
   `error_category`, so a formula-failure row replays as a live answer and verify reads archived
@@ -164,7 +164,7 @@ an untyped dict.
 - The config-drift gate on resume (`presentation/cli/commands/resume_command.py`, `root_content_hash`
   against the recomputed cycle id) is CLI-only: web Resume, `step-cycle` and a fork's launch
   continue a cycle under an edited `pipeline.yaml`, starting prompt or framing. Silent. `grep -rn
-  root_content_hash promptpotter/application/jobs promptpotter/application/runner promptpotter/application/optimization/resume_and_fork` (empty).
+  root_content_hash promptpotter/application/jobs promptpotter/application/runner promptpotter/application/bench/resume_and_fork` (empty).
 - `presentation/terminal/live/phase.py::render_progress_table` differences θ across rounds and
   advises a "Plateau" stop without `AbilityReading.comparable_to` or the served caveat, where the
   browser filters by ruler. `grep -n "theta - prev\|comparable_to" promptpotter/presentation/terminal/live/phase.py`.

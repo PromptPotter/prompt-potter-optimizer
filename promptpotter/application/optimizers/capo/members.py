@@ -14,11 +14,11 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar, cast
 
 from pydantic import Field
 
-from promptpotter.application.campaign_config import Estimand, Knob, Scope
-from promptpotter.application.optimization.resume_and_fork.decisions import (
+from promptpotter.application.bench.resume_and_fork.decisions import (
     GatingMode,
     record_decision,
 )
+from promptpotter.application.campaign_config import Estimand, Knob, Scope
 from promptpotter.application.optimizers import nodes, paper_templates
 from promptpotter.application.optimizers.capo import operators
 from promptpotter.application.optimizers.capo.operators import initial_population
@@ -45,13 +45,13 @@ from promptpotter.shared.statistics import paired_reading
 if TYPE_CHECKING:
     from types import ModuleType
 
-    from promptpotter.application.campaign_config import CampaignConfig
-    from promptpotter.application.initialization.session import Session
-    from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.resume_and_fork.replayers import (
+    from promptpotter.application.bench.cycle import Cycle
+    from promptpotter.application.bench.resume_and_fork.replayers import (
         ReplayContext,
         Replayer,
     )
+    from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
         CatchUpFn,
@@ -772,7 +772,7 @@ class CapoRuntime:
         return CapoState()
 
     def prompt_hashes(self, selected: SelectedOptimizer) -> dict[str, str]:
-        return dict(selected.node_digests)
+        return selected.running_digests()
 
     def complete(self) -> None:
         return None
@@ -782,6 +782,9 @@ class CapoRuntime:
         shaping = [m for m in (paper_templates, operators) if m not in covered]
         tree = "".join(ast.dump(ast.parse(inspect.getsource(m))) for m in shaping)
         return hashlib.sha256(tree.encode("utf-8")).hexdigest()[:16]
+
+    def override_levers(self, node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
+        return {}
 
     @property
     def checkpoint_gating(self) -> Mapping[ResumeCheckpointKind, GatingMode]:

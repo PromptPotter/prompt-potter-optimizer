@@ -143,7 +143,7 @@ The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no 
 - **`prompts/{node}.yaml`** — 8-field `PromptTemplate` per node. Schema: `domain/opt_search_point.py::PromptTemplate`. Loaded by `application/datasets/prompts.py::load_node_prompt`.
 - **`task_description.md`** — free-form markdown; decomposed into the campaign's `task_context` framing (`Cycle.framing`) by the first mint that finds none committed, or by a check-in (`new <name> --task-file`, the web check-in).
 - **`dataset.md`** — operator guide; free-form, not parsed.
-- **`task_context.yaml`** — the committed task framing; written once by the `checkin` decomposition (`application/optimization/task_context.py::commit_task_framing`) or by web ingest at commit, and read free on every later run through `infrastructure/store/dataset_access.py::dataset_task_context_path` on the tenant-first ladder.
+- **`task_context.yaml`** — the committed task framing; written once by the `checkin` decomposition (`application/bench/task_context.py::commit_task_framing`) or by web ingest at commit, and read free on every later run through `infrastructure/store/dataset_access.py::dataset_task_context_path` on the tenant-first ladder.
 
 ---
 

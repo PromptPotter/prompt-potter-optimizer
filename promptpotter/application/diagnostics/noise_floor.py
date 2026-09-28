@@ -8,13 +8,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.initialization.loop_start import (
     arm_diagnostic_scoring,
     diagnostic_pass,
     diagnostic_trace,
 )
 from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.optimization.task_context import campaign_framing
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.scoring.search_point_scorer import score_search_point
