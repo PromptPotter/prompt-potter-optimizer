@@ -25,7 +25,7 @@ confidence sequence built from test supermartingales
 **comparability guard** either — what has to be held equal before two methods' numbers may sit in
 the same table. That is where PromptPotter is pointed, and
 it is why the direction of travel is a **bench**: a place a third party's search method plugs in as
-the round's candidate source and is measured under one model, one budget meter, one grader, one
+an optimizer manifest and is measured under one model, one budget meter, one grader, one
 split and one archive. Status and design of that plug point are
 [`../specs/roadmap.md`](../specs/roadmap.md) § The optimizer plug point — **not built yet**, and
 this page will not claim it before a peer actually runs inside it.

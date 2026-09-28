@@ -28,6 +28,8 @@
 # value is `wired-scheduled-for-removal`, a live route whose consumers are being
 # migrated off it (today: `GET /datasets/{name}/pipeline`). Declaring a route
 # that is about to go makes its removal a visible diff instead of a silence.
+# A schema PROPERTY takes the same key with the same two values: a field no code
+# writes yet, and the field it replaces.
 #
 # READS HAD NO BUCKET, and that is why several shipped undeclared. §0's five I/O
 # kinds define Control-remote as MUTATION, so a GET adds no kind and needed no
@@ -2736,11 +2738,22 @@ components:
           description: Course → the cycle_id. Candidate → the searchpoint id minted at L1/origin.
         parent_id:
           type: [string, "null"]
+          x-status: wired-scheduled-for-removal
           description: |
             The candidate this node descends from; null only at the true root. A fork and
             an L4 inner run carry the SAME edge — one resolver reads
             `fork.from_candidate_id` and `spawned_by`, so a course hangs off a node and
-            needs no lane geometry.
+            needs no lane geometry. Successor `parent_ids`.
+        parent_ids:
+          type: array
+          items: { type: string }
+          x-status: declared-not-wired
+          description: |
+            Every candidate this node derives from — one for a mutation, several for a
+            crossover; empty only at the true root. Lineage is a DAG; this tree view hangs
+            the node under `parent_ids[0]`, the declared rule until the surfaces decide how
+            to draw the other edges. A fork or an L4 inner run carries its one edge here
+            exactly as above.
         label:
           type: string
           description: |
@@ -2786,9 +2799,16 @@ components:
             `dashboard.json::state` calls the fine-grained ACTIVITY phase — a different axis.
         is_winner:
           type: boolean
+          x-status: wired-scheduled-for-removal
           description: |
             Elected this round. False throughout a round that never closed — such a round
-            has no winner, and a lone candidate is not promoted to one.
+            has no winner, and a lone candidate is not promoted to one. Successor `is_selected`.
+        is_selected:
+          type: boolean
+          x-status: declared-not-wired
+          description: |
+            In this round's `selected_labels` — the individuals the next round derives
+            from. False throughout a round that never closed.
         theta:
           type: [number, "null"]
           description: |
@@ -3403,6 +3423,8 @@ components:
         sits on `CampaignConfig` itself rather than under `optimization`. Every
         policy knob invalidates search comparability, so a fork-at-offset-0 is how
         you A/B one without touching the global default or the parent cycle.
+        Every knob that belongs to an optimizer rather than the bench moves into
+        `nodes`, the fork's delta over the selected manifest.
       properties:
         max_rounds:
           type: integer
@@ -3423,22 +3445,43 @@ components:
         l1_patience:
           type: integer
           minimum: 1
-          description: Consecutive non-improving L1 rounds before escalation.
+          x-status: wired-scheduled-for-removal
+          description: Consecutive non-improving L1 rounds before escalation. Moves under `nodes`.
         l2_patience:
           type: integer
           minimum: 1
           nullable: true
-          description: L2 stall tolerance; `null` disables the L2 gate.
+          x-status: wired-scheduled-for-removal
+          description: L2 stall tolerance; `null` disables the L2 gate. Moves under `nodes`.
         l3_patience:
           type: integer
           minimum: 1
           nullable: true
-          description: L3 stall tolerance; `null` disables the L3 gate.
+          x-status: wired-scheduled-for-removal
+          description: L3 stall tolerance; `null` disables the L3 gate. Moves under `nodes`.
         pobb_epsilon:
           type: number
           minimum: 0
           maximum: 1
-          description: Per-candidate P(best) elimination threshold.
+          x-status: wired-scheduled-for-removal
+          description: Per-candidate P(best) elimination threshold. Moves under `nodes`.
+        nodes:
+          type: object
+          x-status: declared-not-wired
+          description: |
+            The fork's delta over the selected optimizer manifest, keyed by node name —
+            `{node: {config: {...}}}`, the shape a target pipeline's overlay takes.
+            Every optimizer knob rides here (potter's patiences, `pobb_*`, the
+            resubset toggle, `schema_field_rename`); the fields around it are the
+            bench's own. No field here switches the manifest: a head-to-head between
+            optimizers is two campaigns, not a fork.
+          additionalProperties:
+            type: object
+            additionalProperties: false
+            properties:
+              config:
+                type: object
+                additionalProperties: true
         scoring:
           oneOf:
             - type: string
@@ -3456,20 +3499,24 @@ components:
         per_round_resubset:
           type: boolean
           nullable: true
+          x-status: wired-scheduled-for-removal
           description: |
             Re-pick the most-informative scoring subset every round (adaptive
             Rasch selection) for this fork. `null` inherits the parent. Safe to
             A/B now that every cross-round comparator measures on one fixed θ ruler.
+            Moves under `nodes`, as potter's sampler config.
         schema_field_rename:
           type: boolean
           nullable: true
+          x-status: wired-scheduled-for-removal
           description: |
             Let this fork's L1 rename a field on the inner `l1_generate`'s output
             schema, not merely re-describe it. `null` inherits the parent (locked by
             default: `build_l1_response_schema` never declares the rename param, so the
             LLM cannot emit a key the schema omits). Only meaningful on a campaign
             that optimizes an optimizer (`promptpotter-self`). An L2/L3
-            `fork_proposal` can request this same unlock autonomously.
+            `fork_proposal` can request this same unlock autonomously. Moves under
+            `nodes`, as potter's config.
 
     DeleteCyclePayload:
       $ref: '#/components/schemas/CycleRef'
@@ -4141,28 +4188,57 @@ components:
             Round ceiling; `0` measures the origin and stops. Smart-default `5`
             (matches the M10 prompt-iteration
             framework default). Operator-editable.
+        optimizer:
+          type: string
+          minLength: 1
+          default: potter
+          x-status: declared-not-wired
+          description: |
+            The optimizer manifest this campaign runs — a name under
+            `assets/optimizers/`, or one a registered package ships. Every
+            entry point selects it here; nothing selects it install-wide.
+        nodes:
+          type: object
+          x-status: declared-not-wired
+          description: |
+            The campaign's overlay on the selected manifest, keyed by node name —
+            `{node: {config: {...}}}`, the shape a target pipeline's overlay
+            takes. An optimizer's knobs, a paper's configuration and each llm
+            node's `config.model` all ride here.
+          additionalProperties:
+            type: object
+            additionalProperties: false
+            properties:
+              config:
+                type: object
+                additionalProperties: true
         prompt_block_catalogue:
           type: string
           enum: [guidance, restrict, off]
           default: guidance
+          x-status: wired-scheduled-for-removal
           description: |
             How the reusable prompt building-block library reaches the optimizer:
             `guidance` (suggest blocks, L1 may still invent), `restrict` (library
             values only — an off-library value fails `L1_PROMPT_BLOCKS_IN_LIBRARY`
             and rides the existing forbidden-value wound), `off` (render empty;
-            prompt bit-for-bit identical to a no-library ablation).
+            prompt bit-for-bit identical to a no-library ablation). Moves under
+            `nodes`, as potter's config.
         escalation_ladder:
           type: string
           enum: [full, l1_l2, l1]
           default: full
+          x-status: wired-scheduled-for-removal
           description: |
             How far up L1 → L2 → L3 this campaign may climb. `full` is the whole
             ladder; `l1_l2` lets L2 re-frame but never reaches L3, force-trigger
             included; `l1` is the L1-only ablation arm, where no escalation rule
             can return a fire and neither the `l2_context` nor the `l3_plan` prompt
-            is ever composed. L1's own prompt is identical under all three.
+            is ever composed. L1's own prompt is identical under all three. Moves
+            under `nodes`, as potter's controller config.
         mechanisms:
           type: object
+          x-status: wired-scheduled-for-removal
           additionalProperties:
             type: object
             additionalProperties:
@@ -4173,7 +4249,9 @@ components:
             Nested `{group: {toggle: bool}}`; seeded with stock defaults,
             operator-editable in the new-campaign form, materialized verbatim into
             the committed `campaign.json`. Self-describing schema served by
-            `GET /campaigns/mechanisms-schema`.
+            `GET /campaigns/mechanisms-schema`. The toggles move to their owners:
+            `degradation_fatal_fastpath` to the bench's `DegradationCheck`, every
+            other one under `nodes` as potter's sampler or eliminator config.
 
     DraftCampaign:
       type: object

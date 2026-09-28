@@ -94,8 +94,8 @@ above, pointed at Opik: their dataset and traces in, every measurement visible a
 experiment, the winner back in their prompt library — with PromptPotter either registered as one
 more optimizer behind that API (a `BaseOptimizer` subclass,
 [`external-constraints.md`](external-constraints.md) § M13) or driving Opik's six through an
-adapter that strips their own evaluation, since each is a whole loop rather than a candidate
-source (the plug point in [`../specs/roadmap.md`](../specs/roadmap.md) § The optimizer plug point). Either way the pitch is
+adapter that strips their own evaluation, since each is a whole loop rather than a set of
+manifest members (the plug point in [`../specs/roadmap.md`](../specs/roadmap.md) § The optimizer plug point). Either way the pitch is
 the bench against the menu: their algorithms, our budget, stopping rule and comparability guard.
 
 **Vendor-stated numbers** (Comet's
@@ -132,15 +132,15 @@ the harness side of [`related-work.md`](related-work.md) § Three layers — no 
 benchmark, no stopping rule, no budget meter beyond reporting cost. It optimizes agent source, not
 a prompt + pipeline configuration, and has no prompt-optimization baselines (no GEPA, DSPy, MIPRO).
 Its tree search overlaps ours in shape (visit-penalised selection over a lineage tree — compare
-`mask/backprop.py` UCB1 and [`../specs/parent-selection.md`](../specs/parent-selection.md)), which
+`mask/backprop.py` UCB1 and [`../specs/roadmap.md`](../specs/roadmap.md) § Selector members), which
 is now common ground in the field, not a moat either side holds.
 
 **Worth taking.** (1) **A zero-sample pre-screen**: judge-ranked candidates before any sample is
 bought, as a prior for PoBB's arm order or a cut before measurement — the same question as
-parent-selection.md § Open "whether a self-reported prediction carries signal", with a published
+the selector members' gate — whether a self-reported prediction carries signal — with a published
 ρ to beat. (2) The **easy-subset gate** (cheap smoke tasks before the real split). (3) One
 acquisition mixing measured rank, predicted rank and a visit penalty — a worked instance of the
-single-acquisition direction parent-selection.md argues for. (4) Their cost table (expansion vs
+single-acquisition direction the selector members argue for. (4) Their cost table (expansion vs
 judge vs evaluation per step) is the accounting our budget meter should be able to print.
 
 **Checked** 2026-09-24 — v1 only, no repository linked in the paper.

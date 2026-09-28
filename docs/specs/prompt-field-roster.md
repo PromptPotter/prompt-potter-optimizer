@@ -156,9 +156,14 @@ Whatever ships, the interaction is the same and it is small:
 
 ## What this does NOT change
 
-- `few_shot_examples` and `plan` stay outside the roster. They render on their own rules
-  (`_render_few_shot_block`; `plan` renders nowhere and rides `prompt_field_dict` so a fork
-  inherits the L3 frame). Folding them in would put a list and a prose block on a string grid.
+- **Few-shot shots are inside the prompt structure and outside the roster.** An individual
+  carries its shots as demo-pool sample ids — the shape is owned by
+  [`../architecture.md`](../architecture.md) § Two-layer searchpoints + self-optimization — and
+  `_render_few_shot_block` resolves and renders them into the prompt the archive key hashes, so
+  a shot edit re-keys a cell like any other edit. A list of ids on a string grid is the wrong
+  shape, so no roster ever lists them.
+- **`plan` is not the target prompt's.** It is potter's L3 frame and rides potter's
+  `optimizer_state`, so a roster never meets it.
 - The `prompt` key written into `pipeline_params` stays a RENDER, never storage —
   `strip_rendered_prompt` remains the sole writer of that strip.
 

@@ -190,13 +190,13 @@ quotes no figure; re-measure before quoting a price to anyone.
    | fixed 4-task easy gate before the 50-task evaluation | PoBB over the shared hard-first order, from `elimination_n_min` | cut on a posterior, not a pass count; hard samples first, because an easy cell carries no information about which arm is better (fishtest's lesson, [`../methods/candidate-elimination.md`](../methods/candidate-elimination.md)) |
    | Bradley-Terry over an LLM judge's pairwise opinions | the Rasch θ/δ fit over measured outcomes | Rasch *is* a Bradley-Terry of arm against item — on outcomes, difficulty-adjusted, with an SE |
    | unevaluated node inherits its parent's accuracy | excluded, never filled | an inherited score is a measurement nobody made |
-   | rank + visit-penalty parent sampling | UCB1 over backpropagated θ (`mask/backprop.py`), [`parent-selection.md`](parent-selection.md) | same role; see *take* below |
+   | rank + visit-penalty parent sampling | UCB1 over backpropagated θ (`mask/backprop.py`), [`roadmap.md`](roadmap.md) § Selector members | same role; see *take* below |
    | 50-task subset → 225-task full run | sequential measurement to decisiveness; `verify` for depth on the winner | the stop is a statistic, not a subset size |
    | adopt the best node | decisive election + the held-out gate below + anchor + rollback by fork | an adoption compounds, so it is the decision that most needs an interval — and the round's best is not the best lineage: the [Huxley-Gödel Machine](https://arxiv.org/abs/2510.21614) found a round's top scorer often has unproductive descendants, and scores clades instead ([`../research/external-constraints.md`](../research/external-constraints.md) § Ranked, item 2) |
 
    **Take from them.** (a) The judge as a *zero-sample prior on measurement order* — which arm PoBB walks
-   first — never as a score; gated on the predicted-vs-realized reading [`parent-selection.md`](parent-selection.md)
-   § Open already asks for, with their ρ≈0.68 as the bar. At L4 it pays most: here one measurement is a whole
+   first — never as a score; gated on the predicted-vs-realized reading [`roadmap.md`](roadmap.md)
+   § Selector members already asks for, with their ρ≈0.68 as the bar. At L4 it pays most: here one measurement is a whole
    inner campaign. (b) Rank-based rather than value-based parent sampling: a rank needs no min-max
    normalization across forks, which is that spec's open *Normalization across forks* item.
    [ShinkaEvolve](https://arxiv.org/abs/2509.19349) reached a state-of-the-art circle-packing result in 150

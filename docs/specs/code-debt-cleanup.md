@@ -77,8 +77,8 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   decision, not by nobody having looked. **The ground it was deferred on is gone**: it was
   "structural while what the milestone needs is empirical", and the new M13 is itself structural.
   What replaces it is stronger — [`roadmap.md`](roadmap.md) § The optimizer plug point answers the
-  same question in the same direction, since a plugged-in proposer takes L1's *seat* and nesting
-  stays re-entrancy at a seam rather than a new rung. **Rides with nothing, deliberately.**
+  same question in the same direction, since a peer is a sibling manifest rather than a rung and
+  nesting stays re-entrancy at a seam. **Rides with nothing, deliberately.**
   **Re-test:** read that section; if it settles the question for the operator too, this item is
   deletable rather than deferred, and deleting it is how it ships.
 

@@ -126,6 +126,37 @@ Capabilities are opt-in. A deterministic node declares none; an LLM node in the 
 - **Abort** — a candidate can signal the round should stop.
 - **Fatal fast-path** — fatal codes derived by `classify_result()` (`domain/results_health.py`) eliminate a candidate on the first query, with no rate threshold.
 
+### Optimizer node types
+
+An optimizer manifest uses `llm` and `measurement` nodes plus four types no backend declares,
+serving the contract in [`../architecture.md`](../architecture.md) § Bench and optimizer. **Each
+of the four is backed by an implementation registered under the node's NAME** through the one
+entry-point registry, so `paired_t:` in a manifest resolves to the `paired_t` member; the node's
+`config` is that member's parameters, and a paper's configuration is a set of those values. No
+member is handed `Cycle`, a store or a live client — only frozen `domain/` inputs — and none sees
+the bench set.
+
+| Type | Reads | Returns | Binds it |
+|---|---|---|---|
+| `llm` | its prompt, filled through the dispatch hub | its parsed response — for a proposing node, individuals, each with its `parent_ids` and `source` | proposals are validated like any candidate: forbidden keys, `validate_overrides`, the node's permitted model set |
+| `measurement` | the round's candidates, the sampler's panel, the eliminator's checks | the round's rows | the bench's scoring gateway, walked unchanged; `config` stays empty |
+| `sampler` | the search pool, the bench's per-sample difficulty, prior rows | the round's panel: ordered sample ids, cut into the blocks an eliminator decides between | draws from the search pool alone; deterministic given its inputs and seed, so resume and fork replay it |
+| `eliminator` | the panel, the candidates, rows as they land | a continue or cut per arm per block, each cut a ledger decision stamped with this node | cuts on evidence about the arm, never on a technical failure — that is the bench's `DegradationCheck`, which runs whatever the eliminator; the `none` member walks every arm to the end |
+| `selector` | the round's rows, lineage, the population or archive in `optimizer_state` | `selected: list[label]` and the next `optimizer_state` | its choice is what the optimizer keeps, never a score the bench serves |
+| `algorithm` | individuals, and the demo pool when it edits shots | new individuals with `parent_ids`, no model call and no measurement | deterministic given its inputs and seed |
+
+**Two rules reject a manifest at parse** — in `parse_pipeline_response`, the same parser a
+backend's file goes through, so a special case cannot reach one side only:
+
+- **A manifest declaring any `sampler`, `eliminator`, `selector` or `algorithm` node must name
+  exactly one `measurement` node in its `default` pipeline.** With none the round has no rows;
+  with two it has two sets and nothing says which one a selector reads.
+- **An `eliminator` needs a `sampler` before it in the same pipeline.** A cut decides between
+  blocks, and only a sampler cuts the panel into blocks.
+
+Both are structural — the parser asks what the file declares, never how it was loaded — so a
+backend pipeline, which declares none of the four types, passes both untouched.
+
 ## How the prediction is read
 
 The per-sample `predicted` value is the **head of the terminal ranker's output** — not a fixed key. `terminal_ranking(result, schema)` (`promptpotter/application/optimization/pobb/classification.py`) walks the schema **in reverse** for the last node with `node_role ∈ {ranker, candidate_source}` that wrote its `pipeline_key`, and `sample_measurement.py` takes the head of that list (shape-agnostic via `extract_item_label`). So:
@@ -151,8 +182,6 @@ the full multi-node shape.
 ## Optimizer-manifest parity
 
 PromptPotter's own optimizer prompt pipeline uses the **same shape** as a backend's: the same `nodes` dict keyed by node name, the same `config` + `optimizer` per-node sub-objects, the same `pipelines` dict over those names, and the same `resolved_prompts` + `resolved_schemas` registries — prompts inline, schemas from the generated `resolved_schemas.json` merged at load — where a backend serves them via `GET /pipeline`. It publishes escalation sequences beside `default`, which no backend needs; the shape is identical either way.
-
-It once declared a `view` block beside those two — a second node roster, hand-kept in sync with the one the engine runs. The graph is derived from `nodes` + `pipelines` now (§ The shape), so the parity is whole rather than one key short of it.
 
 So the same parser, scoring gateway, projection, tracing and observability pathway PromptPotter applies to a target pipeline applies to the optimizer itself — that is the foundation the PromptPotter-as-backend connector and the L4 self-optimization closure are built on ([`../specs/roadmap.md`](../specs/roadmap.md)).
 
