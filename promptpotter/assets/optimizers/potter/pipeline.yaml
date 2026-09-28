@@ -1,28 +1,13 @@
-# potter — PromptPotter's own optimizer, and a manifest like any other: this file IS a pipeline,
-# same shape as any backend's GET /pipeline response. A campaign selects it with
-# `optimization.optimizer: potter` and adjusts it with `optimization.nodes.{node}.config`.
-# Operator-authored — nothing writes it. Its generated half (the Pydantic-derived output schemas)
-# lives in the sibling resolved_schemas.json, which scripts/build_optimizer_schemas.py owns
-# outright and CI gates for drift.
-#
-# Every sampler / eliminator / selector / controller / llm node's KNOBS are declared here and
-# nowhere else: the implementation registered under the node's name validates them and carries
-# no default of its own, so this file is the configuration a run starts from.
-#
-# Editing a `resolved_prompts` field below changes what every optimizer call reads, and
-# the text is hashed into measurement identity — so an edit VOIDS banked outer origins.
-# Comments and formatting are not: the fingerprint hashes the parsed manifest, not bytes.
+# potter — PromptPotter's own optimizer, selected with `optimization.optimizer: potter` and
+# adjusted with `optimization.nodes.{node}.config`. Every node's knobs are declared here and
+# nowhere else. A `resolved_prompts` edit is hashed into measurement identity, so it voids
+# banked outer origins; comments are not. The output schemas are generated into
+# resolved_schemas.json by scripts/build_optimizer_schemas.py.
 name: potter
 version: v1.0
-# The MENU a human picks an optimizer model from — what is offerable, never what is set
-# (each node's own `config.model` is that). Outside the L4 fingerprint by construction:
-# `connectors/promptpotter.py::_identity_config` hashes `config` only, because a permission
-# list does not change what the origin ran, so widening this must not void a banked panel.
-# Admin-owned: extend it here (or in the shadow at `$PROMPTPOTTER_HOME/optimizers/potter/
-# pipeline.yaml`, which `optimizer_manifest_path` prefers) as this install gains access to more models.
-# Seeded with what this install actually runs and profiles — `_MODEL_PROFILES`
-# (`infrastructure/llm/registry.py`) is where a model's max_tokens floor is declared, and
-# preflight HARD-blocks a node set below its own.
+# The models a human may pick, never the one set (each node's `config.model`). Outside the L4
+# fingerprint, so widening it voids no banked panel. `$PROMPTPOTTER_HOME/optimizers/potter/
+# pipeline.yaml` shadows this file per install.
 available_models:
   - openai/gpt-6-luna
   - deepseek/deepseek-v4-flash:nitro
@@ -38,23 +23,13 @@ nodes:
       per_round_resubset: true
   l1_generate:
     type: llm
-    # The MENUS behind this node's scalar params, so the operator picks a value instead of
-    # typing one. `param_allowed_values` alone does NOT open a search axis — `node_config_schema`
-    # reads L1's reach off `param_keys`, which stays empty here on purpose: L1 never searches
-    # its own configuration. That says nothing about L2, whose reach is declared in
-    # `dispatch/schemas.py::L2_NODE_AXES` and served from there, not from this block. Anchored
-    # and aliased onto every node below; a menu named for a key a node does not carry is simply
-    # never read.
+    # Menus the operator picks from; they open no search axis (`param_keys` stays empty, and
+    # L2's reach is `dispatch/schemas.py::L2_NODE_AXES`). `model` falls back to `available_models`.
     optimizer: &node_menus
       param_allowed_values:
-        # These five ARE `capabilities.py::STANDARD_EFFORT_LADDER`, and a YAML cannot import a
-        # constant — so this list cites it by name. A surface resolving a picked model replaces
-        # this ladder with what that model actually takes; the two must not drift.
+        # Mirrors `capabilities.py::STANDARD_EFFORT_LADDER`.
         reasoning_effort: [none, default, low, medium, high]
         provider: [openrouter, groq, openai, anthropic]
-        # `model` is deliberately absent, so it falls back to `available_models` above — the
-        # optimizer's own model is install-global, and every node here keeps `param_keys` empty
-        # regardless, so nothing searches it.
     config:
       temperature: 0.4
       output_format: json
@@ -63,18 +38,10 @@ nodes:
       schema_family: l1_generate
       schema_version: 1
       reasoning_effort: medium
-      # The node with the LEAST headroom and the only one measured hitting its ceiling: one
-      # banked call billed 24,000 completion tokens — two 12,000 round-trips, the first attempt
-      # truncating and the paid schema repair truncating behind it. That is not a short answer,
-      # it is a ZERO-CANDIDATE round (`l1/generate.py` reads finish_reason=length as
-      # `PARSE_FAILURE_MALFORMED`), so the round costs two calls and returns nothing.
-      # A ceiling is not a spend — only emitted tokens bill — and 20000 still lands inside
-      # `OPTIMIZER_CALL_DEADLINE_S`: at deepseek-v4-flash's measured ~233 tok/s a full 20k answer
-      # is ~86s against the 180s per-round-trip wall; gpt-6-luna's rate is unmeasured.
+      # A truncated answer is a zero-candidate round, and 12000 was measured truncating.
       max_tokens: 20000
       provider: openrouter
       model: openai/gpt-6-luna
-      # The proposer's own knobs, beside its call config (`optimizers/potter/knobs.py`).
       n_variants: 5
       k_max: 5
       prompt_block_catalogue: guidance
@@ -92,17 +59,12 @@ nodes:
       `deepseek/deepseek-v4-flash:nitro`, still on the menu, was probed that way and answered with
       an instance. PRICE :nitro OFF THE WIRE, NEVER THE CATALOGUE: its 0731 snapshot's route billed
       $0.386/Mtok over 2.05M tokens, 2.9x its own list.
-  # The MEASUREMENT node: it runs the whole campaign pipeline against the panel and makes no
-  # optimizer call of its own — no model, no prompt, no tunable, so `config` stays empty and the
-  # menus alias does not belong here. `node_config_schema` derives a node's params from
-  # `current_config`, so the dead `reasoning_effort: high` that stood here drew a padlocked
-  # reasoning row on the one node in this graph that does not reason.
+  # Runs the campaign pipeline against the panel; it makes no optimizer call, so no config.
   l1_score:
     type: measurement
     config: {}
-  # PoBB — a candidate keeps measuring only while it could still beat the leader
-  # (`methods/candidate-elimination.md`). It never cuts below the bench's `elimination_n_min`.
-  # ε is the most aggressive bar before false cuts of true winners climb on the archived rounds.
+  # A candidate keeps measuring only while it could still beat the leader
+  # (`methods/candidate-elimination.md`).
   pobb:
     type: eliminator
     config:
@@ -112,8 +74,7 @@ nodes:
       lock_in_n_min: 8
       epsilon_elimination: true
       leader_lock_in: false
-  # θ election — the arm the next round derives from: the strictly positive θ lift over the
-  # parent on the cycle's ruler (`scoring/selection.py::elect_round_winner`).
+  # The next parent: the strictly positive θ lift over the parent (`elect_round_winner`).
   theta_election:
     type: selector
     config: {}
@@ -127,15 +88,8 @@ nodes:
       schema_version: 1
       prompt_family: l1_critique
       prompt_version: 1
-      # BASELINE, deliberately set and never yet tested against `low`. `low` was inherited from
-      # the model profile's advice rather than measured here, and the profile's own evidence is
-      # about the token FLOOR, not about which effort distils better — so this is the arm that
-      # was missing, not a raise for its own sake.
       reasoning_effort: medium
-      # Raised WITH the effort, because 12000 had 5% headroom at `low`: the tail ran 11,370
-      # output tokens against it, and a truncated critique is not a shorter critique — it is a
-      # round whose distillation never lands. At the measured +27% for a two-step effort move
-      # the tail projects to ~14.4k, so this clears it. `max_tokens` is a ceiling, not a spend.
+      # A truncated critique never lands; the measured tail at `low` was 11,370 tokens.
       max_tokens: 16000
       provider: openrouter
       model: openai/gpt-6-luna
@@ -166,8 +120,7 @@ nodes:
       provider: openrouter
       model: openai/gpt-6-luna
     description: *model_route
-  # The controller — the stall ladder that picks, round by round, whether the next round is
-  # `default` alone or one of the alternatives below, and when potter stops.
+  # The stall ladder: picks each round's pipeline below, and when potter stops.
   escalation:
     type: controller
     config:
@@ -179,7 +132,6 @@ nodes:
       rebase_capability: true
       terminate_capability: true
 pipelines:
-  # What the bench walks, once per round.
   default:
     - adaptive_queue
     - l1_generate
@@ -381,10 +333,8 @@ resolved_prompts:
         "plan": the new strategy as AT MOST 6 bullets, ONE sentence each (required). Bullets, not prose. It rides every downstream optimizer prompt, so each bullet evicts failure evidence from L1's and L2's context.
         "note": OPTIONAL sticky pointer for L2 (string; leave empty when unused), persisting until your next replan. Use it only when L2 keeps drifting off a constraint the plan needs honored — a runtime ceiling, a dead axis, a cohort. Leave it empty when the plan is enough.
         "rationale": 1-2 sentences on the strategic shift
-  # The SELF-OPTIMIZING prompt family: what potter reads when the campaign optimizes an INNER
-  # optimizer's own prompts (`datasets/promptpotter-self`), selected by that campaign's overlay
-  # (`nodes.{node}.config.prompt_family`). A field it does not rewrite is the base family's,
-  # aliased so there is one copy. Spec: docs/specs/l4-outer-loop.md.
+  # Read when the campaign optimizes an inner optimizer's prompts (`datasets/promptpotter-self`,
+  # via `nodes.{node}.config.prompt_family`). Spec: docs/specs/l4-outer-loop.md.
   l1_generate_self_optimizing/1:
     persona: >-
       You improve an INNER PromptPotter optimizer's own prompts. You never answer a task — you edit

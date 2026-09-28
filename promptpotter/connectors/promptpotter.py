@@ -11,9 +11,9 @@ from promptpotter.application.intelligence import exploration
 from promptpotter.application.runner.inner import ruler
 from promptpotter.application.runner.inner.spawn import inner_cell_envelope_s, run_inner_cycle
 from promptpotter.application.runner.inner.tasks import (
+    InnerCells,
     InnerTasks,
-    inner_benchmark_documents,
-    select_inner_optimizer,
+    resolve_inner_cells,
 )
 from promptpotter.application.scoring import metrics, selection
 from promptpotter.config.prompt_blocks import block_library
@@ -22,9 +22,8 @@ from promptpotter.domain.l4 import proxies
 from promptpotter.domain.l4.inner_origin import INNER_ORIGIN_KEY
 from promptpotter.domain.l4.proxies import INNER_RESULT_KEY, OUTER_PROXY_KEYS
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import stable_hash
-from promptpotter.infrastructure.store.io import read_yaml
+from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.hashing import module_source_digest
 
 if TYPE_CHECKING:
@@ -34,7 +33,6 @@ if TYPE_CHECKING:
 
     import httpx
 
-    from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
@@ -46,30 +44,6 @@ logger = logging.getLogger(__name__)
 # against the same depth as a cell, and a cancelled call until it has wound down
 # (`query_loop.py::run_walks`). Stop counting one and this constant understates the peak.
 MAX_CELLS_IN_FLIGHT = 4
-
-
-def _inner_optimizer_revision(dataset_dir: Path, inner: SelectedOptimizer) -> dict[str, Any]:
-    """What the inner cycle's optimizer RESOLVES TO — the baseline every arm on the panel departs
-    from: the manifest by name and version, and each node the OUTER dataset declares as its
-    mutation surface by its prompt body, output schema and resolved config.
-
-    NARROW on purpose: a node description, a widened ``available_models`` or a schema regenerated
-    for an unrelated node must not void a panel. DERIVED from the outer declaration rather than a name list, so a surface that
-    grows a node is covered without an edit here. The PARSED manifest, never its bytes."""
-    outer = parse_pipeline_response(read_yaml(dataset_dir / "pipeline.yaml"))
-    mutated = sorted(n.name for n in outer.config_nodes if n.tunes_llm)
-    if undeclared := [name for name in mutated if name not in inner.llm_nodes]:
-        raise ValueError(
-            f"{dataset_dir.name} mutates {undeclared}, which the inner campaign's optimizer "
-            f"{inner.name!r} does not declare (its llm nodes are {sorted(inner.llm_nodes)}): an "
-            "arm editing one would change nothing its inner cells run. Point the panel's inner "
-            "benchmark at a campaign selecting the optimizer these nodes belong to."
-        )
-    return {
-        "manifest": inner.name,
-        "version": inner.version,
-        "nodes": {name: inner.node_digests[name] for name in mutated},
-    }
 
 
 def measurement_modules() -> tuple[ModuleType, ...]:
@@ -96,42 +70,56 @@ def _check_prompt_closure() -> None:
         runtime.source_digest(*measurement_modules())
 
 
+def _inner_cells(stores: Stores, experiment: Mapping[str, Any] | None) -> InnerCells:
+    if experiment is None:
+        raise PayloadInvalidError(
+            f"an outer dataset's graph and identity derive from its {CONNECTOR.experiment_file}, "
+            "which this box does not hold.",
+            code="pipeline_config_invalid",
+        )
+    return resolve_inner_cells(stores, InnerTasks.model_validate(experiment))
+
+
+def _pipeline_declaration(stores: Stores, experiment: Mapping[str, Any] | None) -> dict[str, Any]:
+    return _inner_cells(stores, experiment).pipeline()
+
+
 def _identity_config(
-    stores: Stores, dataset_dir: Path, inner_tasks: Mapping[str, Any] | None
+    stores: Stores, _dataset_dir: Path, experiment: Mapping[str, Any] | None
 ) -> dict[str, dict[str, Any]]:
-    """The inner optimizer's effective-revision fingerprint: which manifest the inner campaign
-    selects and what its nodes resolve to, the source deciding what its prompts say, the estimator
-    source, and the inner benchmark's own config. In the recursion the optimizer IS the instrument,
-    so two optimizers' inner cells must never pool under one key. Not the task list — each task is
-    its own sample's ``source_pin`` (:func:`_extract_experiment`), so adding one to
-    ``inner_tasks.yaml`` voids none of the cells already banked."""
-    inner_tasks = inner_tasks or {}
+    """The inner optimizer's effective-revision fingerprint: which manifest the inner cells run and
+    what each of its llm nodes resolves to, the source deciding what its prompts say, the estimator
+    source, and every inner dataset's own config. In the recursion the optimizer IS the
+    instrument, so two optimizers' inner cells must never pool under one key. Not the task list —
+    each task is its own sample's ``source_pin`` (:func:`_extract_experiment`), so adding one to
+    ``inner_tasks.yaml`` voids none of the cells already banked. Carried on the first node of the
+    outer chain."""
+    cells = _inner_cells(stores, experiment)
+    inner = cells.optimizer
     # `config` only, deliberately. `available_models` is a permission list and
     # `optimizer.param_allowed_values` bounds what L1 may PROPOSE — neither changes what the
     # origin does, so widening either must not void a panel that cost an hour to measure.
-    # An unresolvable benchmark hashes as ``None``, a distinct input from any real config.
-    benchmark = inner_tasks.get("inner_benchmark")
-    inner_pipeline, inner_campaign_config = inner_benchmark_documents(
-        stores, str(benchmark) if benchmark else None
-    )
-    inner_spec = {
-        "benchmark": benchmark,
-        "config": inner_tasks.get("inner_benchmark_config") or {},
-        "nodes": (
-            {name: (node or {}).get("config") for name, node in inner_pipeline["nodes"].items()}
-            if inner_pipeline and isinstance(inner_pipeline.get("nodes"), dict)
-            else None
-        ),
-        "campaign": inner_campaign_config,
+    datasets = {
+        name: {
+            "nodes": {n: (node or {}).get("config") for n, node in cell.pipeline["nodes"].items()}
+            if cell.pipeline and isinstance(cell.pipeline.get("nodes"), dict)
+            else None,
+            "campaign": dict(cell.campaign_config),
+        }
+        for name, cell in cells.by_dataset.items()
     }
-    # The manifest a cell RUNS, under the panel's overlays; a box with no panel lays none.
-    cfg = InnerTasks.model_validate(inner_tasks).inner_benchmark_config if inner_tasks else None
-    inner = select_inner_optimizer(
-        inner_spec["campaign"],
-        cfg.inner_nodes if cfg else {},
-        cfg.inner_depth_nodes if cfg else {},
-    )
-    inner_optimizer = _inner_optimizer_revision(dataset_dir, inner)
+    inner_spec = {
+        "benchmark": cells.panel.inner_benchmark,
+        "config": (experiment or {}).get("inner_benchmark_config") or {},
+        "datasets": datasets,
+    }
+    # NARROW on purpose: a node description, a widened `available_models` or a schema regenerated
+    # for an unrelated node must not void a panel. The PARSED manifest, never its bytes.
+    inner_optimizer = {
+        "manifest": inner.name,
+        "version": inner.version,
+        "nodes": inner.node_digests,
+    }
     # What the inner optimizer's prompts SAY, and which of its panels fill each one: both are
     # code, so nothing above reaches them — see `OptimizerRuntime.source_digest`.
     panel_text = inner.runtime.source_digest(*measurement_modules())
@@ -146,7 +134,7 @@ def _identity_config(
             inner_spec,
         ]
     )[:12]
-    return {"l1_generate": {INNER_ORIGIN_KEY: fingerprint}}
+    return {cells.chain[0]: {INNER_ORIGIN_KEY: fingerprint}}
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +248,8 @@ CONNECTOR = Connector(
     # config dir and fed through ``extract_experiment`` at init (no CSV table).
     experiment_file="inner_tasks.yaml",
     resolve_experiment=_resolve_panel,
+    # The outer's graph IS the inner optimizer's, so it is served here, never mirrored in a file.
+    pipeline_declaration=_pipeline_declaration,
     identity_config=_identity_config,
     completion_check=_check_prompt_closure,
 )

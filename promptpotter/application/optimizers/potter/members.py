@@ -18,7 +18,7 @@ from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.potter import couplings
 from promptpotter.application.optimizers.potter.dispatch.facade import injection_source_digest
 from promptpotter.application.optimizers.potter.dispatch.injections.registry import injection_table
-from promptpotter.application.optimizers.potter.dispatch.layout import layout_levers
+from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS, layout_levers
 from promptpotter.application.optimizers.potter.dispatch.prompts import (
     compute_optimizer_prompt_hashes,
 )
@@ -61,7 +61,7 @@ from promptpotter.application.scoring.candidate_report import fatal_validation_f
 from promptpotter.domain.dashboard_rows import OptimizerLimit
 from promptpotter.domain.optimizer_state import POTTER_MANIFEST, potter_round_state
 from promptpotter.domain.phases import StopLoop
-from promptpotter.domain.pipeline_schema import NodeKind
+from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM, NodeKind
 from promptpotter.domain.results import CandidateProposal
 from promptpotter.domain.results_health import compute_node_failure_rates, evidence_starved_node
 from promptpotter.domain.strict_model import StrictModel
@@ -379,6 +379,13 @@ class PotterRuntime:
 
     def source_digest(self, *covered: ModuleType) -> str:
         return injection_source_digest(*covered)
+
+    def override_param_types(self, node: str) -> dict[str, str]:
+        spec = NODE_LAYOUTS.get(node)
+        if spec is None:
+            return {}
+        # L2 owns `l1_generate`'s panels, so there the outer's lever is its output schema's names.
+        return {"layout": "object"} if spec.editor == "l4" else {SCHEMA_RENAME_PARAM: "object"}
 
     def override_levers(self, node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
         return layout_levers(node, declared)

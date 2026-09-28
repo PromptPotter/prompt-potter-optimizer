@@ -23,6 +23,7 @@ class Connector:
     required_observation_keys: tuple[str, ...] = ()                 # keys the payload ALWAYS carries; init RAISES if the dataset declares no mapping
     experiment_file: str = ""                                       # on-disk experiment doc read from the dataset dir in place of a sample table
     resolve_experiment: ExperimentResolver | None = None            # parsed experiment_file -> the document every read sees (a named roster pinned)
+    pipeline_declaration: Callable[[Stores, Mapping | None], dict] | None = None  # in_process only: the graph served in place of GET /pipeline; pipeline.yaml overlays it
     identity_config: Callable[[Path, Mapping | None], dict] | None = None  # (dataset dir, resolved experiment) -> what EVERY cell is measured with, not the wire
     measured_unit: MeasuredUnit = "sample"                          # what ONE row is CALLED — "sample" | "cell"
     expected_revision: str | None = None                            # backend rev this PP rev expects (paired w/ version_check)

@@ -1875,13 +1875,29 @@ def test_no_held_out_row_reaches_a_round_panel_or_an_archive_view() -> None:
 
 
 def _pipeline_schema(dataset: str) -> PipelineSchema:
-    """The committed `datasets/{dataset}/pipeline.yaml`, parsed. `promptpotter-self` is the
-    outer L4 campaign (it declares the schema levers); `justlogic-d234` is a plain inner one."""
+    """The committed `datasets/{dataset}/pipeline.yaml`, parsed — a plain dataset's whole graph."""
     path = Path(__file__).resolve().parents[1] / "datasets" / dataset / "pipeline.yaml"
     return parse_pipeline_response(yaml.safe_load(path.read_text(encoding="utf-8")))
 
 
-def test_emittable_params_are_declared_and_an_invented_one_is_rejected() -> None:
+def _outer_schema(root: Path) -> PipelineSchema:
+    """`promptpotter-self`'s graph as a run declares it: served off the inner manifest, with the
+    schema levers the outer L4 campaign mutates."""
+    from promptpotter.application.pipeline_resolve import (
+        dataset_pipeline_declaration,
+        experiment_outside_run,
+    )
+    from promptpotter.infrastructure.store.stores import build_stores
+    from promptpotter.shared.identity import default_identity
+
+    outer = Path(__file__).resolve().parents[1] / "datasets" / "promptpotter-self"
+    stores = build_stores(default_identity(), projects_root=root)
+    declared = dataset_pipeline_declaration(stores, outer, experiment_outside_run(outer))
+    assert declared is not None
+    return parse_pipeline_response(declared)
+
+
+def test_emittable_params_are_declared_and_an_invented_one_is_rejected(tmp_path: Path) -> None:
     """`node_param_keys` is the single emittable surface — and every reader must read it.
 
     An invented PARAM is not dropped the way a hallucinated NODE is: absent a membership
@@ -1895,7 +1911,7 @@ def test_emittable_params_are_declared_and_an_invented_one_is_rejected() -> None
     )
     from promptpotter.application.optimizers.potter.validators.l1_strict import validate_overrides
 
-    schema = _pipeline_schema("promptpotter-self")
+    schema = _outer_schema(tmp_path)
     emitted = build_l1_response_schema(
         schema, citable_fields=(), inner_optimizer=resolve_optimizer("potter", {})
     )["properties"]["variants"]["items"]["properties"]["pipeline_overlay"]["properties"]
@@ -2060,7 +2076,7 @@ def test_a_description_lock_holds_its_subtree_and_the_fold_reaches_nested_fields
     assert currency in follows([lines, amount, total])
 
 
-def test_nested_param_override_accumulates_instead_of_reverting_its_parent() -> None:
+def test_nested_param_override_accumulates_instead_of_reverting_its_parent(tmp_path: Path) -> None:
     """A `param_types: object` param merges one level; siblings the child did not name survive.
 
     A nested param is ONE key in the node config, so a node-level `{**existing, **incoming}`
@@ -2072,7 +2088,7 @@ def test_nested_param_override_accumulates_instead_of_reverting_its_parent() -> 
     from promptpotter.application.pipeline_resolve import merge_pipeline_params
     from promptpotter.domain.pipeline_schema import description_key
 
-    schema = _pipeline_schema("promptpotter-self")
+    schema = _outer_schema(tmp_path)
 
     # Every nested param a node's schema can graft accumulates, not just the first one:
     # `output_schema_field_names` + `layout` on the optimizer's own nodes (pp-self). The
@@ -3547,7 +3563,7 @@ def test_a_gutted_prompt_field_is_rejected_and_a_tightening_is_not() -> None:
     )
 
 
-def test_the_l4_dataset_is_recognized_as_one() -> None:
+def test_the_l4_dataset_is_recognized_as_one(tmp_path: Path) -> None:
     """The is-this-L4 probe and the loader must agree — a disagreement is silent.
 
     ``runner/inner/spawn.py`` decides whether to verify the outer observation contract
@@ -3567,11 +3583,14 @@ def test_the_l4_dataset_is_recognized_as_one() -> None:
     from promptpotter.application.runner.inner.tasks import (
         inner_instrument_config,
         load_inner_tasks,
+        resolve_inner_cells,
         resolve_inner_task,
-        select_inner_optimizer,
     )
     from promptpotter.connectors import get
+    from promptpotter.domain.pipeline_parsing import parse_pipeline_response
     from promptpotter.infrastructure.store.io import read_yaml
+    from promptpotter.infrastructure.store.stores import build_stores
+    from promptpotter.shared.identity import default_identity
 
     d = Path(__file__).resolve().parents[1] / "datasets" / "promptpotter-self"
     spec = d / get("promptpotter").experiment_file
@@ -3581,7 +3600,8 @@ def test_the_l4_dataset_is_recognized_as_one() -> None:
 
     # The SHIPPED config, not a hand-built one — the question is what the panel runs under.
     base = load_campaign_config(read_yaml(d / "campaign.yaml")["campaign_config"])
-    ctx = types.SimpleNamespace(dataset_config_dir=d, panel=panel)
+    cells = resolve_inner_cells(build_stores(default_identity(), projects_root=tmp_path), panel)
+    ctx = types.SimpleNamespace(dataset_config_dir=d, cells=cells)
     for task in panel.tasks:
         derived = inner_instrument_config(
             resolve_inner_task(ctx, task.id),
@@ -3595,20 +3615,22 @@ def test_the_l4_dataset_is_recognized_as_one() -> None:
             "pools them anyway"
         )
 
-    # The manifest the outer mutates against — its base templates, wire limits and identity — is
-    # the one a cell RUNS, the panel's overlays laid on the inner dataset's own.
-    inner_raw = read_yaml(d.parent / panel.inner_benchmark / "campaign.yaml")["campaign_config"]
-    cfg = panel.inner_benchmark_config
-    shown = select_inner_optimizer(inner_raw, cfg.inner_nodes, cfg.inner_depth_nodes)
-    cell = inner_instrument_config(
-        resolve_inner_task(ctx, panel.tasks[0].id),
-        load_campaign_config(inner_raw),
-        llm_node="llm_only",
-        n_scored=40,
-    )
-    ran = select_optimizer(cell.optimization)
-    assert shown.node_digests == ran.node_digests
-    assert shown.knobs("escalation") == ran.knobs("escalation")
+    # The manifest the outer mutates against — its graph, base templates, wire limits and
+    # identity — is the one EVERY cell runs, the panel's overlays laid on that cell's dataset's own.
+    shown = cells.optimizer
+    graph = parse_pipeline_response(cells.pipeline())
+    for task in panel.tasks:
+        task_spec = resolve_inner_task(ctx, task.id)
+        cell = inner_instrument_config(
+            task_spec,
+            load_campaign_config(dict(cells.by_dataset[task_spec.inner_dataset].campaign_config)),
+            llm_node="llm_only",
+            n_scored=40,
+        )
+        ran = select_optimizer(cell.optimization)
+        assert shown.node_digests == ran.node_digests
+        assert shown.knobs("escalation") == ran.knobs("escalation")
+        assert {n.name for n in graph.config_nodes if n.tunes_llm} == set(ran.llm_nodes)
 
 
 # 7. Money — what a call is billed, and against which price

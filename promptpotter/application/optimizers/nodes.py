@@ -276,6 +276,11 @@ class OptimizerRuntime(Protocol):
         digest already hashes. An L4 inner cell's identity folds it in."""
         ...
 
+    def override_param_types(self, node: str) -> dict[str, str]:
+        """The params beyond the prompt fields an L4 override of *node* carries and this optimizer
+        applies, by JSON type — what an outer arm may edit on the node besides its prose."""
+        ...
+
     def override_levers(self, node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
         """The levers of one node's L4 override this optimizer resolves itself — beyond the prompt
         fields, schema renames and model the bench resolves — as they RESOLVE, for the inner cell's

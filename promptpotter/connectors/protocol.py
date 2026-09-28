@@ -218,6 +218,11 @@ class Connector:
     """Run where the table completes (``wiring.py::complete_registries``), so what it raises stops
     the server at boot and a run at init; ``None`` checks nothing."""
 
+    pipeline_declaration: Callable[[Stores, Mapping[str, Any] | None], dict[str, Any]] | None = None
+    """What an ``in_process`` backend answers in place of ``GET /pipeline``: the graph it runs, off
+    the dataset's resolved experiment. The dataset's ``pipeline.yaml`` overlays it exactly as it
+    overlays a remote backend's answer. ``None`` = that file is the whole declaration."""
+
     identity_config: (
         Callable[[Stores, Path, Mapping[str, Any] | None], dict[str, dict[str, Any]]] | None
     ) = None

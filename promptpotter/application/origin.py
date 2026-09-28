@@ -17,6 +17,7 @@ from promptpotter.application.datasets.prompts import has_dataset_prompts, load_
 from promptpotter.application.initialization.loop_start import populate_session_scoring
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.pipeline_resolve import (
+    dataset_pipeline_declaration,
     experiment_outside_run,
     resolve_pipeline_config_params,
 )
@@ -45,10 +46,12 @@ from promptpotter.domain.results import (
 from promptpotter.domain.run_records import CandidateMintedRecord, CycleSeed
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.infrastructure.store.dataset_access import dataset_pipeline_path
-from promptpotter.infrastructure.store.io import read_yaml
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import StoredConfigInvalidError
+from promptpotter.shared.errors import (
+    NotFoundError,
+    PayloadInvalidError,
+    StoredConfigInvalidError,
+)
 from promptpotter.shared.instrument import (
     NO_ROUND_SLOT,
     MeasuredCandidate,
@@ -450,8 +453,10 @@ def prospective_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) 
     real run stamps. It lived in the origins ROUTER, which put a hash computation behind an
     adapter no other entry point could reach."""
     try:
-        raw = read_yaml(dataset_pipeline_path(dataset_dir))
-        schema = parse_pipeline_response(raw)
+        experiment = experiment_outside_run(dataset_dir)
+        schema = parse_pipeline_response(
+            dataset_pipeline_declaration(stores, dataset_dir, experiment) or {}
+        )
         cfg = load_dataset_campaign_config(dataset_campaign_path(dataset_dir))
         active = schema.active_steps_excluding(cfg.exclude_nodes)
         if not active:
@@ -462,7 +467,7 @@ def prospective_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) 
             dataset_dir,
             schema,
             judges=cfg.judges,
-            experiment=experiment_outside_run(dataset_dir),
+            experiment=experiment,
             stores=stores,
             workspace=stores.base_dir,
         )
@@ -489,9 +494,10 @@ def prospective_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) 
         TypeError,
         json.JSONDecodeError,
         StoredConfigInvalidError,
+        NotFoundError,
+        PayloadInvalidError,
     ):
-        # StoredConfigInvalidError included deliberately: this is a SURVEY over every
-        # tenant dataset, so one unreadable neighbour drops itself, never the list.
-        # The dataset's own direct reads still 500 with the restamp remedy.
+        # A SURVEY over every tenant dataset: an unreadable neighbour, or an outer one whose inner
+        # benchmark does not resolve, drops itself, never the list. Direct reads still raise.
         logger.exception("origins: prospective origin id failed for %s", dataset_name)
         return None

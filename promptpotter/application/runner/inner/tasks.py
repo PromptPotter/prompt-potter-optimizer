@@ -3,10 +3,10 @@ outer dataset; no name test recognises one. ``extra="forbid"`` throughout: the t
 
 from __future__ import annotations
 
-import contextlib
 import itertools
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ConfigDict, Field, ValidationError, model_validator
@@ -18,12 +18,17 @@ from promptpotter.application.campaign_config import (
     OptimizationConfig,
     merge_node_overlays,
 )
+from promptpotter.application.datasets.authored import (
+    dataset_campaign_path,
+    read_campaign_config_file,
+)
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, resolve_optimizer
 from promptpotter.config.settings import DEFAULT_ORIGIN_BUDGET
-from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
+from promptpotter.domain.l4.proxies import INNER_RESULT_KEY, OUTER_PROXY_KEYS
+from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeKind, NodeType
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.dataset_access import (
-    DatasetAccessError,
+    dataset_pipeline_path,
     readable_dataset_dir,
 )
 from promptpotter.infrastructure.store.io import read_yaml_optional
@@ -156,11 +161,15 @@ class InnerTasks(StrictModel):
         ]
         return raw
 
-    def dataset_for(self, cell: InnerTask | None) -> str:
+    def dataset_for(self, cell: InnerTask) -> str:
         """Which benchmark a cell runs — its own where it names one, the panel's otherwise. The
         ONE spelling of that fallback: the distinctness check, the spec resolver and the shared
         δ scale all key on it, and three copies is three chances to key on a different answer."""
-        return cell.inner_dataset if cell and cell.inner_dataset else self.inner_benchmark
+        return cell.inner_dataset or self.inner_benchmark
+
+    @property
+    def datasets(self) -> frozenset[str]:
+        return frozenset(self.dataset_for(cell) for cell in self.tasks)
 
     @model_validator(mode="after")
     def _cells_are_distinct(self) -> InnerTasks:
@@ -260,24 +269,6 @@ def load_inner_tasks(path: Path) -> InnerTasks:
         ) from exc
 
 
-def inner_benchmark_documents(
-    stores: Stores, benchmark: str | None
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    """The inner benchmark's ``pipeline.yaml`` and ``campaign.yaml::campaign_config`` from the dir the
-    spawn runs and the ruler grades (``readable_dataset_dir``). An unresolvable one reads as absent."""
-    benchmark_dir: Path | None = None
-    if benchmark:
-        with contextlib.suppress(DatasetAccessError):
-            benchmark_dir = readable_dataset_dir(stores, benchmark)
-    if benchmark_dir is None:
-        return None, None
-    campaign = read_yaml_optional(benchmark_dir / "campaign.yaml")
-    return (
-        read_yaml_optional(benchmark_dir / "pipeline.yaml"),
-        (campaign or {}).get("campaign_config"),
-    )
-
-
 def _inner_manifest_nodes(
     own: Mapping[str, ManifestNodeOverlay],
     nodes: Mapping[str, ManifestNodeOverlay],
@@ -288,14 +279,14 @@ def _inner_manifest_nodes(
     return merge_node_overlays(merge_node_overlays(own, nodes), depth_nodes)
 
 
-def select_inner_optimizer(
-    campaign_config: Mapping[str, Any] | None,
+def _select_inner_optimizer(
+    campaign_config: Mapping[str, Any],
     nodes: Mapping[str, ManifestNodeOverlay],
     depth_nodes: Mapping[str, ManifestNodeOverlay],
 ) -> SelectedOptimizer:
     """The manifest an inner cell runs, under the overlay it runs it with — what every L4 arm
-    mutates. One naming none, or an unresolvable benchmark (``None``), runs the default manifest."""
-    opt = (campaign_config or {}).get("optimization") or {}
+    mutates. A template naming none runs the default manifest."""
+    opt = campaign_config.get("optimization") or {}
     own = {
         node: ManifestNodeOverlay.model_validate(raw)
         for node, raw in (opt.get("nodes") or {}).items()
@@ -306,31 +297,137 @@ def select_inner_optimizer(
     )
 
 
+# An inner node's prompt fields an outer arm may rewrite. `problem_description` and `answer_format`
+# carry the injection slots and the output contract, so an edit there severs a channel.
+OUTER_PROMPT_FIELDS: tuple[str, ...] = ("persona", "task_intent", "instruction", "thinking_style")
+
+_OUTER_KINDS = frozenset({NodeKind.LLM, NodeKind.GATEWAY})
+
+
+@dataclass(frozen=True)
+class InnerCell:
+    """One inner dataset of a panel: its campaign template, its pipeline, and the optimizer its
+    cells run under the panel's overlays."""
+
+    campaign_config: Mapping[str, Any]
+    pipeline: Mapping[str, Any] | None
+    optimizer: SelectedOptimizer
+
+
+@dataclass(frozen=True)
+class InnerCells:
+    """A panel and its inner datasets, resolved once: what the outer's graph, identity and binding
+    read, and what each cell runs."""
+
+    panel: InnerTasks
+    by_dataset: Mapping[str, InnerCell]
+
+    @property
+    def optimizer(self) -> SelectedOptimizer:
+        return next(iter(self.by_dataset.values())).optimizer
+
+    @property
+    def chain(self) -> list[str]:
+        """The outer's backend chain: the llm and measurement nodes of the inner round."""
+        inner = self.optimizer
+        return [
+            n for n in inner.schema.pipelines["default"] if inner.node(n).wire_type in _OUTER_KINDS
+        ]
+
+    @property
+    def terminal(self) -> str:
+        """Where an outer cell's row is stamped: the chain's last llm node, after which only
+        measurement nodes, which carry no config, follow — so only a FULL match replays a row."""
+        return [n for n in self.chain if self.optimizer.node(n).wire_type is NodeKind.LLM][-1]
+
+    def pipeline(self) -> dict[str, Any]:
+        """The outer's graph, as a backend's ``GET /pipeline`` answers it: every inner llm node, tunable
+        on its prompt fields and the levers its optimizer applies, on the inner manifest's walks."""
+        inner = self.optimizer
+        observed = [{"pipeline_key": key} for key in (INNER_RESULT_KEY, *OUTER_PROXY_KEYS)]
+        nodes: dict[str, dict[str, Any]] = {}
+        for node in inner.schema.config_nodes:
+            if node.wire_type is NodeKind.GATEWAY:
+                nodes[node.name] = {"type": node.wire_type.value, "config": {}}
+            elif node.wire_type is NodeKind.LLM:
+                levers = inner.runtime.override_param_types(node.name)
+                terminal = node.name == self.terminal
+                nodes[node.name] = {
+                    "type": node.wire_type.value,
+                    "node_role": NodeType.RANKER.value if terminal else NodeType.NONE.value,
+                    "config": {},
+                    "optimizer": {
+                        "param_keys": [*OUTER_PROMPT_FIELDS, *levers],
+                        "param_types": levers,
+                        "observation_name": node.name,
+                        "observation_mappings": observed if terminal else [],
+                    },
+                }
+        walks = {
+            name: [n for n in steps if n in nodes] for name, steps in inner.schema.pipelines.items()
+        }
+        return {
+            "name": inner.name,
+            "nodes": nodes,
+            "pipelines": {k: v for k, v in walks.items() if v},
+        }
+
+
+def resolve_inner_cells(stores: Stores, panel: InnerTasks) -> InnerCells:
+    """Every inner dataset the panel's cells run, its template read once. RAISES where two run
+    different optimizers: the outer edits one optimizer's prompts, and a cell running another
+    would measure an arm on nodes the arm never touched."""
+    cfg = panel.inner_benchmark_config
+    by_dataset: dict[str, InnerCell] = {}
+    for name in sorted(panel.datasets):
+        dataset_dir = readable_dataset_dir(stores, name)
+        campaign = read_campaign_config_file(dataset_campaign_path(dataset_dir))
+        by_dataset[name] = InnerCell(
+            campaign_config=campaign,
+            pipeline=read_yaml_optional(dataset_pipeline_path(dataset_dir)),
+            optimizer=_select_inner_optimizer(campaign, cfg.inner_nodes, cfg.inner_depth_nodes),
+        )
+    runs = {name: (c.optimizer.name, c.optimizer.node_digests) for name, c in by_dataset.items()}
+    if any(run != runs[min(runs)] for run in runs.values()):
+        named = {name: run[0] for name, run in runs.items()}
+        raise ValueError(
+            f"the panel's inner datasets run different inner optimizers ({named}). One panel "
+            "measures one optimizer configuration: give its cells datasets whose optimization "
+            "agrees, or split the panel."
+        )
+    return InnerCells(panel=panel, by_dataset=by_dataset)
+
+
 def resolve_inner_task(ctx: InnerSpawnContext, query: str) -> InnerTaskSpec:
     """Map an outer query to its inner-campaign spec — the top-level benchmark + budget, overlaid by the
-    matching cell. A query with no matching cell runs the panel's default.
+    cell the query names.
 
     Off the panel the CONTEXT carries, so every cell of one run resolves against the panel that
     run opened with."""
-    if (panel := ctx.panel) is None:
+    if ctx.cells is None:
         raise CellUnscoreableError(
             f"{inner_tasks_path(ctx.dataset_config_dir)} is missing — the inner benchmark, its "
             "sample count and its round cap are all declared there. There is no default to run.",
             spent={},
             step_timings={},
         )
+    panel = ctx.cells.panel
     cfg = panel.inner_benchmark_config
     cell = next((t for t in panel.tasks if t.id == query), None)
+    if cell is None:
+        raise CellUnscoreableError(
+            f"{query!r} is no cell of the panel this run opened with", spent={}, step_timings={}
+        )
     return InnerTaskSpec(
         inner_dataset=panel.dataset_for(cell),
-        seed=cell.inner_dataset_seed if cell else 0,
+        seed=cell.inner_dataset_seed,
         n_samples=cfg.n_samples_per_inner_round,
         n_samples_origin=cfg.n_samples_origin,
-        n_rounds=(cell.n_inner_rounds if cell and cell.n_inner_rounds else cfg.max_inner_rounds),
+        n_rounds=cell.n_inner_rounds or cfg.max_inner_rounds,
         nodes=cfg.inner_nodes,
         depth_nodes=cfg.inner_depth_nodes,
-        inner_model=cell.inner_model if cell else None,
-        inner_provider=cell.inner_provider if cell else None,
+        inner_model=cell.inner_model,
+        inner_provider=cell.inner_provider,
         inner_optimizer_temperature=cfg.inner_optimizer_temperature,
     )
 
@@ -394,11 +491,13 @@ def inner_instrument_config(
 
 
 __all__ = [
+    "OUTER_PROMPT_FIELDS",
     "InnerBenchmarkConfig",
+    "InnerCell",
+    "InnerCells",
     "InnerTaskSpec",
-    "inner_benchmark_documents",
     "inner_instrument_config",
     "load_inner_tasks",
+    "resolve_inner_cells",
     "resolve_inner_task",
-    "select_inner_optimizer",
 ]

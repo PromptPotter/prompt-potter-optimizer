@@ -126,10 +126,11 @@ exposed to.
 - **Inner-task count > `elimination_n_min`, and ≥ 6** — below that θ_se exceeds the point-lift and the
   election correctly refuses to crown.
 - **CRN is the variance control, and the only one.** No replication knob beside it; an identical cell replays.
-- **`terminal_node` is the LAST outer node (`l3_plan`).** An inner campaign consumes the ENTIRE outer config
-  at once, so a mid-chain stamp lets prefix-trust replay serve the ORIGIN's rows to a candidate that edits a
-  later node. It is not a health signal and nothing may tally it — one panel counted it and the critique spent
-  an arm fixing a stall that never happened.
+- **`terminal_node` is the outer chain's last llm node (`runner/inner/tasks.py::InnerCells.terminal`).** An
+  inner campaign consumes the ENTIRE outer config at once, and off-chain nodes lead `node_configs`, so only
+  a stamp at the chain's end limits prefix-trust replay to a full match; any earlier one serves the ORIGIN's
+  rows to a candidate that edits a later node. It is not a health signal and nothing may tally it — one panel
+  counted it and the critique spent an arm fixing a stall that never happened.
 - **A HIT/MISS panel stays silent at L4** (`panels._no_labels`). The cell is verifier-graded, so
   `Sample.ground_truth` is `None` and no cell can ever be a hit; rendered as misses, the critique
   diagnosed the artifact and steered the inner loop off its only objective. A prompt clause telling the model

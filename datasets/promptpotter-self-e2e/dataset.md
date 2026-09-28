@@ -28,9 +28,9 @@ tokens that are already near zero at two samples, and it has no banked rows — 
 
 ## What is copied, and what that costs
 
-`task_description.md` and `task_context.yaml` are byte-for-byte the real dataset's, and
-`pipeline.yaml` declares the same graph under its own name and header, because the point is to
-exercise the real recursion rather than a stand-in. Nothing checks that they still agree, so an
-edit to any of them has to reach both directories in the same commit — and for the graph that is a
-THIRD copy, which `pipeline.yaml`'s own header states in full. What differs otherwise is
-`campaign.yaml` and `inner_tasks.yaml`, and what they differ in is the geometry above.
+`task_description.md` and `task_context.yaml` are byte-for-byte the real dataset's, because the
+point is to exercise the real recursion rather than a stand-in. Nothing checks that they still
+agree, so an edit to either has to reach both directories in the same commit. The graph is no
+copy: `pipeline.yaml` carries its own name and header over the one the connector serves. What
+differs otherwise is `campaign.yaml` and `inner_tasks.yaml`, and what they differ in is the
+geometry above.

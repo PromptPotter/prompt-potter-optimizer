@@ -11,10 +11,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.campaign_config import load_campaign_config
-from promptpotter.application.datasets.authored import (
-    dataset_campaign_path,
-    read_campaign_config_file,
-)
 from promptpotter.application.diagnostics.seed_screen import class_floor, draw_bank
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.mint import prepare_fresh_cycle, resolve_cycle_plan
@@ -30,6 +26,7 @@ from promptpotter.application.runner.inner.spawn_context import (
     inner_spawn_context,
 )
 from promptpotter.application.runner.inner.tasks import (
+    InnerCells,
     InnerTaskSpec,
     inner_instrument_config,
     resolve_inner_task,
@@ -369,6 +366,11 @@ def _open_inner_campaign(
     return banked
 
 
+def _cells(ctx: InnerSpawnContext) -> InnerCells:
+    assert ctx.cells is not None, "resolve_inner_task refuses a context carrying no panel"
+    return ctx.cells
+
+
 async def _run_inner_campaign(
     ctx: InnerSpawnContext,
     spec: InnerTaskSpec,
@@ -434,14 +436,9 @@ async def _run_inner_campaign(
     # the disqualifier but is hand-run, so nothing recomputes it for the seats actually seated.
     bank_floor = class_floor(train_data)
 
-    file_config: dict[str, Any] = {}
-    if session.dataset_config_dir is not None:
-        cfg_path = dataset_campaign_path(session.dataset_config_dir)
-        if cfg_path.exists():
-            file_config = read_campaign_config_file(cfg_path)
     campaign_config = inner_instrument_config(
         spec,
-        load_campaign_config(file_config),
+        load_campaign_config(dict(_cells(ctx).by_dataset[spec.inner_dataset].campaign_config)),
         llm_node=session.llm_node_name(),
         n_scored=len(train_data),
     )
@@ -641,6 +638,7 @@ async def _measure_inner_cell(
     # `CellUnscoreableError`, which `measure_sample` resolves to this cell's UNSCOREABLE row.
     proxies = compute_outer_proxies(result)
     facts = inner_cell_facts(result, campaign_id)
+    terminal = _cells(ctx).terminal
 
     data: dict[str, Any] = {
         # A summary line for the reader, not an answer to be matched: this cell carries no label
@@ -661,11 +659,10 @@ async def _measure_inner_cell(
         **(facts.model_dump() if facts is not None else {}),
         # The archive's reuse contract: a named node means "this outcome depends on config only
         # UP TO that node". An inner campaign consumes the ENTIRE outer config at once, so the
-        # only honest stamp is the LAST node of the outer chain — anything earlier lets a
-        # candidate editing a later node silently replay the origin's rows.
-        "terminal_node": "l3_plan",
+        # only honest stamp is `InnerCells.terminal`.
+        "terminal_node": terminal,
         "total_time": elapsed,
-        "step_timings": {"l1_critique": elapsed},
+        "step_timings": {terminal: elapsed},
         # No `step_tokens`: every call the campaign made was billed as it settled
         # (`spend_book.py::SpendBook.mirror`). Returning it HERE would bill the cell twice, a
         # continued cell's whole history again, and the lot whenever the archive replays this row.

@@ -506,6 +506,9 @@ class GepaRuntime:
     def source_digest(self, *covered: ModuleType) -> str:
         return paper_templates.preset_source_digest(operators, *covered)
 
+    def override_param_types(self, node: str) -> dict[str, str]:
+        return {}
+
     def override_levers(self, node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
         return {}
 

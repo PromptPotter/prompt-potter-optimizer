@@ -4,7 +4,6 @@ the scoring lifecycle live in ``session`` + ``loop_start``."""
 from __future__ import annotations
 
 import asyncio
-import copy
 import logging
 import re
 from collections.abc import Callable
@@ -17,6 +16,10 @@ from promptpotter.application.bench.resume_and_fork.replayers import replayers
 from promptpotter.application.datasets.csv_ingest import read_candidate_library_file
 from promptpotter.application.datasets.loaders import resolve_dataset_items, samples_from_dicts
 from promptpotter.application.initialization.session import Session
+from promptpotter.application.pipeline_resolve import (
+    dataset_pipeline_declaration,
+    overlay_dataset_pipeline,
+)
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
@@ -24,7 +27,7 @@ from promptpotter.config.settings import (
 )
 from promptpotter.connectors.protocol import InProcessWorkload
 from promptpotter.domain.backend import BackendConnection
-from promptpotter.domain.pipeline_parsing import merge_node_blocks, parse_pipeline_response
+from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import all_verifier_graded
@@ -44,24 +47,6 @@ from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.identity import IdentityContext, default_identity
 
 logger = logging.getLogger(__name__)
-
-
-def _apply_dataset_overlay(
-    backend_resp: dict[str, Any], local_raw: dict[str, Any]
-) -> dict[str, Any]:
-    """Merge dataset ``pipeline.yaml`` overlay onto the backend response.
-    Overlay carries ``pipelines.default`` / per-node config deltas / metadata; backend stays SoT for runtime defaults.
-
-    ``available_models`` rides too, and must: it is the model MENU the operator declared, and with
-    ``model`` a searchable axis it bounds the L1 enum and ``validate_overrides``. Dropped here, a
-    remote-backend dataset would search whatever catalogue the service happened to return."""
-    out = copy.deepcopy(backend_resp.get("data") or backend_resp)
-    if "pipelines" in local_raw:
-        out["pipelines"] = local_raw["pipelines"]
-    if local_raw.get("available_models"):
-        out["available_models"] = local_raw["available_models"]
-    out["nodes"] = merge_node_blocks(out.get("nodes") or {}, local_raw.get("nodes") or {})
-    return out
 
 
 async def _verify_connector_revision(
@@ -162,20 +147,21 @@ def _verify_required_observation_keys(
 
 async def _resolve_pipeline_schema(
     client: BackendClient,
+    stores: Stores,
     dataset_config_dir: Path | None,
     status: Callable[[str], None],
     *,
-    in_process: bool = False,
+    connector: connectors.Connector,
+    experiment: dict[str, Any] | None,
 ) -> tuple[PipelineSchema, dict[str, Any]]:
-    """Backend schema underneath, dataset overlay on top; an ``in_process`` connector has no backend, so the local file IS
-    the schema. RAISES rather than returning ``None`` — optional at ~40 readers means a run completes with wrong numbers.
+    """Backend schema underneath, dataset overlay on top; an ``in_process`` connector has no backend, so the dataset's
+    own declaration IS the schema. RAISES rather than returning ``None`` — optional at ~40 readers means a run
+    completes with wrong numbers.
 
     Returns the parsed schema AND the declaration it was parsed from — the only copy of that merge
     anywhere, which is why :attr:`Session.pipeline_declaration` carries it on."""
     backend_resp: dict[str, Any] | None = None
-    if in_process:
-        pass  # no remote backend — local pipeline.yaml is authoritative
-    else:
+    if connector.execution != "in_process":
         try:
             backend_resp = await client.fetch_pipeline()
         except (KeyboardInterrupt, asyncio.CancelledError):
@@ -185,7 +171,7 @@ async def _resolve_pipeline_schema(
 
     local_raw: dict[str, Any] | None = None
     if dataset_config_dir is not None:
-        local_raw = read_yaml_optional(dataset_pipeline_path(dataset_config_dir))
+        local_raw = dataset_pipeline_declaration(stores, dataset_config_dir, experiment)
 
     # A `PayloadInvalidError` from the parser is a DECLARATION the operator got wrong — an unknown
     # node type, a gateway carrying config — and it is re-raised rather than warned past. Falling
@@ -194,7 +180,7 @@ async def _resolve_pipeline_schema(
     # parses fine but for one named node. Everything else here is still a REACHABILITY problem,
     # which is exactly what the fallback exists for.
     if backend_resp:
-        merged = _apply_dataset_overlay(backend_resp, local_raw or {})
+        merged = overlay_dataset_pipeline(backend_resp, local_raw or {})
         try:
             schema = parse_pipeline_response(merged)
             status(f"Pipeline: {schema.name} ({len(schema.nodes)} nodes)")
@@ -397,9 +383,11 @@ async def init_services(
 
     pipeline_schema, pipeline_declaration = await _resolve_pipeline_schema(
         client,
+        stores,
         dataset_config_dir,
         status,
-        in_process=connector.execution == "in_process",
+        connector=connector,
+        experiment=experiment,
     )
     _verify_required_observation_keys(pipeline_schema, connector, dataset_name)
     await _verify_connector_revision(client, connector)

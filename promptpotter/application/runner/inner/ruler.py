@@ -41,12 +41,11 @@ def refresh_inner_rulers(
     At run init and each outer round boundary, where the prior round's cells are all banked. A
     no-op for a campaign that spawns nothing."""
     ctx = inner_spawn_context()
-    if ctx is None or ctx.panel is None or not session.state.cycle_id:
+    if ctx is None or ctx.cells is None or not session.state.cycle_id:
         return
-    datasets = {ctx.panel.dataset_for(cell) for cell in ctx.panel.tasks}
     rulers = {
         name: ruler
-        for name in sorted(datasets)
+        for name in sorted(ctx.cells.by_dataset)
         if (ruler := _fit_or_extend(session, campaign_config, name, round_num)) is not None
     }
     set_inner_rulers(replace(ctx, rulers=rulers))

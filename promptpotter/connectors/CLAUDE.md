@@ -89,7 +89,9 @@ and moves every round.
 
 - **`promptpotter`** — `in_process_run` is a thin delegate to
   `application/runner/inner/spawn.py::run_inner_cycle`, because running a whole inner campaign is
-  heavy orchestration and belongs in `application/runner`. Five facts about the arrangement:
+  heavy orchestration and belongs in `application/runner`. Its graph is SERVED
+  (`pipeline_declaration`) off the manifest the panel's cells run, so no dataset mirrors a node.
+  Five facts about the arrangement:
   - **Its own `asyncio.Task`.** The three per-task ContextVars — `_CYCLE_LEDGER` + `_CURRENT_ROUND`
     (`infrastructure/llm/telemetry.py`) and `_ABORT_CHECK` (`infrastructure/llm/rate_limit.py`) —
     isolate per task rather than per call, and the child gets a COPY, which is how `_ABORT_CHECK`
@@ -98,7 +100,8 @@ and moves every round.
     active-pointer collision, and it holds no machine slot. Flat, never physically nested
     (`infrastructure/store/layout.py` says why), so the **re-entrant** invariant holds and L5+ nests.
   - **The spawning cycle publishes its context** via `publish_inner_spawn_context` at the runner
-    seam, so the hook can find where to sandbox and which inner benchmark to run.
+    seam, so the hook can find where to sandbox, which inner benchmark to run and the campaign
+    template it runs under, read once for every cell.
   - **Owner and asker are two facts, and a fork splits them.** `retarget_inner_spawn` moves only
     the *asker* (`spawned_by.outer_cycle_id`); the sandbox owner never follows a fork, because a
     repaired cell CONTINUING the campaign the parent banked is the whole point. One field meaning

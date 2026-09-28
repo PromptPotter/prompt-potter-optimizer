@@ -57,6 +57,9 @@ def _validate(c: object, origin: str) -> Connector:
     # A cell that holds THIS machine runs on it, and a remote one runs on its backend's.
     if c.cells_hold_the_machine and c.execution != "in_process":
         raise RuntimeError(f"{where}: cells_hold_the_machine needs execution='in_process'.")
+    # A remote backend answers `GET /pipeline` itself, so a second declaration would never be read.
+    if c.pipeline_declaration is not None and c.execution != "in_process":
+        raise RuntimeError(f"{where}: pipeline_declaration needs execution='in_process'.")
     return c
 
 

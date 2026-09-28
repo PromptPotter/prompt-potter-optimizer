@@ -18,10 +18,10 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.optimizer_manifest import bind_inner_optimizer
 from promptpotter.application.runner.inner.tasks import (
+    InnerCells,
     InnerTasks,
-    inner_benchmark_documents,
     inner_tasks_path,
-    select_inner_optimizer,
+    resolve_inner_cells,
 )
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.store.layout import inner_sandbox_dir
@@ -56,12 +56,9 @@ class InnerSpawnContext:
     spawn_campaign_id: str
     spawn_cycle_id: str
     asking_cycle_id: str
-    # The panel this run measures on, resolved ONCE at publish. `None` for a dataset that owns no
-    # `inner_tasks.yaml` — which is what makes it not an outer one. Carried rather than re-read
-    # because `inner_tasks.yaml` is an EDITABLE file: three readers hitting disk at three moments
-    # let an edit mid-run split one run's cells across two panels, the same per-run-state hole
-    # `InProcessWorkload` closed for in-process connectors.
-    panel: InnerTasks | None = None
+    # Resolved ONCE at publish, `None` where the dataset owns no `inner_tasks.yaml`. Carried, never
+    # re-read: both files are editable, so a per-cell read lets an edit split one run's cells.
+    cells: InnerCells | None = None
     # The δ scale each inner dataset's cells read on, refreshed at every outer round boundary by
     # `ruler.py`. Empty until one can be identified, which is the cold path a cell self-fits.
     rulers: Mapping[str, DeltaRuler] = field(default_factory=dict)
@@ -114,15 +111,8 @@ def publish_inner_spawn_context(session: Session, campaign_config: CampaignConfi
         CycleHop(campaign_id=session.campaign_id, cycle_id=cycle_id),
     )
     panel = _resolve_outer_panel(session, campaign_config, Path(dataset_dir))
-    bind_inner_optimizer(
-        select_inner_optimizer(
-            inner_benchmark_documents(session.store, panel.inner_benchmark)[1],
-            panel.inner_benchmark_config.inner_nodes,
-            panel.inner_benchmark_config.inner_depth_nodes,
-        )
-        if panel is not None
-        else None
-    )
+    cells = None if panel is None else resolve_inner_cells(session.store, panel)
+    bind_inner_optimizer(None if cells is None else cells.optimizer)
     _INNER_SPAWN.set(
         InnerSpawnContext(
             inner_sandbox_root=inner_root,
@@ -132,7 +122,7 @@ def publish_inner_spawn_context(session: Session, campaign_config: CampaignConfi
             spawn_campaign_id=session.campaign_id,
             spawn_cycle_id=cycle_id,
             asking_cycle_id=cycle_id,
-            panel=panel,
+            cells=cells,
         )
     )
 

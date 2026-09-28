@@ -39,7 +39,11 @@ from promptpotter.config.settings import (
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_overlay import fold_output_contract, node_config_items
-from promptpotter.domain.pipeline_parsing import parse_pipeline_response, parse_resolved_schema
+from promptpotter.domain.pipeline_parsing import (
+    merge_node_blocks,
+    parse_pipeline_response,
+    parse_resolved_schema,
+)
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_TEXT,
     OUTPUT_SCHEMA_KEY,
@@ -102,9 +106,11 @@ __all__ = [
     "apply_node_overlay",
     "campaign_runs_with",
     "configure_and_apply_pipeline",
+    "dataset_pipeline_declaration",
     "merge_declared_layers",
     "merge_pipeline_params",
     "missing_template_vars",
+    "overlay_dataset_pipeline",
     "resolve_campaign_config",
     "resolve_pipeline_config_params",
     "resolve_pipeline_for_campaign",
@@ -361,9 +367,42 @@ def apply_identity_layer(
     return pipeline_params
 
 
-def _dataset_connector(dataset_dir: Path) -> connectors.Connector | None:
-    raw = read_yaml_optional(dataset_pipeline_path(dataset_dir))
+def _connector_of(raw: Mapping[str, Any] | None) -> connectors.Connector | None:
     return connectors.registered().get(str((raw or {}).get("backend_type") or ""))
+
+
+def _dataset_connector(dataset_dir: Path) -> connectors.Connector | None:
+    return _connector_of(read_yaml_optional(dataset_pipeline_path(dataset_dir)))
+
+
+def overlay_dataset_pipeline(served: dict[str, Any], local: Mapping[str, Any]) -> dict[str, Any]:
+    """Merge dataset ``pipeline.yaml`` overlay onto what the backend serves.
+    Overlay carries ``pipelines.default`` / per-node config deltas / metadata; backend stays SoT for runtime defaults.
+
+    ``available_models`` rides too, and must: it is the model MENU the operator declared, and with
+    ``model`` a searchable axis it bounds the L1 enum and ``validate_overrides``. Dropped here, a
+    remote-backend dataset would search whatever catalogue the service happened to return."""
+    out = copy.deepcopy(served.get("data") or served)
+    if "pipelines" in local:
+        out["pipelines"] = local["pipelines"]
+    if local.get("available_models"):
+        out["available_models"] = local["available_models"]
+    out["nodes"] = merge_node_blocks(out.get("nodes") or {}, local.get("nodes") or {})
+    return out
+
+
+def dataset_pipeline_declaration(
+    stores: Stores, dataset_dir: Path, experiment: Mapping[str, Any] | None
+) -> dict[str, Any] | None:
+    """What a dataset declares its pipeline to be: its ``pipeline.yaml``, laid over the graph its
+    connector serves in place of ``GET /pipeline`` where it serves one
+    (``Connector.pipeline_declaration``). The one reader of that graph, in a run and outside one;
+    ``None`` where the dataset has no ``pipeline.yaml``."""
+    local = read_yaml_optional(dataset_pipeline_path(dataset_dir))
+    connector = _connector_of(local)
+    if local is None or connector is None or connector.pipeline_declaration is None:
+        return local
+    return overlay_dataset_pipeline(connector.pipeline_declaration(stores, experiment), local)
 
 
 def experiment_outside_run(dataset_dir: Path | None) -> Mapping[str, Any] | None:
@@ -798,11 +837,11 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: SubjectSpec) -> _Cam
     # carries values and no `param_keys` at all, because `merge_pipeline_overlay` deliberately
     # refuses to freeze the backend's declaration at check-in — so read alone it serves every row
     # `movable_by: []` and reports a live search space as nothing. The run records its own merge
-    # (`wiring::_resolve_pipeline_schema` → `init_cycle`); a campaign that never ran has no backend
-    # answer to give and falls to the file, which is then the honest one.
+    # (`wiring::_resolve_pipeline_schema` → `init_cycle`); a campaign that never ran has no remote
+    # backend answer to give and falls to the dataset's declaration, which is then the honest one.
     raw = stores.campaigns.read_resolved_pipeline(hop)
     if raw is None and dataset_dir:
-        raw = read_yaml_optional(dataset_pipeline_path(dataset_dir))
+        raw = dataset_pipeline_declaration(stores, dataset_dir, experiment_outside_run(dataset_dir))
     schema = parse_pipeline_response(raw or {"nodes": {}, "pipelines": {"default": []}})
     seed = stores.campaigns.read_cycle_seed(hop)
     cfg = _inherited_config(campaign, dataset_dir, seed)

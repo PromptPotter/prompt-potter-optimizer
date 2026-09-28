@@ -27,6 +27,10 @@ from promptpotter.application.intelligence.adaptive_queue_mechanism import margi
 from promptpotter.application.intelligence.hard_sample_archive import (
     build_archive_hard_samples_artifact,
 )
+from promptpotter.application.pipeline_resolve import (
+    dataset_pipeline_declaration,
+    experiment_outside_run,
+)
 from promptpotter.application.scoring.sample_measurement import interpolate_prompt
 from promptpotter.domain.cells import (
     Cell,
@@ -51,11 +55,10 @@ from promptpotter.infrastructure.store.cell_queries import (
 )
 from promptpotter.infrastructure.store.dataset_access import (
     dataset_panel_rows,
-    dataset_pipeline_path,
     readable_dataset_dir,
     readable_dataset_rows,
 )
-from promptpotter.infrastructure.store.io import read_json, read_yaml
+from promptpotter.infrastructure.store.io import read_json
 from promptpotter.infrastructure.store.layout import campaign_root_dir_for, cycle_dir_for
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.shared.errors import BadRequestError, NotFoundError, PayloadInvalidError
@@ -180,8 +183,10 @@ def open_cell(stores: Stores, name: str, run_id: str, sample_id: int) -> Cell:
     row = measured_row(detail, sample_id, read_cold_payload(stores, run_id))
     if row is None:
         raise NotFoundError(f"Run '{run_id}' holds no cell for sample {sample_id}")
-    pipeline = dataset_pipeline_path(dataset_dir)
-    schema = parse_pipeline_response(read_yaml(pipeline)) if pipeline.is_file() else None
+    declared = dataset_pipeline_declaration(
+        stores, dataset_dir, experiment_outside_run(dataset_dir)
+    )
+    schema = parse_pipeline_response(declared) if declared is not None else None
     return assemble_cell(detail, row, schema, run_id=run_id)
 
 

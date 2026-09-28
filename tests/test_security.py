@@ -234,7 +234,7 @@ async def test_cell_envelope_cancels_the_inner_campaign(tmp_path: Path, monkeypa
     shape of the code that achieves it.
     """
     from promptpotter.application.runner.inner import spawn, spawn_context
-    from promptpotter.application.runner.inner.tasks import load_inner_tasks
+    from promptpotter.application.runner.inner.tasks import InnerCells, load_inner_tasks
     from promptpotter.application.scoring.cell_envelope import CellEnvelope
     from promptpotter.domain.results import CycleResult
     from promptpotter.infrastructure.llm import heartbeat as heartbeat_mod
@@ -315,7 +315,8 @@ async def test_cell_envelope_cancels_the_inner_campaign(tmp_path: Path, monkeypa
             spawn_campaign_id="ppself__aaaaaa",
             spawn_cycle_id="cycle_deadbeef0000",
             asking_cycle_id="cycle_deadbeef0000",
-            panel=load_inner_tasks(tmp_path / "inner_tasks.yaml"),
+            # No inner dataset resolved: the stubbed inner run never reads one.
+            cells=InnerCells(panel=load_inner_tasks(tmp_path / "inner_tasks.yaml"), by_dataset={}),
         )
     )
     llm_telemetry._CYCLE_LEDGER.set(_RecordingLedger())  # type: ignore[arg-type]
