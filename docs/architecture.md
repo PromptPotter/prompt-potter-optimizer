@@ -139,9 +139,31 @@ Each is one value from one function, and none folds into another.
   `optimizer` or llm-node call config as `TREATMENT` (`Scope.IDENTITY`), never policy.
 - **Instrument** — what graded the headline: `domain/campaign.py::bench_instrument` — the bank's
   rows (`dataset_hash`), the held-out ids, the `scorer_id` the passes were read under (never
-  re-hashed here) and the target's node models. Two headlines are one quantity only where it
-  agrees; the evidence head-to-head reads every arm's passes under ONE scorer, so its bench sets
-  can differ on the rows and the target but never on the grader.
+  re-hashed here), the target's node models and the origin (`root_content_hash`: its prompt,
+  framing, params and search rows). Two headlines are one quantity only where it agrees; the
+  evidence head-to-head reads every arm's passes under ONE scorer — the declared one where the
+  arms share a head-to-head — so its bench sets can differ on the rows and the target but never
+  on the grader.
+
+#### The controlled comparison — one declaration every mechanism reads
+
+**"Just optimize" and "compare exactly" are two modes, and one predicate tells them apart.** An
+ordinary campaign uses everything that helps: the tenant's whole archive as memory, an operator's
+steer, a ceiling on what it bills. A campaign minted as an **arm** of a declared head-to-head
+(`Campaign.arm`, frozen at mint) is **controlled** — `Session.controlled`, derived as
+`arm is not None` — and every mechanism that would read past the declaration asks that and
+nothing else. The head-to-head is `head_to_heads/{id}.json` in the workspace
+(`domain/campaign.py::HeadToHeadRecord`): the instrument every arm is graded under and the budget
+each may spend (incurred USD, `max_rounds`, the determinism clamp). Its first arm declares it off
+its own; `application/jobs/mint.py` refuses a later arm on any other, or on a key another holds.
+
+What controlled switches, one site each: MEMORY is the arm's own line
+(`store/archive_queries.py`'s fence — the δ ruler at `RulerScope` `campaign`, the sample and axis
+indexes, the fold), while the CACHE still replays any cell, priced; the check-in never re-runs;
+fork, skip and limit commands are refused 409 (`commands/dispatcher.py`); the ceiling meters the
+search's incurred USD, the bench pass beside it (`domain/spend.py::CeilingMeter`). The evidence
+head-to-head reads arms of one record under its declared scorer, pairs only arms equal on it with
+distinct treatments, and marks every other row NOT CONTROLLED.
 
 ### Central loop
 
@@ -596,7 +618,7 @@ writes land through the running loop.
 The on-disk layout makes the four-entity model literal. Under each
 tenant, `campaigns/{campaign_id}/` is the Campaign directory:
 `campaign.json` (manifest — `dataset_name, label, created_at,
-root_cycle_id, root_content_hash, treatment, backend_id, config`; identity + config
+root_cycle_id, root_content_hash, treatment, arm, backend_id, config`; identity + config
 + lifecycle intent only — run state is owned per-cycle by
 `index.json::status` and derived on read for campaign surfaces), `result.json` (the campaign's
 result as facts, rewritten by the cycle holding its line — § The bench score is not an

@@ -832,11 +832,15 @@ async def test_moving_one_ceiling_leaves_the_other_at_its_launch_cap(
     job = registry.request_slot(user_id="default", dataset_name="ds1", hop=hop)
     registry.set_caps(job.job_id, cap_usd=0.30, cap_tokens=5_000_000)
     observers = types.SimpleNamespace(
-        dashboard=types.SimpleNamespace(spend_total_used_usd=0.10, spend_total_tokens=210_000),
+        dashboard=types.SimpleNamespace(spend_metered=lambda _meters: (0.10, 210_000)),
         arm_spend_book=lambda _book: None,
     )
     gate = _build_budget_gate(
-        observers, built_stores.campaigns.cycle_dir(hop), usd_cap=0.30, token_cap=210_000
+        observers,
+        built_stores.campaigns.cycle_dir(hop),
+        usd_cap=0.30,
+        token_cap=210_000,
+        meters="bill",
     )
     assert gate.tripped() == StopReason.TOKEN_BUDGET
 
@@ -965,12 +969,12 @@ def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path)
 
     cycle_dir = tmp_path / "cyc"
     observers = types.SimpleNamespace(
-        dashboard=types.SimpleNamespace(spend_total_used_usd=1.0, spend_total_tokens=9_000),
+        dashboard=types.SimpleNamespace(spend_metered=lambda _meters: (1.0, 9_000)),
         arm_spend_book=lambda _book: None,
     )
 
     # A run that declared NOTHING is still gated, and the gate stays silent until a ceiling exists.
-    gate = _build_budget_gate(observers, cycle_dir, usd_cap=None, token_cap=None)
+    gate = _build_budget_gate(observers, cycle_dir, usd_cap=None, token_cap=None, meters="bill")
     assert gate.tripped() is None
     write_run_limits_mirror(cycle_dir, BudgetChange(0.50, None), rounds=None)
     assert gate.tripped() == StopReason.SPEND_BUDGET, "a mid-run ceiling reached no gate"
@@ -1085,7 +1089,7 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
         )
     )
     ledger = CycleEventLog(tmp_path / "ledger.jsonl")
-    book = SpendBook(usd_cap=lambda: 0.05, tokens_cap=lambda: None)
+    book = SpendBook(usd_cap=lambda: 0.05, tokens_cap=lambda: None, meters="bill")
     ledger.bind(book)
 
     async def burst() -> list[Any]:
@@ -1260,7 +1264,7 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     )
     cells._http = httpx.AsyncClient(transport=httpx.MockTransport(backend))
     cell = SendBound(input_tokens=100, output_tokens=50, usd=0.01)
-    wallet = SpendBook(usd_cap=lambda: None, tokens_cap=lambda: None)
+    wallet = SpendBook(usd_cap=lambda: None, tokens_cap=lambda: None, meters="bill")
     before = sum(isinstance(r, TokenUsageRecord) for _, r in ledger.iter())
     token = set_cycle_ledger(ledger)
     try:
@@ -1309,7 +1313,7 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
         prompt_delivery=types.SimpleNamespace(),  # type: ignore[arg-type]
     )
     cell_ledger = CycleEventLog(tmp_path / "cell.jsonl")
-    purse = SpendBook(usd_cap=lambda: 1.0, tokens_cap=lambda: None)
+    purse = SpendBook(usd_cap=lambda: 1.0, tokens_cap=lambda: None, meters="bill")
     cell_ledger.bind(purse)
     whole = SendBound(input_tokens=100_000, output_tokens=50_000, usd=0.5)
 
@@ -1336,6 +1340,55 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     assert purse.usd_unreported == pytest.approx(out.usd)
     # The reservation is gone with the cell: the whole bound fits again beside what was paid.
     assert purse.fits(whole) == 1
+
+
+def test_a_controlled_arms_ceiling_is_its_searchs_incurred_cost() -> None:
+    """Arms of one head-to-head replay each other's cells, so a ceiling on the BILL hands the arm
+    that arrived second a bigger search for the same money — and a bench pass counted inside it
+    leaves the arm with the longer pick less search. Both are silent: every arm still halts at its
+    number. A controlled arm's book meters its search at incurred cost, the bench beside it."""
+    from promptpotter.domain.run_records import TokenUsageRecord
+    from promptpotter.infrastructure.llm.spend_book import (
+        CallLabel,
+        SendBound,
+        SpendBook,
+        reserved,
+        spending_under,
+    )
+    from promptpotter.infrastructure.llm.telemetry import filed_as
+    from promptpotter.shared.errors import ErrorCategory, SendRefusedError
+
+    def replay(usd: float) -> TokenUsageRecord:
+        return TokenUsageRecord(
+            kind="backend", node="n", input_tokens=10, output_tokens=5, cost_usd=usd, cached=True
+        )
+
+    arm = SpendBook(usd_cap=lambda: 0.10, tokens_cap=lambda: None, meters="search_incurred")
+    ordinary = SpendBook(usd_cap=lambda: 0.10, tokens_cap=lambda: None, meters="bill")
+    for book in (arm, ordinary):
+        book.count(replay(0.06))
+        book.count(replay(0.05))
+    assert ordinary.exhausted() is None, "a replay billed nothing, so it spends no bill"
+    assert arm.exhausted() == ErrorCategory.SPEND_CEILING, "a sibling's cache stretched the arm"
+
+    fresh = SpendBook(usd_cap=lambda: 0.10, tokens_cap=lambda: None, meters="search_incurred")
+    fresh.count(replay(0.09))
+    pass_bound = SendBound(input_tokens=100, output_tokens=100, usd=5.0)
+    fresh.hold(pass_bound, "bench", what="bench pass")
+    fresh.release(pass_bound, "bench")
+    fresh.count(
+        TokenUsageRecord(kind="bench", node="b", input_tokens=1, output_tokens=1, cost_usd=5.0)
+    )
+    assert fresh.exhausted() is None, "the bench pass ate into the arm's search budget"
+    # The pass's cells are backend cells filed as bench: admitted in the bucket they bill to.
+    with (
+        spending_under(fresh),
+        filed_as("bench"),
+        reserved(CallLabel("cell", "backend"), pass_bound),
+    ):
+        pass
+    with pytest.raises(SendRefusedError):
+        fresh.hold(SendBound(input_tokens=1, output_tokens=1, usd=0.02), "optimizer", what="o")
 
 
 def test_a_run_holds_the_budget_it_declared_and_admission_is_the_only_bound(

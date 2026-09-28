@@ -78,7 +78,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import ScoringSpec
-from promptpotter.domain.spend import BudgetChange, SpendCeilings, SpendRollup
+from promptpotter.domain.spend import BudgetChange, CeilingMeter, SpendCeilings, SpendRollup
 from promptpotter.infrastructure.llm.pricing import refresh_rates_in_background
 from promptpotter.infrastructure.llm.rate_limit import get_abort_check, set_abort_check
 from promptpotter.infrastructure.llm.spend_book import SpendBook
@@ -90,11 +90,16 @@ from promptpotter.infrastructure.runtime_flags import (
     spend_sample_lookahead,
     write_run_limits_mirror,
 )
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_wall_clock
+from promptpotter.infrastructure.store.archive_queries import scope_memory_to_own_runs
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    scan_ledger_cell_keys,
+    scan_ledger_run_ids,
+    scan_ledger_wall_clock,
+)
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.judges import judge_instrument
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import ResumeDivergenceError
+from promptpotter.shared.errors import ConflictError, ResumeDivergenceError
 from promptpotter.shared.hashing import dataset_hash
 
 logger = logging.getLogger(__name__)
@@ -125,6 +130,7 @@ def _build_budget_gate(
     *,
     usd_cap: float | None,
     token_cap: int | None,
+    meters: CeilingMeter,
 ) -> BudgetGate:
     """**Always armed**, because a run's ceiling is not settled at launch: the probes re-read
     ``.runtime/run_limits.json`` each tick, so ``change-run-limits`` can bind a run that declared
@@ -133,6 +139,7 @@ def _build_budget_gate(
     webapp, enforced by nothing. An unset arm still costs nothing: the book skips a ``None`` cap.
     The book it arms is what admits every call the run sends."""
     dashboard = observers.dashboard
+    usd_spent, tokens_spent = dashboard.spend_metered(meters)
 
     def _usd_cap() -> float | None:
         saved = read_run_limits_mirror(cycle_dir).usd
@@ -146,8 +153,9 @@ def _build_budget_gate(
     book = SpendBook(
         usd_cap=_usd_cap,
         tokens_cap=_token_cap,
-        usd_spent=dashboard.spend_total_used_usd,
-        tokens_spent=dashboard.spend_total_tokens,
+        meters=meters,
+        usd_spent=usd_spent,
+        tokens_spent=tokens_spent,
     )
     observers.arm_spend_book(book)
     return BudgetGate(book=book)
@@ -175,6 +183,7 @@ def _arm_run_controls(
         cycle_dir,
         usd_cap=campaign_config.optimization.spend_budget_usd,
         token_cap=campaign_config.optimization.token_budget,
+        meters="search_incurred" if session.controlled else "bill",
     )
     session.budget_tripped = gate.tripped
     session.spend_used = lambda: gate.book.usd_spent
@@ -264,6 +273,13 @@ async def _prepare_run(
     limits: HeldLimits,
 ) -> _PreparedRun:
     cb = observers.callbacks
+    if session.controlled and (
+        limits.operator != BudgetChange(None, None) or limits.halt_at_accuracy is not None
+    ):
+        raise ConflictError(
+            "an arm runs its head-to-head's declared budget: no launch ceiling, no halt accuracy",
+            code="arm_budget_declared",
+        )
 
     # A fresh launch supersedes any prior run-control intent: a stale `pause.flag` would pause
     # this very resume on its first poll, so a paused cycle could never be resumed. Binding
@@ -618,10 +634,10 @@ async def _run_single_cycle(
                 spend=observers.dashboard.state.spend,
                 cb=cb,
             )
-            if banked is not None:
+            if banked is not None and budget_gate.book.binds("bench"):
                 budget_gate.book.set_aside(banked.reserve_usd, banked.reserve_tokens)
-                if campaign_config.bench_each_round:
-                    graded(cb, session, banked.origin)
+            if banked is not None and campaign_config.bench_each_round:
+                graded(cb, session, banked.origin)
         elif not session.scoring.require_partition().bench:
             unheld = nothing_held_out(cb, scorer_id=session.scoring.scorer_id)
         stop_reason, cycle_error, fork = await run_round_loop(
@@ -795,9 +811,24 @@ async def run_optimization(
     before origin). *dataset* is the whole bank; everything below this seam reads only the part of
     it the declared split leaves to the search."""
     started_at = utcnow_iso()
+    campaign = session.store.campaigns.load_campaign(session.campaign_id)
+    session.arm = None if campaign is None else campaign.arm
+    if campaign is not None and session.controlled:
+        # Its MEMORY is what its own line filed — resumed off every ledger on it, grown per run.
+        scope_memory_to_own_runs(
+            scan_ledger_run_ids(
+                CycleLayout(session.store.campaigns.cycle_dir(hop)).ledger
+                for hop in session.store.campaigns.line(campaign.root_hop)
+            )
+        )
     partition = partition_bank(dataset, campaign_config.dataset_split)
     session.scoring.partition = partition
     dataset = list(partition.search)
+    # Before this launch takes a cell: every cycle of the campaign priced its cells once, and a
+    # re-read of one — a resume, a fork, a parent re-scored each round — prices nothing again.
+    session.state.counted_cells = scan_ledger_cell_keys(
+        session.store.campaigns.campaign_cycle_ledgers(session.campaign_id)
+    )
     # Every launch path reaches here; bolted onto one entry point instead, it leaves the others
     # pricing off whatever table shipped. No-op on a fresh cache.
     refresh_rates_in_background()

@@ -4,6 +4,7 @@ Nothing enforces that mechanically, and claiming a guard that does not exist is 
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.infrastructure.store.io import append_jsonl, write_jsonl
@@ -31,6 +32,7 @@ __all__ = [
     "measurement_detail_lines",
     "measurements_for_config",
     "measurements_for_sample",
+    "memory_scoped",
     "read_cold_payload",
     "record_measurement_run",
     "reindex_measurements",
@@ -40,6 +42,7 @@ __all__ = [
     "run_signatures",
     "runs_since",
     "sample_fold_rows",
+    "scope_memory_to_own_runs",
     "write_cold_payload",
     "write_sample_fold",
 ]
@@ -60,13 +63,31 @@ __all__ = [
 #            evidence epoch (`shared/instrument.py`, which is where the WHY lives).
 #
 # For a normal campaign no mode is bound, the epoch is empty, and MEMORY over the tenant's
-# whole archive is the feature.
+# whole archive is the feature. A CONTROLLED arm binds the opposite fence: its MEMORY is the
+# runs its own line filed and nothing else, so no other campaign's measurement steers it.
+
+_OWN_RUNS: ContextVar[set[str] | None] = ContextVar("own_runs", default=None)
+
+
+def scope_memory_to_own_runs(run_ids: set[str]) -> None:
+    """Bind this task's MEMORY to *run_ids*, grown by every run it files from here on. Called once
+    at the runner seam of a controlled arm, inside its own task."""
+    _OWN_RUNS.set(set(run_ids))
+
+
+def memory_scoped() -> bool:
+    return _OWN_RUNS.get() is not None
 
 
 def _evidence_epoch() -> frozenset[str]:
     """Runs this task must not see as evidence — empty for a normal campaign."""
     mode = instrument_mode()
     return mode.evidence_epoch if mode is not None else frozenset()
+
+
+def _in_memory(run_id: object) -> bool:
+    own = _OWN_RUNS.get()
+    return own is None or run_id in own
 
 
 def capture_evidence_epoch(stores: Stores) -> frozenset[str]:
@@ -139,12 +160,13 @@ def list_runs(
     dataset_name: str | None = None,
 ) -> list[dict[str, Any]]:
     """Run-summary entries from the archive index, scoped to ``dataset_name`` — an
-    EVIDENCE read, so runs behind the evidence epoch are invisible."""
+    EVIDENCE read, so runs behind the evidence epoch or outside a controlled arm's own are invisible."""
     epoch = _evidence_epoch()
-    entries = stores.archive.list_all(dataset_name=dataset_name)
-    if not epoch:
-        return entries
-    return [e for e in entries if e.get("run_id") not in epoch]
+    return [
+        e
+        for e in stores.archive.list_all(dataset_name=dataset_name)
+        if e.get("run_id") not in epoch and _in_memory(e.get("run_id"))
+    ]
 
 
 def runs_since(
@@ -154,11 +176,9 @@ def runs_since(
     dataset_name: str | None = None,
 ) -> Iterator[tuple[str, dict[str, Any]]]:
     """Yield ``(run_id, detail)`` for runs not in *seen_ids*; missing details skipped.
-    An EVIDENCE read — runs behind the evidence epoch are invisible."""
-    return stores.archive.load_since(
-        seen_ids | _evidence_epoch(),
-        dataset_name=dataset_name,
-    )
+    An EVIDENCE read — runs behind the evidence epoch or outside a controlled arm's are invisible."""
+    since = stores.archive.load_since(seen_ids | _evidence_epoch(), dataset_name=dataset_name)
+    return ((run_id, detail) for run_id, detail in since if _in_memory(run_id))
 
 
 def replay_feed(
@@ -185,6 +205,8 @@ def record_measurement_run(
 ) -> Path:
     """Sole write entry point. *new_measurements* is what is NEW — the detail log is append-only,
     so rows already on disk are never rewritten."""
+    if (own := _OWN_RUNS.get()) is not None:
+        own.add(run_id)
     return stores.archive.append_run(run_id, data, new_measurements)
 
 
@@ -266,7 +288,10 @@ def _sample_fold_path(stores: Stores, dataset_name: str) -> Path:
 
 def sample_fold_rows(stores: Stores, *, dataset_name: str) -> list[dict[str, Any]]:
     """The persisted ``SampleIndex`` derivation, **in append order**: one consumer reads a sample's
-    trailing observations as a streak, so the replay sequence is part of the answer."""
+    trailing observations as a streak, so the replay sequence is part of the answer. A controlled
+    arm reads none: the fold is every campaign's."""
+    if memory_scoped():
+        return []
     return iter_jsonl(_sample_fold_path(stores, dataset_name))
 
 
@@ -274,8 +299,8 @@ def write_sample_fold(
     stores: Stores, *, dataset_name: str, rows: Iterable[dict[str, Any]], append: bool
 ) -> None:
     """Persist per-run derivation *rows* — ``append`` for runs newly folded, else replace. Skipped
-    inside an instrument, which shares this archive with the campaign that spawned it."""
-    if instrument_mode() is not None:
+    inside an instrument or a controlled arm, whose fold is not the dataset's."""
+    if instrument_mode() is not None or memory_scoped():
         return
     path = _sample_fold_path(stores, dataset_name)
     if append:

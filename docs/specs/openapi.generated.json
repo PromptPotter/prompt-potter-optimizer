@@ -367,6 +367,78 @@
         "title": "ArchiveReport",
         "type": "object"
       },
+      "Arm": {
+        "additionalProperties": false,
+        "description": "Which declared head-to-head a campaign runs as an arm of, frozen at mint. Its presence is\nwhat makes the campaign CONTROLLED.",
+        "properties": {
+          "arm_key": {
+            "title": "Arm Key",
+            "type": "string"
+          },
+          "head_to_head_id": {
+            "title": "Head To Head Id",
+            "type": "string"
+          },
+          "treatment_digest": {
+            "title": "Treatment Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "head_to_head_id",
+          "arm_key",
+          "treatment_digest"
+        ],
+        "title": "Arm",
+        "type": "object"
+      },
+      "ArmBudget": {
+        "additionalProperties": false,
+        "description": "What each arm of a head-to-head may spend, equal by declaration.",
+        "properties": {
+          "determinism": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Determinism"
+          },
+          "max_rounds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Rounds"
+          },
+          "usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usd"
+          }
+        },
+        "required": [
+          "usd",
+          "max_rounds",
+          "determinism"
+        ],
+        "title": "ArmBudget",
+        "type": "object"
+      },
       "ArmReplicate": {
         "additionalProperties": false,
         "description": "One arm — a CONFIGURATION identity, which is what the word keeps meaning here — that ran\nmore than once. Computed over ``campaign`` subjects only: a course and a candidate share their\ncampaign's round-0 hashes, so grouping them by it would report a branch as a replicate of the\ntrunk it grew out of. ``level_spread`` is the cheapest noise reading on the board — taken from\ncampaigns already paid for, and invisible to a roster that lists campaigns rather than arms.\n\nIt is a noise reading ONLY at ``n_instruments == 1``. Above that the arm was held constant while\nthe INSTRUMENT moved underneath it, so the spread measures the engine's own drift and is served\nas that — a replicate that was never one is the more useful finding, but it is not noise.",
@@ -715,6 +787,17 @@
       "CampaignDetailResponse": {
         "additionalProperties": false,
         "properties": {
+          "arm": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Arm"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The head-to-head this campaign runs as a CONTROLLED arm of (`campaign.json::arm`, frozen at mint): it reads no other campaign's measurements, refuses a steer and spends its declared budget. Null for an ordinary campaign, which optimizes with everything that helps."
+          },
           "backend_id": {
             "default": "",
             "description": "Backend this campaign optimizes against",
@@ -837,6 +920,7 @@
           "spend_unreported_usd",
           "bench",
           "runs_with",
+          "arm",
           "config"
         ],
         "title": "CampaignDetailResponse",
@@ -1092,6 +1176,17 @@
       "CampaignSummary": {
         "additionalProperties": false,
         "properties": {
+          "arm": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Arm"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The head-to-head this campaign runs as a CONTROLLED arm of (`campaign.json::arm`, frozen at mint): it reads no other campaign's measurements, refuses a steer and spends its declared budget. Null for an ordinary campaign, which optimizes with everything that helps."
+          },
           "backend_id": {
             "default": "",
             "description": "Backend this campaign optimizes against",
@@ -1201,7 +1296,8 @@
           "spend_unpriced_tokens",
           "spend_unreported_usd",
           "bench",
-          "runs_with"
+          "runs_with",
+          "arm"
         ],
         "title": "CampaignSummary",
         "type": "object"
@@ -3537,6 +3633,17 @@
             "title": "Differs On",
             "type": "array"
           },
+          "head_to_head_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Head To Head Id"
+          },
           "note": {
             "title": "Note",
             "type": "string"
@@ -3584,6 +3691,7 @@
         },
         "required": [
           "rows",
+          "head_to_head_id",
           "scorer_id",
           "verdict",
           "differs_on",
@@ -3598,6 +3706,16 @@
         "additionalProperties": false,
         "description": "One campaign's bench headline beside what it cost to reach.",
         "properties": {
+          "arm": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Arm"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "bench": {
             "anyOf": [
               {
@@ -3628,6 +3746,9 @@
                 "type": "null"
               }
             ]
+          },
+          "budget": {
+            "$ref": "#/components/schemas/ArmBudget"
           },
           "calls": {
             "anyOf": [
@@ -3661,6 +3782,14 @@
             },
             "title": "Concurrent With",
             "type": "array"
+          },
+          "controlled": {
+            "title": "Controlled",
+            "type": "boolean"
+          },
+          "human_intervened": {
+            "title": "Human Intervened",
+            "type": "boolean"
           },
           "incurred_usd_ratio": {
             "anyOf": [
@@ -3699,6 +3828,17 @@
             "title": "Optimizer",
             "type": "string"
           },
+          "replay_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replay Share"
+          },
           "rounds": {
             "title": "Rounds",
             "type": "integer"
@@ -3716,6 +3856,17 @@
           "subject": {
             "title": "Subject",
             "type": "string"
+          },
+          "treatment_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Treatment Digest"
           },
           "worked_ratio": {
             "anyOf": [
@@ -3744,6 +3895,11 @@
           "subject",
           "campaign_id",
           "optimizer",
+          "arm",
+          "controlled",
+          "treatment_digest",
+          "budget",
+          "human_intervened",
           "bench",
           "bench_set",
           "comparable",
@@ -3754,6 +3910,7 @@
           "incurred_usd_ratio",
           "loop_incurred_usd_ratio",
           "worked_ratio",
+          "replay_share",
           "lift_per_incurred_usd",
           "concurrent_with",
           "bench_reads"
@@ -3791,6 +3948,10 @@
             "title": "Models",
             "type": "object"
           },
+          "origin": {
+            "title": "Origin",
+            "type": "string"
+          },
           "scorer_id": {
             "title": "Scorer Id",
             "type": "string"
@@ -3812,7 +3973,8 @@
           "split",
           "bench_rows",
           "scorer_id",
-          "models"
+          "models",
+          "origin"
         ],
         "title": "Instrument",
         "type": "object"

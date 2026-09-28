@@ -7,6 +7,7 @@ from pydantic import Field, SerializerFunctionWrapHandler, model_serializer, mod
 from promptpotter.application.datasets.draft_campaign import OptimizationOverrides
 from promptpotter.application.datasets.draft_patch import EditDraftPatch
 from promptpotter.application.runner.origin_gate import GateDecision
+from promptpotter.domain.campaign import ArmRequest
 from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
 from promptpotter.domain.launch_limits import LaunchLimits, RoundsCap
 from promptpotter.domain.strict_model import StrictModel, WireFloat, WireInt
@@ -260,6 +261,11 @@ class MintCampaignPayload(CommandPayload, LaunchLimits):
         default=None,
         description="Laid over the dataset's own `optimization` before the mint freezes it; only "
         "the fields sent move anything",
+    )
+    arm: ArmRequest | None = Field(
+        default=None,
+        description="Mint as a controlled arm of this head-to-head, declared by its first arm; "
+        "an arm off the declared instrument or budget is refused 409",
     )
 
     @property

@@ -11,6 +11,7 @@ from pydantic import ConfigDict, Field
 
 from promptpotter.domain.bench import BenchPasses, DatasetSplit
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.run_records import WallClock
 from promptpotter.domain.spend import SpendRollup
@@ -52,6 +53,9 @@ class Instrument(StrictModel):
     scorer_id: str
     # node -> model at the origin: the target every selection's bench pass ran through.
     models: dict[str, str]
+    # The origin's content hash (`Campaign.root_content_hash`): its prompt, framing, node params
+    # and the search rows, as `build_origin_cycle_id` folds them.
+    origin: str
 
 
 def bench_instrument(
@@ -61,7 +65,8 @@ def bench_instrument(
     split: DatasetSplit | None,
     bench_ids: Iterable[int],
     scorer_id: str,
-    models: Mapping[str, str],
+    origin_params: Mapping[str, Any] | None,
+    origin: str,
 ) -> Instrument:
     held_out = ",".join(str(i) for i in sorted(bench_ids))
     return Instrument(
@@ -70,8 +75,57 @@ def bench_instrument(
         split=split,
         bench_rows=hashlib.sha256(held_out.encode()).hexdigest()[:12],
         scorer_id=scorer_id,
-        models=dict(models),
+        models={
+            node: str(cfg["model"])
+            for node, cfg in node_config_items(dict(origin_params or {}))
+            if "model" in cfg
+        },
+        origin=origin,
     )
+
+
+class ArmBudget(StrictModel):
+    """What each arm of a head-to-head may spend, equal by declaration."""
+
+    model_config = ConfigDict(frozen=True)
+
+    # The SEARCH's incurred USD, replays priced; the bench pass is metered beside it.
+    usd: float | None
+    max_rounds: int | None
+    determinism: dict[str, Any] | None
+
+
+class HeadToHeadRecord(StrictModel):
+    """``head_to_heads/{id}.json``: one declared comparison — the instrument every arm is graded
+    under and the budget each may spend. Its arms are the campaigns whose ``arm`` names it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    head_to_head_id: str
+    created_at: str
+    instrument: Instrument
+    budget: ArmBudget
+
+
+class ArmRequest(StrictModel):
+    """A mint's ask to run as an arm: the head-to-head to join — declared by its first arm — and
+    this arm's key in it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    head_to_head_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    arm_key: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class Arm(StrictModel):
+    """Which declared head-to-head a campaign runs as an arm of, frozen at mint. Its presence is
+    what makes the campaign CONTROLLED."""
+
+    model_config = ConfigDict(frozen=True)
+
+    head_to_head_id: str
+    arm_key: str
+    treatment_digest: str
 
 
 class Launch(StrictModel):
@@ -134,6 +188,7 @@ class Campaign(StrictModel):
     root_content_hash: str = ""
     # `None` only on an unstarted check-in, which has not chosen what it runs.
     treatment: Treatment | None = None
+    arm: Arm | None = None
     backend_id: str = ""
     # Connector KIND, FROZEN at mint: a campaign OUTLIVES its dataset dir, so re-pointing a slug
     # must not re-kind a campaign that already measured under the old one.
@@ -154,9 +209,13 @@ class Campaign(StrictModel):
 
 
 __all__ = [
+    "Arm",
+    "ArmBudget",
     "ArmCost",
+    "ArmRequest",
     "Campaign",
     "CampaignResult",
+    "HeadToHeadRecord",
     "Instrument",
     "Launch",
     "Treatment",

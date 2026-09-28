@@ -67,6 +67,10 @@ def filed_as(kind: TokenUsageKind | None) -> Iterator[None]:
         _FILED_AS.reset(token)
 
 
+def filed_kind(kind: TokenUsageKind) -> TokenUsageKind:
+    return _FILED_AS.get() or kind
+
+
 def set_current_round(round_num: int | None) -> Token[int | None]:
     return _CURRENT_ROUND.set(round_num)
 
@@ -129,7 +133,7 @@ def emit_token_usage(
     chronology every lifetime-spend read sums off raw JSON, so nesting the counts under a key
     would zero every account's history. ``cache_read=None`` lands as ``0`` here."""
     record = TokenUsageRecord(
-        kind=_FILED_AS.get() or kind,
+        kind=filed_kind(kind),
         node=node,
         model=model,
         provider=provider,
@@ -205,7 +209,7 @@ def emit_spend_hold(
     keeps one, else the active ledger — in the bucket :func:`emit_token_usage` would file it in."""
     record = SpendHoldRecord(
         hold_id=hold_id,
-        kind=_FILED_AS.get() or kind,
+        kind=filed_kind(kind),
         node=node,
         model=model,
         provider=provider,
@@ -304,6 +308,7 @@ __all__ = [
     "emit_round_warning",
     "emit_token_usage",
     "filed_as",
+    "filed_kind",
     "reset_current_round",
     "reset_cycle_ledger",
     "set_current_round",

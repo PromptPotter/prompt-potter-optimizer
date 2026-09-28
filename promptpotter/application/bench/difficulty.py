@@ -29,6 +29,7 @@ from promptpotter.domain.ruler import (
     theta_caveat,
 )
 from promptpotter.domain.scoring import is_graded
+from promptpotter.infrastructure.store.archive_queries import memory_scoped
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.errors import RulerUnpersistedError
@@ -43,8 +44,8 @@ logger = logging.getLogger(__name__)
 __all__ = ["DifficultyView", "RulerScope"]
 
 # Which archive rows a fit reads — `dataset`: every campaign's on the cycle's dataset
-# (`docs/architecture.md` § Three data scopes).
-RulerScope = Literal["dataset"]
+# (`docs/architecture.md` § Three data scopes); `campaign`: a controlled arm's own line alone.
+RulerScope = Literal["dataset", "campaign"]
 
 
 def _reading(
@@ -238,7 +239,7 @@ class DifficultyView:
         *,
         origin_sp_hash: str,
         origin_results: list[dict[str, Any]],
-        scope: RulerScope = "dataset",
+        scope: RulerScope,
     ) -> tuple[DifficultyView, tuple[float, float] | None]:
         """The view a cycle opens on, and C0's θ on it."""
         view = cls(
@@ -259,18 +260,19 @@ class DifficultyView:
         return view, origin_theta
 
     def archive(self) -> list[Observation]:
-        """The archive under ``scope``, read now."""
+        """The archive under ``scope``, read now. ``campaign`` is what the facade's memory fence
+        admits, so it refuses to read where no fence is bound rather than fit off every campaign."""
         session = self.session
-        match self.scope:
-            case "dataset":
-                return build_archive_observations(
-                    session.store,
-                    dataset_name=session.dataset_name,
-                    scorer=session.scoring.require_scorer(),
-                    scorer_id=session.scoring.scorer_id,
-                    sample_ids=session.scoring.require_partition().admitted_ids,
-                    origin_sp_hash=self.origin_sp_hash,
-                )
+        if self.scope == "campaign" and not memory_scoped():
+            raise RuntimeError("a campaign-scoped ruler read with no controlled arm's fence bound")
+        return build_archive_observations(
+            session.store,
+            dataset_name=session.dataset_name,
+            scorer=session.scoring.require_scorer(),
+            scorer_id=session.scoring.scorer_id,
+            sample_ids=session.scoring.require_partition().admitted_ids,
+            origin_sp_hash=self.origin_sp_hash,
+        )
 
     @property
     def scale_id(self) -> str:

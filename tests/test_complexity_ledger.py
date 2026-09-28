@@ -424,7 +424,10 @@ LEDGER_BASELINE = {
     # memory's field validator, and the framing no longer rides the memory.
     # -1: `layout_json_schema(...) -> dict[str, Any]` — potter's layout left `domain/` for its
     # dispatch hub; the map it builds is potter's wire schema, not a domain type.
-    "domain_any_maps": 87,
+    # +1: `ArmBudget.determinism` — the determinism clamp a head-to-head declares per arm, as its
+    # JSON dump: the typed clamp is `campaign_config.py`'s, whose `Knob` annotations `domain/` may
+    # not import, and the record needs only equality over it.
+    "domain_any_maps": 88,
     "models_lax": 3,
     "prompt_string_fields": 6,
     # +1: `demo_pool` — the value space of the `shot_ids` slot and the one carrier of the parent's
@@ -704,7 +707,13 @@ LEDGER_BASELINE = {
     # kept from the first, read in its place, is paired as the second's (test_numerics § 4).
     # +1: a resumed campaign clocked off its last launch with the origin gate counted as work, and
     # its origin's bench pass re-sent per launch — both priced into a head-to-head (test_resume).
-    "test_functions": 228,
+    # +1: a controlled arm's δ ruler, axis digest or sample fold drawn from another campaign's runs
+    # — every number renders, steered by measurements its rival never had (test_integrity § 3).
+    # +1: a controlled arm's ceiling on the bill, stretched by a sibling's replays, or eaten by its
+    # own bench pass — each arm halts at its number on a different search (test_security).
+    # +1: a resumed arm charged twice for cells its ledger already priced, or its bench pass held
+    # to its spent search ceiling — the selection is never graded (test_integrity § 7).
+    "test_functions": 231,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -846,7 +855,12 @@ LEDGER_BASELINE = {
     # `wall_clock_*` became `worked_*`: the line's launches less gate and unworked time.
     # -1: `LineageNode.evaluators` — the round map a `score:` lens re-scored; a lens now re-grades
     # the arm's rows per cell (`mask/load.py`), so no browser or fold reads the map off the tree.
-    "served_fields": 742,
+    # +16: the controlled comparison. `CampaignSummary.arm` and its detail twin (2) over `Arm`'s
+    # three fields; `Instrument.origin`, so two origins can no longer share an instrument; on
+    # `HeadToHeadRow`, `arm`, `controlled`, `treatment_digest`, `human_intervened`, `replay_share`
+    # and `budget` over `ArmBudget`'s three; `HeadToHead.head_to_head_id`. Each is a fact the
+    # guard decides on, served so no surface re-derives whether a pair is one quantity.
+    "served_fields": 758,
 }
 
 

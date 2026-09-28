@@ -213,6 +213,12 @@ export function campaignCard(
 
   const facts: [string, string][] = [["Dataset", campaign.dataset_name]];
   if (runsWith) facts.push(["Optimizer", runsWith.optimizer]);
+  facts.push([
+    "Comparison",
+    campaign.arm
+      ? `controlled — arm ${campaign.arm.arm_key} of head-to-head ${campaign.arm.head_to_head_id}`
+      : "not controlled — optimizes with every measurement and steer",
+  ]);
   facts.push(["Last activity", fmtAgo(run.updatedAt) || fmtDateTime(run.updatedAt)]);
   const created = fmtAgo(campaign.created_at);
   facts.push([

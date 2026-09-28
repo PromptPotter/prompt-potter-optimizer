@@ -62,6 +62,11 @@ def campaign_root_dir_for(tenant_root: WorkspaceDir, campaign_id: str) -> Path:
     return campaigns_root_dir_for(tenant_root) / validate_path_component(campaign_id)
 
 
+def head_to_head_path(tenant_root: WorkspaceDir, head_to_head_id: str) -> Path:
+    """A declared head-to-head — workspace-scoped, because its arms are campaigns."""
+    return tenant_root / "head_to_heads" / f"{validate_path_component(head_to_head_id)}.json"
+
+
 def campaign_cycles_dir(campaign_root: Path) -> Path:
     """The ``cycles/`` dir under an ALREADY-RESOLVED campaign root — the sole owner
     of the literal, for every enumerator that walks a campaign's cycles."""

@@ -13,7 +13,7 @@ from promptpotter.application.run_observers import build_campaign_emitter
 from promptpotter.application.runner.campaign_ids import mint_campaign_id, mint_checkin_cycle_id
 from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.bench import BankPartition
-from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.campaign import Arm, Campaign
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.phases import StopReason
@@ -93,6 +93,9 @@ class CycleSnapshot:
     obs: ObservabilityBridge | None = None
     audit_projection: AuditTrailProjection | None = None
     ledger: CycleEventLog | None = None
+    # Every cell (`ReplayFeed.cell_key`) this campaign's search already priced, grown as a walk
+    # takes each: a replay of one is a re-read and costs nothing again (`QueryLoopState.counted`).
+    counted_cells: set[str] = field(default_factory=set)
     # Forensic traceback for ``index.json::crash_traceback`` written by
     # ``mark_finished``. Operator-facing summary (kind + message) is owned by
     # the canonical ``ErrorRecord`` on the ledger; this field is the in-process
@@ -138,6 +141,14 @@ class Session:
     # value (ADR-0005). Read from the cycle index at init; forces every run
     # this cycle scores to grade C (excluded from digest / reuse / L4).
     human_intervened: bool = False
+    # The head-to-head this campaign runs as an arm of (`Campaign.arm`), read at the runner seam.
+    arm: Arm | None = None
+
+    @property
+    def controlled(self) -> bool:
+        """An arm of a declared head-to-head — the one predicate every mechanism reading past the
+        declaration asks (`docs/architecture.md` § The controlled comparison)."""
+        return self.arm is not None
 
     @property
     def hop(self) -> CycleHop:
@@ -237,6 +248,7 @@ def auto_mint_session(
     pipeline_params: dict[str, Any] | None = None,
     active_steps: list[str] | None = None,
     label: str = "",
+    arm: Arm | None,
 ) -> tuple[str, str, str]:
     """Mint fresh campaign + session + root cycle; claim the active pointer. ``campaign_id`` comes from the CALLER, so an
     L4 inner spawn can hand in an id derived from the cell it measures and land back on a campaign it already ran."""
@@ -275,6 +287,7 @@ def auto_mint_session(
             root_cycle_id=root_cycle,
             root_content_hash=target_hash,
             treatment=select_optimizer(campaign_config.optimization).treatment(),
+            arm=arm,
             backend_id=session.backend_id,
             backend_type=backend_type_of_dataset(session.store, dataset_name),
             owner_user_id=str(session.identity.user_id),

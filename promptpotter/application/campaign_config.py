@@ -9,6 +9,7 @@ from pydantic import Field
 
 from promptpotter.config.settings import DEFAULT_ORIGIN_BUDGET
 from promptpotter.domain.bench import DatasetSplit
+from promptpotter.domain.campaign import ArmBudget
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeSearchNarrowing
 from promptpotter.domain.results import DisplayMetric, HardSampleOrder
 from promptpotter.domain.strict_model import StrictModel
@@ -302,6 +303,17 @@ class OptimizationConfig(StrictModel):
             "`inner_optimizer_temperature` and its cell seed arrive here."
         ),
     )
+
+    @property
+    def arm_budget(self) -> ArmBudget:
+        """What a head-to-head declares equal per arm, read off these knobs."""
+        return ArmBudget(
+            usd=self.spend_budget_usd,
+            max_rounds=self.max_rounds,
+            determinism=None
+            if self.determinism is None
+            else self.determinism.model_dump(mode="json"),
+        )
 
 
 class CampaignConfig(StrictModel):

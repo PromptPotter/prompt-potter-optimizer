@@ -319,7 +319,7 @@ def _open_inner_campaign(
     store = session.store.campaigns
     root = CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id)
     if store.load(root) is None:
-        prepare_fresh_cycle(session, campaign_config, train_data, campaign_id=campaign_id)
+        prepare_fresh_cycle(session, campaign_config, train_data, campaign_id=campaign_id, arm=None)
         return 0
 
     # A rebase retires the root under `superseded_by`; the banked trajectory is its successor's.

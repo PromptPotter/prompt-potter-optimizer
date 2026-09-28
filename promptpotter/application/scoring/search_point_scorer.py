@@ -381,6 +381,9 @@ def open_walk(
     cached_sample_results, deprecated_samples, dataset_sample_ids = _resolve_prior_cache(
         dataset, session, feed=feed, label=label
     )
+    cell_keys = {} if feed is None else {s.id: feed.cell_key(s.key) for s in dataset}
+    counted = session.state.counted_cells
+    rereads = frozenset(s for s in cached_sample_results if cell_keys.get(s) in counted)
 
     def _shareable(row: dict[str, Any]) -> bool:
         """What a waiting walk may replay — a row this walk's own run would serve back."""
@@ -508,6 +511,9 @@ def open_walk(
             cached=cached_sample_results,
             shareable=_shareable,
         ),
+        cell_keys=cell_keys,
+        counted=counted,
+        rereads=rereads,
     )
     return Walk(
         dataset=dataset,

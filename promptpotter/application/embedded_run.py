@@ -29,6 +29,7 @@ from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.application.runner.origin_gate import submit_gate_decision
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.settings import DEFAULT_BACKEND_ID, DEFAULT_BACKEND_URL
+from promptpotter.domain.campaign import ArmRequest
 from promptpotter.domain.results import CycleResult
 
 if TYPE_CHECKING:
@@ -99,6 +100,7 @@ async def run_campaign(
     langfuse_session_id: str | None = None,
     limits: LaunchLimits,
     mode: RunMode,
+    arm: ArmRequest | None = None,
 ) -> CycleResult:
     """Mint through ``mint_framed_cycle``, the prologue ``new`` and the web mint run, then run the
     loop from its origin. With no slot there is no admission: the run holds its declaration as-is —
@@ -111,6 +113,7 @@ async def run_campaign(
             train_data,
             campaign_id=fresh_campaign_id(session, campaign_config),
             task_text=None,
+            arm=arm,
         )
     held = unadmitted_limits(
         campaign_config,

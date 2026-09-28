@@ -42,6 +42,7 @@ from promptpotter.application.jobs.launcher.mint_and_start import with_optimizat
 from promptpotter.application.jobs.mint import fresh_campaign_id, mint_framed_cycle
 from promptpotter.application.runner.entry import RunMode
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.domain.campaign import ArmRequest
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.stores import build_stores
@@ -295,6 +296,18 @@ async def _ingest_and_prepare_checkin(
     return prepared.session, prepared.campaign_config, prepared.session.dataset_name or "?"
 
 
+def _arm_request(raw: str | None) -> ArmRequest | None:
+    if raw is None:
+        return None
+    head_to_head_id, sep, arm_key = raw.partition(":")
+    if not sep:
+        raise SystemExit(f"ERROR: --arm takes HEAD_TO_HEAD:KEY, got {raw!r}")
+    try:
+        return ArmRequest(head_to_head_id=head_to_head_id, arm_key=arm_key)
+    except ValidationError as exc:
+        raise SystemExit(f"ERROR: --arm {raw!r}: {exc}") from exc
+
+
 async def _mint_fresh_session(
     args: argparse.Namespace,
 ) -> tuple[Session, CampaignConfig, str]:
@@ -341,6 +354,7 @@ async def _mint_fresh_session(
         task_text=Path(args.task_file).read_text(encoding="utf-8")
         if args.task_file
         else args.task_text,
+        arm=_arm_request(args.arm),
         log=logger.info if get_verbose() else None,
     )
 
@@ -374,6 +388,8 @@ async def cmd_new(args: argparse.Namespace) -> CommandResult:
     """Mint a fresh campaign and run from round 0. The positional is a dataset name or a raw CSV; both
     produce the same session bundle, so the tail (backend → dataset → pipeline → task → loop) is one."""
     if (pos := getattr(args, "dataset", None)) and Path(pos).is_file():
+        if args.arm is not None:
+            raise SystemExit("ERROR: --arm mints a committed dataset's campaign, not a raw file")
         session, campaign_config, dataset_name = await _ingest_and_prepare_checkin(args)
     else:
         session, campaign_config, dataset_name = await _mint_fresh_session(args)

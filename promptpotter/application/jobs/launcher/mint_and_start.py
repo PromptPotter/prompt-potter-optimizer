@@ -54,6 +54,7 @@ from promptpotter.application.pipeline_resolve import (
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
+from promptpotter.domain.campaign import ArmRequest
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.launch_limits import HeldLimits, LaunchLimits
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
@@ -205,6 +206,7 @@ async def mint_campaign_command(
     job: Job,
     limits: LaunchLimits,
     optimization: Mapping[str, Any],
+    arm: ArmRequest | None,
     origin_override: dict[str, Any] | None = None,
     pipeline_overlay: dict[str, Any] | None = None,
     backend_url: str = DEFAULT_BACKEND_URL,
@@ -269,6 +271,7 @@ async def mint_campaign_command(
             train_data,
             campaign_id=fresh_campaign_id(session, campaign_config),
             task_text=None,
+            arm=arm,
             origin_override=origin_override,
         )
         campaign_id, cycle_id = minted.campaign_id, minted.cycle_id

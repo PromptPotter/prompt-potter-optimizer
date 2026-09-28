@@ -49,12 +49,13 @@ from typing import TYPE_CHECKING, NamedTuple
 import httpx
 
 from promptpotter.domain.run_records import TokenUsageRecord
-from promptpotter.domain.spend import TokenAccount, TokenUsageKind
+from promptpotter.domain.spend import SEARCH_KINDS, CeilingMeter, TokenAccount, TokenUsageKind
 from promptpotter.infrastructure.llm.telemetry import (
     active_cycle_ledger,
     bill_usd,
     emit_spend_hold,
     emit_token_usage,
+    filed_kind,
 )
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.read_model import HOLD_TRAIL, iter_jsonl, open_holds
@@ -77,6 +78,7 @@ __all__ = [
     "bind_spend_book",
     "bound_spend_book",
     "connection_broke",
+    "filed",
     "may_have_billed",
     "never_sent",
     "reservation_left",
@@ -173,11 +175,13 @@ class SpendBook(Projection):
         *,
         usd_cap: Callable[[], float | None],
         tokens_cap: Callable[[], int | None],
+        meters: CeilingMeter,
         usd_spent: float = 0.0,
         tokens_spent: int = 0,
     ) -> None:
         self.usd_cap = usd_cap
         self.tokens_cap = tokens_cap
+        self.meters = meters
         self.usd_spent = usd_spent
         self.tokens_spent = tokens_spent
         # Sends that ended with no bill, at the bound each was admitted on — see the module header.
@@ -202,11 +206,23 @@ class SpendBook(Projection):
         self._seen = record
         self.count(record)
 
-    def count(self, record: TokenUsageRecord) -> None:
-        if not record.cached:
-            self._spend(record.cost_usd, record.input_tokens + record.output_tokens)
+    def binds(self, kind: TokenUsageKind) -> bool:
+        """Whether a send of ``kind`` spends against these ceilings; a bench pass under a
+        ``search_incurred`` book is metered beside them."""
+        return self.meters == "bill" or kind in SEARCH_KINDS
 
-    def _spend(self, usd: float | None, tokens: int) -> None:
+    def count(self, record: TokenUsageRecord) -> None:
+        # A replay is priced into the USD arm only where the ceiling is the search's incurred cost.
+        replay_usd = self.meters == "search_incurred"
+        self._spend(
+            record.kind,
+            record.cost_usd if not record.cached or replay_usd else None,
+            0 if record.cached else record.input_tokens + record.output_tokens,
+        )
+
+    def _spend(self, kind: TokenUsageKind, usd: float | None, tokens: int) -> None:
+        if not self.binds(kind):
+            return
         self.usd_spent += usd or 0.0
         self.tokens_spent += tokens
 
@@ -285,6 +301,8 @@ class SpendBook(Projection):
         """Hold ``bound`` — out of the room left, refusing a send that does not fit, or out of
         ``drawn_from``, the reservation of the cell the send is part of, which already fit. What
         that reservation cannot cover is refused here like any other send."""
+        if not self.binds(kind):
+            return
         if drawn_from is None:
             self.refuse_unless_room(bound, what)
         else:
@@ -325,12 +343,16 @@ class SpendBook(Projection):
         )
 
     def release(self, bound: SendBound, kind: TokenUsageKind) -> None:
+        if not self.binds(kind):
+            return
         self._held_usd[kind] -= bound.usd or 0.0
         self._held_tokens[kind] -= bound.tokens or 0
 
     def unreported(self, bound: SendBound, kind: TokenUsageKind) -> None:
         """A send out ended with no bill: its hold stops being a send out and stays held as one
         whose price nobody learned."""
+        if not self.binds(kind):
+            return
         self.release(bound, kind)
         self.usd_unreported += bound.usd or 0.0
         self.tokens_unreported += bound.tokens or 0
@@ -339,7 +361,7 @@ class SpendBook(Projection):
 def unbounded_spend_book() -> SpendBook:
     """A book for a call path no ceiling binds yet — it refuses nothing and still counts every
     bill and every unreported send."""
-    return SpendBook(usd_cap=lambda: None, tokens_cap=lambda: None)
+    return SpendBook(usd_cap=lambda: None, tokens_cap=lambda: None, meters="bill")
 
 
 _BOOK: ContextVar[SpendBook | None] = ContextVar("spend_book", default=None)
@@ -365,6 +387,12 @@ def spending_under(book: SpendBook) -> Iterator[SpendBook]:
         yield book
     finally:
         _BOOK.reset(token)
+
+
+def filed(label: CallLabel) -> CallLabel:
+    """``label`` under the kind its block files it as (``telemetry.filed_as``) — so a send is
+    admitted in the bucket its bill will land in, and a bench pass is never held as search."""
+    return CallLabel(label.node, filed_kind(label.kind))
 
 
 def _bound_book(what: str) -> SpendBook:
@@ -397,7 +425,7 @@ class _Reservation:
             output_tokens=(bound.tokens or 0) - tokens,
             usd=(bound.usd or 0.0) - usd,
         )
-        if short.usd or short.tokens:
+        if (short.usd or short.tokens) and self.book.binds(self.kind):
             self.book.refuse_unless_room(short, f"{what}, past its cell's reservation")
         self.usd -= usd
         self.tokens -= tokens
@@ -422,6 +450,7 @@ def reserved(label: CallLabel, bound: SendBound) -> Iterator[None]:
     :class:`SendRefusedError`. Every send admitted inside the block, in this task or one it starts,
     draws from the reservation; what is left of it is released when the block ends, however it
     ends, and what it cannot cover is admitted against the ceiling (:meth:`_Reservation.draw`)."""
+    label = filed(label)
     book = _bound_book(label.node)
     book.hold(bound, label.kind, what=label.node)
     reservation = _Reservation(book, label.kind, bound)
@@ -535,7 +564,7 @@ class Admission:
         for record in self._unseen:
             self._book.count(record)
         for usd, tokens in self._unlanded:
-            self._book._spend(usd, tokens)
+            self._book._spend(self._label.kind, usd, tokens)
 
     def release(self) -> None:
         # A bill of nothing, so no later scan reads the hold as a send that ended unreported.
@@ -560,6 +589,7 @@ def admitted(
     refused with :class:`SendRefusedError` where it does not fit. The block closes the admission;
     one it leaves open — the send raised or was cancelled before its bill came back — is
     unreported."""
+    label = filed(label)
     book = _bound_book(label.node)
     reservation = _RESERVATION.get()
     drawn_from = (

@@ -26,6 +26,7 @@ __all__ = [
     "SEARCH_KINDS",
     "TOKEN_KIND_BUCKET",
     "BudgetChange",
+    "CeilingMeter",
     "SpendBucket",
     "SpendCeilings",
     "SpendRollup",
@@ -181,8 +182,13 @@ into ``backend`` as the measured system's (``judges/CLAUDE.md`` § Scoring, neve
 loop). ``diagnostic`` is what a `verify` / `ab` / `noise-floor` spends — it answers a question ABOUT
 the search rather than advancing it, so folding it into `backend` would report re-measuring a
 candidate as the cost of finding one. ``bench`` is the held-out pass, the price of the headline
-every optimizer is compared on. Each is a bucket and not an exemption: inside every ceiling,
-always, because the loop fires both itself."""
+every optimizer is compared on. Each is a bucket and not an exemption: inside a ``bill`` ceiling,
+because the loop fires both itself; a ``search_incurred`` one meters them beside it."""
+
+CeilingMeter = Literal["bill", "search_incurred"]
+"""What a run's spend ceiling counts. ``bill`` — every kind, billed, a replay free: the run's own
+cost. ``search_incurred`` — ``SEARCH_KINDS`` alone, replays priced: a controlled arm's declared
+budget, which a sibling arm's cache cannot stretch and its bench pass cannot eat into."""
 
 ROLE_SPEND_KIND: dict[str, TokenUsageKind] = {MeasurementRole.BENCH: "bench"}
 """The scoring passes whose ROLE files their spend, whatever each call would otherwise bank as —
@@ -318,6 +324,24 @@ class SpendRollup(StrictModel):
         """Incurred-side twin of :attr:`unpriced_tokens`. >0 ⇒ the L4 efficiency proxy would divide by
         an understated cost and read cheapness that never happened, so such a cell is refused."""
         return sum(b.incurred_unpriced_tokens for b in self.buckets)
+
+    def metered(self, meters: CeilingMeter) -> tuple[float, int]:
+        """What a ceiling of ``meters`` has already counted: USD, then billed tokens."""
+        if meters == "bill":
+            return self.total_used_usd, self.total_tokens_used
+        search = [getattr(self, TOKEN_KIND_BUCKET[k]) for k in SEARCH_KINDS]
+        return (
+            sum(b.incurred_usd for b in search),
+            sum(b.input_tokens + b.output_tokens for b in search),
+        )
+
+    @property
+    def search_replay_share(self) -> float | None:
+        """The share of the search's incurred USD a replay answered — billed nothing, since a
+        cache another run paid into served it. ``None`` where the search incurred nothing."""
+        search = [getattr(self, TOKEN_KIND_BUCKET[k]) for k in SEARCH_KINDS]
+        incurred = sum(b.incurred_usd for b in search)
+        return None if incurred <= 0.0 else 1.0 - sum(b.used_usd for b in search) / incurred
 
     @property
     def search_incurred_usd(self) -> float | None:

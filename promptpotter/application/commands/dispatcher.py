@@ -123,7 +123,9 @@ from promptpotter.shared.identity import (
 )
 
 
-class _DeleteCycleRejectedError(Exception):
+class _RejectedError(Exception):
+    """A domain guard refusing a recorded command: the ack lands ``rejected`` and the caller 409s."""
+
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
         self.reason = reason
@@ -384,7 +386,7 @@ class CommandDispatcher:
                 parent_cycle_id=parent_cycle_id,
             )
             if not deleted:
-                raise _DeleteCycleRejectedError(reason)
+                raise _RejectedError(reason)
 
         return await self._record_and_apply(root_ledger, call, Applier(_apply))
 
@@ -492,7 +494,7 @@ class CommandDispatcher:
                 if asyncio.iscoroutine(result):
                     result = await result
                 applied_value = result
-            except _DeleteCycleRejectedError as exc:
+            except _RejectedError as exc:
                 ack_status = "rejected"
                 ack_detail = exc.reason
             except Exception as exc:
@@ -544,6 +546,18 @@ class CommandDispatcher:
         # Every launch this dispatcher starts runs the campaign's own dataset; the queue entry has
         # to name it, and this is the one place the manifest is already open.
         dataset_name = campaign.dataset_name if campaign else ""
+        if campaign.arm is not None and isinstance(
+            payload, ForkCyclePayload | SkipSearchpointPayload | ChangeRunLimitsPayload
+        ):
+            reason = (
+                f"{campaign.campaign_id} is arm {campaign.arm.arm_key} of head-to-head "
+                f"{campaign.arm.head_to_head_id}: its search, steer and budget are the declaration's"
+            )
+
+            def _refuse() -> None:
+                raise _RejectedError(reason)
+
+            return Applier(_refuse, dedupe=False)
         if isinstance(payload, VerifyCandidatePayload):
 
             async def _apply_verify() -> None:
@@ -804,6 +818,7 @@ class CommandDispatcher:
                 job=job,
                 limits=payload,
                 optimization=payload.optimization_sent,
+                arm=payload.arm,
             ),
         )
 

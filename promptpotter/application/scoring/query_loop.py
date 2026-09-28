@@ -37,7 +37,12 @@ from promptpotter.domain.phases import (
 from promptpotter.domain.scoring import CellScorer, QueryMeasurement
 from promptpotter.domain.spend import StepTokenUsage
 from promptpotter.domain.validators import StopRule, StopSignal
-from promptpotter.infrastructure.llm.spend_book import SendBound, bound_spend_book
+from promptpotter.infrastructure.llm.spend_book import (
+    CallLabel,
+    SendBound,
+    bound_spend_book,
+    filed,
+)
 from promptpotter.infrastructure.runtime_flags import effective_lookahead
 from promptpotter.shared.errors import (
     ErrorCategory,
@@ -192,14 +197,16 @@ class QueryLoopResult:
 
 
 def _with_running(
-    result: QueryMeasurement, running: dict[str, Any], run_id: str
+    result: QueryMeasurement, running: dict[str, Any], run_id: str, cell: str | None
 ) -> QueryMeasurement:
-    """A shallow copy carrying the candidate's running fitness and the archive run the row lands in
-    — transient projection hints for the live surfaces. The persisted results keep the clean result,
-    not this copy: an archived row is already filed under its run."""
+    """A shallow copy carrying the candidate's running fitness, the archive run the row lands in and
+    the cell it measured — the ledger's copy. The persisted results keep the clean result, not this
+    copy: an archived row is already filed under its run."""
     out = dict(result)
     out["_running"] = running
     out["run_id"] = run_id
+    if cell is not None:
+        out["cell_key"] = cell
     return cast(QueryMeasurement, out)
 
 
@@ -268,6 +275,14 @@ class QueryLoopState:
     claim_cell: (
         Callable[[Sample], Awaitable[tuple[QueryMeasurement | None, CellClaim | None]]] | None
     )
+    # Each sample's cell (`ReplayFeed.cell_key`); empty where nothing is archived to replay.
+    cell_keys: Mapping[int, str]
+    # The campaign's priced cells (`SessionState.counted_cells`), shared by every walk and grown
+    # as each takes one, so a replay is metered the first time the campaign reads that cell only.
+    counted: set[str]
+    # The replays already priced when the walk opened: none waits on the ceiling and no spend stop
+    # lands on one.
+    rereads: frozenset[int]
 
 
 def _armed_cells(session: Session) -> int:
@@ -473,10 +488,11 @@ class Walk:
         acq = cell.result()
         del self.finished[acq.idx]
         ctx, n = self.ctx, self.n
+        cell_key = ctx.cell_keys.get(acq.sample.id)
         if not acq.fresh:
             # Only if it STAYED a replay: the stale-data protocol may have re-measured for real,
             # and that path already emitted its own fresh records.
-            if acq.result.get("cached"):
+            if acq.result.get("cached") and (cell_key is None or cell_key not in ctx.counted):
                 _emit_cached_step_tokens(acq.result)
         elif acq.deprecated_display is not None and ctx.on_sample_scored is not None:
             ctx.on_sample_scored(acq.deprecated_display, acq.idx, n)
@@ -520,7 +536,11 @@ class Walk:
                 self.consecutive_errors = 0
 
         if ctx.on_sample_scored is not None:
-            ctx.on_sample_scored(_with_running(acq.result, running, ctx.run_id), acq.idx, n)
+            ctx.on_sample_scored(
+                _with_running(acq.result, running, ctx.run_id, cell_key), acq.idx, n
+            )
+        if cell_key is not None:
+            ctx.counted.add(cell_key)
         return None
 
     def _abort_reason(self, result: QueryMeasurement) -> str:
@@ -563,6 +583,12 @@ class Walk:
         if self.boundary is not None and self.boundary <= last + 1:
             stops.append(self.boundary)
         return min((m for m in stops if m is not None), default=None)
+
+    def rereads_ahead(self, start: int) -> int:
+        end = start
+        while end < self.n and self.dataset[end].id in self.ctx.rereads:
+            end += 1
+        return end - start
 
     def rows(self) -> list[QueryMeasurement]:
         """Every row the walk has, taken or only returned."""
@@ -678,6 +704,10 @@ async def run_walks(
     block = 0
     cancels = session.backend_client.cancel_stops_billing
     book = bound_spend_book()
+    label = filed(CallLabel("the next cell", "backend"))
+    # A pass the book's ceilings do not meter — a bench pass on a controlled arm — is neither
+    # admitted against them nor stopped by them.
+    unbounded = book is not None and not book.binds(label.kind)
     cell = _dearest(
         [
             await cell_bound(session, walk.ctx.search_point.pipeline_params or {})
@@ -689,9 +719,9 @@ async def run_walks(
     def affordable() -> int:
         # Every call out is counted at the dearest cell, here rather than read back off the book: a
         # cell launched this step has not placed its own hold yet.
-        if book is None or cell is None:
+        if book is None or cell is None or unbounded:
             return sys.maxsize
-        return book.fits(cell, beside="backend") - out()
+        return book.fits(cell, beside=label.kind) - out()
 
     def live() -> list[Walk]:
         return [walk for walk in walks if walk is not None and walk.outcome is None]
@@ -769,7 +799,7 @@ async def run_walks(
         return True
 
     def fill(walk: Walk, cap: int, armed: int) -> None:
-        room = min(cap - out(), affordable())
+        room = min(cap - out(), max(affordable(), walk.rereads_ahead(walk.submitted)))
         last = min(walk.n if walk.skip_at is None else walk.skip_at, walk.submitted + room) - 1
         if walk.boundary is not None:
             # One cell past a pending close at most, whatever the rules allow.
@@ -783,7 +813,7 @@ async def run_walks(
             sample, _cell = walk.launch(armed, horizon)
             room -= 1
             if backfills is not None:
-                room -= len(backfills.start_backfill(sample, room))
+                room -= len(backfills.start_backfill(sample, min(room, affordable())))
 
     def reading() -> Flight:
         walking = live()
@@ -813,7 +843,7 @@ async def run_walks(
             most,
             waiting,
             session.backend_client.backpressure.reading(),
-            affordable=None if book is None or cell is None else max(0, affordable()),
+            affordable=None if book is None or cell is None or unbounded else max(0, affordable()),
             cell_usd=None if cell is None else cell.usd,
         )
 
@@ -872,6 +902,8 @@ async def run_walks(
             # Same cadence as the pause, because the round-boundary gate cannot fire until the round
             # closes — and for an L4 outer round every sample is an entire inner CAMPAIGN.
             tripped = session.budget_tripped() if session.budget_tripped is not None else None
+            if unbounded or walk.rereads_ahead(len(walk.results)):
+                tripped = None
             stopping = skip or pause or tripped is not None
             # A returned cell, or a catch-up already started, is paid for — kept before a stop is
             # honoured, so the stop lands a row later, as if pressed a moment later. Keeping starts
@@ -953,7 +985,7 @@ async def run_walks(
                         walk.n,
                     )
                     # Refused with the ceiling that binds, and the sums that say why.
-                    book.hold(cell, "backend", what="the next cell")
+                    book.hold(cell, label.kind, what=label.node)
                 raise RuntimeError(
                     f"scoring phase stalled: nothing out and nothing to take at query "
                     f"{len(walk.results)}/{walk.n}"

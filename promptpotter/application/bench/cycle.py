@@ -170,6 +170,7 @@ class Cycle:
             config,
             origin_sp_hash=sp.sp_hash(schema),
             origin_results=list(origin_results or []),
+            scope="campaign" if session.controlled else "dataset",
         )
 
         return cls(

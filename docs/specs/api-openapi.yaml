@@ -3752,6 +3752,30 @@ components:
             the terminal's `--set` are, by the one resolution a run takes: an
             optimizer this install lacks is a 404 `optimizer_unknown`, a knob its
             manifest refuses a 422. Omitted, the dataset's own declaration runs.
+        arm:
+          type: object
+          required: [head_to_head_id, arm_key]
+          additionalProperties: false
+          description: |
+            Mint as a CONTROLLED arm of a head-to-head (`head_to_heads/{id}.json`).
+            The first arm declares it off its own instrument (dataset rows, split,
+            held-out rows, scorer, target models, origin) and budget; a later arm
+            on any other is refused 409 `arm_off_instrument`, a key another arm
+            holds 409 `arm_taken`. An arm reads no other campaign's measurements,
+            refuses fork/skip/limit commands 409, and its spend ceiling is its
+            search's INCURRED USD, the bench pass metered beside it. Omitted, the
+            campaign optimizes with everything that helps.
+          properties:
+            head_to_head_id:
+              type: string
+              pattern: '^[A-Za-z0-9_-]+$'
+              minLength: 1
+              maxLength: 64
+            arm_key:
+              type: string
+              pattern: '^[A-Za-z0-9_-]+$'
+              minLength: 1
+              maxLength: 64
 
     StartRunPayload:
       allOf:

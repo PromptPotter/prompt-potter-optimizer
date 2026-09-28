@@ -71,7 +71,7 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.bench import BenchReading, BenchScore, DatasetSplit
-from promptpotter.domain.campaign import Instrument
+from promptpotter.domain.campaign import Arm, ArmBudget, Instrument
 from promptpotter.domain.cells import (
     Cell,
     CellCandidate,
@@ -263,6 +263,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     # --- campaigns/manifests router ---
     RunsWithParam,  # nested in CampaignRunsWith — the emitter does not recurse
     CampaignRunsWith,  # nested in CampaignSummary
+    Arm,  # nested in CampaignSummary and HeadToHeadRow
     CampaignSummary,
     CampaignListResponse,
     # What ONE campaign runs at one searchpoint (`frontend-surface-contract.md::I9`).
@@ -291,6 +292,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     MetricReading,
     DatasetSplit,  # nested in Instrument
     Instrument,
+    ArmBudget,  # nested in HeadToHeadRow
     HeadToHeadRow,
     SelectionPair,
     HeadToHead,

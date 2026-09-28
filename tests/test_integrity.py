@@ -1881,6 +1881,65 @@ def test_earned_block_mining_is_blind_inside_an_instrument() -> None:
     assert contextvars.copy_context().run(_inside_instrument) == {}
 
 
+def test_a_controlled_arm_remembers_only_the_runs_its_own_line_filed(built_stores: Any) -> None:
+    """An arm of a head-to-head is compared on what its OWN search found: a δ ruler, an axis
+    digest or a sample fold drawn from another campaign's runs on the dataset steers it with
+    measurements its rival never had, and nothing on screen says so. The archive stays a CACHE
+    either way; MEMORY is fenced to the runs the arm filed, and grows as it files more."""
+    import contextvars
+
+    from factories import measurements
+
+    from promptpotter.infrastructure.store.archive_queries import (
+        list_runs,
+        record_measurement_run,
+        runs_since,
+        sample_fold_rows,
+        scope_memory_to_own_runs,
+        write_sample_fold,
+    )
+
+    def bank(run_id: str) -> None:
+        record_measurement_run(
+            built_stores,
+            run_id,
+            {
+                "run_id": run_id,
+                "dataset_name": "ds",
+                "prompt_fields_id": run_id,
+                "item_count": 2,
+                "content_hash": run_id,
+                "created_at": "2026-09-28T00:00:00Z",
+            },
+            measurements([1.0, 0.0]),
+        )
+
+    bank("panel_foreign")
+    write_sample_fold(built_stores, dataset_name="ds", rows=[{"run_id": "x"}], append=False)
+
+    def inside_arm() -> tuple[set[str], set[str], list[dict[str, Any]]]:
+        scope_memory_to_own_runs({"origin_own"})
+        bank("origin_own")
+        bank("panel_own")
+        write_sample_fold(built_stores, dataset_name="ds", rows=[{"run_id": "y"}], append=True)
+        return (
+            {e["run_id"] for e in list_runs(built_stores, dataset_name="ds")},
+            {run_id for run_id, _ in runs_since(built_stores, set(), dataset_name="ds")},
+            sample_fold_rows(built_stores, dataset_name="ds"),
+        )
+
+    listed, since, fold = contextvars.copy_context().run(inside_arm)
+    assert listed == since == {"origin_own", "panel_own"}
+    assert fold == []
+    # Outside the arm the tenant's whole archive is memory again, and the fold was not touched.
+    assert {e["run_id"] for e in list_runs(built_stores, dataset_name="ds")} == {
+        "panel_foreign",
+        "origin_own",
+        "panel_own",
+    }
+    assert sample_fold_rows(built_stores, dataset_name="ds") == [{"run_id": "x"}]
+
+
 def test_repeat_marker_reads_the_idea_not_the_field_it_was_written_into() -> None:
     """`mutation_memory`'s ↺ marker is the loop's only defence against re-proposal, and both
     ways it can fail are SILENT — the panel still renders a full, plausible record either way.
@@ -3860,9 +3919,11 @@ def _walk_over(
     on_taken: Any = None,
     cached: dict[int, Any] | None = None,
     banked: dict[int, Any] | None = None,
+    rereads: list[int] | None = None,
 ) -> Any:
     """A walk as the gateway opens one, over stubbed persistence: ``cached`` is the archive it
-    replays from, ``banked`` collects what a stop keeps for its resumption."""
+    replays from, ``banked`` collects what a stop keeps for its resumption, ``rereads`` the cells the
+    campaign already priced."""
     from promptpotter.shared.instrument import measured_candidate_context
 
     ctx = query_loop.QueryLoopState(
@@ -3883,6 +3944,9 @@ def _walk_over(
         bank=lambda rows, kept: (banked if banked is not None else {}).update(
             {r["sample_id"]: r for r in kept}
         ),
+        cell_keys={s.id: f"cell_{s.id}" for s in dataset},
+        counted={f"cell_{sid}" for sid in rereads or ()},
+        rereads=frozenset(rereads or ()),
     )
     return query_loop.Walk(
         dataset, ctx, checks, on_sample_starting, measured_candidate_context(measured)
@@ -3941,7 +4005,7 @@ async def _walk(
     depths: list[int] = []
     committed: list[int] = []
     returned: list[int] = []
-    book = SpendBook(usd_cap=lambda: cap_usd, tokens_cap=lambda: None)
+    book = SpendBook(usd_cap=lambda: cap_usd, tokens_cap=lambda: None, meters="bill")
     dollar = SendBound(input_tokens=0, output_tokens=0, usd=1.0)
 
     async def _measure(sample: Sample, session: Any, *, pipeline_params: Any = None) -> Any:
@@ -4451,6 +4515,85 @@ async def test_sample_lookahead_changes_the_bill_and_never_the_record(tmp_path: 
     replayed = await _walk(dataset, armed=4, max_cells=4, cut_at=None, skip_at=3)
     assert replayed["stop_reason"] == "skip" and len(replayed["rows"]) == 3
     assert sorted(replayed["calls"]) == [s.id for s in dataset[:3]]
+
+
+async def test_a_resumed_arm_re_reads_its_cells_and_still_reaches_its_bench(tmp_path: Path) -> None:
+    """A resume re-walks the origin, and the round it stopped in, over cells its own ledger already
+    priced. Metered again, a controlled arm pays for each twice; near its ceiling it halts in run
+    init, and a spent search ceiling stops its bench pass too, so its selection is never graded.
+    Silent: the halt reads as the arm's budget, and the headline is simply missing."""
+    from promptpotter.application.runner.termination import BudgetGate
+    from promptpotter.domain.pipeline_schema import WebSpendBound
+    from promptpotter.domain.run_records import TokenUsageRecord
+    from promptpotter.infrastructure.ledger import CycleEventLog
+    from promptpotter.infrastructure.llm import telemetry
+    from promptpotter.infrastructure.llm.spend_book import SpendBook, spending_under
+
+    dataset = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(4)]
+    step = {"solve": {"input": 10, "output": 5, "cost_usd": 0.01}}
+    banked = {
+        s.id: {
+            "sample_id": s.id,
+            "query": s.query,
+            "ground_truth": "a",
+            "predicted": "a",
+            "fitness": 1.0,
+            "objective": 1.0,
+            "error": None,
+            "pipeline_data": {"step_tokens": step},
+        }
+        for s in dataset
+    }
+    # The ceiling already spent: no cell fits, and the gate reads it as reached.
+    book = SpendBook(
+        usd_cap=lambda: 0.02, tokens_cap=lambda: None, meters="search_incurred", usd_spent=0.02
+    )
+    ledger = CycleEventLog.open(CycleDir(tmp_path / "cycle"))
+    ledger.bind(book)
+    session = types.SimpleNamespace(
+        scoring=types.SimpleNamespace(scorer=lambda r: 1.0),
+        state=types.SimpleNamespace(ledger=None),
+        pause_check=lambda: False,
+        skip_check=None,
+        skip_consume=None,
+        budget_tripped=BudgetGate(book=book).tripped,
+        sample_lookahead_check=lambda: 1,
+        backend_client=types.SimpleNamespace(
+            max_cells_in_flight=1,
+            cancel_stops_billing=False,
+            holds_own_sends=False,
+            node_spend_bound=lambda node, cfg: node.spend_bound,
+        ),
+        pipeline_schema=types.SimpleNamespace(
+            nodes=[
+                types.SimpleNamespace(
+                    name="search",
+                    is_llm=False,
+                    spend_bound=WebSpendBound(kind="web", queries=1, usd_per_query=0.01),
+                )
+            ]
+        ),
+        flight=None,
+    )
+    taken = [s.id for s in dataset[:3]]
+    walk = _walk_over(dataset, session, checks=[], cached=banked, rereads=taken)
+    # The selection's bench pass, filed beside the arm's search ceiling.
+    bench = _walk_over(dataset, session, checks=[], cached=banked)
+    token = telemetry.set_cycle_ledger(ledger)
+    try:
+        with spending_under(book):
+            stopped = await _stopped_by_operator(query_loop.run_walks([walk], session))
+            with telemetry.filed_as("bench"):
+                await query_loop.run_walks([bench], session)
+    finally:
+        telemetry.reset_cycle_ledger(token)
+    assert [r["sample_id"] for r in walk.results] == taken, "the ceiling held back a re-read"
+    # The next cell no earlier launch took is search again, and the spent ceiling stops it.
+    assert stopped == "spend_budget"
+    assert len(bench.results) == len(dataset), "the search's ceiling stopped the bench pass"
+    kinds = [r.kind for _, r in ledger.iter() if isinstance(r, TokenUsageRecord)]
+    assert kinds == ["bench"] * len(dataset), f"a re-read was metered a second time: {kinds}"
+    assert book.usd_spent == pytest.approx(0.02)
 
 
 def _counting_client(reply: str) -> tuple[Any, list[int]]:
@@ -4966,7 +5109,9 @@ def test_first_mint_decomposes_once_and_bills_the_run_it_frames(
     monkeypatch.setattr(mint, "prepare_fresh_cycle", minting)
     for campaign_id in ("c1", "c2"):
         asyncio.run(
-            mint.mint_framed_cycle(session, config, [], campaign_id=campaign_id, task_text=None)
+            mint.mint_framed_cycle(
+                session, config, [], campaign_id=campaign_id, task_text=None, arm=None
+            )
         )
 
     assert framing_at_mint == ["log parsing", "log parsing"], (

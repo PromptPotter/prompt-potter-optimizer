@@ -22,6 +22,13 @@ PROMPTPOTTER_HOME=.scratch/offline-home .venv/Scripts/python.exe scripts/offline
 Run it from the tree under test with that tree's own venv — a worktree probe run through another
 tree's interpreter answers for that other tree.
 
+`--controlled` proves the controlled comparison instead ([`../architecture.md`](../architecture.md)
+§ The controlled comparison): two workspaces, each running a potter and a capo arm of one
+head-to-head, one of them after a foreign campaign on the dataset whose origin differs. It fails
+unless a skip on an arm is refused, each arm's memory holds only runs it filed, and both arms'
+decisions are byte-identical with and without the foreign campaign; `head_to_head.json` beside
+them is the evidence read of all three.
+
 ## Why it cannot be mistaken for a real run
 
 - **`PROMPTPOTTER_HOME` must be set.** The default workspace is never written. A home that holds

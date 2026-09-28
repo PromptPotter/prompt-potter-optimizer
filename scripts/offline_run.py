@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextvars
 import hashlib
 import io
 import json
@@ -34,11 +35,15 @@ from promptpotter.application.campaign_config import (
     OptimizationConfig,
     load_campaign_config,
 )
+from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.commands.payloads import SkipSearchpointPayload
 from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     read_campaign_config_file,
 )
 from promptpotter.application.embedded_run import open_session, run_campaign
+from promptpotter.application.evidence.read import subject_evidence
+from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.optimizer_manifest import (
     resolve_optimizer,
@@ -51,18 +56,25 @@ from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_
 from promptpotter.config.settings import Settings
 from promptpotter.connectors.promptpotter import measurement_modules
 from promptpotter.domain.bench import BenchScore
+from promptpotter.domain.campaign import ArmRequest
 from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import SpendRollup
+from promptpotter.infrastructure.store.archive_queries import list_runs, scope_memory_to_own_runs
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_run_ids
 from promptpotter.infrastructure.store.io import rmtree_robust
+from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.terminal.live.display import LiveDisplay
+from promptpotter.shared.errors import ConflictError
 from promptpotter.shared.hashing import module_source_digest
 from promptpotter.shared.identity import default_identity
 
 DATASET = "justlogic-d234"
 BACKEND_URL = "http://127.0.0.1:8000"
 STAMP = "offline-run.json"
+# `--controlled`'s two workspaces: the arms beside a foreign campaign, and the arms alone.
+CONTROLLED = ("controlled", "controlled-bare")
 NOT_A_KEY = "offline-run-not-a-key"
 PROVIDER_KEYS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY")
 LABEL = "OFFLINE — fake optimizer LLM and fake backend; every number is synthetic"
@@ -526,7 +538,8 @@ def synthetic_rows(n: int) -> list[Sample]:
     return rows
 
 
-def campaign_config(optimizer: str, rounds: int) -> CampaignConfig:
+def campaign_config(optimizer: str, rounds: int, *, pinned: bool = False) -> CampaignConfig:
+    """*pinned* seeds every optimizer's draws alike, which arms of one head-to-head must share."""
     raw = dict(
         read_campaign_config_file(dataset_campaign_path(benchmark_datasets_root() / DATASET))
     )
@@ -537,6 +550,7 @@ def campaign_config(optimizer: str, rounds: int) -> CampaignConfig:
     opt.update(max_rounds=rounds, spend_budget_usd=1000.0, origin_gate="off", optimizer=optimizer)
     if optimizer != templated:
         opt["nodes"] = SCALED.get(optimizer, {})
+    if optimizer != templated or pinned:
         # Its draws follow the campaign's id unless a clamp seeds them, and every run mints an id.
         opt["determinism"] = {"seed": 0}
     sampler = select_optimizer(load_campaign_config(raw).optimization).sampler
@@ -555,11 +569,25 @@ def text_templates(config: CampaignConfig) -> dict[str, str]:
     }
 
 
-async def run_one(optimizer: str, workspace: Path, *, rounds: int, rows: int) -> Path:
-    (workspace / "requests").mkdir()
-    config = campaign_config(optimizer, rounds)
+async def run_one(
+    optimizer: str,
+    workspace: Path,
+    *,
+    rounds: int,
+    rows: int,
+    out: Path | None = None,
+    arm: ArmRequest | None = None,
+    framing: bool = True,
+) -> tuple[Path, str]:
+    """*out* holds its requests and decisions, the workspace itself by default; the archive is the
+    workspace's, so campaigns run in one process share it as a tenant's do."""
+    out = workspace if out is None else out
+    (out / "requests").mkdir(parents=True)
+    config = campaign_config(optimizer, rounds, pinned=arm is not None)
+    if not framing:
+        config = config.model_copy(update={"task_framing": "off"})
     samples = synthetic_rows(rows)
-    llm = FakeLLM(workspace / "requests", text_templates(config))
+    llm = FakeLLM(out / "requests", text_templates(config))
     backend = FakeBackend(samples)
     router = Router(llm, backend)
     install_network(router)
@@ -577,6 +605,7 @@ async def run_one(optimizer: str, workspace: Path, *, rounds: int, rows: int) ->
         display=LiveDisplay.for_campaign(session, config),
         limits=LaunchLimits(),
         mode=RunMode(),
+        arm=arm,
     )
     await session.backend_client.aclose()
     stores.campaigns.update_campaign(session.campaign_id, {"label": LABEL})
@@ -591,10 +620,76 @@ async def run_one(optimizer: str, workspace: Path, *, rounds: int, rows: int) ->
         "llm_calls": dict(sorted(llm.calls.items())),
         "backend_cells": backend.cells,
     }
-    (workspace / "decisions.json").write_text(
+    (out / "decisions.json").write_text(
         json.dumps(decisions, indent=1, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8"
     )
-    return cycle
+    return cycle, session.campaign_id
+
+
+async def run_controlled(workspace: Path, *, rounds: int, rows: int, foreign: bool) -> None:
+    """Two arms of one head-to-head — potter, then capo — after, with *foreign*, an undeclared
+    campaign on the dataset whose origin differs (framing off). Asserts what M5 promises: a steer on
+    an arm is refused, an arm's MEMORY holds no foreign run, and the evidence reads the arms under
+    the declared scorer with the foreign origin marked."""
+    subjects = []
+    if foreign:
+        _, cid = await run_one(
+            "potter", workspace, rounds=rounds, rows=rows, out=workspace / "foreign", framing=False
+        )
+        subjects.append(cid)
+    arms = {}
+    for name in ("potter", "capo"):
+        cycle, cid = await run_one(
+            name,
+            workspace,
+            rounds=rounds,
+            rows=rows,
+            out=workspace / f"arm-{name}",
+            arm=ArmRequest(head_to_head_id="h2h", arm_key=name),
+        )
+        arms[name] = (cycle, cid)
+        subjects.append(cid)
+    stores = build_stores(default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
+    cycle, cid = arms["potter"]
+    try:
+        await CommandDispatcher(stores).dispatch_cycle_command(
+            CommandCall(SkipSearchpointPayload(campaign_id=cid, cycle_id=cycle.name), "skip-arm"),
+            expected_version=None,
+        )
+    except ConflictError as exc:
+        print(f"skip on an arm: {exc.http_status} {exc}")
+    else:
+        raise SystemExit("offline run: a skip on a controlled arm was applied")
+
+    def filed(campaign_id: str) -> set[str]:
+        campaign = stores.campaigns.load_campaign(campaign_id)
+        assert campaign is not None
+        return scan_ledger_run_ids(
+            CycleLayout(stores.campaigns.cycle_dir(hop)).ledger
+            for hop in stores.campaigns.line(campaign.root_hop)
+        )
+
+    def memory(campaign_id: str) -> set[str]:
+        scope_memory_to_own_runs(filed(campaign_id))
+        return {e["run_id"] for e in list_runs(stores, dataset_name=DATASET)}
+
+    foreign_only = set().union(*(filed(c) for c in subjects)) - set().union(
+        *(filed(c) for _, c in arms.values())
+    )
+    for name, (_, cid) in arms.items():
+        seen = contextvars.copy_context().run(memory, cid)
+        if seen & foreign_only or not seen <= filed(cid):
+            raise SystemExit(f"offline run: arm {name}'s memory reads a run it did not file")
+        print(f"arm {name}: memory holds {len(seen)} own runs, none of {len(foreign_only)} foreign")
+    ev = subject_evidence(stores, [SubjectSpec("campaign", c) for c in subjects])
+    table = ev.head_to_head
+    assert table is not None
+    (workspace / "head_to_head.json").write_text(table.model_dump_json(indent=1), encoding="utf-8")
+    print(
+        f"head-to-head {table.head_to_head_id}: scorer {table.scorer_id}, differs_on "
+        f"{table.differs_on}, pairs {[(p.campaign_a, p.campaign_b) for p in table.pairs]}, "
+        f"controlled {[(r.optimizer, r.controlled) for r in table.rows]}"
+    )
 
 
 # ---------------------------------------------------------------------------------------------
@@ -866,6 +961,11 @@ def main() -> int:
     ap.add_argument("--rounds", type=int, default=4, help="max_rounds per campaign")
     ap.add_argument("--rows", type=int, default=200, help="synthetic bank size")
     ap.add_argument("--digests", action="store_true", help="print the L4 identity digests")
+    ap.add_argument(
+        "--controlled",
+        action="store_true",
+        help="run two arms of one head-to-head beside a foreign campaign, and without it",
+    )
     ap.add_argument("--child", help=argparse.SUPPRESS)
     args = ap.parse_args()
     if args.digests:
@@ -875,12 +975,22 @@ def main() -> int:
         if any(os.environ[k] != NOT_A_KEY for k in PROVIDER_KEYS):
             raise SystemExit("offline run: --child runs only under the env its parent builds")
         workspace = Path(os.environ["PROMPTPOTTER_HOME"])
-        print(asyncio.run(run_one(args.child, workspace, rounds=args.rounds, rows=args.rows)))
+        if args.child in CONTROLLED:
+            asyncio.run(
+                run_controlled(
+                    workspace,
+                    rounds=args.rounds,
+                    rows=args.rows,
+                    foreign=args.child == CONTROLLED[0],
+                )
+            )
+            return 0
+        print(asyncio.run(run_one(args.child, workspace, rounds=args.rounds, rows=args.rows))[0])
         return 0
 
     home = claim_home()
     complete_registries()
-    names = args.optimizer or sorted(optimizers.runtimes())
+    names = list(CONTROLLED) if args.controlled else args.optimizer or sorted(optimizers.runtimes())
     stamp = {"offline": True, "note": LABEL, "workspaces": names}
     (home / STAMP).write_text(json.dumps(stamp, indent=1) + "\n", encoding="utf-8")
     # One workspace each: the archive and the δ ruler pool across campaigns in a workspace, so a
@@ -905,11 +1015,23 @@ def main() -> int:
             failed += 1
             print(f"{name}: FAILED (exit {rc}) -- {workspace / 'run.log'}")
             continue
+        if args.controlled:
+            continue
         run = json.loads((workspace / "decisions.json").read_text(encoding="utf-8"))["run"]
         (cycle,) = (workspace / "projects").glob("*/campaigns/*/cycles/*")
         failed += run["bench"] is None
         headline = "NO BENCH HEADLINE" if run["bench"] is None else f"{run['bench']['lift']:+.3f}"
         print(f"{name}: {run['stop_reason']}, bench lift {headline} -- {cycle}")
+    if args.controlled and not failed:
+        beside, bare = (home / name for name in CONTROLLED)
+        for arm in ("arm-potter", "arm-capo"):
+            same = (beside / arm / "decisions.json").read_bytes() == (
+                bare / arm / "decisions.json"
+            ).read_bytes()
+            failed += not same
+            print(f"{arm}: decisions {'UNMOVED' if same else 'MOVED'} by the foreign campaign")
+        lines = (beside / "run.log").read_text(encoding="utf-8").splitlines()
+        print("\n".join(line for line in lines if line.startswith(("skip on", "arm ", "head-to-"))))
     print(f"wall clock {time.monotonic() - t0:.0f}s")
     return 1 if failed else 0
 

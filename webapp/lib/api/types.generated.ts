@@ -1111,6 +1111,13 @@ export interface CampaignRunsWith {
   max_rounds: number | null;
 }
 
+/** Which declared head-to-head a campaign runs as an arm of, frozen at mint. Its presence is */
+export interface Arm {
+  head_to_head_id: string;
+  arm_key: string;
+  treatment_digest: string;
+}
+
 export interface CampaignSummary {
   /** Campaign id ({dataset}__{rand6}) — one RUN of an origin */
   campaign_id: string;
@@ -1168,6 +1175,11 @@ export interface CampaignSummary {
    * when the root pipeline did not resolve. `max_rounds` is the DECLARED
    * rounds cap; 0 means origin only. */
   runs_with: CampaignRunsWith | null;
+  /** The head-to-head this campaign runs as a CONTROLLED arm of
+   * (`campaign.json::arm`, frozen at mint): it reads no other campaign's
+   * measurements, refuses a steer and spends its declared budget. Null for an
+   * ordinary campaign, which optimizes with everything that helps. */
+  arm: Arm | null;
 }
 
 export interface CampaignListResponse {
@@ -1463,6 +1475,14 @@ export interface Instrument {
   bench_rows: string;
   scorer_id: string;
   models: Record<string, string>;
+  origin: string;
+}
+
+/** What each arm of a head-to-head may spend, equal by declaration. */
+export interface ArmBudget {
+  usd: number | null;
+  max_rounds: number | null;
+  determinism: Record<string, unknown> | null;
 }
 
 /** One campaign's bench headline beside what it cost to reach. */
@@ -1470,6 +1490,11 @@ export interface HeadToHeadRow {
   subject: string;
   campaign_id: string;
   optimizer: string;
+  arm: Arm | null;
+  controlled: boolean;
+  treatment_digest: string | null;
+  budget: ArmBudget;
+  human_intervened: boolean;
   bench: BenchScore | null;
   bench_set: Instrument | null;
   comparable: boolean | null;
@@ -1480,6 +1505,7 @@ export interface HeadToHeadRow {
   incurred_usd_ratio: number | null;
   loop_incurred_usd_ratio: number | null;
   worked_ratio: number | null;
+  replay_share: number | null;
   lift_per_incurred_usd: number | null;
   concurrent_with: string[];
   bench_reads: number | null;
@@ -1500,6 +1526,7 @@ export interface SelectionPair {
 /** The campaigns' bench headlines side by side, and whether one instrument graded them all. */
 export interface HeadToHead {
   rows: HeadToHeadRow[];
+  head_to_head_id: string | null;
   scorer_id: string;
   verdict: boolean | null;
   differs_on: string[];
@@ -2140,6 +2167,11 @@ export interface CampaignDetailResponse {
    * when the root pipeline did not resolve. `max_rounds` is the DECLARED
    * rounds cap; 0 means origin only. */
   runs_with: CampaignRunsWith | null;
+  /** The head-to-head this campaign runs as a CONTROLLED arm of
+   * (`campaign.json::arm`, frozen at mint): it reads no other campaign's
+   * measurements, refuses a steer and spends its declared budget. Null for an
+   * ordinary campaign, which optimizes with everything that helps. */
+  arm: Arm | null;
   /** Content hash of the origin search point — the campaign identity */
   root_content_hash: string;
   /** Frozen CampaignConfig snapshot for this campaign */

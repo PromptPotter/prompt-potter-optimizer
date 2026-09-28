@@ -147,6 +147,9 @@ async def resume_with_divergence_check(
     packages_before = cycle.optimizer.runtime.round_packages(
         cycle, [t.model_copy(deep=True) for t in prior]
     )
+    # The trajectory the loop continues from, whichever optimizer walked it: the pick the bench
+    # grades and the parent the next round measures are both read off `cycle.rounds`.
+    cycle.replay_priors(prior)
 
     correction = await apply_correction(
         campaign_store, hop, prior, packages_before, session, cycle, dataset

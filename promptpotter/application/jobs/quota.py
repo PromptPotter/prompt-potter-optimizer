@@ -292,7 +292,9 @@ def admit_spend(*, stores: Stores, bucket: str) -> SpendBook:
                 "runs on the host's key."
             ),
         )
-    return SpendBook(usd_cap=lambda: headroom.usd, tokens_cap=lambda: headroom.tokens)
+    return SpendBook(
+        usd_cap=lambda: headroom.usd, tokens_cap=lambda: headroom.tokens, meters="bill"
+    )
 
 
 def declare_run_ceiling(

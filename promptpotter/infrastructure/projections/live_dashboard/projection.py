@@ -36,7 +36,7 @@ from promptpotter.domain.scoring import (
     recorded_elapsed_s,
     weighted_sum_weights,
 )
-from promptpotter.domain.spend import SpendRollup
+from promptpotter.domain.spend import CeilingMeter, SpendRollup
 from promptpotter.infrastructure.ledger import open_with_history
 from promptpotter.infrastructure.projections.audit_trail import (
     audit_rounds_dir,
@@ -733,13 +733,8 @@ class LiveDashboardProjection(Projection):
         self.state.spend_by_round.setdefault(key, SpendRollup()).bank(record)
         self._schedule_persist()
 
-    @property
-    def spend_total_used_usd(self) -> float:
-        return self.state.spend.total_used_usd
-
-    @property
-    def spend_total_tokens(self) -> int:
-        return self.state.spend.total_tokens_used
+    def spend_metered(self, meters: CeilingMeter) -> tuple[float, int]:
+        return self.state.spend.metered(meters)
 
     def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None:
         """Lights the node of the optimizer call in progress — the multi-minute blind spot during a

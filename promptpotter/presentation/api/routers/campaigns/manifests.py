@@ -29,7 +29,7 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.application.runner.campaign_result import read_campaign_bench
 from promptpotter.domain.bench import BenchScore
-from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.campaign import Arm, Campaign
 from promptpotter.domain.pipeline_overlay import (
     permitted_models_for_campaign,
     steers_disallowed_model,
@@ -124,6 +124,14 @@ class CampaignSummary(StrictModel):
             "origin only."
         )
     )
+    arm: Arm | None = Field(
+        description=(
+            "The head-to-head this campaign runs as a CONTROLLED arm of (`campaign.json::arm`, "
+            "frozen at mint): it reads no other campaign's measurements, refuses a steer and "
+            "spends its declared budget. Null for an ordinary campaign, which optimizes with "
+            "everything that helps."
+        )
+    )
 
 
 class CampaignListResponse(StrictModel):
@@ -157,6 +165,7 @@ def _campaign_summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
         spend_unreported_usd=round(spent.unreported_usd, 6),
         bench=read_campaign_bench(stores, campaign),
         runs_with=campaign_runs_with(stores, campaign),
+        arm=campaign.arm,
     )
 
 

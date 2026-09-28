@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.bench import BankPartition
-from promptpotter.domain.campaign import Campaign, CampaignResult
+from promptpotter.domain.campaign import Campaign, CampaignResult, HeadToHeadRecord
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.export import PromptExport, parse_prompt_export
 from promptpotter.domain.launch_limits import RoundsCap
@@ -63,6 +63,7 @@ from promptpotter.infrastructure.store.layout import (
     campaigns_root_dir_for,
     classify,
     cycle_dir_for,
+    head_to_head_path,
     inner_sandbox_key,
     root_cycle_id,
     round_number,
@@ -319,6 +320,16 @@ class CampaignStore:
     def write_result(self, campaign_id: str, result: CampaignResult) -> None:
         write_json(
             self.campaign_root_dir(campaign_id) / CAMPAIGN_RESULT, result.model_dump(mode="json")
+        )
+
+    def load_head_to_head(self, head_to_head_id: str) -> HeadToHeadRecord | None:
+        data = read_json_optional(head_to_head_path(self._base_dir, head_to_head_id))
+        return None if data is None else HeadToHeadRecord.model_validate(data)
+
+    def declare_head_to_head(self, record: HeadToHeadRecord) -> None:
+        write_json(
+            head_to_head_path(self._base_dir, record.head_to_head_id),
+            record.model_dump(mode="json"),
         )
 
     def update_campaign(self, campaign_id: str, updates: dict[str, Any]) -> None:

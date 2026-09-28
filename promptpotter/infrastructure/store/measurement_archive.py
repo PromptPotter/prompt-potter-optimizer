@@ -645,6 +645,10 @@ class ReplayFeed:
         _drop_row(claim.row_path)
         return claim
 
+    def cell_key(self, sample_key: str) -> str:
+        """The cell's identity — this configuration measuring this sample — the one its claim holds."""
+        return _cell_key(self._node_configs, sample_key)
+
     def claimed_row(self, sample_key: str) -> dict[str, Any] | None:
         """The row the cell's holder measured and has not taken yet; ``None`` until it returns."""
         path = self._archive._claim_path(self._node_configs, sample_key)

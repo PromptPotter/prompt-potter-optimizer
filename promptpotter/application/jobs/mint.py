@@ -15,8 +15,10 @@ from promptpotter.application.bench.task_context import (
     commit_task_framing,
     committed_task_context,
 )
+from promptpotter.application.datasets.authored import config_cell_scorer
 from promptpotter.application.initialization.session import auto_mint_session
 from promptpotter.application.jobs.quota import admit_spend
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.pipeline_resolve import (
     configure_and_apply_pipeline,
@@ -24,12 +26,23 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.application.runner.campaign_ids import build_origin_cycle_id, mint_campaign_id
 from promptpotter.domain.bench import partition_bank
+from promptpotter.domain.campaign import (
+    Arm,
+    ArmBudget,
+    ArmRequest,
+    HeadToHeadRecord,
+    Instrument,
+    bench_instrument,
+)
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.l4.inner_origin import instrument_of
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
+from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import ConflictError, PayloadInvalidError
+from promptpotter.shared.hashing import dataset_hash
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -177,6 +190,75 @@ def _warn_on_novel_instrument(
     log(f"NOTE: instrument {instrument} is new — none of {len(prior)} prior campaigns replay")
 
 
+def _join_head_to_head(
+    session: Session,
+    campaign_config: CampaignConfig,
+    dataset: list[Sample],
+    plan: CyclePlan,
+    request: ArmRequest,
+) -> Arm:
+    """Declare the head-to-head off this arm's own instrument and budget when none is recorded,
+    else refuse an arm that would run under any other — or re-use a key another arm holds."""
+    optimization = campaign_config.optimization
+    partition = partition_bank(dataset, campaign_config.dataset_split)
+    instrument = bench_instrument(
+        dataset_name=resolved_dataset_name(session, campaign_config),
+        dataset_hash=dataset_hash(dataset),
+        split=campaign_config.dataset_split,
+        bench_ids=[s.id for s in partition.bench],
+        scorer_id=config_cell_scorer(campaign_config)[1],
+        origin_params=plan.pipeline_params,
+        origin=plan.cycle_id.removeprefix("cycle_"),
+    )
+    budget = optimization.arm_budget
+    campaigns = session.store.campaigns
+    declared = campaigns.load_head_to_head(request.head_to_head_id)
+    if declared is None:
+        campaigns.declare_head_to_head(
+            HeadToHeadRecord(
+                head_to_head_id=request.head_to_head_id,
+                created_at=utcnow_iso(),
+                instrument=instrument,
+                budget=budget,
+            )
+        )
+    else:
+        differs = [
+            f"instrument.{name}"
+            for name in Instrument.model_fields
+            if getattr(declared.instrument, name) != getattr(instrument, name)
+        ] + [
+            f"budget.{name}"
+            for name in ArmBudget.model_fields
+            if getattr(declared.budget, name) != getattr(budget, name)
+        ]
+        if differs:
+            raise ConflictError(
+                f"head-to-head {request.head_to_head_id} declares another "
+                f"{', '.join(differs)}: this arm would not be graded on its instrument",
+                code="arm_off_instrument",
+                details={"differs_on": differs},
+            )
+    taken = [
+        other.campaign_id
+        for campaign_dir in campaigns.iter_campaign_dirs()
+        if (other := campaigns.load_campaign(campaign_dir.name)) is not None
+        and other.arm is not None
+        and other.arm.head_to_head_id == request.head_to_head_id
+        and other.arm.arm_key == request.arm_key
+    ]
+    if taken:
+        raise ConflictError(
+            f"arm {request.arm_key} of {request.head_to_head_id} is campaign {taken[0]} already",
+            code="arm_taken",
+        )
+    return Arm(
+        head_to_head_id=request.head_to_head_id,
+        arm_key=request.arm_key,
+        treatment_digest=select_optimizer(optimization).treatment().digest,
+    )
+
+
 def fresh_campaign_id(session: Session, campaign_config: CampaignConfig) -> str:
     """A brand-new random campaign id — what every mint that does NOT own its campaign's identity
     passes on. The L4 inner spawn is the one caller that does, deriving it from its cell."""
@@ -189,6 +271,7 @@ def prepare_fresh_cycle(
     dataset: list[Sample],
     *,
     campaign_id: str,
+    arm: ArmRequest | None,
     origin_override: dict[str, Any] | None = None,
     log: Callable[..., None] | None = None,
 ) -> MintedCycle:
@@ -197,6 +280,9 @@ def prepare_fresh_cycle(
     seed = _campaign_origin_seed(origin_override)
     plan = resolve_cycle_plan(
         session, campaign_config, dataset, origin_override=origin_override, log=log
+    )
+    arm_of = (
+        None if arm is None else _join_head_to_head(session, campaign_config, dataset, plan, arm)
     )
     # **Never sweep the inner sandbox here.** A fresh mint has a fresh ``campaign_id`` and the
     # key carries it (``store/layout.py::inner_sandbox_key``), so an rmtree at this line can
@@ -211,6 +297,7 @@ def prepare_fresh_cycle(
         dataset_size=len(dataset),
         pipeline_params=plan.pipeline_params,
         active_steps=list(plan.pipeline_params.get("steps", [])),
+        arm=arm_of,
     )
     if seed is not None:
         session.store.campaigns.write_cycle_seed(
@@ -245,12 +332,17 @@ async def mint_framed_cycle(
     *,
     campaign_id: str,
     task_text: str | None,
+    arm: ArmRequest | None,
     origin_override: dict[str, Any] | None = None,
     log: Callable[..., None] | None = None,
 ) -> MintedCycle:
     """:func:`prepare_fresh_cycle` behind the dataset's framing — the mint of every entry point
     that starts a campaign. An L4 inner cell mints through ``prepare_fresh_cycle`` alone, so a
     round's cells never race to decompose. ``task_text`` is an operator's own description."""
+    if arm is not None and (task_text or origin_override):
+        raise PayloadInvalidError(
+            "an arm runs the head-to-head's origin and framing: no task text, no origin override"
+        )
     description = _description_to_decompose(session, campaign_config, task_text)
     # The cycle id hashes the framing this commits, so the check-in bills a scratch ledger first
     # and its records are carried onto the minted cycle — the run's own meter.
@@ -272,6 +364,7 @@ async def mint_framed_cycle(
             campaign_config,
             dataset,
             campaign_id=campaign_id,
+            arm=arm,
             origin_override=origin_override,
             log=log,
         )

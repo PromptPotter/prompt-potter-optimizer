@@ -137,6 +137,13 @@ def _add_new_args(p_new: argparse.ArgumentParser) -> None:
     )
     p_new.add_argument("--backend-url", default=DEFAULT_BACKEND_URL)
     p_new.add_argument("--backend-id", default=DEFAULT_BACKEND_ID)
+    p_new.add_argument(
+        "--arm",
+        default=None,
+        metavar="HEAD_TO_HEAD:KEY",
+        help="Mint as a controlled arm of a head-to-head, declared by its first arm off that "
+        "arm's instrument and budget; a later arm on any other is refused.",
+    )
 
     p_new.add_argument(
         "--diag",

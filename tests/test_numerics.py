@@ -4656,7 +4656,9 @@ def test_cached_calls_are_metered_but_not_billed(tmp_path: Path) -> None:
     assert spend.total_used_usd == pytest.approx(0.02)
     assert spend.total_incurred_usd == pytest.approx(0.04)
     # The budget gate reads the bill, so a replay can never halt a run it cost nothing to make.
-    assert view.spend_total_used_usd == pytest.approx(0.02)
+    assert view.spend_metered("bill")[0] == pytest.approx(0.02)
+    # A controlled arm's ceiling is its search's incurred cost: a sibling's cache stretches nothing.
+    assert view.spend_metered("search_incurred")[0] == pytest.approx(0.04)
     assert spend.loop.input_tokens == 1000  # billed tokens: the wire call only
 
     # The per-round map is the SAME fold under a second key, so it must reconcile against the
@@ -4707,7 +4709,7 @@ def test_cached_calls_are_metered_but_not_billed(tmp_path: Path) -> None:
     )
     assert by_round["3"].diagnostic.used_usd == pytest.approx(0.005)
     assert by_round["3"].backend.used_usd == pytest.approx(0.01), "a verify is not backend spend"
-    assert view.spend_total_used_usd == pytest.approx(0.035)
+    assert view.spend_metered("bill")[0] == pytest.approx(0.035)
     assert sum(r.total_used_usd for r in by_round.values()) == pytest.approx(spend.total_used_usd)
 
 
@@ -4902,7 +4904,7 @@ def test_the_search_stops_short_by_what_the_bench_pass_costs() -> None:
     from promptpotter.infrastructure.llm.spend_book import SendBound, SpendBook
     from promptpotter.shared.errors import ErrorCategory
 
-    book = SpendBook(usd_cap=lambda: 1.0, tokens_cap=lambda: 10_000, usd_spent=0.6)
+    book = SpendBook(usd_cap=lambda: 1.0, tokens_cap=lambda: 10_000, meters="bill", usd_spent=0.6)
     book.set_aside(0.3, 2_000)
     send = SendBound(input_tokens=100, output_tokens=100, usd=0.2)
     # $0.60 spent + $0.30 kept for the pass: a $0.20 send no longer fits the search.
