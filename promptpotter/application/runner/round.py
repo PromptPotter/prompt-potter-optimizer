@@ -551,7 +551,7 @@ def persist_round(
                 round_result,
             )
         write_hard_samples_artifacts(session, cycle)
-        write_log_md(session)
+        write_log_md(session, cycle.config)
         write_review_md(session, cycle)
 
     if _rr := session.state.audit_projection:

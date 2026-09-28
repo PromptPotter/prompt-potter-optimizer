@@ -124,7 +124,8 @@ def get_evidence(
         ),
     ] = "",
 ) -> Evidence:
-    """Roster, comparability, replicates, the cell/subject/residual decomposition, what the
+    """The campaign subjects' bench head-to-head, guarded by whether one bench set graded them;
+    then roster, comparability, replicates, the cell/subject/residual decomposition, what the
     selection can resolve, the run-order confound, and — under the selected metric — a merged
     interval per subject with every pairwise test. Reduced fresh from disk on each fetch
     (on-demand, not the 2 s poll); zero LLM, nothing persisted."""

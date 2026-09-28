@@ -7,6 +7,7 @@ import argparse
 import logging
 from typing import get_args
 
+from promptpotter.application.evidence.head_to_head import BenchSet
 from promptpotter.application.evidence.metric_catalogue import MEASURAND, MetricUnit
 from promptpotter.application.evidence.read import (
     Evidence,
@@ -16,6 +17,8 @@ from promptpotter.application.evidence.read import (
 from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.domain.bench import BenchScore, DatasetSplit
+from promptpotter.domain.spend import TOKEN_KIND_BUCKET
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
@@ -132,6 +135,118 @@ def _roster_lines(ev: Evidence) -> list[str]:
             f"{rep.level_spread:+.3f}. {verdict}"
         )
     return lines
+
+
+def _bench_set_text(bench_set: BenchSet | None, field: str) -> str:
+    if bench_set is None:
+        return "—"
+    value = getattr(bench_set, field)
+    if isinstance(value, DatasetSplit):
+        return f"bench {value.bench}, demo {value.demo}, seed {value.seed}"
+    if isinstance(value, dict):
+        return ", ".join(f"{k}={v}" for k, v in sorted(value.items())) or "—"
+    return "—" if value is None else str(value)
+
+
+def _head_to_head_lines(ev: Evidence) -> list[str]:
+    """The headline table, printed first: the bench is what a head-to-head is decided on, and the
+    roster below reads the search rows, which each optimizer chose among."""
+    if (h2h := ev.head_to_head) is None:
+        return []
+    lines = [f"Head-to-head on the held-out bench, oldest first. {h2h.note}"]
+    shared = next((r.bench_set for r in h2h.rows if r.comparable), None)
+    if shared is not None and not set(h2h.differs_on) & set(BenchSet.model_fields):
+        lines.append(
+            "  bench set: "
+            + " · ".join(
+                f"{field} {_bench_set_text(shared, field)}" for field in BenchSet.model_fields
+            )
+        )
+    for field in h2h.differs_on:
+        lines.append(
+            f"  {field} DIFFERS: "
+            + "; ".join(
+                f"{r.campaign_id[:22]}="
+                + (
+                    _bench_set_text(r.bench_set, field)
+                    if field in BenchSet.model_fields
+                    else _origin_text(r.bench)
+                )
+                for r in h2h.rows
+            )
+        )
+    lines += [
+        "",
+        f"  {'campaign':<24}  {'optimizer':<9}  {'sel':>3}  {'selected':>8}  {'95% CI':>16}  "
+        f"{'origin':>7}  {'95% CI':>16}  {'lift':>7}  {'95% CI':>18}  {'USD':>8}  "
+        f"{'tokens':>8}  {'wall s':>7}  {'rounds':>6}",
+    ]
+    for r in h2h.rows:
+        # `x` off the instrument most rows share: its headline is listed, never paired.
+        mark = {True: " ", False: "x", None: " "}[r.comparable]
+        b = r.bench
+        spend = r.spend
+        lines.append(
+            f" {mark}{r.campaign_id[:24]:<24}  {r.optimizer[:9]:<9}  "
+            + (
+                f"{b.selected.round:>3}  {_level(b.selected.composite_fitness):>8}  "
+                f"{fmt_ci(b.selected.ci_lo, b.selected.ci_hi, spec='{:.3f}'):>16}  "
+                f"{_level(b.origin.composite_fitness):>7}  "
+                f"{fmt_ci(b.origin.ci_lo, b.origin.ci_hi, spec='{:.3f}'):>16}  "
+                f"{'—' if b.lift is None else f'{b.lift:+.3f}':>7}  "
+                f"{fmt_ci(b.lift_ci_lo, b.lift_ci_hi, spec='{:+.3f}'):>18}  "
+                if b is not None
+                else f"{'no bench headline':<95}  "
+            )
+            + (
+                f"{spend.total_used_usd:>8.4f}  {spend.total_tokens_used:>8}  "
+                if spend is not None
+                else f"{'—':>8}  {'—':>8}  "
+            )
+            + f"{'—' if r.wall_clock_s is None else f'{r.wall_clock_s:.0f}':>7}  {r.rounds:>6}"
+        )
+    buckets = list(TOKEN_KIND_BUCKET.values())
+    lines += [
+        "",
+        "  USD billed by bucket — `bench` is the held-out pass that graded the selection:",
+        f"  {'campaign':<24}" + "".join(f"  {b:>10}" for b in buckets),
+    ]
+    for r in h2h.rows:
+        spend = r.spend
+        lines.append(
+            f"  {r.campaign_id[:24]:<24}"
+            + "".join(
+                f"  {'—' if spend is None else f'{getattr(spend, b).used_usd:.4f}':>10}"
+                for b in buckets
+            )
+        )
+    if h2h.pairs:
+        lines += [
+            "",
+            "  selection b - selection a on the bench rows both scored, in the composite — "
+            "the lift column's arithmetic with the origin replaced by a:",
+            f"  {'pair (b - a)':<50}  {'shift':>7}  {'95% CI':>18}  {'n':>4}  {'p':>12}  "
+            f"{'p (Holm)':>12}",
+        ]
+        for p in h2h.pairs:
+            label = f"{p.campaign_a[:23]} -> {p.campaign_b[:23]}"
+            lines.append(
+                f"  {label:<50}  {p.shift:>+7.3f}  "
+                f"{fmt_ci(p.ci_lo, p.ci_hi, spec='{:+.3f}'):>18}  {p.n_rows:>4}  "
+                f"{fmt_pvalue(p.p_value):>12}  {fmt_pvalue(p.p_adjusted):>12}"
+            )
+    lines.append("")
+    return lines
+
+
+def _level(value: float | None) -> str:
+    return "—" if value is None else f"{value:.3f}"
+
+
+def _origin_text(bench: BenchScore | None) -> str:
+    if bench is None:
+        return "—"
+    return f"{bench.origin.sp_hash[:8]} at {_level(bench.origin.composite_fitness)}"
 
 
 def _config_lines(ev: Evidence) -> list[str]:
@@ -473,6 +588,7 @@ async def cmd_evidence(args: argparse.Namespace) -> CommandResult:
         # a flag the operator had not passed.
         return CommandResult(data={"error": str(exc)}, human=str(exc))
     lines = [
+        *_head_to_head_lines(ev),
         *_roster_lines(ev),
         *_factor_lines(ev),
         *_grid_lines(ev),

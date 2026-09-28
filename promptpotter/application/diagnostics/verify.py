@@ -11,9 +11,6 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.campaign_config import (
-    load_campaign_config as validate_campaign_config,
-)
 from promptpotter.application.initialization.loop_start import (
     arm_diagnostic_scoring,
     diagnostic_pass,
@@ -22,7 +19,10 @@ from promptpotter.application.initialization.loop_start import (
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.optimization.task_context import campaign_framing
 from promptpotter.application.origin import resolve_origin_opt_search_point
-from promptpotter.application.pipeline_resolve import merge_pipeline_params
+from promptpotter.application.pipeline_resolve import (
+    merge_pipeline_params,
+    resolve_campaign_config,
+)
 from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.metrics import compute_composite_fitness
@@ -198,7 +198,7 @@ async def verify_candidate(
     session.campaign_id = hop.campaign_id
     session.state.cycle_id = hop.cycle_id
 
-    campaign_config = validate_campaign_config(campaign.config)
+    campaign_config = resolve_campaign_config(stores, campaign, hop)
     log_fn = log or (lambda *_a, **_k: None)
     pipeline_params = arm_diagnostic_scoring(
         session, campaign_config, source=RunSource.VERIFY, log=log_fn

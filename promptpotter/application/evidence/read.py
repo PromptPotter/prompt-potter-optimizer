@@ -29,6 +29,11 @@ from promptpotter.application.evidence.grid import (
     grid_reading,
     levels_by_subject,
 )
+from promptpotter.application.evidence.head_to_head import (
+    HeadToHead,
+    HeadToHeadEntry,
+    head_to_head,
+)
 from promptpotter.application.evidence.metric_catalogue import (
     MEASURAND,
     available_channels,
@@ -146,6 +151,9 @@ class Evidence(StrictModel):
     # row, so nothing downstream joins two lists on `key`.
     subjects: list[SubjectReading]
     comparability: Comparability
+    # The HEADLINE, read off each unmasked campaign subject's finished root cycle — the held-out
+    # bench set, not the search rows everything below pools. `None` with no campaign subject.
+    head_to_head: HeadToHead | None = None
     # WHICH number everything below is about — the picker's vocabulary, the merged per-subject
     # intervals and every pairwise test, all under one selection. Non-optional: the default always
     # resolves, so there is no state where a chart is drawn under no named metric.
@@ -266,6 +274,7 @@ def subject_evidence(
     """
     wanted: dict[str, SubjectSpec] = {s.key: s for s in specs}
     heads: dict[str, _Head] = {}
+    leaves: dict[str, Stores] = {}
     channels_by_subject: dict[str, dict[str, dict[str, float]]] = {}
     for key, spec in wanted.items():
         resolved = _at(stores, spec)
@@ -279,6 +288,7 @@ def subject_evidence(
         if not channels:
             continue
         heads[key] = head
+        leaves[key] = leaf_stores
         channels_by_subject[key] = channels
 
     # An unmeasured selection is not a metric problem, so it may not be answered as one: two
@@ -351,6 +361,13 @@ def subject_evidence(
         generated_at=utcnow_iso(),
         subjects=rows,
         comparability=comparability(rows),
+        head_to_head=head_to_head(
+            [
+                HeadToHeadEntry(r, leaves[r.key], heads[r.key].cycle_dir)
+                for r in rows
+                if r.kind == "campaign" and r.mask is None
+            ]
+        ),
         metric=reading,
         unread_subjects=sorted(set(wanted) - set(heads)),
         factors=factors(rows, levels, spec_metric),

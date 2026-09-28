@@ -8,9 +8,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from promptpotter.application.campaign_config import (
-    load_campaign_config as validate_campaign_config,
-)
 from promptpotter.application.initialization.loop_start import (
     arm_diagnostic_scoring,
     diagnostic_pass,
@@ -18,6 +15,7 @@ from promptpotter.application.initialization.loop_start import (
 )
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.optimization.task_context import campaign_framing
+from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleHop
@@ -97,7 +95,7 @@ async def measure_noise_floor(
     # needs this cycle published as the spawn context before it can dispatch an inner
     # campaign per sample. Normally done once by `run_optimization`; this use-case
     # bypasses that runner, so it publishes for itself (no-op on a non-recursive cycle).
-    campaign_config = validate_campaign_config(campaign.config)
+    campaign_config = resolve_campaign_config(stores, campaign, hop)
     publish_inner_spawn_context(session, campaign_config)
 
     log_fn = log or (lambda *_a, **_k: None)

@@ -499,10 +499,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_evidence = sub.add_parser(
         "evidence",
-        help="What a SET of subjects jointly says: the roster, whether their levels are "
-        "comparable at all, the cell/subject/residual decomposition, what the selection can "
-        "resolve at its current width, the run-order confound, and (with --ranking) the measured "
-        "edits. Read-only, zero spend, no LLM calls; naming a leader, never adopting one.",
+        help="What a SET of subjects jointly says: the campaigns' bench headlines head-to-head, "
+        "never paired where one bench set did not grade them all, then the roster, whether their "
+        "levels are comparable at all, the cell/subject/residual decomposition, what the "
+        "selection can resolve at its current width, the run-order confound, and (with --ranking) "
+        "the measured edits. Read-only, zero spend, no LLM calls; naming a leader, never adopting one.",
     )
     p_evidence.add_argument(
         "dataset",

@@ -164,7 +164,10 @@ LEDGER_BASELINE = {
     # +4: `optimizers/gepa/{__init__,members,state,operators}.py` — GEPA's preset, split as CAPO's
     # and LEVI's are and for their reasons; `operators.py` is what `GepaRuntime.source_digest`
     # hashes beside `paper_templates.py`.
-    "modules": 386,
+    # +1: `evidence/head_to_head.py` — the campaigns' bench headlines and the one-instrument guard
+    # over them. It reads the finished cycle's bench files and archive runs, which `read.py`'s
+    # round-0 walk never opens, and folds into `comparison.py` only by giving that pure module I/O.
+    "modules": 387,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     # +2: `application/optimizers/__init__.py` (the member registry) and its `potter/`, empty.
@@ -625,7 +628,10 @@ LEDGER_BASELINE = {
     # number renders (test_numerics § 4).
     # +1: a GEPA child admitted on a minibatch tie, or a parent drawn off the best aggregate rather
     # than in proportion to the cells each survivor leads, still selects a winner (test_numerics § 4).
-    "test_functions": 217,
+    # +1: a head-to-head pairing two optimizers' selections across bench sets another seed drew, or
+    # across a grader that moved under one shared origin, still prints an interval and a winner
+    # (test_numerics § 7).
+    "test_functions": 218,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -727,7 +733,13 @@ LEDGER_BASELINE = {
     # read off its election record. `/tree` spans campaigns and optimizers, so the viewed cycle's
     # `LiveDashboardState.stamps_theta` cannot answer for a node; `theta: null` already means "not
     # fit yet", and a second meaning in that null is what drew CAPO nodes as a cold ruler.
-    "served_fields": 664,
+    # +53: `Evidence.head_to_head` (1), `HeadToHead` (5), `HeadToHeadRow` (9), `SelectionPair` (8),
+    # `BenchSet` (7), `DatasetSplit` (3), and `SpendRollup` (9) with `SpendBucket` (11), which reach
+    # the contract through this read for the first time. The head-to-head is M13's comparison:
+    # each row's price by bucket beside its headline, and the guard naming the field that differs.
+    # -1: `BenchSet.cell_formula` — the resolved text reads `fitness` for a defaulted and a declared
+    # composite that grade a miss differently; `scorer_id`, stamped by the run, names both apart.
+    "served_fields": 716,
 }
 
 

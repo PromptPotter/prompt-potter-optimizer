@@ -21,6 +21,8 @@ import numpy as np
 import pytest
 
 from promptpotter.application.campaign_config import load_campaign_config
+from promptpotter.application.evidence.read import subject_evidence
+from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.exploration import (
     Observation,
@@ -62,6 +64,7 @@ from promptpotter.application.scoring.candidate_report import (
     fatal_validation_failures,
 )
 from promptpotter.application.scoring.classification import DegradationCheck, terminal_ranking
+from promptpotter.application.scoring.evaluators import DEFAULT_CELL_FORMULA
 from promptpotter.application.scoring.formula import (
     ScoringFormulaError,
     compile_scorer,
@@ -77,7 +80,8 @@ from promptpotter.application.scoring.metrics import (
     matched_parent_stats,
 )
 from promptpotter.application.scoring.sample_measurement import measure_sample
-from promptpotter.domain.bench import partition_bank
+from promptpotter.domain.bench import BenchReading, BenchScore, DatasetSplit, partition_bank
+from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.export import build_prompt_export
 from promptpotter.domain.measurement_provenance import RunSource
@@ -114,6 +118,7 @@ from promptpotter.domain.wounds import ValidationFailure
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
+from promptpotter.infrastructure.store.archive_queries import record_measurement_run
 from promptpotter.shared import extract_gsm8k_number
 from promptpotter.shared.errors import RulerCoverageError
 from promptpotter.shared.statistics import (
@@ -349,6 +354,13 @@ def test_a_miss_is_charged_its_cost_and_a_solved_cell_scores_its_composite(monke
     before = auto_scorer_id(per_sample, per_cell)
     monkeypatch.setattr(compiler, "MISS_COST_SHARE", 0.3)
     assert auto_scorer_id(per_sample, per_cell) != before
+    # A defaulted cell formula and the same text declared stamp one `scorer_cell_formula`, yet only
+    # the declared one charges a miss — so the id, never the resolved text, names the grader.
+    (defaulted,) = rescore_results(
+        [cell(2, "b", 692)], compile_scorer(per_sample, None, verifier_graded=False)
+    )
+    assert defaulted["objective"] == 0.0
+    assert auto_scorer_id(per_sample, None) != auto_scorer_id(per_sample, DEFAULT_CELL_FORMULA)
 
 
 # 2. Composite fitness — what a score is made of
@@ -3328,6 +3340,121 @@ def test_a_human_authored_arm_never_pools_with_the_loop_that_proposed_one() -> N
     # nothing on disk distinguishes them, and inventing a per-cut identity would claim it does.
     assert human != authorship_of("fork_seed", "")
     assert authorship_of("fork_seed", "") == authorship_of("campaign_origin", "")
+
+
+def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench(built_stores) -> None:
+    """The held-out bench IS an optimizer head-to-head's comparability guard. A campaign whose rows
+    another seed drew sat a different exam, and one reading the shared origin apart on the same rows
+    was graded by another function; a paired difference across either still prints an interval and
+    names a winning optimizer. Silent: every number renders."""
+    stores = built_stores
+    bank = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(12)]
+
+    def campaign(
+        cid: str,
+        n: int,
+        *,
+        seed: int,
+        selected: float,
+        origin: float = 0.4,
+        regraded: float = 0.0,
+        scorer: str = "auto_charged",
+    ) -> Any:
+        split = DatasetSplit(bench=6, seed=seed)
+        partition = partition_bank(bank, split)
+        hop = CycleHop(campaign_id=cid, cycle_id=f"cycle_{cid}")
+        stores.campaigns.create_campaign(
+            Campaign(
+                campaign_id=cid,
+                dataset_name="ds",
+                created_at=f"2026-09-26T00:00:0{n}Z",
+                root_cycle_id=hop.cycle_id,
+                config={
+                    "optimization": {
+                        "optimizer": cid.split("_")[0],
+                        "degradation_threshold": 0.0,
+                    },
+                    "dataset_split": split.model_dump(),
+                },
+            )
+        )
+        stores.campaigns.create(hop, {})
+        panel = [measurement(s.id, 0.5, query=s.query) for s in partition.search[:4]]
+        stores.campaigns.save_round_file(
+            hop, round_result(0, candidates_scored=1, all_candidate_results={"c0": panel})
+        )
+        stores.campaigns.write_bank_partition(hop, partition)
+        readings = []
+        for role, level in (("origin", origin), ("selected", selected)):
+            run_id = f"bench_{cid}_{role}"
+            rows = [
+                measurement(s.id, level, objective=level + 0.1 * (s.id % 2), query=s.query)
+                for s in partition.bench
+            ]
+            header = {"run_id": run_id, "prompt_fields_id": role, "item_count": len(rows)}
+            record_measurement_run(
+                stores,
+                run_id,
+                {**header, "scores": {}, "content_hash": run_id, "created_at": ""},
+                rows,
+            )
+            readings.append(
+                BenchReading(
+                    round=int(role == "selected"),
+                    sp_hash=role,
+                    accuracy=level,
+                    composite_fitness=level + 0.05 + (regraded if role == "origin" else 0.0),
+                    ci_lo=None,
+                    ci_hi=None,
+                    n_scored=len(rows),
+                    run_id=run_id,
+                    stopped=None,
+                )
+            )
+        bench = BenchScore(
+            bench_size=6,
+            origin=readings[0],
+            selected=readings[1],
+            lift=None,
+            lift_ci_lo=None,
+            lift_ci_hi=None,
+        )
+        final = {"bench": bench.model_dump(mode="json"), "scorer_id": scorer}
+        stores.campaigns.update(hop, {"final": final})
+        return SubjectSpec("campaign", cid)
+
+    potter = campaign("potter_a", 1, seed=0, selected=0.5)
+    capo = campaign("capo_b", 2, seed=0, selected=0.7)
+    h2h = subject_evidence(stores, [potter, capo]).head_to_head
+    assert h2h is not None and h2h.verdict is True
+    (pair,) = h2h.pairs
+    assert (pair.campaign_a, pair.campaign_b, pair.n_rows) == ("potter_a", "capo_b", 6)
+    assert pair.shift == pytest.approx(0.2) and pair.ci_lo is not None and pair.ci_lo > 0.0
+
+    # Another seed drew other held-out rows: its headline is listed and never paired.
+    gepa = campaign("gepa_c", 3, seed=1, selected=0.9)
+    h2h = subject_evidence(stores, [potter, capo, gepa]).head_to_head
+    assert h2h is not None and h2h.verdict is False
+    assert {"bench_rows", "split"} <= set(h2h.differs_on)
+    assert [(p.campaign_a, p.campaign_b) for p in h2h.pairs] == [("potter_a", "capo_b")]
+    assert [r.comparable for r in h2h.rows] == [True, True, False]
+
+    # One bench set, but the shared origin reads 0.2 apart on the same rows: another grader.
+    # A replayed origin row keeps its old grade, so there only the headline moves.
+    for drifted in (
+        campaign("capo_d", 4, seed=0, selected=0.7, origin=0.6),
+        campaign("capo_e", 5, seed=0, selected=0.7, regraded=0.3),
+    ):
+        h2h = subject_evidence(stores, [potter, capo, drifted]).head_to_head
+        assert h2h is not None and h2h.differs_on == ["origin_reading"], drifted.key
+        assert [(p.campaign_a, p.campaign_b) for p in h2h.pairs] == [("potter_a", "capo_b")]
+
+    # One snapshot, one bench, one origin reading, but the run graded under another scorer: the
+    # dataset file supplied a `per_cell` the snapshot never names, so only the run's stamp tells.
+    regraded = campaign("capo_f", 6, seed=0, selected=0.7, scorer="auto_plain")
+    h2h = subject_evidence(stores, [potter, capo, regraded]).head_to_head
+    assert h2h is not None and h2h.differs_on == ["scorer_id"]
+    assert [(p.campaign_a, p.campaign_b) for p in h2h.pairs] == [("potter_a", "capo_b")]
 
 
 # 8. The L4 outer proxy — what one finished inner cycle says

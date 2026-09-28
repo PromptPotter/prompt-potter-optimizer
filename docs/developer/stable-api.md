@@ -78,11 +78,12 @@ Configured per dataset via `campaign.yaml::scoring`:
 {
   "scoring": {
     "per_sample": "acc",                    // required: was this cell RIGHT
-    "per_cell": "acc * 500 / max(1, latency)", // optional: what it was WORTH — θ is fit on this
-    "scorer_id": "acc_v1"                   // optional: explicit id
+    "per_cell": "acc * 500 / max(1, latency)" // optional: what it was WORTH — θ is fit on this
   }
 }
 ```
+
+**The scorer id is derived, never declared** — `compiler.py::auto_scorer_id` over everything that grades a cell. A run stamps the one it graded under at `index.json::final.scorer_id`; `campaign.json` holds only a delta over the dataset file, so an id re-derived from it can name a scorer that never ran.
 
 **Addressable namespace** (`application/scoring/formula/compiler.py`):
 

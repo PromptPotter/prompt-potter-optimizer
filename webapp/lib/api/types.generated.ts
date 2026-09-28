@@ -1490,11 +1490,69 @@ export interface MetricReading {
   n_tests: number;
 }
 
+export interface DatasetSplit {
+  /** Rows held out as the bench set: no optimizer node ever reads one, and the
+   * headline is scored on them. */
+  bench: number;
+  /** Rows reserved as the demo pool — the rows an individual's `shot_ids` name,
+   * rendered into its prompt as query and ground truth, never scored. */
+  demo: number;
+  /** Seeds which rows fall where. Membership ranks each row by its content
+   * (`Sample.key`), never its slot, so a reordered bank holds out the same
+   * rows. */
+  seed: number;
+}
+
+/** What one campaign's held-out set IS; two headlines are one quantity only if all of it agrees. */
+export interface BenchSet {
+  dataset_name: string;
+  dataset_hash: string | null;
+  split: DatasetSplit | null;
+  bench_rows: string;
+  scorer_id: string;
+  models: Record<string, string>;
+}
+
+/** One campaign's bench headline beside what it cost to reach. */
+export interface HeadToHeadRow {
+  subject: string;
+  campaign_id: string;
+  optimizer: string;
+  bench: BenchScore | null;
+  bench_set: BenchSet | null;
+  comparable: boolean | null;
+  spend: SpendRollup | null;
+  wall_clock_s: number | null;
+  rounds: number;
+}
+
+/** Two campaigns' selections paired on the bench rows both scored, in the headline composite. */
+export interface SelectionPair {
+  campaign_a: string;
+  campaign_b: string;
+  shift: number;
+  ci_lo: number | null;
+  ci_hi: number | null;
+  p_value: number | null;
+  p_adjusted: number | null;
+  n_rows: number;
+}
+
+/** The campaigns' bench headlines side by side, and whether one instrument graded them all. */
+export interface HeadToHead {
+  rows: HeadToHeadRow[];
+  verdict: boolean | null;
+  differs_on: string[];
+  pairs: SelectionPair[];
+  note: string;
+}
+
 /** The whole read for one selection of subjects — recomputed on every fetch. */
 export interface Evidence {
   generated_at: string;
   subjects: SubjectReading[];
   comparability: Comparability;
+  head_to_head: HeadToHead | null;
   metric: MetricReading;
   unread_subjects: string[];
   factors: FactorReading[];

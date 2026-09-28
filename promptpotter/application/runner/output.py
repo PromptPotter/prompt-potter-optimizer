@@ -7,7 +7,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.campaign_config import load_campaign_config
 from promptpotter.application.intelligence.exploration import build_observations
 from promptpotter.application.intelligence.hard_sample_sorter import (
     build_hard_samples_artifact,
@@ -42,6 +41,7 @@ from promptpotter.infrastructure.store.read_model import iter_jsonl
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -277,7 +277,7 @@ def _fork_summary_from_index(fork_index: dict[str, Any]) -> ForkSummaryView:
     )
 
 
-def write_log_md(session: Session) -> None:
+def write_log_md(session: Session, config: CampaignConfig) -> None:
     """Render the per-cycle log.md and refresh the campaign digest — at every round's close, and
     once more when the run is stamped finished: `mark_finished` writes the stop, the finish time
     and the winner into `index.json` AFTER the last round rendered, so a digest left there reads
@@ -286,7 +286,7 @@ def write_log_md(session: Session) -> None:
         return
     with graceful("log.md render failed"):
         store = session.store.campaigns
-        _render_cycle_log_md(store, session.hop)
+        _render_cycle_log_md(store, session.hop, config)
         _render_campaign_log_md(store, session.campaign_id)
 
 
@@ -308,21 +308,17 @@ def _spend_by_round(layout: CycleLayout) -> dict[str, SpendRollup]:
     return out
 
 
-def _render_cycle_log_md(store: CampaignStore, hop: CycleHop) -> None:
+def _render_cycle_log_md(store: CampaignStore, hop: CycleHop, config: CampaignConfig) -> None:
     index = store.load(hop)
     if not index:
         return
     n_rounds = int(index.get("n_rounds", 0) or 0)
     rounds = store.load_rounds_range(hop, 0, n_rounds - 1) if n_rounds else []
     layout = CycleLayout(store.cycle_dir(hop))
-    campaign = store.load_campaign(hop.campaign_id)
-    # The typed knobs, never a raw-dict key read: the manifest persists only the delta from
-    # defaults, so an unset knob is absent rather than spelled out.
-    config = load_campaign_config(campaign.config) if campaign is not None else None
     # The heat map `write_hard_samples_artifacts` put on disk, at the scope the campaign reads it.
     hard_samples = (
         store.campaign_root_dir(hop.campaign_id) / "hard_samples.json"
-        if config is not None and config.optimization.seed_heatmap_from_archive
+        if config.optimization.seed_heatmap_from_archive
         else layout.hard_samples
     )
     content = to_markdown(
@@ -332,7 +328,7 @@ def _render_cycle_log_md(store: CampaignStore, hop: CycleHop) -> None:
             hard_samples_artifact=read_json_tolerant(hard_samples),
             streams_dir=layout.streams,
             fork_indices=None,
-            hard_sample_order=config.hard_sample_order if config is not None else "info_gain",
+            hard_sample_order=config.hard_sample_order,
             spend_by_round=_spend_by_round(layout),
         )
     )

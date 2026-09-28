@@ -483,7 +483,7 @@ def _close_cycle(
     stop_reason: StopReason,
     cycle_error: ErrorRecord | None,
     started_at: str,
-    accuracy_ceiling: float | None,
+    config: CampaignConfig,
     diag: bool,
     bench: BenchScore | None,
 ) -> CycleResult:
@@ -510,7 +510,7 @@ def _close_cycle(
         session,
         observers,
         cycle_result,
-        accuracy_ceiling=accuracy_ceiling,
+        config=config,
         cycle=cycle,
         diag=diag,
     )
@@ -704,7 +704,7 @@ async def _run_single_cycle(
         stop_reason=stop_reason,
         cycle_error=cycle_error,
         started_at=started_at,
-        accuracy_ceiling=campaign_config.accuracy_ceiling,
+        config=campaign_config,
         diag=mode.diag,
         bench=bench,
     )
@@ -833,7 +833,7 @@ async def run_optimization(
             stop_reason=run_stop_reason(stop),
             cycle_error=None,
             started_at=started_at,
-            accuracy_ceiling=campaign_config.accuracy_ceiling,
+            config=campaign_config,
             diag=mode.diag,
             bench=None,
         )
@@ -890,7 +890,7 @@ def _finalize_run(
     observers: RunObservers,
     cycle_result: CycleResult,
     *,
-    accuracy_ceiling: float | None,
+    config: CampaignConfig,
     cycle: Cycle | None,
     diag: bool,
 ) -> str | None:
@@ -947,7 +947,7 @@ def _finalize_run(
             # and every clock names its own question, because a bare round count on this block
             # is what gets quoted as the result. Seconds are the `wall_clock.round_ended_s` entry
             # under the same round number, never a second copy banked beside it.
-            **round_clocks(rounds, accuracy_ceiling=accuracy_ceiling)._asdict(),
+            **round_clocks(rounds, accuracy_ceiling=config.accuracy_ceiling)._asdict(),
             "prompt_hashes": bound_optimizer().prompt_hashes(),
             # On the origin's OWN samples — never `rounds[0].reference_composite`, which
             # is round 1's winner's matched floor on a different sample basis.
@@ -956,6 +956,8 @@ def _finalize_run(
             # dashboard makes: one resolution, now four readers — the export names it too, since
             # a fitness handed to another program without its formula is a number, not a result.
             "scorer_cell_formula": round_formula,
+            # The grader every `objective` above, the bench's included, was scored under.
+            "scorer_id": session.scoring.scorer_id,
             "mode": "diag" if diag else "full",
             # Basis: the pick the optimizer DECLARED (`Cycle.selection`), which may name a different
             # round than the index's top-level `best_accuracy`/`best_round` — those read the rounds'
@@ -978,7 +980,7 @@ def _finalize_run(
             final=final_block,
             export=_export_artifact(session, cycle_result, cycle, formula=round_formula),
         )
-        write_log_md(session)
+        write_log_md(session, config)
         # Re-rendered off the `final` just banked: the round-close render could not carry the
         # bench score, which is taken after the last round closes.
         if cycle is not None:

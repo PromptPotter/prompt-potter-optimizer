@@ -645,6 +645,62 @@
         "title": "BenchScore",
         "type": "object"
       },
+      "BenchSet": {
+        "additionalProperties": false,
+        "description": "What one campaign's held-out set IS; two headlines are one quantity only if all of it agrees.\nA differing field is named in ``HeadToHead.differs_on``.",
+        "properties": {
+          "bench_rows": {
+            "title": "Bench Rows",
+            "type": "string"
+          },
+          "dataset_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Hash"
+          },
+          "dataset_name": {
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "models": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "object"
+          },
+          "scorer_id": {
+            "title": "Scorer Id",
+            "type": "string"
+          },
+          "split": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DatasetSplit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "dataset_name",
+          "dataset_hash",
+          "split",
+          "bench_rows",
+          "scorer_id",
+          "models"
+        ],
+        "title": "BenchSet",
+        "type": "object"
+      },
       "Body_ingest_dataset_api_v1_datasets_ingest_post": {
         "properties": {
           "file": {
@@ -2482,6 +2538,35 @@
         "title": "DatasetPipelineResponse",
         "type": "object"
       },
+      "DatasetSplit": {
+        "additionalProperties": false,
+        "properties": {
+          "bench": {
+            "description": "Rows held out as the bench set: no optimizer node ever reads one, and the headline is scored on them.",
+            "minimum": 0.0,
+            "title": "Bench",
+            "type": "integer"
+          },
+          "demo": {
+            "default": 0,
+            "description": "Rows reserved as the demo pool — the rows an individual's `shot_ids` name, rendered into its prompt as query and ground truth, never scored.",
+            "minimum": 0.0,
+            "title": "Demo",
+            "type": "integer"
+          },
+          "seed": {
+            "default": 0,
+            "description": "Seeds which rows fall where. Membership ranks each row by its content (`Sample.key`), never its slot, so a reordered bank holds out the same rows.",
+            "title": "Seed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bench"
+        ],
+        "title": "DatasetSplit",
+        "type": "object"
+      },
       "DatasetStorageEntry": {
         "additionalProperties": false,
         "properties": {
@@ -2825,6 +2910,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/FactorGridReading"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "head_to_head": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HeadToHead"
               },
               {
                 "type": "null"
@@ -3426,6 +3521,144 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HeadToHead": {
+        "additionalProperties": false,
+        "description": "The campaigns' bench headlines side by side, and whether one instrument graded them all.",
+        "properties": {
+          "differs_on": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Differs On",
+            "type": "array"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "pairs": {
+            "items": {
+              "$ref": "#/components/schemas/SelectionPair"
+            },
+            "title": "Pairs",
+            "type": "array"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/HeadToHeadRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
+          }
+        },
+        "required": [
+          "rows",
+          "verdict",
+          "differs_on",
+          "pairs",
+          "note"
+        ],
+        "title": "HeadToHead",
+        "type": "object"
+      },
+      "HeadToHeadRow": {
+        "additionalProperties": false,
+        "description": "One campaign's bench headline beside what it cost to reach.",
+        "properties": {
+          "bench": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BenchScore"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "bench_set": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BenchSet"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "comparable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparable"
+          },
+          "optimizer": {
+            "title": "Optimizer",
+            "type": "string"
+          },
+          "rounds": {
+            "title": "Rounds",
+            "type": "integer"
+          },
+          "spend": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpendRollup"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "wall_clock_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wall Clock S"
+          }
+        },
+        "required": [
+          "subject",
+          "campaign_id",
+          "optimizer",
+          "bench",
+          "bench_set",
+          "comparable",
+          "spend",
+          "wall_clock_s",
+          "rounds"
+        ],
+        "title": "HeadToHeadRow",
         "type": "object"
       },
       "KnobRow": {
@@ -5462,6 +5695,84 @@
         "title": "ScenarioReading",
         "type": "object"
       },
+      "SelectionPair": {
+        "additionalProperties": false,
+        "description": "Two campaigns' selections paired on the bench rows both scored, in the headline composite.\n``shift = b - a``: ``BenchScore.lift``'s arithmetic with ``a`` where the origin stands.",
+        "properties": {
+          "campaign_a": {
+            "title": "Campaign A",
+            "type": "string"
+          },
+          "campaign_b": {
+            "title": "Campaign B",
+            "type": "string"
+          },
+          "ci_hi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Hi"
+          },
+          "ci_lo": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Lo"
+          },
+          "n_rows": {
+            "title": "N Rows",
+            "type": "integer"
+          },
+          "p_adjusted": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P Adjusted"
+          },
+          "p_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P Value"
+          },
+          "shift": {
+            "title": "Shift",
+            "type": "number"
+          }
+        },
+        "required": [
+          "campaign_a",
+          "campaign_b",
+          "shift",
+          "ci_lo",
+          "ci_hi",
+          "p_value",
+          "p_adjusted",
+          "n_rows"
+        ],
+        "title": "SelectionPair",
+        "type": "object"
+      },
       "SpawnedBy": {
         "additionalProperties": false,
         "description": "The outer work-item an L4 inner cycle was spawned to measure.\n\nStamped at inner-cycle mint (``runner/inner/spawn.py``) — an inner campaign's own\nids carry no outer provenance (random ``campaign_id``, ``cycle_id`` hashed from its\nOWN origin), so without this the fan-out can only be numbered by launch order.",
@@ -5536,6 +5847,118 @@
           "task"
         ],
         "title": "SpawnedBy",
+        "type": "object"
+      },
+      "SpendBucket": {
+        "additionalProperties": false,
+        "description": "One spend sub-bucket (backend, optimizer-loop, or judge). Mutated only by\n``_handle_token_usage``. ``used_usd`` is the BILL; ``incurred_usd`` prices cache hits too.",
+        "properties": {
+          "cache_read_tokens": {
+            "default": 0,
+            "title": "Cache Read Tokens",
+            "type": "integer"
+          },
+          "cache_write_tokens": {
+            "default": 0,
+            "title": "Cache Write Tokens",
+            "type": "integer"
+          },
+          "incurred_unpriced_tokens": {
+            "default": 0,
+            "title": "Incurred Unpriced Tokens",
+            "type": "integer"
+          },
+          "incurred_usd": {
+            "default": 0.0,
+            "title": "Incurred Usd",
+            "type": "number"
+          },
+          "input_tokens": {
+            "default": 0,
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "output_tokens": {
+            "default": 0,
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "rate_known": {
+            "default": false,
+            "title": "Rate Known",
+            "type": "boolean"
+          },
+          "reasoning_tokens": {
+            "default": 0,
+            "title": "Reasoning Tokens",
+            "type": "integer"
+          },
+          "unpriced_tokens": {
+            "default": 0,
+            "title": "Unpriced Tokens",
+            "type": "integer"
+          },
+          "used_usd": {
+            "default": 0.0,
+            "title": "Used Usd",
+            "type": "number"
+          }
+        },
+        "title": "SpendBucket",
+        "type": "object"
+      },
+      "SpendRollup": {
+        "additionalProperties": false,
+        "description": "A cycle's spend: a bucket per spend kind, and the totals every consumer reads off them.\n``total_used_usd`` is the BILL a budget caps; ``total_incurred_usd`` prices cache hits too.",
+        "properties": {
+          "backend": {
+            "$ref": "#/components/schemas/SpendBucket"
+          },
+          "bench": {
+            "$ref": "#/components/schemas/SpendBucket"
+          },
+          "diagnostic": {
+            "$ref": "#/components/schemas/SpendBucket"
+          },
+          "judge": {
+            "$ref": "#/components/schemas/SpendBucket"
+          },
+          "loop": {
+            "$ref": "#/components/schemas/SpendBucket"
+          },
+          "total_incurred_usd": {
+            "default": 0.0,
+            "title": "Total Incurred Usd",
+            "type": "number"
+          },
+          "total_tokens_used": {
+            "default": 0,
+            "title": "Total Tokens Used",
+            "type": "integer"
+          },
+          "total_used_usd": {
+            "default": 0.0,
+            "title": "Total Used Usd",
+            "type": "number"
+          },
+          "unpriced_tokens": {
+            "default": 0,
+            "title": "Unpriced Tokens",
+            "type": "integer"
+          }
+        },
+        "title": "SpendRollup",
         "type": "object"
       },
       "SubjectMask": {
@@ -8469,7 +8892,7 @@
     },
     "/api/v1/evidence": {
       "get": {
-        "description": "Roster, comparability, replicates, the cell/subject/residual decomposition, what the\nselection can resolve, the run-order confound, and — under the selected metric — a merged\ninterval per subject with every pairwise test. Reduced fresh from disk on each fetch\n(on-demand, not the 2 s poll); zero LLM, nothing persisted.",
+        "description": "The campaign subjects' bench head-to-head, guarded by whether one bench set graded them;\nthen roster, comparability, replicates, the cell/subject/residual decomposition, what the\nselection can resolve, the run-order confound, and — under the selected metric — a merged\ninterval per subject with every pairwise test. Reduced fresh from disk on each fetch\n(on-demand, not the 2 s poll); zero LLM, nothing persisted.",
         "operationId": "get_evidence_api_v1_evidence_get",
         "parameters": [
           {
