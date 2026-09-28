@@ -22,10 +22,15 @@ __all__ = [
     "L1_PARSE_FAILURE_MALFORMED",
     "L1_PARSE_FAILURE_TOOLING",
     "L1_PARSE_FAILURE_WRONG_TYPE",
+    "LEVI_MANIFEST",
     "POTTER_MANIFEST",
     "CapoRoundState",
     "CritiqueReadout",
+    "DescriptorStats",
     "L2L3Memory",
+    "LeviCalibration",
+    "LeviElite",
+    "LeviRoundState",
     "OptimizerState",
     "PotterRoundState",
     "WoundChannels",
@@ -36,6 +41,8 @@ PotterManifest = Literal["potter"]
 POTTER_MANIFEST: PotterManifest = "potter"
 CapoManifest = Literal["capo"]
 CAPO_MANIFEST: CapoManifest = "capo"
+LeviManifest = Literal["levi"]
+LEVI_MANIFEST: LeviManifest = "levi"
 
 # The reasons `PotterRoundState.l1_parse_failure` can carry. Opposite kinds of evidence, so no
 # reader may treat the field as a bool:
@@ -141,23 +148,61 @@ class CapoRoundState(StrictModel):
     length_norm: int | None
 
 
+class DescriptorStats(StrictModel):
+    """Welford's running count, mean and squared-deviation sum per descriptor dimension."""
+
+    count: int
+    mean: list[float]
+    m2: list[float]
+
+
+class LeviCalibration(StrictModel):
+    """What LEVI's calibration round fixes for the run: the proxy and the archive's Voronoi cells."""
+
+    # Sample keys, in the order every later round walks them.
+    proxy: list[str]
+    centroids: list[list[float]]
+    stats: DescriptorStats
+
+
+class LeviElite(StrictModel):
+    """One occupied cell of LEVI's archive: the best individual mapped to it."""
+
+    cell: int
+    # The mean per-cell objective over the proxy: LEVI's f, which the cell keeps the best of.
+    score: float
+    # The round whose rows measured it, which is where its feedback is read back from.
+    round: int
+    individual: OptSearchPoint
+
+
+class LeviRoundState(StrictModel):
+    """LEVI's payload: its CVT-MAP-Elites archive and what calibration fixed for it."""
+
+    # ``None`` on the origin's document: round 1 is the calibration round that sets it.
+    calibration: LeviCalibration | None
+    elites: list[LeviElite]
+    rounds_without_advance: int
+
+
 _PAYLOADS: dict[str, type[StrictModel]] = {
     POTTER_MANIFEST: PotterRoundState,
     CAPO_MANIFEST: CapoRoundState,
+    LEVI_MANIFEST: LeviRoundState,
 }
 
 
 class OptimizerState(StrictModel):
     """``{manifest, prompt_hashes, payload}`` — the one envelope every optimizer's state rides."""
 
-    manifest: PotterManifest | CapoManifest
+    manifest: PotterManifest | CapoManifest | LeviManifest
     # Which prompts of the manifest produced this round, per llm node — the only thing that can
     # answer "was this round produced by the optimizer I am holding now?" once the process exited.
     # Resume diverges at the FIRST round that disagrees. Empty on a generation-only round.
     # IDENTITY, NOT A FIRE RECORD — every node is named on every round, including ones that never
     # run. Which node RAN, and what each panel cost it, is the ledger's `llm_call`.
     prompt_hashes: dict[str, str] = Field(default_factory=dict)
-    payload: PotterRoundState | CapoRoundState
+    payload: PotterRoundState | CapoRoundState | LeviRoundState
 
     @model_validator(mode="after")
     def _payload_is_the_manifests(self) -> Self:

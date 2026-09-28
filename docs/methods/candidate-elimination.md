@@ -147,6 +147,54 @@ incumbent. Where the bench runs CAPO differently from the paper:
   too.
 - **A reply without `<prompt>` markers** makes an invalid arm that costs no cell.
 
+## LEVI mapping and deviations
+
+LEVI (arXiv 2605.09764) races nothing: its manifest (`assets/optimizers/levi/pipeline.yaml`, every
+value cited there) has no eliminator, and its selector is an archive. Round 1 is its Phase 1
+(Alg. 1), the **calibration round**; every later round is one paradigm-shift period (Alg. 2).
+
+| Paper | Node · config |
+|---|---|
+| Seed pass `M_l.DIVERSESEED`, 4 seeds (Alg. 1, Table 5) | `levi_paradigm_shift` in round 1, `n_diverse_seeds: 4` |
+| Calibration matrix on the discovery set, N_init = 5 (§3.3, App. A) | round 1 scores the origin (its parent) and the seeds on the whole search pool |
+| Proxy by greedy column subset, K_proxy = 30, (r, s, c) = (0.5, 0.5, 0.15) | `proxy_css`: `size`, `rank_weight`, `separation_weight`, `redundancy_weight`; `shared/statistics.py::greedy_column_subset`; a `proxy_selected` decision, REPLAYED |
+| f restricted to the proxy (Alg. 1 line 11) | `proxy_css` draws the proxy, in one order, every round after calibration |
+| Welford z-score + sigmoid, CVT with 50 centroids, TRYINSERT (§3, Alg. 1-2) | `map_elites`: `centroids: 50`; the statistics ride `LeviCalibration.stats` |
+| Behavioural descriptors, input- and output-side (§3.1) | `map_elites.descriptors`, read by `optimizers/descriptors.py` |
+| Refinement route: small model, ~90% of calls (§3.2) | `levi_refine`, Qwen3-8B (§4.2), `interval - 1` calls a round, `max_tokens` 16,384 |
+| Parent ∝ exp(f / T), T ∈ {0.3, 0.7, 1.0, 1.2}; one inspiration, dropped 20% (App. B) | `levi_refine`: `sampler_temperatures`, `n_inspirations`, `inspiration_drop` |
+| Paradigm shift every 10 evaluations, k = 3 clusters, `max_tokens` 4,096 (App. F) | `levi_paradigm_shift`: `interval`, `n_clusters`; Gemini 3 Flash (App. A) |
+| Templates E.6 and E.7 | `resolved_prompts`, verbatim |
+| Budget B; the best elite returned | the campaign's budget; the round selects the best elite unless it is the incumbent |
+
+Where the bench runs LEVI differently from the paper:
+
+- **Rounds, not workers.** A period's `interval - 1` refinements and its one shift are measured
+  together and inserted in walk order, so the ratio holds exactly while no refinement sees another's
+  insert; LEVI's four workers do (App. B). Its worker, process and timeout counts are the bench's.
+- **The seed pass sends E.7** — E.1 is written for code — over the seeds so far, **starting from
+  the origin** where Alg. 1 starts from none: the origin is measured on the pool anyway, and makes
+  App. A's five calibration prompts of Table 5's four seeds. A seed reply without `<prompt>`
+  markers is an invalid arm; nothing of it is fed forward.
+- **No variants and no meta-advice.** The variant bursts (Table 5, App. F) have only a code
+  template (E.5), and 80 variants on the pool exceed the paper's own prompt budget (Table 2); the
+  meta-advice template is unpublished, so its section stays empty.
+- **Unstated values, chosen:** the descriptors (prompt length and each proxy cell's objective);
+  `feedback_failures` 3, GEPA's reflection minibatch; centroids by k-means over `cvt_samples`
+  uniform draws inside the calibration descriptors' bounds (Figure 2); decoding temperature 1.0;
+  a one-sided tie worth ½ in rank faithfulness; separation normalised by the widest column; the
+  inspiration and the failures drawn uniformly.
+- **Alg. 1 as printed:** the calibration prompts enter the running statistics at line 13 and again
+  at their insertion, line 17.
+- **The artifact** is the individual's `instruction` and `{problem_description}` CAPO's task
+  description, as § CAPO's population and operators states for CAPO; the failures shown ride
+  `fence_untrusted`.
+- **f** is the mean of the campaign's per-cell objective on the proxy — the task's scoring
+  function, which LEVI takes as given. The paper re-evaluates on the full set for late-stage
+  selection (§4.2); the bench scores its selection on the bench set instead.
+- **A repeated prompt replays its reply** from the optimizer reuse cache where the paper resamples;
+  the duplicate lands in an occupied cell, the redundancy §3.2 calls harmless.
+
 ## On-disk shape and replay
 
 Each `ELIMINATION_CUT` / `LEADER_LOCK_IN` decision record (in `rounds/round_NNNN.json`) carries the paired snapshot under `data`: `p_best`, `leader_id`, `candidate_sample_ids` (the ordered list the candidate had measured at decision time) and `prior_histories[cid]` (each prior's grades restricted to exactly those samples, after backfill). `inputs_ref` records the gate parameters in force **and which `EliminationGate` (`pobb/checks.py`) fired** — only ε computed a posterior, so a replayer re-deriving a collapse cut under the ε rule tests a real `p_best` against a bar nobody set.

@@ -435,11 +435,40 @@ export interface CapoRoundState {
   length_norm: number | null;
 }
 
+/** Welford's running count, mean and squared-deviation sum per descriptor dimension. */
+export interface DescriptorStats {
+  count: number;
+  mean: number[];
+  m2: number[];
+}
+
+/** What LEVI's calibration round fixes for the run: the proxy and the archive's Voronoi cells. */
+export interface LeviCalibration {
+  proxy: string[];
+  centroids: number[][];
+  stats: DescriptorStats;
+}
+
+/** One occupied cell of LEVI's archive: the best individual mapped to it. */
+export interface LeviElite {
+  cell: number;
+  score: number;
+  round: number;
+  individual: OptSearchPoint;
+}
+
+/** LEVI's payload: its CVT-MAP-Elites archive and what calibration fixed for it. */
+export interface LeviRoundState {
+  calibration: LeviCalibration | null;
+  elites: LeviElite[];
+  rounds_without_advance: number;
+}
+
 /** ``{manifest, prompt_hashes, payload}`` — the one envelope every optimizer's state rides. */
 export interface OptimizerState {
-  manifest: 'potter' | 'capo';
+  manifest: 'potter' | 'capo' | 'levi';
   prompt_hashes: Record<string, string>;
-  payload: PotterRoundState | CapoRoundState;
+  payload: PotterRoundState | CapoRoundState | LeviRoundState;
 }
 
 /** The individual: prompt structure + lineage. */

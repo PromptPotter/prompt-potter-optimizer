@@ -89,7 +89,11 @@ from promptpotter.domain.opt_search_point import (
 )
 from promptpotter.domain.optimizer_state import (
     CapoRoundState,
+    DescriptorStats,
     L2L3Memory,
+    LeviCalibration,
+    LeviElite,
+    LeviRoundState,
     OptimizerState,
     PotterRoundState,
     WoundChannels,
@@ -214,6 +218,10 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     L2L3Memory,
     PotterRoundState,
     CapoRoundState,
+    DescriptorStats,
+    LeviCalibration,
+    LeviElite,
+    LeviRoundState,
     OptimizerState,
     OptSearchPoint,
     RoundResult,

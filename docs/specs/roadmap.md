@@ -77,7 +77,7 @@ Terse landing for the per-milestone specs consolidated here. Status is truth; th
 |---|---|---|
 | `potter` | `l1_generate`, `l1_critique`, `l2_context`, `l3_plan` (llm) · the δ-adaptive sampler · PoBB (eliminator) · θ election (selector) · `l1_score` (measurement); its escalations are alternative `pipelines:` its controller picks | patiences, `pobb_*`, the `mechanisms` toggles but the bench's degradation fast path, `n_variants`, `prompt_block_catalogue`, `escalation_ladder`, the rebase and terminate capabilities |
 | `capo` | `capo_crossover`, `capo_mutate`, `capo_init` (llm) · `few_shot`, `population_rejoin` (algorithm) · `blocks` (sampler) · `paired_t` (eliminator) · `population` (selector) · `score` (measurement) | μ=10, c=4, α=0.2, b=30, z_max=10, k_max=5, γ=0.05 (CAPO App. C.4); the 5M input-token budget is the campaign's (`docs/methods/candidate-elimination.md` § CAPO's population and operators) |
-| `levi` | `levi_seed`, `levi_refine` (llm, small model) · `levi_paradigm_shift` (llm, large model) · `proxy_css` (sampler) · `map_elites` (selector) · `score` (measurement) | K_proxy=30, paradigm period 10 (App. B, templates App. E.6/E.7); the 90/10 routing is two nodes' `config.model` |
+| `levi` | `levi_refine` (llm, small model) · `levi_paradigm_shift` (llm, large model; also the seed pass) · `proxy_css` (sampler) · `map_elites` (selector) · `score` (measurement) | K_proxy=30, (r, s, c)=(0.5, 0.5, 0.15), 50 centroids, 4 seeds, paradigm period 10, k=3 (App. A/B/F, templates App. E.6/E.7); the 90/10 routing is two nodes' `config.model` (`docs/methods/candidate-elimination.md` § LEVI mapping and deviations) |
 | `gepa` | `gepa_reflect` (llm, its own reflection model) · `minibatch` (sampler) · `pareto` (selector) · `score` (measurement) | minibatch 3 (App. E.4) |
 | `sift` | a self-proposer and the candidate judge (llm) · `fixed_gate` (eliminator) · the Bradley-Terry parent selector · `score` (measurement) | § SIFT reproduction |
 
@@ -141,6 +141,13 @@ What collapses: greedy promotion becomes the acquisition at `c = 0`, and the rew
 
 - **Composite fitness (C2; P1, spend, is done).** P2 a per-candidate rollup and its scatter panel, which waits on P3 · P3 `compile_post_aggregate_fitness(formula)` + `campaign.yaml::scoring_post_aggregate` · P4 multi-objective racing, which is a `pareto` selector (GEPA's) with an eliminator reading the front.
 - **CAPO's features, ours too.** A demo pool held out at run init that `select_round_subset` and `sample_dataset` never draw; shots carried by sample id, rendered by `_render_few_shot_block` and emittable by `L1Variant` within `k_max` ([`prompt-field-roster.md`](prompt-field-roster.md) § What this does NOT change); a `target_prompt_chars` channel in the `per_cell` namespace, which lets any campaign's formula price prompt length; the `blocks` sampler, the `paired_t` eliminator, and a `population` selector with crossover lineage.
+- **LEVI's calibration, ours too.** A screening phase any manifest can opt into — potter's
+  included — on the check-in node rather than in a round: N calibration prompts (the origin plus
+  proposed seeds) scored on the whole search pool before round 1, the matrix banked on the cycle,
+  and a sampler handed it (`shared/statistics.py::greedy_column_subset` is the proxy; the
+  δ ruler could anchor on the same rows). Today it is LEVI's round 1, so the matrix exists only
+  where the calibration round's own rows hold it; lifting it needs a check-in step that measures,
+  a banked-matrix record, and a sampler input that is not a round document.
 - **SIFT's members** (§ SIFT reproduction). The **self-proposer** — the parent agent run on its own source and evaluation logs, returning one patch; a proposing node is handed its parents, which is the whole of the self-reference. The **archive-wide parent selector** with SIFT's `P(i) ∝ exp(−α·r_BT − β·r_acc − η·log(1+v))`; their "an unevaluated node inherits its parent's accuracy" lives inside this function and nowhere else — it may steer a choice, never become a measurement. The **candidate-level pairwise judge + regularized Bradley-Terry**, new because `promptpotter/judges/` grades cells, not candidates: two candidates' full source in, a preference out, bounded comparisons per new node, ranks out to the selector and the eliminator. The **`fixed_gate` eliminator** — their small pass/fail block as a literal replacement for PoBB, a priority queue by `r_BT + r_acc`, the full search split on the chosen node.
 
 #### Target wire shapes

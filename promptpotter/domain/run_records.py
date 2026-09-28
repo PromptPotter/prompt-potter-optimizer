@@ -33,6 +33,7 @@ __all__ = [
     "LLMCallStartRecord",
     "LedgerCandidate",
     "LedgerRoundClose",
+    "LeviCheckpointKind",
     "PhaseRecord",
     "PotterCheckpointKind",
     "ResumeCheckpointKind",
@@ -72,11 +73,20 @@ class CapoCheckpointKind(enum.StrEnum):
     POPULATION_KEPT = "population_kept"
 
 
-ResumeCheckpointKind = BenchCheckpointKind | PotterCheckpointKind | CapoCheckpointKind
+class LeviCheckpointKind(enum.StrEnum):
+    """Decisions LEVI's members take: the proxy benchmark its calibration round chooses."""
+
+    PROXY_SELECTED = "proxy_selected"
+
+
+ResumeCheckpointKind = (
+    BenchCheckpointKind | PotterCheckpointKind | CapoCheckpointKind | LeviCheckpointKind
+)
 RESUME_CHECKPOINT_KINDS: tuple[ResumeCheckpointKind, ...] = (
     *BenchCheckpointKind,
     *PotterCheckpointKind,
     *CapoCheckpointKind,
+    *LeviCheckpointKind,
 )
 
 

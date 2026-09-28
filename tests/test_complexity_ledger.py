@@ -152,13 +152,20 @@ LEDGER_BASELINE = {
     # +2: `optimizers/capo/state.py` — CAPO's working state, the population, apart from `members.py`
     # for potter's reason; `optimizers/capo/operators.py` — what CAPO's llm nodes send and read
     # back, apart because it is the code `CapoRuntime.source_digest` hashes and nothing else.
-    "modules": 376,
+    # +4: `optimizers/levi/{__init__,members,state,operators}.py` — LEVI's preset, split as CAPO's
+    # is and for CAPO's reasons: the registry finds members by subpackage, the working state is
+    # imported apart from them, and `operators.py` is what `LeviRuntime.source_digest` hashes.
+    # +1: `optimizers/descriptors.py` — an arm's rows as a behaviour descriptor. The bench's rows,
+    # read for any archive: no optimizer owns what a row reports, and a second archive-keeping
+    # preset (GEPA's per-instance front) reads the same per-cell profile.
+    "modules": 381,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     # +2: `application/optimizers/__init__.py` (the member registry) and its `potter/`, empty.
     # -1: `optimization/l1/score/`, its modules gone to the round walk.
     # +1: `optimizers/capo/__init__.py`, empty, as `potter/`'s is.
-    "init_files": 55,
+    # +1: `optimizers/levi/__init__.py`, empty, as `capo/`'s is.
+    "init_files": 56,
     # +1: `judges/__init__.py` — flagged for the same reason `connectors/__init__.py` is, and by
     # the same text test: a registry module has both an `__all__` and imports. Named rather than
     # emptied; the protocol types are deliberately NOT re-exported through it.
@@ -215,7 +222,12 @@ LEDGER_BASELINE = {
     # +1: `OptimizationConfig.lift_reference` — what an arm's lift is read against, the round's
     # best-so-far or its own parents. The bench's, not a node's: every optimizer's arms carry the
     # lift, and a paper comparing the two readings needs both runnable under one manifest.
-    "config_leaf_fields": 55,
+    # +14: LEVI at its paper values, each on the node that spends it — `proxy_css.size` / the three
+    # CSS weights (K_proxy, r, s, c), `levi_paradigm_shift.interval` / `n_clusters` /
+    # `n_diverse_seeds`, `levi_refine`'s parent temperatures, inspiration count and drop rate and
+    # feedback count, `map_elites.centroids` / `cvt_samples` / `descriptors`. No CAPO or potter
+    # knob holds any: a proxy, an archive and a routing period are mechanisms neither runs.
+    "config_leaf_fields": 69,
     # +1: `QUEUE_MAX_WAIT_S` — how long a launch may wait in line before it is withdrawn. It is a
     # setting and not a constant because it is the one queue number a HOST has to be able to
     # answer for: on a shared box it decides when someone else's waiting launch is given up on.
@@ -293,7 +305,12 @@ LEDGER_BASELINE = {
     # round 1; the initial population is gone by round 2, so no round field can re-derive it.
     # +11: `SpendRollup.bench`, one `SpendBucket` — the held-out pass's price. `diagnostic` held it
     # beside `verify`'s re-measures, so a head-to-head could not read what its headline cost.
-    "cycle_result_fields": 269,
+    # +22: `LeviRoundState` under `optimizer_state.payload` — the calibration (proxy, centroids and
+    # the running descriptor statistics, 5 leaves), each elite (cell, score, measuring round and the
+    # individual's 13) and its rounds without advance. The archive between rounds, re-seated off
+    # the round document on resume; the statistics fold every arm ever offered, so no round's rows
+    # re-derive them.
+    "cycle_result_fields": 291,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
@@ -582,7 +599,10 @@ LEDGER_BASELINE = {
     # optimizer's headline as its search while every total still sums (test_integrity § 7).
     # +1: a crossover read against its worse parent, or a parent re-measured beyond the child's
     # cells, still prints a lift and an interval (test_numerics § 7).
-    "test_functions": 214,
+    # +1: a LEVI round walking the whole pool instead of its proxy, routing more than one call per
+    # period to the large model, or keeping an elite by correctness over the campaign's objective
+    # still selects a winner (test_numerics § 4).
+    "test_functions": 215,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

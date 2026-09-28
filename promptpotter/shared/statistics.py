@@ -348,11 +348,78 @@ def rank_correlation(xs: list[float], ys: list[float]) -> float | None:
     return None if math.isnan(rho) else rho
 
 
+def _order(a: float, b: float) -> int:
+    return (a > b) - (a < b)
+
+
+def _rank_agreement(full: Sequence[float], proxy: Sequence[float]) -> float:
+    pairs = [(i, j) for i in range(len(full)) for j in range(i + 1, len(full))]
+    if not pairs:
+        return 1.0
+    total = 0.0
+    for i, j in pairs:
+        f, p = _order(full[i], full[j]), _order(proxy[i], proxy[j])
+        # The paper grants a tie on one side "partial credit" without its size; half is the midpoint.
+        total += 1.0 if f == p else 0.5 if f == 0 or p == 0 else 0.0
+    return total / len(pairs)
+
+
+def _pearson(xs: Sequence[float], ys: Sequence[float]) -> float:
+    mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+    sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys, strict=True))
+    sxx, syy = sum((x - mx) ** 2 for x in xs), sum((y - my) ** 2 for y in ys)
+    # A constant column orders nothing, so it correlates with nothing.
+    return sxy / math.sqrt(sxx * syy) if sxx > 0.0 and syy > 0.0 else 0.0
+
+
+def greedy_column_subset(
+    matrix: Sequence[Sequence[float]],
+    k: int,
+    *,
+    rank_weight: float,
+    separation_weight: float,
+    redundancy_weight: float,
+) -> list[int]:
+    """The ``k`` columns of a candidates × examples score matrix whose mean ranks the candidates as
+    the full mean does, added greedily by LEVI's marginal score (arXiv 2605.09764 §3.3)."""
+    n_rows, n_cols = len(matrix), len(matrix[0]) if matrix else 0
+    columns = [[matrix[i][j] for i in range(n_rows)] for j in range(n_cols)]
+    full = [sum(row) / n_cols for row in matrix]
+    spreads = [math.sqrt(sum((v - sum(c) / n_rows) ** 2 for v in c) / n_rows) for c in columns]
+    widest = max(spreads, default=0.0)
+    chosen: list[int] = []
+    sums = [0.0] * n_rows
+    while len(chosen) < min(k, n_cols):
+        best, best_score = -1, -math.inf
+        for j in range(n_cols):
+            if j in chosen:
+                continue
+            taken = [*chosen, j]
+            proxy = [(sums[i] + columns[j][i]) / len(taken) for i in range(n_rows)]
+            separation = sum(spreads[c] for c in taken) / len(taken) / widest if widest else 0.0
+            redundancy = (
+                sum(abs(_pearson(columns[j], columns[c])) for c in chosen) / len(chosen)
+                if chosen
+                else 0.0
+            )
+            score = (
+                rank_weight * _rank_agreement(full, proxy)
+                + separation_weight * separation
+                - redundancy_weight * redundancy
+            )
+            if score > best_score:
+                best, best_score = j, score
+        chosen.append(best)
+        sums = [sums[i] + columns[best][i] for i in range(n_rows)]
+    return chosen
+
+
 __all__ = [
     "cells_for_exact_verdict",
     "discordant_counts",
     "exact_p_floor",
     "exact_paired_reading",
+    "greedy_column_subset",
     "holm_adjusted",
     "mean_ci",
     "mean_ci_t",

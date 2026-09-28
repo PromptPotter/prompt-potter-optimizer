@@ -47,6 +47,7 @@ from promptpotter.application.optimization.validators.l1_invariants import (
 from promptpotter.application.optimizer_manifest import bind_optimizer
 from promptpotter.application.optimizers.capo import operators as capo_operators
 from promptpotter.application.optimizers.capo.state import CapoState, capo_state
+from promptpotter.application.optimizers.levi.state import LeviState
 from promptpotter.application.optimizers.nodes import Population, RoundContext
 from promptpotter.application.runner.measurement import measure_population
 from promptpotter.application.runner.round import execute_round, round_plan
@@ -1490,18 +1491,19 @@ def test_a_round_that_measured_nothing_usable_names_which_way_it_broke():
     assert holed.degraded_rate == 0.0  # the one classifiable cell was clean — and says so
 
 
-def _capo_cycle(
+def _peer_cycle(
     built_stores: Any,
     tmp_path: Path,
     monkeypatch: Any,
+    optimizer: str,
     nodes: dict,
     solves: Callable[[str, Sample], bool],
 ) -> Cycle:
-    """A CAPO cycle over a sixteen-row bank, whose backend answers a cell right where
-    ``solves(prompt, sample)`` says."""
+    """A cycle of a peer ``optimizer`` over a sixteen-row bank, whose backend answers a cell right
+    where ``solves(prompt, sample)`` says."""
     bank = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(16)]
     schema = PipelineSchema(
-        name="capo-e2e",
+        name=f"{optimizer}-e2e",
         nodes=[
             PipelineNode(
                 name="solve", node_type=NodeType.NONE, tunes_llm=False, prompt_info=NodePromptInfo()
@@ -1510,11 +1512,11 @@ def _capo_cycle(
     )
     config = load_campaign_config(
         {
-            "dataset_name": "capo-e2e",
+            "dataset_name": f"{optimizer}-e2e",
             "sp_budget_round": 12,
             "dataset_split": {"bench": 0, "demo": 2},
             "optimization": {
-                "optimizer": "capo",
+                "optimizer": optimizer,
                 "degradation_threshold": 0.0,
                 "elimination_n_min": 2,
                 "nodes": nodes,
@@ -1533,12 +1535,12 @@ def _capo_cycle(
         ),
         pipeline_schema=schema,
         samples=bank,
-        dataset_name="capo-e2e",
+        dataset_name=f"{optimizer}-e2e",
     )
     session.source = RunSource.OPTIMIZATION_LOOP
     session.state.ledger = CycleEventLog.open(CycleDir(tmp_path / "cycle"))
-    # The campaign's composite REWARDS length, the opposite of CAPO's objective: the population
-    # must still be kept by CAPO's own reading, while the bench scores every arm by this formula.
+    # The campaign's composite REWARDS length, the opposite of CAPO's objective: CAPO's population
+    # must still be kept by its own reading, while LEVI's archive ranks on this formula itself.
     session.scoring.scorer = compile_scorer(
         "label_match(predicted, ground_truth)",
         "fitness * min(1.0, target_prompt_chars / 200.0)",
@@ -1551,6 +1553,7 @@ def _capo_cycle(
         solved = solves(prompt, sample)
         row = {
             "sample_id": sample.id,
+            "sample_key": sample.key,
             "query": sample.query,
             "ground_truth": sample.ground_truth,
             "predicted": sample.ground_truth if solved else "wrong",
@@ -1620,7 +1623,7 @@ def test_a_capo_round_races_its_population_beside_the_offspring_and_keeps_the_be
     }
     # GOOD answers every cell, OK the even ones, anything else none.
     good_or_even = lambda prompt, s: "GOOD" in prompt or ("OK" in prompt and s.id % 2 == 0)  # noqa: E731
-    cycle = _capo_cycle(built_stores, tmp_path, monkeypatch, nodes, good_or_even)
+    cycle = _peer_cycle(built_stores, tmp_path, monkeypatch, "capo", nodes, good_or_even)
     monkeypatch.setattr(capo_operators, "llm_call", _llm)
     session = cycle.session
     search = list(session.scoring.partition.search)
@@ -1667,6 +1670,125 @@ def test_a_capo_round_races_its_population_beside_the_offspring_and_keeps_the_be
     resumed = CapoState()
     resumed.replay(first)
     assert [ind.lineage.id for ind in resumed.population] == [ind.lineage.id for ind in carried]
+
+
+def test_a_levi_run_calibrates_a_proxy_then_spends_one_large_call_per_period(
+    built_stores, tmp_path, monkeypatch
+) -> None:
+    """LEVI through the real round spine (arXiv 2605.09764 Alg. 1-2): the calibration round scores
+    the seeds and the origin on the whole pool and keeps a proxy that ranks them as the pool does;
+    every later round walks exactly that proxy with `interval - 1` small-model refinements and one
+    large-model paradigm shift, and the archive keeps each cell's best by the campaign's objective.
+    Silent if wrong: a round on the whole pool, or the wrong routing, still selects a winner."""
+    calls: list[tuple[str, str]] = []
+
+    async def _llm(messages: list[dict], **kw: Any) -> Any:
+        prompt = messages[0]["content"]
+        calls.append((kw["node"], prompt))
+        if "(score:" in prompt:
+            text = "<prompt>Solve it GOOD, from a new angle.</prompt>"
+        elif "# Prompt Paradigm Shift" in prompt:
+            seeds = {1: "Solve the EVEN ones.", 2: "Solve the LOW ones."}
+            shown = prompt.count("### Representative")
+            text = f"<prompt>{seeds[shown]}</prompt>" if shown in seeds else "no markers"
+        else:
+            text = "<prompt>Solve the EVEN ones, every one.</prompt>"
+        return types.SimpleNamespace(content=text)
+
+    nodes = {
+        "proxy_css": {"config": {"size": 4}},
+        "levi_paradigm_shift": {"config": {"interval": 3, "n_clusters": 2, "n_diverse_seeds": 3}},
+        "levi_refine": {"config": {"feedback_failures": 1}},
+        "map_elites": {"config": {"centroids": 4, "cvt_samples": 64}},
+    }
+
+    def solves(prompt: str, s: Sample) -> bool:
+        return (
+            "GOOD" in prompt
+            or ("EVEN" in prompt and s.id % 2 == 0)
+            or ("LOW" in prompt and s.id < 8)
+        )
+
+    cycle = _peer_cycle(built_stores, tmp_path, monkeypatch, "levi", nodes, solves)
+    monkeypatch.setattr(capo_operators, "llm_call", _llm)
+    session = cycle.session
+    search = list(session.scoring.partition.search)
+    origin_id = cycle.opt_sp.lineage.id
+
+    def objective_mean(rows: list[dict], keys: list[str]) -> float:
+        by_key = {r["sample_key"]: r["objective"] for r in rows}
+        return sum(by_key[k] for k in keys) / len(keys)
+
+    first = asyncio.run(execute_round(cycle, 1, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
+    assert [node for node, _ in calls] == ["levi_paradigm_shift"] * 3, "the seed pass alone"
+    measured = [cs for cs in first.candidate_scores if cs.outcome is not ArmOutcome.INVALID]
+    assert len(measured) == 2 and all(cs.scored_samples == len(search) for cs in measured)
+    payload = first.optimizer_state.payload
+    proxy = payload.calibration.proxy
+    assert len(proxy) == 4 and set(proxy) <= {s.key for s in search}
+    calibration = {
+        origin_id: first.reference_results[origin_id],
+        **{cs.candidate_id: first.all_candidate_results[cs.candidate_id] for cs in measured},
+    }
+    full = {cid: objective_mean(rows, [s.key for s in search]) for cid, rows in calibration.items()}
+    on_proxy = {cid: objective_mean(rows, proxy) for cid, rows in calibration.items()}
+    for a in calibration:
+        for b in calibration:
+            assert (full[a] > full[b]) == (on_proxy[a] > on_proxy[b]), "the proxy re-ranks them"
+    decisions = [d.model_dump(mode="json") for d in cycle.pending_decisions]
+    assert [d["kind"] for d in decisions] == ["proxy_selected"]
+    assert replay_all_mismatches(first, decisions) == [], "a resume re-derives the proxy"
+    assert len({e.cell for e in payload.elites}) == len(payload.elites)
+    assert all(
+        e.score == pytest.approx(on_proxy[e.individual.lineage.id]) for e in payload.elites
+    ), "an elite's score is its mean campaign objective on the proxy"
+    best = max(payload.elites, key=lambda e: e.score)
+    assert first.selected_labels == [
+        next(
+            cs.label
+            for cs in first.candidate_scores
+            if cs.candidate_id == best.individual.lineage.id
+        )
+    ]
+
+    cycle.absorb_round(first, 1)
+    calls.clear()
+    second = asyncio.run(execute_round(cycle, 2, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
+    assert [node for node, _ in calls] == ["levi_refine"] * 2 + ["levi_paradigm_shift"], (
+        "interval 3: two small-model refinements, then one large-model shift"
+    )
+    assert all(
+        sorted(r["sample_key"] for r in rows) == sorted(proxy)
+        for rows in (second.all_candidate_results.values())
+    ), "every arm walks exactly the proxy"
+    off_proxy = [s.query for s in search if s.key not in proxy]
+    refinements = [p for node, p in calls if node == "levi_refine"]
+    fed = [p for p in refinements if "## Failures" in p]
+    assert fed and all("<UNTRUSTED_DATASET_CONTENT" in p for p in fed), "the parent's failures"
+    assert not any(f"Input: {q}\n" in p for q in off_proxy for p in refinements), "off the proxy"
+    elite_ids = {e.individual.lineage.id for e in payload.elites}
+    minted = [
+        rec
+        for _, rec in session.state.ledger.iter()
+        if isinstance(rec, CandidateMintedRecord) and rec.round == 2
+    ]
+    assert [rec.candidate_id for rec in minted] == [
+        cs.candidate_id for cs in second.candidate_scores
+    ]
+    assert all(set(rec.parent_ids) <= elite_ids for rec in minted), "a parent from outside"
+    shift = second.candidate_scores[-1]
+    assert second.selected_labels == [shift.label], "the new family outscores every elite"
+    kept = second.optimizer_state.payload
+    assert kept.rounds_without_advance == 0 and max(e.score for e in kept.elites) == pytest.approx(
+        objective_mean(second.all_candidate_results[shift.candidate_id], proxy)
+    )
+
+    resumed = LeviState()
+    resumed.replay(second)
+    assert [e.individual.lineage.id for e in resumed.elites] == [
+        e.individual.lineage.id for e in kept.elites
+    ]
+    assert resumed.calibration is not None and resumed.calibration.proxy == proxy
 
 
 # 5. Elimination — who is cut, and when
@@ -2225,7 +2347,7 @@ def test_the_paired_t_race_cuts_live_arms_together_at_each_block_on_the_rows_the
         "blocks": {"config": {"block_size": 4, "max_blocks": 3}},
         "paired_t": {"config": {"alpha": 0.2, "survivors": 2, "length_penalty": 0.05}},
     }
-    cycle = _capo_cycle(built_stores, tmp_path, monkeypatch, nodes, good_or_late)
+    cycle = _peer_cycle(built_stores, tmp_path, monkeypatch, "capo", nodes, good_or_late)
     capo_state(cycle.working_state).length_norm = 100
     ctx = RoundContext(cycle=cycle, round_num=1, callbacks=_QUIET_CALLBACKS)  # type: ignore[arg-type]
     plan = round_plan(cycle.optimizer)
