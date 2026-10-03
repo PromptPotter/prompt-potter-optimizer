@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.application.views.render.primitives import (
     BOLD,
@@ -32,8 +34,10 @@ from promptpotter.application.views.view_models import (
     SpDiffView,
 )
 from promptpotter.domain.candidate_diff import group_diff_keys
-from promptpotter.domain.results import ArmOutcome, scoreboard_rank_key
 from promptpotter.shared.composite import render_composite_fitness_block
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def _render_init_enter(v: InitEnterView) -> str:
@@ -122,27 +126,12 @@ def _render_measure_enter(v: MeasureEnterView) -> str:
     )
 
 
-def _render_round_complete(v: RoundCompleteView) -> str:
-    out: list[str] = []
-    if len(v.scores) > 3:
-        if board := _scoreboard(v.scores, v.winner_label, theta=v.stamps_theta):
-            out.append(board)
-    elif v.scores:
-        parts = [
-            f"{s.label}={fmt_pct(s.accuracy)}{f' ({s.outcome})' if s.outcome.cut_short else ''}"
-            for s in sorted(
-                v.scores,
-                key=lambda s: scoreboard_rank_key(
-                    s.composite_fitness,
-                    s.accuracy,
-                    s.theta,
-                    is_selected=s.label == v.winner_label,
-                    is_partial=s.outcome is ArmOutcome.SKIPPED,
-                ),
-                reverse=True,
-            )
-        ]
-        out.append(f"  Scoreboard: {' | '.join(parts)}")
+def render_round_verdict(v: RoundCompleteView, basis: Sequence[str]) -> str:
+    """The round's verdict as ONE block: the board, who was selected and why, then *basis* — the
+    lift interval and the overlap series, which exist only once the round has closed."""
+    out: list[str] = [""]
+    if board := _scoreboard(v.scores, v.winner_label, theta=v.stamps_theta):
+        out.append(board)
 
     formula = v.composite_fitness_formula_short or v.composite_fitness_formula
     show_inline = not formula
@@ -181,9 +170,10 @@ def _render_round_complete(v: RoundCompleteView) -> str:
         detail += ["the best-so-far held", f"n={v.winner_total}"]
         out.append(f"  {YELLOW}{BOLD}· HELD{RESET}  {headline} ({', '.join(detail)}){comp_tag}")
     # The selector's own reason, whichever way the round went: the rate on the line above is never
-    # what an optimizer's selection read. Its lift interval prints once, in `render_round_stats`.
+    # what an optimizer's selection read.
     if v.verdict_reason:
         out.append(f"  {DIM}why: {v.verdict_reason}{RESET}")
+    out.extend(f"  {line}" for line in basis)
 
     if not show_inline and v.winner_composite_fitness is not None:
         # No fallback to the cycle's origin composite — the substitution the verdict line refuses.
@@ -230,8 +220,6 @@ def to_text(view: AnyView) -> str:
             return _render_candidates_generated(view)
         case MeasureEnterView():
             return _render_measure_enter(view)
-        case RoundCompleteView():
-            return _render_round_complete(view)
         case OptimizerStepEnterView():
             return _render_step_enter(view)
         case OptimizerStepExitView():
@@ -407,4 +395,4 @@ def render_sp_diff(view: SpDiffView) -> str:
     return "\n".join(out)
 
 
-__all__ = ["render_sp_diff", "to_text"]
+__all__ = ["render_round_verdict", "render_sp_diff", "to_text"]

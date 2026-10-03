@@ -207,15 +207,16 @@ def _scoreboard(
         ),
         reverse=True,
     )
-    w = 78
+    w = 108
 
     # Column ORDER is the row's, and the two disagreed: the header named Composite before 95% CI
     # while the row printed them the other way round, so every CI was read against the wrong
     # column. The interval brackets mean per-cell fitness — accuracy's own fold — so it sits
     # beside Accuracy, and `Ability θ` closes the table with what a θ selector decides on.
+    # `Cells` leads the numbers because it is their basis: every rate to its right is read over it.
     theta_hdr = f"   {'Ability θ':>9s}" if theta else ""
     hdr = (
-        f"{'#':<4s}{'Label':<8s}{'Accuracy':>8s}   {'95% CI':>16s}   "
+        f"{'#':<4s}{'Label':<8s}{'Cells':>7s}   {'Accuracy':>8s}   {'95% CI':>16s}   "
         f"{'Composite':>9s}{theta_hdr}   {'Delta':>7s}"
     )
     lines = [f"  {_box_top('SCOREBOARD', width=w)}", f"  {_box_line(hdr, width=w)}"]
@@ -240,8 +241,10 @@ def _scoreboard(
         # ruler is cold NO row has one — a zero there would read as a measured mid-scale ability.
         theta_str = "---" if s.theta is None else f"{s.theta:+.3f}"
         theta_cell = f"   {theta_str:>9s}" if theta else ""
+        cells = f"{s.scored}/{s.expected}" if s.expected else str(s.total)
+        acc_str = "—" if acc is None else f"{acc:.1%}"
         row = (
-            f"{i:<4d}{label:<8s}{acc:>8.1%}   {ci_str:>16s}   "
+            f"{i:<4d}{label:<8s}{cells:>7s}   {acc_str:>8s}   {ci_str:>16s}   "
             f"{comp_val:>9.4f}{theta_cell}   {delta_str:>7s}{winner_mark}"
         )
         lines.append(f"  {_box_line(row, width=w)}")

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.formula import split_scoring_block
-from promptpotter.application.views.render.ansi import to_text
+from promptpotter.application.views.render.ansi import render_round_verdict, to_text
 from promptpotter.application.views.render.candidate import (
     fmt_individual_header,
     individual_summary_from_dict,
@@ -20,6 +20,7 @@ from promptpotter.application.views.render.phase import (
     render_patience_status,
     render_progress_table,
     render_round_stats,
+    round_verdict_basis,
 )
 from promptpotter.application.views.render.prefix_reading import prefix_reading
 from promptpotter.application.views.render.primitives import (
@@ -39,7 +40,7 @@ from promptpotter.application.views.render.primitives import (
     display_tags,
 )
 from promptpotter.application.views.render.sample import fmt_query_result
-from promptpotter.application.views.view_models import AnyView
+from promptpotter.application.views.view_models import AnyView, RoundCompleteView
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.dashboard_rows import RunStanding
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -48,7 +49,6 @@ from promptpotter.domain.results import (
     ArmOutcome,
     ScoreboardRankKey,
     candidate_label,
-    overlap_series,
     scoreboard_rank_key,
 )
 from promptpotter.domain.run_records import (
@@ -67,7 +67,6 @@ from promptpotter.infrastructure.projections.live_state import (
     apply_phase,
     apply_race_standing,
     roll_p_best_at_round_complete,
-    top_n_p_best,
 )
 from promptpotter.infrastructure.store.io import append_line
 from promptpotter.infrastructure.store.layout import CycleLayout
@@ -137,6 +136,7 @@ class ReadoutProjection(Projection):
         self._headed: set[int] = set()
         self._pending_calls: dict[str, int] = {}
         self._readout: Path | None = None
+        self._verdict: RoundCompleteView | None = None
 
     @classmethod
     def for_campaign(
@@ -294,22 +294,19 @@ class ReadoutProjection(Projection):
         self._write(f"  {DIM}✓ {' · '.join(bits)}{RESET}")
 
     def _handle_election(self, record: ElectionRecord) -> None:
-        """The verdict, where the election makes it — not at the round close two LLM calls later.
+        """The news, where the election makes it — not at the round close two LLM calls later.
 
-        The browser reads it off this same record; the terminal was the entry point still waiting
-        for the summary block. ``verdict_reason`` rides the live handle rather than the wire, so a
-        replay off disk prints nothing and the summary stays the only readout there."""
+        One line and no numbers: the board, the reason and the overlap series print together in
+        the verdict block at round close, which is the first moment all three exist. Silent where
+        the selector gave no reason — the origin round, which chose between nobody."""
         rr = record.live_round_result
-        if rr is None or not (reason := rr.verdict_reason):
+        if rr is None or not rr.verdict_reason:
             return
-        verdict = (
-            f"{GREEN}✓ selected {', '.join(record.selected_labels)}{RESET}"
+        self._write(
+            f"  {GREEN}✓ selected {', '.join(record.selected_labels)}{RESET}"
             if record.selected_labels
-            else f"{DIM}· held the best-so-far{RESET}"
+            else f"  {DIM}· held the best-so-far{RESET}"
         )
-        self._write(f"  {verdict} {DIM}— {reason}{RESET}")
-        if series := overlap_series(rr.overlap):
-            self._write(f"  {DIM}overlap ({series}){RESET}")
 
     def _handle_snapshot(self, record: SnapshotRecord) -> None:
         payload = record.payload
@@ -390,7 +387,11 @@ class ReadoutProjection(Projection):
         # under no round marker.
         if event.phase == CampaignPhase.ORIGIN and event.event == "enter":
             self._write("\n" + _round_rule("ROUND 0 — ORIGIN", "C0 · campaign root"))
-        if view is not None and (rendered := to_text(view)):
+        if isinstance(view, RoundCompleteView):
+            # Held, not printed: the panel gate can still unwind this round, and a re-run's
+            # `select:exit` replaces it here.
+            self._verdict = view
+        elif view is not None and (rendered := to_text(view)):
             self._write(rendered)
         apply_phase(self._core, event, view)
         if event.phase == CampaignPhase.PROPOSE and event.event == "enter":
@@ -501,26 +502,6 @@ class ReadoutProjection(Projection):
             return
         tags = [cid if cid == "origin" or cid.endswith("_winner") else cid[:6] for cid in prior_ids]
         self._write(f"  {DIM}↻ {member} catch-up #{sample_id}:{RESET} " + ", ".join(tags))
-
-    def _render_p_best_line(self) -> str | None:
-        """Top-5 P(best) across the round's CANDIDATES, with each arrow against that candidate's own previous reading. Ranking one
-        snapshot's dict instead ranks its odds against each prior, and last round's ids never match — they are round-scoped."""
-        if not self._core.round_p_best:
-            return None
-        last = self._core.round_p_best_prev
-        parts: list[str] = []
-        for cid, prob in top_n_p_best(self._core.round_p_best):
-            prev = last.get(cid)
-            arrow = ""
-            if prev is not None:
-                if prob > prev + 1e-4:
-                    arrow = "▲"
-                elif prob < prev - 1e-4:
-                    arrow = "▼"
-            tag = f"*{cid[:6]}*" if cid == self._core.current_p_best_id else cid[:6]
-            parts.append(f"{tag} {prob * 100:4.1f}%{arrow}")
-        member = self._core.race_member
-        return f"{member} P(best) @ q{self._core.current_p_best_n}: " + " | ".join(parts)
 
     def _render_block_lines(self) -> list[str]:
         lines = []
@@ -647,21 +628,23 @@ class ReadoutProjection(Projection):
             elapsed = time.monotonic() - self._round_started_at
             elapsed_label = f" — {fmt_elapsed(elapsed)}"
         self._round_started_at = None
+        # The round's verdict, whole and once. The origin round elects nobody, so it has none and
+        # its composite prints in the summary below instead.
+        verdict, self._verdict = self._verdict, None
+        if verdict is not None:
+            self._write(render_round_verdict(verdict, round_verdict_basis(round_result)))
         self._write("")
         self._write(_node_top(f"ROUND {rn} SUMMARY{elapsed_label}"))
         table = render_progress_table(self.campaign_rounds, stamps_theta=round_result.stamps_theta)
         for line in table.split("\n"):
             self._write(line)
-        if self._block_racing:
-            for line in self._render_block_lines():
-                self._write(_node_line(line))
-        elif (p_best_line := self._render_p_best_line()) is not None:
-            self._write(_node_line(p_best_line))
+        for line in self._render_block_lines():
+            self._write(_node_line(line))
         roll_p_best_at_round_complete(self._core)
         self._block_racing, self._block_decided, self._headed = {}, {}, set()
         formula_short = self._phase_ctx.get("composite_fitness_formula_short")
         formula_full = self._phase_ctx.get("composite_fitness_formula")
-        if formula_short or formula_full:
+        if verdict is None and (formula_short or formula_full):
             # Under per_round_resubset the round-0 composite is a different subset, so
             # a cross-subset fallback would read draw difficulty as candidate lift.
             for line in render_composite_fitness_block(

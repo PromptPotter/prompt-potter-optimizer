@@ -201,6 +201,7 @@ def from_disk_log(
                 verdict_reason=t.verdict_reason,
                 overlap=t.overlap,
                 p_best_trajectory=traj,
+                candidate_labels={c.candidate_id: c.label for c in t.candidate_scores},
                 winner_id=selected.candidate_id if selected else "",
                 spend=(spend_by_round or {}).get(str(t.round)),
             )

@@ -189,6 +189,11 @@ class ScoreEntry:
     accuracy: float | None
     composite_fitness: float | None
     total: int
+    # The row's BASIS: cells this arm answered of the cells the round asked of it. An arm stopped
+    # early reports a rate over a prefix, and a board without this prints it beside full-panel
+    # rates as if the two were one measurement.
+    scored: int
+    expected: int
     mean_fitness_ci_lo: float | None
     mean_fitness_ci_hi: float | None
     # Carried because the display RANKS on it (`domain/results.py::scoreboard_rank_key`) and a
@@ -213,7 +218,9 @@ class ScoreEntry:
 
 @dataclass(frozen=True)
 class RoundCompleteView:
-    """``select:exit`` — the round's summary. Round-trip invariant target."""
+    """``select:exit`` — the round's verdict. The readout HOLDS it until the round closes: the
+    panel gate can still unwind the round, and the overlap line it prints beside is not measured
+    yet. Round-trip invariant target."""
 
     round: int
     parent_acc: float
@@ -329,6 +336,9 @@ class RoundDigestView:
     # Per-candidate P(best) trajectory from the round's racing stream
     # (``.runtime/streams/round_NNNN_{member}.jsonl``); empty for resumed rounds.
     p_best_trajectory: dict[str, list[float]] = field(default_factory=dict)
+    # ``{candidate_id: label}`` for the trajectory's keys, so its rows carry the name every other
+    # surface prints an arm under.
+    candidate_labels: dict[str, str] = field(default_factory=dict)
     # Who the round ELECTED. The trajectory above is a STOPPING posterior and cannot answer it —
     # its argmax is regularly not the elected arm, and can name two of them or none.
     winner_id: str = ""

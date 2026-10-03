@@ -67,7 +67,9 @@ def _render_p_best_trajectory(rd: RoundDigestView) -> list[str]:
         rd.p_best_trajectory.items(),
         key=lambda kv: (kv[0] != rd.winner_id, -(kv[1][-1] if kv[1] else 0.0)),
     )
-    lines: list[str] = ["", "P(best) trajectory:", "```"]
+    # Each row is one arm against ITS OWN priors at its own turn, so the rows share no scale and
+    # the heading says so: two finals side by side are not a comparison between those arms.
+    lines: list[str] = ["", "P(best) trajectory (each arm against its own priors):", "```"]
     for cid, traj in ordered[:8]:
         if not traj:
             continue
@@ -78,7 +80,9 @@ def _render_p_best_trajectory(rd: RoundDigestView) -> list[str]:
             suffix = " [winner]"
         elif final < 5.0:
             suffix = " [stopped]"
-        lines.append(f"  {cid[:10]:<10} {spark}  {final:5.1f}%{suffix}")
+        label = rd.candidate_labels.get(cid)
+        name = f"{label} ({cid[:10]})" if label else cid[:10]
+        lines.append(f"  {name:<19} {spark}  {final:5.1f}%{suffix}")
     lines.append("```")
     return lines
 

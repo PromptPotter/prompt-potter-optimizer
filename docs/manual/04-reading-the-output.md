@@ -61,13 +61,20 @@ GENERATE
   Model           openai/gpt-oss-20b
 ```
 
-Scoring opens under a `MEASURE` rule naming the manifest's measurement node, and the round
-closes with a scoreboard and one verdict line:
+Scoring opens under a `MEASURE` rule naming the manifest's measurement node. The election says
+only who it picked — `✓ selected C3.1` — and the round closes with the verdict, printed once as
+one block:
 
 ```
-  Scoreboard: C3.1=74.0% | C3.2=71.0% | C3.3=68.0%
+  SCOREBOARD
+  #   Label    Cells   Accuracy             95% CI   Composite     Delta
+  1   C3.1     50/50      74.0%     [61.0%, 84.0%]      0.7400    +12.0%  *
+  2   C3.2     50/50      71.0%     [57.0%, 82.0%]      0.7100     +9.0%
+  3   C3.3     14/50      57.1%     [32.0%, 79.0%]      0.5710       ---  (eliminated)
   ✓ SELECTED C3.1  74.0% (vs reference 62.0%, +12.0%)  p=0.003 **
   why: …
+  lift vs reference: +0.120 [+0.031, +0.209]  |  clears 0
+  overlap (C0 62.0% → C3.1 74.0%, 50 shared cells)
 ```
 
 | Line | Meaning |
@@ -75,7 +82,9 @@ closes with a scoreboard and one verdict line:
 | `ROUND 3/10` | Round number and ceiling. In lives mode the ceiling is replaced by a ♥ bank. |
 | `stall 0/3 → L2` | Rounds of no improvement, and how many trigger [L2](../concepts/the-loop.md). Reads `L2 every round` when patience is 0. |
 | `Prior critique` | Whether last round produced one — the input this round's candidates were built from. |
-| `Scoreboard` | Each candidate's accuracy. Above three candidates this becomes a full box adding composite fitness, 95% CI and delta, with the selected arm marked `*` — and an `Ability θ` column where the optimizer's selector fits one per arm. |
+| `SCOREBOARD` | One row per candidate, the selected arm marked `*`, with an `Ability θ` column where the optimizer's selector fits one per arm. **Read `Cells` first**: it is the cells the arm answered of the cells the round asked of it, and every rate to its right is read over it — so an arm cut at `14/50` is not comparable to one at `50/50`. |
+| `lift vs reference` | The selected arm's lift with its interval. `spans 0` means the round did not separate the arm from its reference, whatever the verdict line's point estimate reads. |
+| `overlap` | The best-so-far line on the cells all of it has answered — the one line two rounds can be differenced on. |
 | the verdict | `✓ SELECTED <label>` or `· HELD` (the best-so-far stands). The accuracy on it never decided the round — the optimizer's selector did — so a `why:` line beneath states its reason whichever way it went. |
 | `(vs reference 62.0%, +12.0%)` | The **matched-pair** reference — the individual this arm's lift is read against (`lift_reference`) — restricted to the samples the arm actually measured. An arm that stopped before covering its reference's panel gets no such rate, because subtracting a full-set rate from a prefix would publish lift nobody measured. |
 | `p=0.003 **` | Significance of the lift over that reference; the stars are the band. |

@@ -308,6 +308,8 @@ def score_entry_from_dict(s: dict[str, Any]) -> ScoreEntry:
         accuracy=sc.accuracy,
         composite_fitness=sc.composite_fitness,
         total=sc.total,
+        scored=sc.scored_samples,
+        expected=sc.expected_samples,
         mean_fitness_ci_lo=sc.mean_fitness_ci_lo,
         mean_fitness_ci_hi=sc.mean_fitness_ci_hi,
         outcome=sc.outcome,
