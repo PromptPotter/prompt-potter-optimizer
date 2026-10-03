@@ -227,6 +227,9 @@ components:
             # so it reaches no cycle subscriber — listed because the enum's rule
             # is the union, not the subset a given channel happens to carry.
             - spend_tombstone
+            # A cell the campaign's search priced — billed fresh or metered as a
+            # replay (``CellPricedRecord``), so a resumed launch prices it once.
+            - cell_priced
         version:
           type: integer
           minimum: 1

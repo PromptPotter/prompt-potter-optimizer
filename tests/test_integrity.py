@@ -4153,6 +4153,7 @@ async def _walk(
         "entries": list(backend.entries),
         "committed": committed,
         "banked": banked,
+        "priced": set(walk.ctx.counted),
         "returned": returned,
         "billed": book.usd_spent,
         "depths": depths,
@@ -4558,6 +4559,8 @@ async def test_sample_lookahead_changes_the_bill_and_never_the_record(tmp_path: 
         dataset, armed=4, max_cells=4, cut_at=None, pause_after_call=3, stall=head
     )
     assert stopped["rows"] == [] and set(stopped["banked"]) == set(stopped["returned"])
+    # Paid already: the resumed walk meets each as a replay, and must not meter it as search again.
+    assert stopped["priced"] == {f"cell_{sid}" for sid in stopped["banked"]}
     resumed = await _walk(dataset, armed=4, max_cells=4, cut_at=None, cached=stopped["banked"])
     assert not set(resumed["calls"]) & set(stopped["banked"]), "a banked cell was paid again"
     assert [r["sample_id"] for r in resumed["rows"]] == [s.id for s in dataset]
@@ -4600,6 +4603,7 @@ async def test_a_resumed_arm_re_reads_its_cells_and_still_reaches_its_bench(tmp_
     from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.llm import telemetry
     from promptpotter.infrastructure.llm.spend_book import SpendBook, spending_under
+    from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_cell_keys
 
     dataset = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(4)]
     step = {"solve": {"input": 10, "output": 5, "cost_usd": 0.01}}
@@ -4666,6 +4670,8 @@ async def test_a_resumed_arm_re_reads_its_cells_and_still_reaches_its_bench(tmp_
     kinds = [r.kind for _, r in ledger.iter() if isinstance(r, TokenUsageRecord)]
     assert kinds == ["bench"] * len(dataset), f"a re-read was metered a second time: {kinds}"
     assert book.usd_spent == pytest.approx(0.02)
+    # No surface watched the bench walk, and the next launch still learns every cell it priced.
+    assert scan_ledger_cell_keys([ledger.path]) == {f"cell_{s.id}" for s in dataset}
 
 
 def _counting_client(reply: str) -> tuple[Any, list[int]]:

@@ -16,6 +16,7 @@ from promptpotter.shared.clock import utcnow_iso
 __all__ = [
     "BenchCheckpointKind",
     "CandidateMintedRecord",
+    "CellPricedRecord",
     "CheckpointKind",
     "CommandAckRecord",
     "CommandRecord",
@@ -208,6 +209,20 @@ class SpendHoldRecord(StrictModel):
     output_tokens: int
     cost_usd: float | None = None
     round: int | None = None
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+class CellPricedRecord(StrictModel):
+    """A cell (``ReplayFeed.cell_key``) this campaign's search has PRICED — its measurement billed,
+    or its replay metered. Written the first time a walk takes the cell, and where a stop keeps one
+    it paid for and has not taken, so a later read of it in this launch or a resumed one prices
+    nothing again. A fact of the spend meter, never of a display: a walk no surface watches writes
+    it too."""
+
+    model_config = ConfigDict(frozen=True)
+
+    record_type: Literal["cell_priced"] = "cell_priced"
+    cell_key: str
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -748,6 +763,7 @@ class CycleSeedRecord(StrictModel):
 CycleRecord = Annotated[
     ResumeCheckpointRecord
     | CandidateMintedRecord
+    | CellPricedRecord
     | CommandAckRecord
     | CommandRecord
     | CycleSeedRecord

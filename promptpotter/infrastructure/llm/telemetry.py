@@ -10,6 +10,7 @@ from contextvars import ContextVar, Token
 from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.domain.run_records import (
+    CellPricedRecord,
     CommandAckRecord,
     CommandRecord,
     CycleRecord,
@@ -193,6 +194,10 @@ def emit_backend_warning(
     )
 
 
+def emit_cell_priced(cell_key: str) -> None:
+    _append_record(CellPricedRecord(cell_key=cell_key))
+
+
 def emit_spend_hold(
     *,
     hold_id: str,
@@ -302,6 +307,7 @@ def emit_round_warning(
 __all__ = [
     "active_cycle_ledger",
     "bill_usd",
+    "emit_cell_priced",
     "emit_command",
     "emit_command_ack",
     "emit_error_record",

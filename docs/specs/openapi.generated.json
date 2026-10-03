@@ -6019,6 +6019,7 @@
             "description": "The ledger record_type — ProjectionEnvelope.kind.",
             "enum": [
               "candidate_minted",
+              "cell_priced",
               "decision",
               "command",
               "command_ack",

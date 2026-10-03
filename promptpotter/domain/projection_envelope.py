@@ -30,6 +30,7 @@ __all__ = [
 ProjectionKind = Literal[
     # `record_type` literals — the complete `CycleRecord` union
     "candidate_minted",
+    "cell_priced",
     "decision",
     "command",
     "command_ack",
@@ -72,6 +73,7 @@ if _declared != _record_types:
 # the tail, reaches its own translator, and is on no ledger for the ray to filter.
 RENDERS_AS_ACTIVITY: dict[ProjectionKind, bool] = {
     "candidate_minted": True,
+    "cell_priced": False,
     "command": True,
     "command_ack": True,
     "cycle_seed": True,

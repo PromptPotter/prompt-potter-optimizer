@@ -42,6 +42,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     bound_spend_book,
     filed,
 )
+from promptpotter.infrastructure.llm.telemetry import emit_cell_priced
 from promptpotter.infrastructure.runtime_flags import effective_lookahead
 from promptpotter.shared.errors import (
     ErrorCategory,
@@ -196,16 +197,14 @@ class QueryLoopResult:
 
 
 def _with_running(
-    result: QueryMeasurement, running: dict[str, Any], run_id: str, cell: str | None
+    result: QueryMeasurement, running: dict[str, Any], run_id: str
 ) -> QueryMeasurement:
-    """A shallow copy carrying the candidate's running fitness, the archive run the row lands in and
-    the cell it measured — the ledger's copy. The persisted results keep the clean result, not this
-    copy: an archived row is already filed under its run."""
+    """A shallow copy carrying the candidate's running fitness and the archive run the row lands
+    in — the ledger's copy. The persisted results keep the clean result, not this copy: an archived
+    row is already filed under its run."""
     out = dict(result)
     out["_running"] = running
     out["run_id"] = run_id
-    if cell is not None:
-        out["cell_key"] = cell
     return cast(QueryMeasurement, out)
 
 
@@ -282,6 +281,14 @@ class QueryLoopState:
     # The replays already priced when the walk opened: none waits on the ceiling and no spend stop
     # lands on one.
     rereads: frozenset[int]
+
+    def priced(self, sample: Sample) -> None:
+        """Mark this sample's cell priced — billed fresh or metered as a replay. Said on the ledger
+        the first time, which is where a later launch learns it."""
+        cell = self.cell_keys.get(sample.id)
+        if cell is not None and cell not in self.counted:
+            self.counted.add(cell)
+            emit_cell_priced(cell)
 
 
 def _armed_cells(session: Session) -> int:
@@ -495,6 +502,7 @@ class Walk:
                 _emit_cached_step_tokens(acq.result)
         elif acq.deprecated_display is not None and ctx.on_sample_scored is not None:
             ctx.on_sample_scored(acq.deprecated_display, acq.idx, n)
+        ctx.priced(acq.sample)
 
         self.results.append(acq.result)
         try:
@@ -535,11 +543,7 @@ class Walk:
                 self.consecutive_errors = 0
 
         if ctx.on_sample_scored is not None:
-            ctx.on_sample_scored(
-                _with_running(acq.result, running, ctx.run_id, cell_key), acq.idx, n
-            )
-        if cell_key is not None:
-            ctx.counted.add(cell_key)
+            ctx.on_sample_scored(_with_running(acq.result, running, ctx.run_id), acq.idx, n)
         return None
 
     def _abort_reason(self, result: QueryMeasurement) -> str:
@@ -610,6 +614,7 @@ class Walk:
         self.collect()
         horizon = self.horizon(self.n - 1)
         rows: list[QueryMeasurement] = []
+        paid: list[Sample] = []
         samples: list[Sample] = []
         for idx in sorted(self.finished):
             if horizon is not None and idx >= horizon:
@@ -622,9 +627,13 @@ class Walk:
                 break
             if acq.fresh:
                 rows.append(acq.result)
+                paid.append(acq.sample)
             samples.append(acq.sample)
         if rows:
             self.ctx.bank(self.results, rows)
+            # Billed already, and the resumed walk meets each as a replay.
+            for sample in paid:
+                self.ctx.priced(sample)
         return samples
 
     def end(

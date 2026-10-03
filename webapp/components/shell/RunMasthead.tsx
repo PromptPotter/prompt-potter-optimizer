@@ -22,6 +22,7 @@ import { pathLeaf } from "@/lib/ids";
 import { isMeasuring } from "@/lib/poll";
 import { cx } from "@/lib/cx";
 import { runPhaseLabel } from "@/lib/run-phase";
+import { TERMS } from "@/lib/terms";
 import { useWorkspace } from "@/lib/workspace";
 import type { Tab } from "@/lib/view-tab";
 
@@ -147,7 +148,7 @@ export function RunMasthead({
               {phaseBody}
             </button>
           )}
-          <span className="chip">
+          <Term className="chip" content={TERMS.masthead_best}>
             <span className="chip-lbl">Best</span>
             {fmtPct0(best)}
             {spark && (
@@ -160,7 +161,7 @@ export function RunMasthead({
                 <path className="line" d={spark.path} />
               </svg>
             )}
-          </span>
+          </Term>
           {/* The headline: the selection graded on held-out rows; BEST beside it is the optimizer's own. */}
           <span className="chip">
             <span className="chip-lbl">{bench.label}</span>

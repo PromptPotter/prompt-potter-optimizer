@@ -136,18 +136,34 @@ def _check_task_context_present(
 
 
 def _check_cap_funds_round(
-    config: CampaignConfig, search_pool: int, cell_usd: float | None
+    config: CampaignConfig,
+    search_pool: int,
+    cell_usd: float | None,
+    measured_cell_usd: float | None,
 ) -> PreflightWarning | None:
-    """A warning, never a block: ``cell_usd`` prices every retry at its token ceiling on the
-    dearest host and an eliminator cuts arms short, so a cap under the product can still close."""
+    """A warning, never a block. Priced at what a cell BILLED where the archive says: ``cell_usd``
+    is every retry at its token ceiling on the dearest host, a bound a cell bills far under."""
     cap = config.optimization.spend_budget_usd
-    if cap is None or cell_usd is None:
+    price = cell_usd if measured_cell_usd is None else measured_cell_usd
+    if cap is None or price is None:
         return None
     selected = select_optimizer(config.optimization)
     cells = selected.round_cells_ceiling(search_pool)
-    need = cells * cell_usd
+    need = cells * price
     if need <= cap:
         return None
+    if measured_cell_usd is not None:
+        return PreflightWarning(
+            code="spend_cap_below_round",
+            title=f"spend cap ${cap:.2f} is under one round's expected cost (${need:.2f})",
+            detail=(
+                f"One round of {selected.name} can measure {cells} cells off the {search_pool} "
+                f"search rows, and a cell of this dataset has billed ${measured_cell_usd:.5f} on "
+                f"these models, so a full round is expected to cost ${need:.2f} and this run to "
+                "stop on `spend_budget` inside round 1 unless an eliminator cuts arms short. Raise "
+                "it with `set-limits --max-usd`, or narrow the round in `optimization.nodes`."
+            ),
+        )
     return PreflightWarning(
         code="spend_cap_below_round",
         title=f"spend cap ${cap:.2f} is under one round's ceiling (${need:.2f})",
@@ -182,14 +198,16 @@ def run_preflight_checks(
     task_context: Mapping[str, Any] | None = None,
     *,
     cell_usd: float | None,
+    measured_cell_usd: float | None,
 ) -> list[PreflightWarning]:
     """``target_models`` are the resolved per-node target/scoring model ids, empty when the backend
-    owns the model; ``dataset`` is the search pool and ``cell_usd`` the most one of its cells can
-    bill, ``None`` where nothing prices it. Pure — no mutation, no I/O."""
+    owns the model; ``dataset`` is the search pool, ``cell_usd`` the most one of its cells can
+    bill and ``measured_cell_usd`` what one has billed, each ``None`` where nothing prices it.
+    Pure — no mutation, no I/O."""
     warnings: list[PreflightWarning] = []
     if (w := _check_sp_budget_vs_dataset(config, dataset)) is not None:
         warnings.append(w)
-    if (w := _check_cap_funds_round(config, len(dataset), cell_usd)) is not None:
+    if (w := _check_cap_funds_round(config, len(dataset), cell_usd, measured_cell_usd)) is not None:
         warnings.append(w)
     opt_model = select_optimizer(config.optimization).model()
     if (w := _check_optimizer_below_target(opt_model, target_models)) is not None:

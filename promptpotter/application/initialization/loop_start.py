@@ -20,7 +20,11 @@ from promptpotter.application.runner.campaign_ids import cycle_config_identity
 from promptpotter.application.runner.inner.spawn_context import retarget_inner_spawn
 from promptpotter.application.scoring.classification import build_degradation_checks
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
-from promptpotter.application.scoring.formula import compile_scorer, split_scoring_block
+from promptpotter.application.scoring.formula import (
+    cell_channels_of,
+    compile_scorer,
+    split_scoring_block,
+)
 from promptpotter.application.scoring.sample_measurement import cell_bound
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
@@ -40,6 +44,7 @@ from promptpotter.infrastructure.llm.telemetry import (
     reset_cycle_ledger,
     set_cycle_ledger,
 )
+from promptpotter.infrastructure.store import archive_queries
 from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 from promptpotter.judges import build_evaluators, judge_instrument
 from promptpotter.shared.errors import graceful
@@ -260,6 +265,22 @@ def diagnostic_trace(stores: Stores, hop: CycleHop | None) -> Iterator[None]:
         reset_cycle_ledger(token)
 
 
+def _measured_cell_usd(
+    session: Session, node_configs: list[tuple[str, dict[str, Any]]]
+) -> float | None:
+    """What a cell of this dataset billed on the models it runs on now, as the archive priced it;
+    ``None`` where no archived row answers."""
+    on_models = {name: {"model": cfg["model"]} for name, cfg in node_configs if cfg.get("model")}
+    billed = [
+        cost
+        for m in archive_queries.measurements_for_config(
+            session.store, on_models, dataset_name=session.dataset_name
+        )
+        if (cost := cell_channels_of(m.row).get("cost")) is not None
+    ]
+    return sum(billed) / len(billed) if billed else None
+
+
 async def _emit_preflight_and_init_session(
     config: CampaignConfig,
     dataset: list[Sample],
@@ -296,6 +317,7 @@ async def _emit_preflight_and_init_session(
         target_models,
         task_context=origin.framing.to_dict(),
         cell_usd=None if bound is None else bound.usd,
+        measured_cell_usd=_measured_cell_usd(session, target_node_configs),
     )
     for w in preflight_warnings:
         logger.warning("preflight[%s]: %s — %s", w.code, w.title, w.detail)

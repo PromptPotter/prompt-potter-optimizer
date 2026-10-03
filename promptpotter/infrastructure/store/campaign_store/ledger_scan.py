@@ -399,22 +399,24 @@ def _unworked_seconds(rows: list[dict[str, Any]]) -> float | None:
 def scan_ledger_run_ids(ledger_paths: Iterable[Path]) -> set[str]:
     """Every archive run these ledgers' scored samples landed in — what a line filed, which no
     run in the archive can say, since none names a campaign."""
-    return _scan_scored(ledger_paths, "run_id")
-
-
-def scan_ledger_cell_keys(ledger_paths: Iterable[Path]) -> set[str]:
-    """Every cell these ledgers' scored samples measured or replayed — each one already priced."""
-    return _scan_scored(ledger_paths, "cell_key")
-
-
-def _scan_scored(ledger_paths: Iterable[Path], key: str) -> set[str]:
     found: set[str] = set()
     for path in ledger_paths:
         for rec in iter_jsonl(path, record_types=frozenset({"sample_scored"})):
             if rec.get("record_type") != "snapshot" or rec.get("event") != "sample_scored":
                 continue
-            value = ((rec.get("payload") or {}).get("result") or {}).get(key)
+            value = ((rec.get("payload") or {}).get("result") or {}).get("run_id")
             if isinstance(value, str):
+                found.add(value)
+    return found
+
+
+def scan_ledger_cell_keys(ledger_paths: Iterable[Path]) -> set[str]:
+    """Every cell these ledgers' campaign already priced (``CellPricedRecord``)."""
+    found: set[str] = set()
+    for path in ledger_paths:
+        for rec in iter_jsonl(path, record_types=frozenset({"cell_priced"})):
+            value = rec.get("cell_key")
+            if rec.get("record_type") == "cell_priced" and isinstance(value, str):
                 found.add(value)
     return found
 
