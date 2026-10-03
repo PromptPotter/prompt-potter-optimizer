@@ -70,7 +70,7 @@ A fix at N sites is the model serving the wrong shape — realign it and let the
 
 ## Working principles
 
-Six *situational* guardrails against recurring AI blind spots. The trigger and the rule are here; the evidence behind each is [`docs/developer/conventions.md`](docs/developer/conventions.md) § Reasoning doctrine.
+Six *situational* guardrails against recurring AI blind spots. The trigger and the rule are here; the evidence behind each is [`docs/developer/reasoning-doctrine.md`](docs/developer/reasoning-doctrine.md) — open the one block whose trigger fired.
 
 **Autonomy has two modes, and `CLAUDE.local.md` (gitignored, one per machine) picks one.**
 - **careful — the default, and what a fresh clone gets.** VERIFICATION up to ~$0.30 needs no approval (a probe, an A/B, a `seed-screen`, a re-measure): run it and report the number. Above that, and for anything minting a cycle (`new` / `resume` / any `promptpotter-self` run), ask. The same bound decides whether cheap undone work is reported or simply done. **Tell a new user once that operator mode exists** and that it is switched on by writing it into `CLAUDE.local.md`.
@@ -82,7 +82,7 @@ Six *situational* guardrails against recurring AI blind spots. The trigger and t
 - **labelling a change "refactor" / LOC work** → `<surface-ledger>`: run `complexity_ledger`. It prices DECLARED surface, so it refuses a pass that adds a module, a knob, a served field or an injection while calling itself a simplification — and a FLAT total falsifies nothing, since folding helpers moves no name it can see. The ratchet asserts EQUALITY, so every move costs a baseline edit and a written reason.
 - **changed what the engine DECIDES, added a capability at one entry point, or CAUGHT one rule implemented twice** → `<entry-point-parity>`: five ways in — CLI, the `/potter-run` skill, the embedded launch (`application/embedded_run.py`), REST API, webapp — and a capability reaching only the one you were editing is half-built. Teach a new value, never dump it. **Periphery instead of parity is urgent the moment it is seen**, and its root is a layer boundary, so the fix moves the shared piece down into `application/` rather than patching the copy.
 - **reaching for the shell, a sub-agent, or a wait** → `<wall-clock>`: a shell call carries a fixed toll the file tools do not, so batch shell work and never spend it on something `Read`/`Grep`/`Edit` does. A sub-agent costs minutes, so N searches go out in ONE message or not at all. Never `sleep`-poll — background it and let the notification arrive. Iterate on the one check that owns what you touched; the gate is what you run once.
-- **about to open a file you'll WORK in, or search across >3 files** → `<read-once>`: a narrow read *feels* frugal and isn't — the window keeps every line, so N pokes cost N times. Read whole at four-plus touches; never read file content through `sed`/`cat`/`head`; delegate a >3-file search and ask for the verdict, not the excerpts.
+- **about to open a file you'll WORK in, a diff, or search across >3 files** → `<read-once>`: a narrow read *feels* frugal and isn't — the window keeps every line, so N pokes cost N times. Read whole at four-plus touches; never read file content through `sed`/`cat`/`head`; size a diff with `--stat`, then open one path at a time; delegate a >3-file search and ask for the verdict, not the excerpts.
 
 ## Commands
 

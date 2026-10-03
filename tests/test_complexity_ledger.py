@@ -1,6 +1,6 @@
 """Ratchet: the package's conceptual surface never moves unexamined, in either direction.
 
-The rules are ``docs/developer/conventions.md`` § Reasoning doctrine ``<surface-ledger>``; a
+The rules are ``docs/developer/reasoning-doctrine.md`` ``<surface-ledger>``; a
 move's reason goes in the COMMIT BODY, and ``git log -p`` is the history layer. This file is
 only where the surface stands now — never a target to reach.
 """

@@ -7,7 +7,7 @@ import {
 } from "react";
 
 // Commits on Enter or blur (blur alone when multi-line), never per keystroke — the rule of
-// `webapp/CLAUDE.md` § Component conventions.
+// `webapp/components/CLAUDE.md` § Component conventions.
 
 type Own = {
   value: string;

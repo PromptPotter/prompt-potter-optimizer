@@ -26,7 +26,7 @@ import { useWorkspace } from "@/lib/workspace";
 import type { Tab } from "@/lib/view-tab";
 
 // ONE header over every tab, owning "where is this run": no pane below repeats a fact it shows
-// (webapp/CLAUDE.md § Component conventions).
+// (webapp/components/CLAUDE.md § Component conventions).
 export function RunMasthead({
   tab,
   onSelectTab,

@@ -22,7 +22,7 @@ type Props = {
 );
 
 // The one clipboard copy. A payload is an object (pretty JSON), a string, or a thunk for either;
-// never host one inside a LABEL (webapp/CLAUDE.md § Component conventions).
+// never host one inside a LABEL (webapp/components/CLAUDE.md § Component conventions).
 export function CopyButton({ data, title = "Copy as JSON", choices, children, disabled }: Props) {
   const [copied, setCopied] = useState(false);
   // Every host frames this in something clickable (a `<summary>`, a selectable row); swallowed here

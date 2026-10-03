@@ -19,7 +19,7 @@ import {
 import type { PipelineStatus } from "@/lib/types";
 
 // The one node-config editor for every host; `mode` picks only the value transport. Governed by
-// `webapp/CLAUDE.md` § Component conventions (an axis is a `ValueList`; gate on the fact, not a callback).
+// `webapp/components/CLAUDE.md` § Component conventions (an axis is a `ValueList`; gate on the fact, not a callback).
 export function NodeConfigEditor(props: {
   mode: ConfigMode;
   schema: Record<string, NodeConfigParam[]> | null;

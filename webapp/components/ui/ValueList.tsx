@@ -6,7 +6,7 @@ import { Popover } from "./Popover";
 import s from "./ValueList.module.css";
 
 // The one widget for an enumerable axis: position 1 is the start value, the ticks are the
-// permitted set, each drawn only when its callback/prop is passed (webapp/CLAUDE.md § an AXIS).
+// permitted set, each drawn only when its callback/prop is passed (webapp/components/CLAUDE.md § an AXIS).
 export function ValueList({
   name,
   values,
