@@ -1,0 +1,1718 @@
+WARNING: This origin has already been run as cycle cycle_c15deaa5a571 in campaign(s) justlogic-d234__374f7b — a fresh `new` re-measures the identical seed. `resume` continues one of those instead; `new` is for an origin you have CHANGED (optimizer prompt, config, or dataset).
+✓ campaign      — minted justlogic-d234__81a5f7
+✓ backend       — reachable at http://127.0.0.1:8000
+✓ dataset       — justlogic-d234 (600 queries)
+✓ pipeline      — termnorm vv1.1.1 · 1 node (llm_only)
+Session: C:\Users\dsacc\Desktop\PromptPotter\prompt-potter-optimizer\.scratch\gui-real\projects\197ee2cf2aea7b14\sessions\s_d9d534a7
+Campaign: C:\Users\dsacc\Desktop\PromptPotter\prompt-potter-optimizer\.scratch\gui-real\projects\197ee2cf2aea7b14\campaigns\justlogic-d234__81a5f7
+✓ origin        — launching origin scoring
+Readout: C:\Users\dsacc\Desktop\PromptPotter\prompt-potter-optimizer\.scratch\gui-real\projects\197ee2cf2aea7b14\campaigns\justlogic-d234__81a5f7\cycles\cycle_c15deaa5a571\readout.log · 2026-09-28 18:50:12
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ROUND 0 — ORIGIN                                    C0 · campaign root
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  C0/1  [36mOrigin from C:\Users\dsacc\Desktop\PromptPotter\prompt-potter-optimizer\datasets\justlogic-d234/prompts/ (llm_only)[0m
+  [2mshared order:[0m #000, #002, #003, …  (40 samples, win-opportunities first; 0 candidate priors)
+  [2m⇉ sample look-ahead depth 1 — 40 samples run one at a time; arm it from the browser to overlap them[0m
+  [  1]   4.2s #000 MISS --/1 [ai]📖 io=635/218 -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [  2]   0.8s #002 MISS --/1 [ai]📖 io=717/290 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [  3]   0.5s #003 MISS --/1 [ai]📖 io=550/205 -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [  4]   0.9s #004 HIT [ai]📖 io=429/407 -> 'TRUE' gt:'TRUE' q:'Premises: The …'
+  [  5]   0.6s #005 HIT [ai]📖 io=534/175 -> 'FALSE' gt:'FALSE' q:'Premises: So l…'
+  [  6]   1.0s #006 MISS --/1 [ai]📖 io=543/470 -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [  7]   0.6s #007 HIT [ai]📖 io=573/131 -> 'Uncertain' gt:'Uncertain' q:'Premises: At l…'
+  [  8]   1.1s #009 MISS --/1 [ai]📖 io=499/329 -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [  9]   0.7s #010 HIT [ai]📖 io=591/213 -> 'Uncertain' gt:'Uncertain' q:'Premises: Eith…'
+  [ 10]   1.0s #011 MISS --/1 [ai]📖 io=540/380 -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 11]   0.9s #012 HIT [ai]📖 io=572/424 -> 'Uncertain' gt:'Uncertain' q:'Premises: It i…'
+  [ 12]   0.9s #013 MISS --/1 [ai]📖 io=538/190 -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 13]   0.4s #014 MISS --/1 [ai]📖 io=517/136 -> 'TRUE' gt:'Uncertain' q:'Premises: Shou…'
+  [ 14]   0.8s #016 HIT [ai]📖 io=609/159 -> 'FALSE' gt:'FALSE' q:'Premises: Assu…'
+  [ 15]   1.2s #017 MISS --/1 [ai]📖 io=585/234 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 16]   0.6s #020 MISS --/1 [ai]📖 io=533/149 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 17]   0.6s #021 MISS --/1 [ai]📖 io=564/116 -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 18]   0.9s #023 HIT [ai]📖 io=548/142 -> 'Uncertain' gt:'Uncertain' q:'Premises: Shou…'
+  [ 19]   0.6s #024 HIT [ai]📖 io=622/128 -> 'Uncertain' gt:'Uncertain' q:'Premises: If e…'
+  [ 20]   0.4s #025 HIT [ai]📖 io=461/115 -> 'Uncertain' gt:'Uncertain' q:'Premises: The …'
+  [ 21]   0.6s #026 HIT [ai]📖 io=465/152 -> 'Uncertain' gt:'Uncertain' q:'Premises: The …'
+  [ 22]   0.7s #027 MISS --/1 [ai]📖 io=624/362 -> 'TRUE' gt:'FALSE' q:'Premises: When…'
+  [ 23]   0.6s #028 MISS --/1 [ai]📖 io=485/190 -> 'FALSE' gt:'TRUE' q:'Premises: It i…'
+  [ 24]   0.9s #029 HIT [ai]📖 io=505/422 -> 'TRUE' gt:'TRUE' q:'Premises: It i…'
+  [ 25]   0.7s #030 MISS --/1 [ai]📖 io=478/195 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 26]   0.9s #031 MISS --/1 [ai]📖 io=466/425 -> 'Uncertain' gt:'FALSE' q:'Premises: On t…'
+  [ 27]   0.8s #032 HIT [ai]📖 io=514/194 -> 'FALSE' gt:'FALSE' q:'Premises: On t…'
+  [ 28]   0.7s #033 MISS --/1 [ai]📖 io=455/244 -> 'Uncertain' gt:'TRUE' q:'Premises: If b…'
+  [ 29]   0.7s #034 MISS --/1 [ai]📖 io=433/312 -> 'TRUE' gt:'FALSE' q:'Premises: It i…'
+  [ 30]   0.9s #035 MISS --/1 [ai]📖 io=479/365 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 31]   0.7s #036 HIT [ai]📖 io=566/262 -> 'FALSE' gt:'FALSE' q:'Premises: One …'
+  [ 32]   0.5s #037 MISS --/1 [ai]📖 io=613/207 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 33]   0.6s #038 HIT [ai]📖 io=550/155 -> 'Uncertain' gt:'Uncertain' q:'Premises: Ther…'
+  [ 34]   0.7s #039 HIT [ai]📖 io=473/233 -> 'Uncertain' gt:'Uncertain' q:'Premises: Assu…'
+  [ 35]   0.5s #040 MISS --/1 [ai]📖 io=464/96 -> 'FALSE' gt:'TRUE' q:'Premises: Give…'
+  [ 36]   0.8s #042 HIT [ai]📖 io=406/338 -> 'Uncertain' gt:'Uncertain' q:'Premises: The …'
+  [ 37]   0.6s #044 MISS --/1 [ai]📖 io=559/137 -> 'Uncertain' gt:'FALSE' q:'Premises: Ther…'
+  [ 38]   0.5s #046 MISS --/1 [ai]📖 io=492/173 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 39]   0.7s #048 MISS --/1 [ai]📖 io=483/255 -> 'Uncertain' gt:'FALSE' q:'Premises: Give…'
+  [ 40]   0.7s #049 MISS --/1 [ai]📖 io=722/335 -> 'Uncertain' gt:'TRUE' q:'Premises: Ther…'
+  ┌─ C0/1 ────────────────────────────────── 40.0% [24.6%, 55.4%] ─┐
+  │  40 samples (40📖)                                              │
+  └─ composite_fitness=0.5161 ─────────────────────────────────────┘
+  [32m★ leader: C0 40.0%[0m
+WARNING: preflight[config_coupling.resubset_subset_relative_on_thin_bank]: config coupling [info]: optimization.nodes.adaptive_queue.config.per_round_resubset, optimization.elimination_n_min — per_round_resubset=ON re-picks the scored subset per candidate. Every cross-round comparator reads ONE anchored δ ruler in θ — the stall replayer, c0_ok, the round-winner election and PoBB elimination all via fit_theta_given_delta on cycle.difficulty — and that ruler is EXTENDED to cover each round's new cells, so the accuracy-space collision is resolved. Resubset is comparability-coherent in θ, with TWO residuals. WARMTH: below elimination_n_min banked samples the ruler stays flat and θ is logit-accuracy on each arm's OWN subset, so those rounds are subset-relative until it warms. BAND: the acquisition buys the cells whose δ sits nearest the leader's θ, which against a wide bank collapses onto a narrow δ range — inside it every cell is equally hard, so θ reduces to logit-accuracy plus a constant while the ruler is warm and every id matches, which makes this the silent one. Turning resubset OFF freezes the panel to the campaign-start prefix, which removes the band residual by forcing the same cells into every panel. A cell missing from a WARM ruler is neither residual — it raises.
+
+[33m⚠ [1mconfig coupling [info]: optimization.nodes.adaptive_queue.config.per_round_resubset, optimization.elimination_n_min[0m
+    [33mper_round_resubset=ON re-picks the scored subset per candidate. Every cross-round comparator reads ONE anchored δ ruler in θ — the stall replayer, c0_ok, the round-winner election and PoBB elimination all via fit_theta_given_delta on cycle.difficulty — and that ruler is EXTENDED to cover each round's new cells, so the accuracy-space collision is resolved. Resubset is comparability-coherent in θ, with TWO residuals. WARMTH: below elimination_n_min banked samples the ruler stays flat and θ is logit-accuracy on each arm's OWN subset, so those rounds are subset-relative until it warms. BAND: the acquisition buys the cells whose δ sits nearest the leader's θ, which against a wide bank collapses onto a narrow δ range — inside it every cell is equally hard, so θ reduces to logit-accuracy plus a constant while the ruler is warm and every id matches, which makes this the silent one. Turning resubset OFF freezes the panel to the campaign-start prefix, which removes the band residual by forcing the same cells into every panel. A cell missing from a WARM ruler is neither residual — it raises.[0m
+WARNING: Skipping Langfuse cloud dataset registration for 480 items (rate-limit risk). Use the dedicated Langfuse sync cell instead.
+  [32m✓[0m Initialized  origin=40.0%  cycle=cycle_c15dea  samples=480  bench=100 held out  obs=ON
+    Starting fresh (no prior rounds for this cycle)  — starting at round 1  (task_context=8 keys)
+  [ 41]   0.6s #001 HIT [ai]📖 io=500/182 -> 'Uncertain' gt:'Uncertain' q:'Premises: Prov…'
+  [ 42]   0.6s #008 MISS --/1 [ai]📖 io=567/122 -> 'Uncertain' gt:'FALSE' q:'Premises: Shou…'
+  [ 43]   0.4s #015 HIT [ai]📖 io=478/153 -> 'FALSE' gt:'FALSE' q:'Premises: Once…'
+  [ 44]   0.4s #018 HIT [ai]📖 io=502/138 -> 'Uncertain' gt:'Uncertain' q:'Premises: Assu…'
+  [ 45]   1.0s #019 MISS --/1 [ai]📖 io=554/242 -> 'Uncertain' gt:'FALSE' q:'Premises: Once…'
+  [ 46]   1.0s #022 MISS --/1 [ai]📖 io=457/262 -> 'Uncertain' gt:'TRUE' q:'Premises: head…'
+  [ 47]   0.9s #041 HIT [ai]📖 io=510/188 -> 'TRUE' gt:'TRUE' q:'Premises: At l…'
+  [ 48]   0.6s #043 MISS --/1 [ai]📖 io=633/141 -> 'TRUE' gt:'FALSE' q:'Premises: On t…'
+  [ 49]   0.9s #045 MISS --/1 [ai]📖 io=415/203 -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 50]   0.5s #047 HIT [ai]📖 io=507/133 -> 'Uncertain' gt:'Uncertain' q:'Premises: On t…'
+  [ 51]   0.5s #051 MISS --/1 [ai]📖 io=484/168 -> 'FALSE' gt:'TRUE' q:'Premises: The …'
+  [ 52]   1.6s #060 HIT [ai]📖 io=948/656 -> 'TRUE' gt:'TRUE' q:'Premises: So l…'
+        [33m⚠ llm_only: finish_reason=error reasoning_chars=2227[0m
+        [33m⚠ llm_only: schema_repair attempt=1: Response was not valid JSON.[0m
+  [ 53]   0.9s #061 MISS --/1 [ai]📖 io=563/302 -> 'Uncertain' gt:'FALSE' q:'Premises: The …'
+  [ 54]   0.8s #063 MISS --/1 [ai]📖 io=446/182 -> 'TRUE' gt:'FALSE' q:'Premises: Give…'
+  [ 55]   1.5s #080 MISS --/1 [ai]📖 io=502/354 -> 'Uncertain' gt:'TRUE' q:'Premises: The …'
+  [ 56]   0.6s #087 MISS --/1 [ai]📖 io=482/153 -> 'Uncertain' gt:'FALSE' q:'Premises: The …'
+  [ 57]   0.7s #089 MISS --/1 [ai]📖 io=560/164 -> 'Uncertain' gt:'TRUE' q:'Premises: On t…'
+  [ 58]   1.0s #093 MISS --/1 [ai]📖 io=488/270 -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 59]   0.7s #104 HIT [ai]📖 io=593/141 -> 'Uncertain' gt:'Uncertain' q:'Premises: So l…'
+  [ 60]   1.0s #110 HIT [ai]📖 io=447/574 -> 'FALSE' gt:'FALSE' q:'Premises: Shou…'
+  [ 61]   1.1s #124 MISS --/1 [ai]📖 io=465/264 -> 'Uncertain' gt:'TRUE' q:'Premises: Some…'
+  [ 62]   0.9s #134 HIT [ai]📖 io=521/144 -> 'Uncertain' gt:'Uncertain' q:'Premises: We k…'
+  [ 63]   1.1s #136 HIT [ai]📖 io=516/156 -> 'Uncertain' gt:'Uncertain' q:'Premises: So l…'
+  [ 64]   1.2s #138 MISS --/1 [ai]📖 io=650/110 -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [ 65]   0.5s #144 MISS --/1 [ai]📖 io=438/146 -> 'Uncertain' gt:'TRUE' q:'Premises: So l…'
+  [ 66]   0.7s #145 MISS --/1 [ai]📖 io=499/268 -> 'Uncertain' gt:'FALSE' q:'Premises: Shou…'
+  [ 67]   0.9s #155 MISS --/1 [ai]📖 io=484/437 -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [ 68]   0.9s #157 HIT [ai]📖 io=406/304 -> 'TRUE' gt:'TRUE' q:'Premises: The …'
+  [ 69]   0.6s #160 MISS --/1 [ai]📖 io=550/150 -> 'Uncertain' gt:'TRUE' q:'Premises: Shou…'
+  [ 70]   1.0s #162 MISS --/1 [ai]📖 io=502/515 -> 'TRUE' gt:'FALSE' q:'Premises: We c…'
+  [ 71]   0.6s #166 MISS --/1 [ai]📖 io=550/157 -> 'Uncertain' gt:'FALSE' q:'Premises: When…'
+  [ 72]   0.9s #183 MISS --/1 [ai]📖 io=487/295 -> 'Uncertain' gt:'FALSE' q:'Premises: Shou…'
+  [ 73]   0.8s #188 HIT [ai]📖 io=400/296 -> 'Uncertain' gt:'Uncertain' q:'Premises: When…'
+  [ 74]   0.6s #192 MISS --/1 [ai]📖 io=624/177 -> 'FALSE' gt:'TRUE' q:'Premises: Ther…'
+  [ 75]   0.9s #194 HIT [ai]📖 io=532/406 -> 'FALSE' gt:'FALSE' q:'Premises: We k…'
+  [ 76]   1.2s #195 HIT [ai]📖 io=424/332 -> 'FALSE' gt:'FALSE' q:'Premises: One …'
+  [ 77]   0.6s #202 HIT [ai]📖 io=492/218 -> 'FALSE' gt:'FALSE' q:'Premises: It i…'
+  [ 78]   0.6s #213 HIT [ai]📖 io=455/149 -> 'Uncertain' gt:'Uncertain' q:'Premises: Prov…'
+  [ 79]   0.8s #214 MISS --/1 [ai]📖 io=513/375 -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 80]   0.5s #216 MISS --/1 [ai]📖 io=450/184 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 81]   0.7s #218 MISS --/1 [ai]📖 io=514/231 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 82]   1.6s #220 MISS --/1 [ai]📖 io=540/129 -> 'Uncertain' gt:'TRUE' q:'Premises: If h…'
+  [ 83]   0.7s #230 HIT [ai]📖 io=565/154 -> 'Uncertain' gt:'Uncertain' q:'Premises: Prov…'
+  [ 84]   0.6s #232 MISS --/1 [ai]📖 io=462/204 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 85]   0.5s #237 MISS --/1 [ai]📖 io=641/165 -> 'Uncertain' gt:'TRUE' q:'Premises: Shou…'
+  [ 86]   0.8s #254 MISS --/1 [ai]📖 io=505/305 -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 87]   0.8s #273 HIT [ai]📖 io=569/154 -> 'Uncertain' gt:'Uncertain' q:'Premises: Ther…'
+  [ 88]   0.5s #280 HIT [ai]📖 io=534/129 -> 'FALSE' gt:'FALSE' q:'Premises: Assu…'
+  [ 89]   0.7s #284 MISS --/1 [ai]📖 io=476/180 -> 'Uncertain' gt:'TRUE' q:'Premises: Eith…'
+  [ 90]   0.7s #289 HIT [ai]📖 io=510/262 -> 'FALSE' gt:'FALSE' q:'Premises: It i…'
+  [ 91]   0.8s #295 HIT [ai]📖 io=506/131 -> 'Uncertain' gt:'Uncertain' q:'Premises: Shou…'
+  [ 92]   0.6s #297 HIT [ai]📖 io=467/147 -> 'Uncertain' gt:'Uncertain' q:'Premises: We k…'
+  [ 93]   0.8s #305 MISS --/1 [ai]📖 io=417/346 -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 94]   0.8s #315 HIT [ai]📖 io=440/176 -> 'Uncertain' gt:'Uncertain' q:'Premises: When…'
+  [ 95]   1.7s #322 HIT [ai]📖 io=452/139 -> 'Uncertain' gt:'Uncertain' q:'Premises: Give…'
+  [ 96]   0.6s #330 HIT [ai]📖 io=592/181 -> 'Uncertain' gt:'Uncertain' q:'Premises: Give…'
+  [ 97]   0.7s #331 MISS --/1 [ai]📖 io=583/147 -> 'Uncertain' gt:'TRUE' q:'Premises: On t…'
+  [ 98]   1.1s #336 HIT [ai]📖 io=487/153 -> 'Uncertain' gt:'Uncertain' q:'Premises: It i…'
+  [ 99]   0.8s #340 MISS --/1 [ai]📖 io=704/219 -> 'Uncertain' gt:'TRUE' q:'Premises: Ther…'
+  [100]   0.7s #352 MISS --/1 [ai]📖 io=519/205 -> 'Uncertain' gt:'TRUE' q:'Premises: We k…'
+  [101]   1.8s #355 HIT [ai]📖 io=499/180 -> 'FALSE' gt:'FALSE' q:'Premises: It i…'
+  [102]   0.7s #358 MISS --/1 [ai]📖 io=534/288 -> 'FALSE' gt:'TRUE' q:'Premises: Once…'
+  [103]   0.6s #362 HIT [ai]📖 io=565/156 -> 'Uncertain' gt:'Uncertain' q:'Premises: At l…'
+  [104]   0.6s #367 MISS --/1 [ai]📖 io=442/136 -> 'Uncertain' gt:'TRUE' q:'Premises: Eith…'
+  [105]   0.4s #376 HIT [ai]📖 io=561/138 -> 'FALSE' gt:'FALSE' q:'Premises: Assu…'
+  [106]   0.8s #377 MISS --/1 [ai]📖 io=523/275 -> 'Uncertain' gt:'TRUE' q:'Premises: At l…'
+  [107]   0.8s #380 HIT [ai]📖 io=463/209 -> 'TRUE' gt:'TRUE' q:'Premises: The …'
+  [108]   1.3s #383 MISS --/1 [ai]📖 io=502/353 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [109]   0.5s #397 HIT [ai]📖 io=556/178 -> 'Uncertain' gt:'Uncertain' q:'Premises: Prov…'
+  [110]   0.5s #417 MISS --/1 [ai]📖 io=453/209 -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [111]   0.7s #419 MISS --/1 [ai]📖 io=571/212 -> 'FALSE' gt:'TRUE' q:'Premises: When…'
+  [112]   1.7s #425 MISS --/1 [ai]📖 io=489/260 -> 'Uncertain' gt:'FALSE' q:'Premises: The …'
+  [113]   0.7s #427 HIT [ai]📖 io=476/406 -> 'FALSE' gt:'FALSE' q:'Premises: When…'
+  [114]   0.6s #442 HIT [ai]📖 io=549/134 -> 'Uncertain' gt:'Uncertain' q:'Premises: It i…'
+  [115]   0.8s #445 HIT [ai]📖 io=605/261 -> 'TRUE' gt:'TRUE' q:'Premises: It i…'
+  [116]   0.8s #453 MISS --/1 [ai]📖 io=484/299 -> 'Uncertain' gt:'FALSE' q:'Premises: We k…'
+  [117]   0.5s #457 HIT [ai]📖 io=544/145 -> 'Uncertain' gt:'Uncertain' q:'Premises: Give…'
+  [118]   0.9s #462 HIT [ai]📖 io=430/330 -> 'TRUE' gt:'TRUE' q:'Premises: At l…'
+  [119]   0.5s #478 HIT [ai]📖 io=436/177 -> 'Uncertain' gt:'Uncertain' q:'Premises: Some…'
+  [120]   0.4s #484 HIT [ai]📖 io=612/147 -> 'Uncertain' gt:'Uncertain' q:'Premises: Thos…'
+  [121]   0.6s #487 MISS --/1 [ai]📖 io=571/126 -> 'Uncertain' gt:'FALSE' q:'Premises: On t…'
+  [122]   0.8s #488 MISS --/1 [ai]📖 io=601/263 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [123]   0.7s #498 HIT [ai]📖 io=418/150 -> 'Uncertain' gt:'Uncertain' q:'Premises: The …'
+  [124]   0.6s #500 MISS --/1 [ai]📖 io=454/363 -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [125]   0.7s #502 MISS --/1 [ai]📖 io=492/167 -> 'Uncertain' gt:'TRUE' q:'Premises: The …'
+  [126]   0.6s #504 MISS --/1 [ai]📖 io=582/167 -> 'Uncertain' gt:'TRUE' q:'Premises: Ther…'
+  [127]   0.4s #505 HIT [ai]📖 io=468/139 -> 'Uncertain' gt:'Uncertain' q:'Premises: Eith…'
+  [128]   0.6s #517 MISS --/1 [ai]📖 io=486/277 -> 'Uncertain' gt:'TRUE' q:'Premises: Give…'
+  [129]   0.6s #524 HIT [ai]📖 io=652/186 -> 'TRUE' gt:'TRUE' q:'Premises: Eith…'
+  [130]   0.7s #535 HIT [ai]📖 io=514/213 -> 'FALSE' gt:'FALSE' q:'Premises: Prov…'
+  [131]   0.8s #554 MISS --/1 [ai]📖 io=483/169 -> 'Uncertain' gt:'TRUE' q:'Premises: At l…'
+  [132]   1.1s #555 HIT [ai]📖 io=474/127 -> 'Uncertain' gt:'Uncertain' q:'Premises: Assu…'
+  [133]   0.8s #564 HIT [ai]📖 io=519/365 -> 'Uncertain' gt:'Uncertain' q:'Premises: At l…'
+  [134]   1.3s #567 MISS --/1 [ai]📖 io=628/253 -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [135]   1.0s #568 MISS --/1 [ai]📖 io=528/547 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [136]   0.7s #569 MISS --/1 [ai]📖 io=511/145 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [137]   1.1s #572 HIT [ai]📖 io=503/155 -> 'Uncertain' gt:'Uncertain' q:'Premises: We k…'
+  [138]   1.1s #588 MISS --/1 [ai]📖 io=428/269 -> 'Uncertain' gt:'TRUE' q:'Premises: We k…'
+  [139]   1.2s #596 MISS --/1 [ai]📖 io=523/587 -> 'Uncertain' gt:'TRUE' q:'Premises: If t…'
+  [140]   0.8s #598 MISS --/1 [ai]📖 io=588/311 -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [2m✓ l1_critique_r0 · 0.0s · 5148 tok · 92% reasoning · replayed[0m
+
+├─ ROUND 0 SUMMARY ──────────────────────────────────────────────────────┤
+│  Round    Accuracy     n  Composite  Ability θ     Trend
+│    0        40.0%    40    0.5161     +0.062         -
+│  
+│  composite_fitness = 0.5161   reference=0.5161  Δ+0.0000
+│  formula:  fitness * (0.92 + 0.08 * 692.0 / max(692.0, tokens))
+│    tokens=776.375
+│  accuracy: 40.0% of 40 samples  |  evaluated: 1 candidates
+│  Recall: top-1=40% top-5=40%
+│  [33m⚠ No improvement (0/0 patience)[0m
+├────────────────────────────────────────────────────────────────────────┤
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ROUND 1/999                                             L2 every round
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+├─ GENERATE ─────────────────────────────────────────────────────────────┤
+│  Parent accuracy 40.0%
+│  Parent prompt   Decide whether the claim follows from the...
+│  Candidates      3   Prior critique: from R0
+│  Model           openai/gpt-6-luna
+├────────────────────────────────────────────────────────────────────────┤
+  [2m↻ optimizer call: l1_generate_r1 · openai/gpt-6-luna · 13,189c prompt[0m
+  [2m  · l1_generate_r1 still waiting · 11s · provider openai/gpt-6-luna has not answered[0m
+  [2m✓ l1_generate_r1 · 20.0s · 5500 tok · 74% reasoning · 0% prefix cached[0m
+  [32m✓[0m 3 candidates generated (from LLM)
+
+│  [36mRound 1 SPs:[0m
+│                                                 Start  Parent  C1.1  C1.2  C1.3  
+│  [2m─── llm_only ──────────────────────────────────[0m
+│  llm_only.output_schema_descriptions.reasoning  -      -       -     -     [a]   
+│                                llm_only.prompt  [b]    [c]     ·     ·     ·     
+│  [2m─── prompt ────────────────────────────────────[0m
+│                                    instruction  -      -       -     [d]   -     
+│                                 thinking_style  -      -       [e]   -     -     
+│  
+│  [36mValues[0m [2m— full text in round_0001.json::candidate_scores[].prompt_fields / .pipeline_params, joined on label[0m
+│    [a] llm_only.output_schema_descriptions.reasoning      216 B  [2mC1.3[0m
+│    [b] llm_only.prompt                                    257 B  [2mStart[0m
+│    [c] llm_only.prompt                                    508 B  [2mParent[0m
+│    [d] instruction                                        210 B  [2mC1.2[0m
+│    [e] thinking_style                                     239 B  [2mC1.1[0m
+
+├─ MEASURE ──────────────────────── l1_score · 3 candidates on 34 cells ─┤
+  C1.1/3  [36mAdds an explicit polarity-and-conditional check for cases where a conditional is mistaken for a direct assertion. This…[0m
+  [2mshared order:[0m #000, #002, #003, …  (34 samples, win-opportunities first; 1 candidate prior)
+  [  1]   0.8s #000 MISS --/1 io=675/204 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [  2]   0.7s #002 MISS --/1 io=757/239 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [  3]   0.8s #003 MISS --/1 io=590/281 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [  4]   1.1s #004 HIT io=469/444 c0% -> 'TRUE' gt:'TRUE' q:'Premises: The …'
+  [  5]   0.8s #006 HIT io=583/364 c0% -> 'FALSE' gt:'FALSE' q:'Premises: Eith…'
+  [  6]   1.0s #009 MISS --/1 io=539/419 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [  7]   0.7s #011 MISS --/1 io=580/249 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [  8]   1.2s #005 MISS --/1 io=574/690 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [2mpobb:[0m P(best)=49.3% @ q8  vs hardest=R0_win (P(c>p)=49.3%)  (of 1 prior)
+  [  9]   0.7s #013 MISS --/1 io=578/204 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 10]   1.1s #014 MISS --/1 io=557/607 c46% -> 'TRUE' gt:'Uncertain' q:'Premises: Shou…'
+  [ 11]   1.1s #017 MISS --/1 io=625/460 c41% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 12]   0.9s #007 HIT io=613/138 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: At l…'
+  [ 13]   0.7s #020 MISS --/1 io=573/183 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 14]   0.7s #021 MISS --/1 io=604/119 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 15]   1.0s #027 MISS --/1 io=664/347 c39% -> 'TRUE' gt:'FALSE' q:'Premises: When…'
+  [ 16]   1.1s #010 HIT io=631/210 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: Eith…'
+  [ 17]   1.0s #028 MISS --/1 io=525/570 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 18]   0.7s #030 MISS --/1 io=518/191 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 19]   3.6s #031 MISS --/1 io=423/441 c8% -> 'Uncertain' gt:'FALSE' q:'Premises: On t…'
+  [ 20]   0.9s #012 HIT io=612/407 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: It i…'
+  [ 21]   0.8s #033 MISS --/1 io=495/322 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: If b…'
+  [ 22]   1.1s #034 HIT io=473/523 c0% -> 'FALSE' gt:'FALSE' q:'Premises: It i…'
+  [ 23]   1.3s #035 HIT io=519/452 c49% -> 'FALSE' gt:'FALSE' q:'Premises: So l…'
+  [ 24]   0.5s #016 HIT io=649/159 c0% -> 'FALSE' gt:'FALSE' q:'Premises: Assu…'
+  [ 25]   0.9s #037 MISS --/1 io=653/272 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 26]   0.9s #023 HIT io=588/179 c44% -> 'Uncertain' gt:'Uncertain' q:'Premises: Shou…'
+  [ 27]   1.0s #024 HIT io=662/137 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: If e…'
+  [ 28]   0.5s #025 HIT io=501/119 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: The …'
+  [ 29]   0.7s #026 HIT io=505/152 c51% -> 'Uncertain' gt:'Uncertain' q:'Premises: The …'
+  [ 30]   1.3s #029 HIT io=545/680 c0% -> 'TRUE' gt:'TRUE' q:'Premises: It i…'
+  [ 31]   1.0s #032 HIT io=554/222 c0% -> 'FALSE' gt:'FALSE' q:'Premises: On t…'
+  [ 32]   0.7s #036 MISS --/1 io=606/231 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [ 33]   0.7s #038 HIT io=590/156 c43% -> 'Uncertain' gt:'Uncertain' q:'Premises: Ther…'
+  [ 34]   0.7s #039 HIT io=513/205 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: Assu…'
+  ┌─ C1.1/3 ──────────────────────────────── 47.1% [30.0%, 64.1%] ─┐
+  │  34 samples                                                    │
+  └─ composite_fitness=0.5682 ─────────────────────────────────────┘
+  [32m★ leader: C1.1 47.1%[0m
+  C1.2/3  [36mAdds branch-by-branch evaluation followed by recombination, targeting derivations abandoned after identifying an…[0m
+  [2mshared order:[0m #000, #002, #003, …  (34 samples, win-opportunities first; 2 candidate priors)
+  [ 35]   0.7s #000 MISS --/1 io=671/204 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 36]   0.8s #002 MISS --/1 io=753/265 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 37]   0.5s #003 MISS --/1 io=586/198 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 38]   1.0s #004 HIT io=465/594 c0% -> 'TRUE' gt:'TRUE' q:'Premises: The …'
+  [ 39]   0.8s #006 MISS --/1 io=579/198 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 40]   1.2s #009 MISS --/1 io=535/538 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 41]   1.6s #011 MISS --/1 io=576/572 c44% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 42]   1.0s #005 MISS --/1 io=570/396 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [2mpobb:[0m P(best)=29.9% @ q8  vs hardest=R0_win (P(c>p)=29.9%)  (of 2 priors)
+  [ 43]   0.9s #013 MISS --/1 io=574/245 c45% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 44]   1.0s #014 MISS --/1 io=553/705 c0% -> 'FALSE' gt:'Uncertain' q:'Premises: Shou…'
+  [ 45]   0.7s #017 MISS --/1 io=621/331 c41% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 46]   0.9s #007 HIT io=609/139 c42% -> 'Uncertain' gt:'Uncertain' q:'Premises: At l…'
+  [ 47]   0.7s #020 MISS --/1 io=569/182 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 48]   0.4s #021 MISS --/1 io=600/114 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 49]   0.6s #027 MISS --/1 io=660/211 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: When…'
+  [ 50]   1.1s #010 HIT io=627/213 c41% -> 'Uncertain' gt:'Uncertain' q:'Premises: Eith…'
+  [ 51]   0.6s #028 MISS --/1 io=521/284 c0% -> 'FALSE' gt:'TRUE' q:'Premises: It i…'
+  [ 52]   0.7s #030 MISS --/1 io=514/202 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 53]   1.2s #031 MISS --/1 io=502/568 c0% -> 'TRUE' gt:'FALSE' q:'Premises: On t…'
+  [ 54]   0.6s #012 HIT io=608/274 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: It i…'
+  [ 55]   0.8s #033 MISS --/1 io=491/234 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: If b…'
+  [ 56]   2.3s #034 HIT io=386/401 c8% -> 'FALSE' gt:'FALSE' q:'Premises: It i…'
+  [ 57]   1.2s #035 MISS --/1 io=515/358 c50% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 58]   0.4s #016 HIT io=645/156 c40% -> 'FALSE' gt:'FALSE' q:'Premises: Assu…'
+  [ 59]   0.8s #037 MISS --/1 io=649/329 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 60]   0.5s #023 HIT io=584/147 c44% -> 'Uncertain' gt:'Uncertain' q:'Premises: Shou…'
+  [ 61]   0.5s #024 HIT io=658/132 c39% -> 'Uncertain' gt:'Uncertain' q:'Premises: If e…'
+  [ 62]   0.6s #025 HIT io=497/117 c52% -> 'Uncertain' gt:'Uncertain' q:'Premises: The …'
+  [ 63]   0.6s #026 HIT io=501/152 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: The …'
+  [ 64]   1.0s #029 MISS --/1 io=541/447 c47% -> 'FALSE' gt:'TRUE' q:'Premises: It i…'
+  [ 65]   0.5s #032 HIT io=550/193 c47% -> 'FALSE' gt:'FALSE' q:'Premises: On t…'
+  [ 66]   4.1s #036 MISS --/1 io=519/612 c6% -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [ 67]   0.5s #038 HIT io=586/156 c44% -> 'Uncertain' gt:'Uncertain' q:'Premises: Ther…'
+  [ 68]   0.8s #039 HIT io=509/229 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: Assu…'
+  ┌─ C1.2/3 ──────────────────────────────── 38.2% [21.7%, 54.8%] ─┐
+  │  34 samples                                                    │
+  └─ composite_fitness=0.5002 ─────────────────────────────────────┘
+  [2m→ C1.2 38.2%  (-8.8% from C1.1)[0m
+  C1.3/3  [36mllm_only.output_schema_descriptions.reasoning: Show a compact derivation that accounts for every relevant premise: connect the premises that support the conclusion, preserving negations and quantifier scope. Do not stop before their consequences have been traced.[0m
+  [2mshared order:[0m #000, #002, #003, …  (34 samples, win-opportunities first; 3 candidate priors)
+  [ 69]   0.5s #000 MISS --/1 io=691/116 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 70]   0.8s #002 MISS --/1 io=773/266 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 71]   0.8s #003 MISS --/1 io=606/259 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 72]   1.1s #004 HIT io=485/454 c53% -> 'TRUE' gt:'TRUE' q:'Premises: The …'
+  [ 73]   0.7s #006 MISS --/1 io=599/330 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 74]   1.2s #009 MISS --/1 io=555/676 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 75]   1.1s #011 MISS --/1 io=596/646 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 76]   1.5s #005 MISS --/1 io=590/849 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [2mpobb:[0m P(best)=29.9% @ q8  vs hardest=R0_win (P(c>p)=29.9%)  (of 3 priors)
+  [ 77]   1.1s #013 MISS --/1 io=594/646 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 78]   0.7s #014 HIT io=573/394 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: Shou…'
+  [ 79]   1.1s #017 MISS --/1 io=641/441 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 80]   0.5s #007 HIT io=629/114 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: At l…'
+  [ 81]   0.7s #020 MISS --/1 io=589/178 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 82]   0.7s #021 MISS --/1 io=620/114 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 83]   0.8s #027 MISS --/1 io=680/326 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: When…'
+  [ 84]   0.8s #010 HIT io=647/197 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: Eith…'
+  [ 85]   0.7s #028 MISS --/1 io=541/151 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 86]   0.6s #030 MISS --/1 io=534/189 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 87]   1.0s #031 MISS --/1 io=522/553 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: On t…'
+  [ 88]   1.1s #012 HIT io=628/317 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: It i…'
+  [ 89]   1.1s #033 MISS --/1 io=511/328 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: If b…'
+  [ 90]   1.0s #034 MISS --/1 io=489/528 c0% -> 'TRUE' gt:'FALSE' q:'Premises: It i…'
+  [ 91]   1.1s #035 MISS --/1 io=535/497 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  ┌─ C1.3/3 ───────────────────────────────── 21.7% [4.5%, 39.0%] ─┐
+  │  [36mllm_only.output_schema_descriptions.reasoning: Show a compact[0m…│
+  │  [33m✂ eliminated q23/34  p_best=26.7% < eps=30%  vs C1.1 (of 3 pr[0m…│
+  └─ composite_fitness=0.3669 ─────────────────────────────────────┘
+  [2m→ C1.3 21.7%  (-25.3% from C1.1)[0m
+  [ 92]   4.2s #000 MISS --/1 [ai]📖 io=635/218 -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 93]   0.8s #002 MISS --/1 [ai]📖 io=717/290 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 94]   0.5s #003 MISS --/1 [ai]📖 io=550/205 -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 95]   0.9s #004 HIT [ai]📖 io=429/407 -> 'TRUE' gt:'TRUE' q:'Premises: The …'
+  [ 96]   0.6s #005 HIT [ai]📖 io=534/175 -> 'FALSE' gt:'FALSE' q:'Premises: So l…'
+  [ 97]   1.0s #006 MISS --/1 [ai]📖 io=543/470 -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 98]   0.6s #007 HIT [ai]📖 io=573/131 -> 'Uncertain' gt:'Uncertain' q:'Premises: At l…'
+  [ 99]   1.1s #009 MISS --/1 [ai]📖 io=499/329 -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [100]   0.7s #010 HIT [ai]📖 io=591/213 -> 'Uncertain' gt:'Uncertain' q:'Premises: Eith…'
+  [101]   1.0s #011 MISS --/1 [ai]📖 io=540/380 -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [102]   0.9s #012 HIT [ai]📖 io=572/424 -> 'Uncertain' gt:'Uncertain' q:'Premises: It i…'
+  [103]   0.9s #013 MISS --/1 [ai]📖 io=538/190 -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [104]   0.4s #014 MISS --/1 [ai]📖 io=517/136 -> 'TRUE' gt:'Uncertain' q:'Premises: Shou…'
+  [105]   0.8s #016 HIT [ai]📖 io=609/159 -> 'FALSE' gt:'FALSE' q:'Premises: Assu…'
+  [106]   1.2s #017 MISS --/1 [ai]📖 io=585/234 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [107]   0.6s #020 MISS --/1 [ai]📖 io=533/149 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [108]   0.6s #021 MISS --/1 [ai]📖 io=564/116 -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [109]   0.9s #023 HIT [ai]📖 io=548/142 -> 'Uncertain' gt:'Uncertain' q:'Premises: Shou…'
+  [110]   0.6s #024 HIT [ai]📖 io=622/128 -> 'Uncertain' gt:'Uncertain' q:'Premises: If e…'
+  [111]   0.4s #025 HIT [ai]📖 io=461/115 -> 'Uncertain' gt:'Uncertain' q:'Premises: The …'
+  [112]   0.6s #026 HIT [ai]📖 io=465/152 -> 'Uncertain' gt:'Uncertain' q:'Premises: The …'
+  [113]   0.7s #027 MISS --/1 [ai]📖 io=624/362 -> 'TRUE' gt:'FALSE' q:'Premises: When…'
+  [114]   0.6s #028 MISS --/1 [ai]📖 io=485/190 -> 'FALSE' gt:'TRUE' q:'Premises: It i…'
+  [115]   0.9s #029 HIT [ai]📖 io=505/422 -> 'TRUE' gt:'TRUE' q:'Premises: It i…'
+  [116]   0.7s #030 MISS --/1 [ai]📖 io=478/195 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [117]   0.9s #031 MISS --/1 [ai]📖 io=466/425 -> 'Uncertain' gt:'FALSE' q:'Premises: On t…'
+  [118]   0.8s #032 HIT [ai]📖 io=514/194 -> 'FALSE' gt:'FALSE' q:'Premises: On t…'
+  [119]   0.7s #033 MISS --/1 [ai]📖 io=455/244 -> 'Uncertain' gt:'TRUE' q:'Premises: If b…'
+  [120]   0.7s #034 MISS --/1 [ai]📖 io=433/312 -> 'TRUE' gt:'FALSE' q:'Premises: It i…'
+  [121]   0.9s #035 MISS --/1 [ai]📖 io=479/365 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [122]   0.7s #036 HIT [ai]📖 io=566/262 -> 'FALSE' gt:'FALSE' q:'Premises: One …'
+  [123]   0.5s #037 MISS --/1 [ai]📖 io=613/207 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [124]   0.6s #038 HIT [ai]📖 io=550/155 -> 'Uncertain' gt:'Uncertain' q:'Premises: Ther…'
+  [125]   0.7s #039 HIT [ai]📖 io=473/233 -> 'Uncertain' gt:'Uncertain' q:'Premises: Assu…'
+  [33m⚠ r1round 1 resolved nothing: every one of its 3 readable arms has a lift interval spanning 0 (best reaches +0.165 at its upper bound). An arm this round selects is the best of what it saw, not a measured improvement over its reference[0m
+  Scoreboard: C1.1=47.1% | C1.2=38.2% | C1.3=21.7% (eliminated)
+  [32m[1m✓ SELECTED C1.1[0m  47.1% (vs reference 44.1%, [32m+2.9%[0m)  p=0.66 (ns)
+  [2mwhy: C1.1 won on θ lift +0.083 (θ +0.255 vs parent +0.172, se 0.205); runner-up C1.2 at -0.205[0m
+  composite_fitness = 0.5682   reference=0.5487  Δ+0.0195
+  formula:  fitness * (0.92 + 0.08 * 692.0 / max(692.0, tokens))
+    tokens=885.853
+  [32m✓ selected C1.1[0m [2m— C1.1 won on θ lift +0.083 (θ +0.255 vs parent +0.172, se 0.205); runner-up C1.2 at -0.205[0m
+  [2m↻ optimizer call: l1_critique_r1 · openai/gpt-6-luna · 9,516c prompt[0m
+  [2m  · l1_critique_r1 still waiting · 10s · provider openai/gpt-6-luna has not answered[0m
+  [2m  · l1_critique_r1 still waiting · 20s · provider openai/gpt-6-luna has not answered[0m
+  [2m✓ l1_critique_r1 · 28.2s · 4828 tok · 93% reasoning · 0% prefix cached[0m
+
+├─ ROUND 1 SUMMARY — 2m 17s ─────────────────────────────────────────────┤
+│  Round    Accuracy     n  Composite  Ability θ     Trend
+│    0        40.0%    40    0.5161     +0.062         -
+│    1        47.1%    34    0.5682     +0.129    +0.068
+│  
+│  pobb P(best) @ q23: f1c372 50.0% | d0a3df 31.3%▲ | *ae2861* 26.7%▼
+│  composite_fitness = 0.5682   reference=0.5487  Δ+0.0195
+│  formula:  fitness * (0.92 + 0.08 * 692.0 / max(692.0, tokens))
+│    tokens=885.853
+│  accuracy: 47.1% of 34 samples  |  evaluated: 3 candidates
+│  lift vs reference: +0.029 [-0.106, +0.165]  |  [33mspans 0 — not separable from its reference[0m
+│  overlap (34 shared cells: C0 44.1%  →  C1.1 47.1%)
+│  Recall: top-1=47% top-5=47%
+│  [32m✓ Improvement detected, auto-continuing...[0m
+├────────────────────────────────────────────────────────────────────────┤
+
+├─ L2 REFINE CONTEXT ──────────────────────────────────────── L2 fire 1 ─┤
+│  L1 stalled 1 rounds  |  acc=47.1%  best=47.1%
+│  l1_overrides: (none)
+│  LLM analyzing failure patterns...
+├────────────────────────────────────────────────────────────────────────┤
+  [2m↻ optimizer call: l2_context_r1 · openai/gpt-6-luna · 7,617c prompt[0m
+  [2m✓ l2_context_r1 · 9.7s · 3237 tok · 87% reasoning · 0% prefix cached[0m
+WARNING: L2 layout accepted with reports — 1 outcome(s): l1_layout_voids_prefix
+  [32m✓[0m L2 decision: 0 param changes, l1_layout edited, axis=instruction
+    L2: The failure cluster is premise-inconsistency misclassification: sample “birch…
+  [36mL2 call[0m [2m→ .runtime/cache/rounds/round_NNNN.json::nodes.l2_context (prompt · response · usage)[0m
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ROUND 2/999                                             L2 every round
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+├─ GENERATE ─────────────────────────────────────────────────────────────┤
+│  Parent accuracy 47.1%
+│  Parent prompt   Decide whether the claim follows from the...
+│  Candidates      3   Prior critique: from R1
+│  Model           openai/gpt-6-luna
+├────────────────────────────────────────────────────────────────────────┤
+  [2m↻ optimizer call: l1_generate_r2 · openai/gpt-6-luna · 14,866c prompt[0m
+  [2m  · l1_generate_r2 still waiting · 10s · provider openai/gpt-6-luna has not answered[0m
+  [2m  · l1_generate_r2 still waiting · 20s · provider openai/gpt-6-luna has not answered[0m
+  [2m✓ l1_generate_r2 · 27.7s · 6583 tok · 78% reasoning · 0% prefix cached[0m
+  [32m✓[0m 3 candidates generated (from LLM)
+
+│  [36mRound 2 SPs:[0m
+│                   Start  Parent  C2.1  C2.2  C2.3  
+│  [2m─── llm_only ────[0m
+│  llm_only.prompt  [a]    [b]     ·     ·     ·     
+│  [2m─── prompt ──────[0m
+│      instruction  -      -       -     [c]   -     
+│      task_intent  [d]    ·       [e]   ·     ·     
+│   thinking_style  -      [f]     ·     ·     [g]   
+│  
+│  [36mValues[0m [2m— full text in round_0002.json::candidate_scores[].prompt_fields / .pipeline_params, joined on label[0m
+│    [a] llm_only.prompt      257 B  [2mStart[0m
+│    [b] llm_only.prompt      749 B  [2mParent[0m
+│    [c] instruction          179 B  [2mC2.2[0m
+│    [d] task_intent          184 B  [2mStart[0m
+│    [e] task_intent          311 B  [2mC2.1[0m
+│    [f] thinking_style       239 B  [2mParent[0m
+│    [g] thinking_style       228 B  [2mC2.3[0m
+
+├─ MEASURE ──────────────────────── l1_score · 3 candidates on 34 cells ─┤
+  C2.1/3  [36mTargets inconsistent-premise overclaiming by separating tests for the claim and its negation and blocking…[0m
+  [2mshared order:[0m #036, #005, #014, …  (34 samples, win-opportunities first; 1 candidate prior)
+  [  1]   1.1s #036 HIT io=630/270 c0% -> 'FALSE' gt:'FALSE' q:'Premises: One …'
+  [  2]   1.0s #005 MISS --/1 io=598/404 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [  3]   1.2s #014 HIT io=581/764 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: Shou…'
+  [  4]   0.8s #035 MISS --/1 io=543/434 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [  5]   0.7s #040 MISS --/1 io=528/387 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: Give…'
+  [  6]   1.8s #046 MISS --/1 io=473/303 c14% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [  7]   1.1s #044 MISS --/1 io=623/129 c41% -> 'Uncertain' gt:'FALSE' q:'Premises: Ther…'
+  [  8]   0.9s #006 MISS --/1 io=607/370 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [2mpobb:[0m P(best)=49.6% @ q8  vs hardest=R1_win (P(c>p)=49.6%)  (of 1 prior)
+  [  9]   0.9s #048 MISS --/1 io=547/348 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Give…'
+  [ 10]   0.7s #049 MISS --/1 io=786/232 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: Ther…'
+  [ 11]   0.8s #037 MISS --/1 io=677/192 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 12]   1.9s #034 MISS --/1 io=497/477 c52% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 13]   1.6s #030 MISS --/1 io=542/208 c47% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 14]   0.6s #021 MISS --/1 io=628/134 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 15]   0.7s #020 MISS --/1 io=597/166 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 16]   0.8s #029 MISS --/1 io=569/375 c0% -> 'FALSE' gt:'TRUE' q:'Premises: It i…'
+  ┌─ C2.1/3 ───────────────────────────────── 12.5% [0.0%, 29.2%] ─┐
+  │  16 samples [33m⚠ eliminated 16/34[0m                                 │
+  │  [33m✂ eliminated q16/34  p_best=19.1% < eps=30%  vs R1_winner (of[0m…│
+  └─ composite_fitness=0.2935 ─────────────────────────────────────┘
+  [32m★ leader: C2.1 12.5%[0m
+  C2.2/3  [36mTargets premature stopping by requiring repeated passes over all premises until inference closure before…[0m
+  [2mshared order:[0m #036, #005, #014, …  (34 samples, win-opportunities first; 1 candidate prior)
+  [ 17]   0.5s #036 MISS --/1 io=638/148 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [ 18]   0.9s #005 MISS --/1 io=606/350 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 19]   1.0s #014 HIT io=589/488 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: Shou…'
+  [ 20]   1.0s #035 MISS --/1 io=551/493 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 21]   0.6s #040 MISS --/1 io=536/148 c0% -> 'FALSE' gt:'TRUE' q:'Premises: Give…'
+  [ 22]   0.6s #046 MISS --/1 io=564/288 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 23]   0.8s #044 MISS --/1 io=631/288 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Ther…'
+  [ 24]   1.3s #006 HIT io=615/543 c0% -> 'FALSE' gt:'FALSE' q:'Premises: Eith…'
+  [2mpobb:[0m P(best)=49.6% @ q8  vs hardest=R1_win (P(c>p)=49.6%)  (of 1 prior)
+  [ 25]   1.3s #048 MISS --/1 io=555/414 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Give…'
+  [ 26]   1.0s #049 MISS --/1 io=794/304 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: Ther…'
+  [ 27]   0.8s #037 MISS --/1 io=685/309 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 28]   1.1s #034 HIT io=505/554 c51% -> 'FALSE' gt:'FALSE' q:'Premises: It i…'
+  [ 29]   0.8s #030 MISS --/1 io=550/215 c47% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 30]   0.7s #021 MISS --/1 io=636/121 c40% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 31]   0.6s #020 MISS --/1 io=605/170 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 32]   1.7s #029 MISS --/1 io=577/556 c0% -> 'FALSE' gt:'TRUE' q:'Premises: It i…'
+  [ 33]   0.7s #033 MISS --/1 io=527/219 c49% -> 'Uncertain' gt:'TRUE' q:'Premises: If b…'
+  [ 34]   1.1s #028 MISS --/1 io=557/470 c46% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 35]   0.6s #003 MISS --/1 io=622/229 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 36]   0.8s #042 HIT io=478/374 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: The …'
+  [ 37]   0.8s #000 MISS --/1 io=707/193 c36% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 38]   1.2s #013 MISS --/1 io=610/228 c42% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 39]   0.6s #027 MISS --/1 io=696/257 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: When…'
+  [ 40]   1.9s #031 MISS --/1 io=538/732 c48% -> 'Uncertain' gt:'FALSE' q:'Premises: On t…'
+  [ 41]   1.2s #017 MISS --/1 io=657/356 c39% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 42]   3.5s #009 MISS --/1 io=488/450 c7% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 43]   0.8s #011 MISS --/1 io=612/335 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 44]   0.9s #002 MISS --/1 io=789/283 c32% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 45]   0.8s #050 MISS --/1 io=761/135 c34% -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [2m↻ pobb catch-up #50:[0m R1_winner
+  [ 46]   1.1s #052 HIT io=668/430 c38% -> 'Uncertain' gt:'Uncertain' q:'Premises: Assu…'
+  [2m↻ pobb catch-up #52:[0m R1_winner
+  [ 47]   0.8s #053 MISS --/1 io=572/183 c45% -> 'TRUE' gt:'FALSE' q:'Premises: Eith…'
+  [2m↻ pobb catch-up #53:[0m R1_winner
+  [ 48]   1.6s #054 HIT io=524/515 c49% -> 'TRUE' gt:'TRUE' q:'Premises: Eith…'
+  [2m↻ pobb catch-up #54:[0m R1_winner
+  [ 49]   0.9s #055 HIT io=585/181 c44% -> 'Uncertain' gt:'Uncertain' q:'Premises: Prov…'
+  [2m↻ pobb catch-up #55:[0m R1_winner
+  [ 50]   0.8s #056 MISS --/1 io=615/285 c42% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [2m↻ pobb catch-up #56:[0m R1_winner
+  ┌─ C2.2/3 ───────────────────────────────── 20.6% [6.8%, 34.4%] ─┐
+  │  34 samples                                                    │
+  └─ composite_fitness=0.3568 ─────────────────────────────────────┘
+  [32m★ leader: C2.2 20.6%[0m
+  C2.3/3  [36mBuilds on the measured benefit of explicit negation translation by making polarity carry-through in nested…[0m
+  [2mshared order:[0m #036, #005, #014, …  (34 samples, win-opportunities first; 2 candidate priors)
+  [ 51]   0.6s #036 MISS --/1 io=603/203 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [ 52]   0.9s #005 MISS --/1 io=571/249 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 53]   1.0s #014 HIT io=554/673 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: Shou…'
+  [ 54]   0.9s #035 HIT io=516/446 c0% -> 'FALSE' gt:'FALSE' q:'Premises: So l…'
+  [ 55]   0.7s #040 MISS --/1 io=501/199 c0% -> 'FALSE' gt:'TRUE' q:'Premises: Give…'
+  [ 56]   0.6s #046 MISS --/1 io=529/225 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 57]   0.8s #044 MISS --/1 io=596/155 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Ther…'
+  [ 58]   0.7s #006 HIT io=580/444 c0% -> 'FALSE' gt:'FALSE' q:'Premises: Eith…'
+  [2mpobb:[0m P(best)=50.0% @ q8  vs hardest=R1_win (P(c>p)=50.0%)  (of 2 priors)
+  [ 59]   0.7s #048 MISS --/1 io=520/335 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Give…'
+  [ 60]   0.7s #049 MISS --/1 io=759/194 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: Ther…'
+  [ 61]   1.2s #037 MISS --/1 io=650/166 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 62]   0.9s #034 HIT io=470/540 c0% -> 'FALSE' gt:'FALSE' q:'Premises: It i…'
+  [ 63]   0.5s #030 MISS --/1 io=515/202 c50% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 64]   0.7s #021 MISS --/1 io=601/119 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 65]   0.6s #020 MISS --/1 io=570/166 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 66]   1.0s #029 HIT io=542/427 c47% -> 'TRUE' gt:'TRUE' q:'Premises: It i…'
+  [ 67]   0.8s #033 MISS --/1 io=492/239 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: If b…'
+  [ 68]   0.9s #028 MISS --/1 io=522/537 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 69]   0.8s #003 MISS --/1 io=587/221 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 70]   0.9s #042 HIT io=443/362 c58% -> 'Uncertain' gt:'Uncertain' q:'Premises: The …'
+  [ 71]   0.8s #000 MISS --/1 io=672/222 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 72]   0.8s #013 MISS --/1 io=575/503 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 73]   0.9s #027 MISS --/1 io=661/241 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: When…'
+  [ 74]   1.7s #031 MISS --/1 io=503/559 c51% -> 'Uncertain' gt:'FALSE' q:'Premises: On t…'
+  [ 75]   0.9s #017 MISS --/1 io=622/228 c41% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 76]   1.1s #009 MISS --/1 io=536/394 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 77]   1.0s #011 MISS --/1 io=577/278 c44% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 78]   0.8s #002 MISS --/1 io=754/261 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 79]   0.7s #050 MISS --/1 io=726/159 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [ 80]   0.9s #052 HIT io=633/191 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: Assu…'
+  [ 81]   1.3s #053 MISS --/1 io=537/555 c0% -> 'TRUE' gt:'FALSE' q:'Premises: Eith…'
+  [ 82]   1.0s #054 HIT io=489/483 c52% -> 'TRUE' gt:'TRUE' q:'Premises: Eith…'
+  [ 83]   0.7s #055 HIT io=550/181 c47% -> 'Uncertain' gt:'Uncertain' q:'Premises: Prov…'
+  [ 84]   0.5s #056 MISS --/1 io=580/189 c44% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  ┌─ C2.3/3 ──────────────────────────────── 26.5% [11.4%, 41.5%] ─┐
+  │  34 samples                                                    │
+  └─ composite_fitness=0.4042 ─────────────────────────────────────┘
+  [32m★ leader: C2.3 26.5%[0m
+  [ 85]   1.1s #014 MISS --/1 [ai]📖 io=557/607 -> 'TRUE' gt:'Uncertain' q:'Premises: Shou…'
+  [ 86]   1.3s #035 HIT [ai]📖 io=519/452 -> 'FALSE' gt:'FALSE' q:'Premises: So l…'
+  [ 87]   0.8s #006 HIT [ai]📖 io=583/364 -> 'FALSE' gt:'FALSE' q:'Premises: Eith…'
+  [ 88]   1.2s #005 MISS --/1 [ai]📖 io=574/690 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 89]   0.7s #030 MISS --/1 [ai]📖 io=518/191 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 90]   0.6s #021 MISS --/1 [ai]📖 io=604/119 -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 91]   0.7s #020 MISS --/1 [ai]📖 io=573/183 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 92]   0.8s #033 MISS --/1 [ai]📖 io=495/322 -> 'Uncertain' gt:'TRUE' q:'Premises: If b…'
+  [ 93]   1.0s #028 MISS --/1 [ai]📖 io=525/570 -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 94]   0.8s #003 MISS --/1 [ai]📖 io=590/281 -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 95]   0.8s #000 MISS --/1 [ai]📖 io=675/204 -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 96]   0.7s #013 MISS --/1 [ai]📖 io=578/204 -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 97]   1.0s #027 MISS --/1 [ai]📖 io=664/347 -> 'TRUE' gt:'FALSE' q:'Premises: When…'
+  [ 98]   3.6s #031 MISS --/1 [ai]📖 io=423/441 -> 'Uncertain' gt:'FALSE' q:'Premises: On t…'
+  [ 99]   1.1s #017 MISS --/1 [ai]📖 io=625/460 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [100]   1.0s #009 MISS --/1 [ai]📖 io=539/419 -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [101]   0.7s #011 MISS --/1 [ai]📖 io=580/249 -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [102]   0.7s #002 MISS --/1 [ai]📖 io=757/239 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [103]   0.7s #036 MISS --/1 [ai]📖 io=606/231 -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [104]   1.1s #034 HIT [ai]📖 io=473/523 -> 'FALSE' gt:'FALSE' q:'Premises: It i…'
+  [105]   0.9s #037 MISS --/1 [ai]📖 io=653/272 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [106]   1.3s #029 HIT [ai]📖 io=545/680 -> 'TRUE' gt:'TRUE' q:'Premises: It i…'
+  [107]   1.0s #049 MISS --/1 io=762/215 c34% -> 'Uncertain' gt:'TRUE' q:'Premises: Ther…'
+  [108]   1.0s #048 MISS --/1 io=523/295 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Give…'
+  [109]   0.7s #044 MISS --/1 io=599/139 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Ther…'
+  [110]   0.7s #040 HIT io=504/376 c51% -> 'TRUE' gt:'TRUE' q:'Premises: Give…'
+  [111]   0.8s #046 MISS --/1 io=532/225 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [112]   1.1s #042 HIT io=446/385 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: The …'
+  [113]   4.2s #050 MISS --/1 [ai]📖 io=729/148 -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [114]   0.6s #052 HIT [ai]📖 io=636/211 -> 'Uncertain' gt:'Uncertain' q:'Premises: Assu…'
+  [115]   1.0s #053 MISS --/1 [ai]📖 io=540/327 -> 'TRUE' gt:'FALSE' q:'Premises: Eith…'
+  [116]   1.2s #054 HIT [ai]📖 io=492/506 -> 'TRUE' gt:'TRUE' q:'Premises: Eith…'
+  [117]   0.8s #055 HIT [ai]📖 io=553/183 -> 'Uncertain' gt:'Uncertain' q:'Premises: Prov…'
+  [118]   1.6s #056 MISS --/1 [ai]📖 io=583/367 -> 'FALSE' gt:'TRUE' q:'Premises: When…'
+  [33m⚠ r2round 2 resolved nothing: every one of its 3 readable arms has a lift interval spanning 0 (best reaches +0.162 at its upper bound). An arm this round selects is the best of what it saw, not a measured improvement over its reference[0m
+  Scoreboard: C2.3=26.5% | C2.2=20.6% | C2.1=12.5% (eliminated)
+  [32m[1m✓ SELECTED C2.3[0m  26.5% (vs reference 26.5%, [33m+0.0%[0m)  p=1.00 (ns)
+  [2mwhy: C2.3 won on θ lift +0.175 = +0.001 over the parent + 0.174 parent selection bias (θ -0.137 vs parent -0.138, se 0.200); runner-up C2.2 at -0.025[0m
+  composite_fitness = 0.4042   reference=0.4040  Δ+0.0003
+  formula:  fitness * (0.92 + 0.08 * 692.0 / max(692.0, tokens))
+    tokens=884.765
+  [32m✓ selected C2.3[0m [2m— C2.3 won on θ lift +0.175 = +0.001 over the parent + 0.174 parent selection bias (θ -0.137 vs parent -0.138, se 0.200); runner-up C2.2 at -0.025[0m
+  [2m↻ optimizer call: l1_critique_r2 · openai/gpt-6-luna · 11,243c prompt[0m
+  [2m  · l1_critique_r2 still waiting · 10s · provider openai/gpt-6-luna has not answered[0m
+  [2m  · l1_critique_r2 still waiting · 20s · provider openai/gpt-6-luna has not answered[0m
+  [2m✓ l1_critique_r2 · 28.1s · 5314 tok · 90% reasoning · 0% prefix cached[0m
+
+├─ ROUND 2 SUMMARY — 2m 36s ─────────────────────────────────────────────┤
+│  Round    Accuracy     n  Composite  Ability θ     Trend
+│    0        40.0%    40    0.5161     +0.062         -
+│    1        47.1%    34    0.5682     +0.129    +0.068
+│    2        26.5%    34    0.4042     +0.202    +0.072
+│  
+│  pobb P(best) @ q34: *7c8983* 62.0%▼ | bfbf59 36.8%▲ | 33178e 19.1%▼
+│  composite_fitness = 0.4042   reference=0.4040  Δ+0.0003
+│  formula:  fitness * (0.92 + 0.08 * 692.0 / max(692.0, tokens))
+│    tokens=884.765
+│  accuracy: 26.5% of 34 samples  |  evaluated: 3 candidates
+│  lift vs reference: +0.000 [-0.086, +0.086]  |  [33mspans 0 — not separable from its reference[0m
+│  overlap (34 shared cells, +12 measured: C0 44.1%  →  C1.1 47.1%  →  C2.3 50.0%)
+│  Recall: top-1=26% top-5=26%
+│  [32m✓ Improvement detected, auto-continuing...[0m
+├────────────────────────────────────────────────────────────────────────┤
+
+├─ L2 REFINE CONTEXT ──────────────────────────────────────── L2 fire 2 ─┤
+│  L1 stalled 1 rounds  |  acc=26.5%  best=47.1%
+│  l1_overrides: (none)
+│  LLM analyzing failure patterns...
+├────────────────────────────────────────────────────────────────────────┤
+  [2m↻ optimizer call: l2_context_r2 · openai/gpt-6-luna · 7,863c prompt[0m
+  [2m✓ l2_context_r2 · 7.0s · 3024 tok · 81% reasoning · 0% prefix cached[0m
+WARNING: L2 layout accepted with reports — 1 outcome(s): l1_layout_voids_prefix
+  [32m✓[0m L2 decision: 0 param changes, l1_layout edited, axis=thinking_style
+    L2: The failure cluster is indirect entailment: in the evidenced U→F group 15…
+  [36mL2 call[0m [2m→ .runtime/cache/rounds/round_NNNN.json::nodes.l2_context (prompt · response · usage)[0m
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ROUND 3/999                                             L2 every round
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+├─ GENERATE ─────────────────────────────────────────────────────────────┤
+│  Parent accuracy 26.5%
+│  Parent prompt   Decide whether the claim follows from the...
+│  Candidates      3   Prior critique: from R2
+│  Model           openai/gpt-6-luna
+├────────────────────────────────────────────────────────────────────────┤
+  [2m↻ optimizer call: l1_generate_r3 · openai/gpt-6-luna · 15,481c prompt[0m
+  [2m  · l1_generate_r3 still waiting · 10s · provider openai/gpt-6-luna has not answered[0m
+  [2m  · l1_generate_r3 still waiting · 20s · provider openai/gpt-6-luna has not answered[0m
+  [2m  · l1_generate_r3 still waiting · 30s · provider openai/gpt-6-luna has not answered[0m
+  [2m✓ l1_generate_r3 · 37.7s · 7650 tok · 86% reasoning · 0% prefix cached[0m
+  [32m✓[0m 3 candidates generated (from LLM)
+
+│  [36mRound 3 SPs:[0m
+│                   Start  Parent  C3.1  C3.2  C3.3  
+│  [2m─── llm_only ────[0m
+│  llm_only.prompt  [a]    [b]     ·     ·     ·     
+│  [2m─── prompt ──────[0m
+│    answer_format  [c]    ·       ·     ·     [d]   
+│      task_intent  [e]    ·       ·     [f]   ·     
+│   thinking_style  -      [g]     [h]   ·     ·     
+│  
+│  [36mValues[0m [2m— full text in round_0003.json::candidate_scores[].prompt_fields / .pipeline_params, joined on label[0m
+│    [a] llm_only.prompt      257 B  [2mStart[0m
+│    [b] llm_only.prompt      738 B  [2mParent[0m
+│    [c] answer_format         71 B  [2mStart[0m
+│    [d] answer_format        116 B  [2mC3.3[0m
+│    [e] task_intent          184 B  [2mStart[0m
+│    [f] task_intent          355 B  [2mC3.2[0m
+│    [g] thinking_style       228 B  [2mParent[0m
+│    [h] thinking_style       330 B  [2mC3.1[0m
+
+├─ MEASURE ──────────────────────── l1_score · 3 candidates on 34 cells ─┤
+  C3.1/3  [36mTargets missed indirect entailments by adding an explicit instruction to follow linked premises through to the target,…[0m
+  [2mshared order:[0m #036, #005, #040, …  (34 samples, win-opportunities first; 1 candidate prior)
+  [  1]   1.1s #036 MISS --/1 io=622/226 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [  2]   0.8s #005 MISS --/1 io=590/391 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [  3]   0.5s #040 MISS --/1 io=520/210 c0% -> 'FALSE' gt:'TRUE' q:'Premises: Give…'
+  [  4]   1.4s #014 HIT io=573/693 c45% -> 'Uncertain' gt:'Uncertain' q:'Premises: Shou…'
+  [  5]   0.7s #046 MISS --/1 io=548/178 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [  6]   0.7s #044 MISS --/1 io=615/245 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Ther…'
+  [  7]   0.8s #048 MISS --/1 io=539/469 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Give…'
+  [  8]   1.3s #035 MISS --/1 io=535/604 c48% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [2mpobb:[0m P(best)=30.2% @ q8  vs hardest=R2_win (P(c>p)=30.2%)  (of 1 prior)
+  [  9]   0.7s #049 MISS --/1 io=778/296 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: Ther…'
+  [ 10]   1.5s #056 MISS --/1 io=599/280 c43% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 11]   0.8s #053 MISS --/1 io=556/221 c0% -> 'TRUE' gt:'FALSE' q:'Premises: Eith…'
+  [ 12]   1.6s #006 HIT io=599/594 c0% -> 'FALSE' gt:'FALSE' q:'Premises: Eith…'
+  [ 13]   0.7s #050 MISS --/1 io=745/157 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [ 14]   0.9s #037 MISS --/1 io=669/537 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 15]   0.8s #030 MISS --/1 io=534/218 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 16]   1.5s #034 HIT io=489/580 c52% -> 'FALSE' gt:'FALSE' q:'Premises: It i…'
+  [ 17]   0.5s #021 MISS --/1 io=620/116 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 18]   0.5s #020 MISS --/1 io=589/170 c43% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 19]   0.7s #033 MISS --/1 io=511/345 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: If b…'
+  [ 20]   1.0s #029 HIT io=561/530 c0% -> 'TRUE' gt:'TRUE' q:'Premises: It i…'
+  [ 21]   1.6s #028 MISS --/1 io=541/758 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 22]   0.9s #003 MISS --/1 io=606/210 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 23]   0.8s #000 MISS --/1 io=691/235 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 24]   0.8s #013 MISS --/1 io=594/305 c43% -> 'TRUE' gt:'FALSE' q:'Premises: If t…'
+  [ 25]   0.7s #027 MISS --/1 io=680/175 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: When…'
+  [ 26]   1.3s #031 MISS --/1 io=522/844 c0% -> 'TRUE' gt:'FALSE' q:'Premises: On t…'
+  [ 27]   0.9s #017 MISS --/1 io=641/354 c40% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 28]   1.1s #009 HIT io=555/704 c46% -> 'TRUE' gt:'TRUE' q:'Premises: It i…'
+  [ 29]   1.1s #011 MISS --/1 io=596/617 c43% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 30]   0.8s #002 MISS --/1 io=773/298 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 31]   1.0s #057 MISS --/1 io=576/526 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [2m↻ pobb catch-up #57:[0m R2_winner
+  [ 32]   0.8s #058 MISS --/1 io=555/348 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: On t…'
+  [2m↻ pobb catch-up #58:[0m R2_winner
+  [ 33]   0.6s #059 MISS --/1 io=537/185 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: We c…'
+  [2m↻ pobb catch-up #59:[0m R2_winner
+  [ 34]   1.2s #064 MISS --/1 io=621/538 c41% -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [2m↻ pobb catch-up #64:[0m R2_winner
+  ┌─ C3.1/3 ───────────────────────────────── 14.7% [2.6%, 26.8%] ─┐
+  │  34 samples                                                    │
+  └─ composite_fitness=0.3095 ─────────────────────────────────────┘
+  [32m★ leader: C3.1 14.7%[0m
+  C3.2/3  [36mTargets answers based on only one or two premises by having the solver trace support for the claim and its negation…[0m
+  [2mshared order:[0m #036, #005, #040, …  (34 samples, win-opportunities first; 2 candidate priors)
+  [ 35]   0.7s #036 MISS --/1 io=633/228 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [ 36]   0.7s #005 HIT io=601/169 c0% -> 'FALSE' gt:'FALSE' q:'Premises: So l…'
+  [ 37]   0.8s #040 HIT io=531/370 c0% -> 'TRUE' gt:'TRUE' q:'Premises: Give…'
+  [ 38]   1.1s #014 MISS --/1 io=584/586 c0% -> 'FALSE' gt:'Uncertain' q:'Premises: Shou…'
+  [ 39]   0.5s #046 MISS --/1 io=559/181 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 40]   0.6s #044 MISS --/1 io=626/129 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Ther…'
+  [ 41]   0.9s #048 MISS --/1 io=550/253 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Give…'
+  [ 42]   1.3s #035 MISS --/1 io=546/409 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [2mpobb:[0m P(best)=50.0% @ q8  vs hardest=R2_win (P(c>p)=50.0%)  (of 2 priors)
+  [ 43]   0.9s #049 MISS --/1 io=789/198 c32% -> 'Uncertain' gt:'TRUE' q:'Premises: Ther…'
+  [ 44]   0.8s #056 MISS --/1 io=610/238 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 45]   1.2s #053 MISS --/1 io=567/541 c45% -> 'TRUE' gt:'FALSE' q:'Premises: Eith…'
+  [ 46]   0.7s #006 MISS --/1 io=610/364 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 47]   0.8s #050 MISS --/1 io=756/248 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [ 48]   0.5s #037 MISS --/1 io=680/174 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 49]   0.5s #030 MISS --/1 io=545/195 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 50]   1.3s #034 HIT io=500/548 c0% -> 'FALSE' gt:'FALSE' q:'Premises: It i…'
+  [ 51]   0.5s #021 MISS --/1 io=631/118 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 52]   0.7s #020 MISS --/1 io=600/161 c43% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 53]   1.0s #033 MISS --/1 io=522/273 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: If b…'
+  [ 54]   1.2s #029 HIT io=572/465 c45% -> 'TRUE' gt:'TRUE' q:'Premises: It i…'
+  [ 55]   0.9s #028 MISS --/1 io=552/378 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 56]   1.4s #003 MISS --/1 io=617/204 c41% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 57]   0.7s #000 MISS --/1 io=702/292 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 58]   0.9s #013 MISS --/1 io=605/410 c42% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 59]   0.8s #027 MISS --/1 io=691/264 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: When…'
+  [ 60]   1.3s #031 MISS --/1 io=533/474 c48% -> 'Uncertain' gt:'FALSE' q:'Premises: On t…'
+  [ 61]   0.8s #017 MISS --/1 io=652/369 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 62]   1.1s #009 MISS --/1 io=566/371 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 63]   0.8s #011 MISS --/1 io=607/290 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 64]   0.8s #002 MISS --/1 io=784/291 c33% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 65]   1.1s #057 MISS --/1 io=587/293 c44% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 66]   1.0s #058 MISS --/1 io=566/403 c45% -> 'Uncertain' gt:'TRUE' q:'Premises: On t…'
+  ┌─ C3.2/3 ───────────────────────────────── 12.5% [0.9%, 24.1%] ─┐
+  │  32 samples [33m⚠ eliminated 32/34[0m                                 │
+  │  [33m✂ eliminated q32/34  p_best=23.0% < eps=30%  vs R2_winner (of[0m…│
+  └─ composite_fitness=0.2943 ─────────────────────────────────────┘
+  [2m→ C3.2 12.5%  (-2.2% from C3.1)[0m
+  C3.3/3  [36mTargets possible label-extraction errors by making the final line and permitted label spellings explicit, while…[0m
+  [2mshared order:[0m #036, #005, #040, …  (34 samples, win-opportunities first; 2 candidate priors)
+  [ 67]   0.8s #036 MISS --/1 io=613/277 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [ 68]   1.2s #005 MISS --/1 io=581/654 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 69]   0.6s #040 MISS --/1 io=511/230 c0% -> 'FALSE' gt:'TRUE' q:'Premises: Give…'
+  [ 70]   1.3s #014 HIT io=564/822 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: Shou…'
+  [ 71]   0.6s #046 MISS --/1 io=539/223 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 72]   0.7s #044 MISS --/1 io=606/138 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Ther…'
+  [ 73]   0.8s #048 HIT io=530/373 c0% -> 'FALSE' gt:'FALSE' q:'Premises: Give…'
+  [ 74]   1.0s #035 MISS --/1 io=526/389 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [2mpobb:[0m P(best)=49.8% @ q8  vs hardest=R2_win (P(c>p)=49.8%)  (of 2 priors)
+  [ 75]   0.8s #049 MISS --/1 io=769/220 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: Ther…'
+  [ 76]   0.9s #056 MISS --/1 io=590/334 c0% -> 'FALSE' gt:'TRUE' q:'Premises: When…'
+  [ 77]   0.7s #053 MISS --/1 io=547/192 c0% -> 'TRUE' gt:'FALSE' q:'Premises: Eith…'
+  [ 78]   1.6s #006 MISS --/1 io=590/562 c43% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 79]   0.9s #050 MISS --/1 io=736/167 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [ 80]   0.7s #037 MISS --/1 io=660/156 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 81]   1.0s #030 MISS --/1 io=525/223 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 82]   1.4s #034 HIT io=480/669 c0% -> 'FALSE' gt:'FALSE' q:'Premises: It i…'
+  [ 83]   1.0s #021 HIT io=611/177 c0% -> 'FALSE' gt:'FALSE' q:'Premises: Eith…'
+  [ 84]   0.7s #020 MISS --/1 io=580/206 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 85]   0.7s #033 MISS --/1 io=502/251 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: If b…'
+  [ 86]   0.9s #029 HIT io=552/406 c46% -> 'TRUE' gt:'TRUE' q:'Premises: It i…'
+  [ 87]   0.9s #028 MISS --/1 io=532/475 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 88]   0.8s #003 MISS --/1 io=597/284 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 89]   0.6s #000 MISS --/1 io=682/205 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 90]   1.1s #013 MISS --/1 io=585/451 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 91]   0.9s #027 MISS --/1 io=671/313 c0% -> 'TRUE' gt:'FALSE' q:'Premises: When…'
+  [ 92]   1.0s #031 MISS --/1 io=513/481 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: On t…'
+  [ 93]   1.2s #017 MISS --/1 io=632/310 c41% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 94]   1.6s #009 MISS --/1 io=546/413 c47% -> 'FALSE' gt:'TRUE' q:'Premises: It i…'
+  [ 95]   0.9s #011 MISS --/1 io=587/302 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 96]   1.0s #002 MISS --/1 io=764/249 c34% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 97]   1.0s #057 MISS --/1 io=567/368 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 98]   0.9s #058 HIT io=546/290 c47% -> 'TRUE' gt:'TRUE' q:'Premises: On t…'
+  [ 99]   0.8s #059 MISS --/1 io=528/162 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: We c…'
+  [100]   1.1s #064 MISS --/1 io=612/510 c42% -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  ┌─ C3.3/3 ───────────────────────────────── 17.6% [4.6%, 30.7%] ─┐
+  │  34 samples                                                    │
+  └─ composite_fitness=0.3342 ─────────────────────────────────────┘
+  [32m★ leader: C3.3 17.6%[0m
+  [101]   1.0s #014 HIT [ai]📖 io=554/673 -> 'Uncertain' gt:'Uncertain' q:'Premises: Shou…'
+  [102]   0.9s #035 HIT [ai]📖 io=516/446 -> 'FALSE' gt:'FALSE' q:'Premises: So l…'
+  [103]   0.7s #006 HIT [ai]📖 io=580/444 -> 'FALSE' gt:'FALSE' q:'Premises: Eith…'
+  [104]   0.9s #005 MISS --/1 [ai]📖 io=571/249 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [105]   0.5s #030 MISS --/1 [ai]📖 io=515/202 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [106]   0.6s #021 MISS --/1 [ai]📖 io=601/119 -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [107]   0.6s #020 MISS --/1 [ai]📖 io=570/166 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [108]   0.8s #033 MISS --/1 [ai]📖 io=492/239 -> 'Uncertain' gt:'TRUE' q:'Premises: If b…'
+  [109]   0.9s #028 MISS --/1 [ai]📖 io=522/537 -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [110]   0.8s #003 MISS --/1 [ai]📖 io=587/221 -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [111]   0.8s #000 MISS --/1 [ai]📖 io=672/222 -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [112]   0.8s #013 MISS --/1 [ai]📖 io=575/503 -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [113]   0.9s #027 MISS --/1 [ai]📖 io=661/241 -> 'Uncertain' gt:'FALSE' q:'Premises: When…'
+  [114]   1.7s #031 MISS --/1 [ai]📖 io=503/559 -> 'Uncertain' gt:'FALSE' q:'Premises: On t…'
+  [115]   1.0s #017 MISS --/1 [ai]📖 io=622/228 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [116]   1.1s #009 MISS --/1 [ai]📖 io=536/394 -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [117]   1.0s #011 MISS --/1 [ai]📖 io=577/278 -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [118]   0.8s #002 MISS --/1 [ai]📖 io=754/261 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [119]   0.6s #036 MISS --/1 [ai]📖 io=603/203 -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [120]   0.9s #034 HIT [ai]📖 io=470/540 -> 'FALSE' gt:'FALSE' q:'Premises: It i…'
+  [121]   0.5s #056 MISS --/1 [ai]📖 io=580/189 -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [122]   1.3s #053 MISS --/1 [ai]📖 io=537/555 -> 'TRUE' gt:'FALSE' q:'Premises: Eith…'
+  [123]   0.7s #050 MISS --/1 [ai]📖 io=726/159 -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [124]   1.2s #037 MISS --/1 [ai]📖 io=650/166 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [125]   1.0s #029 HIT [ai]📖 io=542/427 -> 'TRUE' gt:'TRUE' q:'Premises: It i…'
+  [126]   0.7s #049 MISS --/1 [ai]📖 io=759/194 -> 'Uncertain' gt:'TRUE' q:'Premises: Ther…'
+  [127]   0.7s #048 MISS --/1 [ai]📖 io=520/335 -> 'Uncertain' gt:'FALSE' q:'Premises: Give…'
+  [128]   0.8s #044 MISS --/1 [ai]📖 io=596/155 -> 'Uncertain' gt:'FALSE' q:'Premises: Ther…'
+  [129]   0.7s #040 MISS --/1 [ai]📖 io=501/199 -> 'FALSE' gt:'TRUE' q:'Premises: Give…'
+  [130]   0.6s #046 MISS --/1 [ai]📖 io=529/225 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [131]   0.9s #057 MISS --/1 [ai]📖 io=557/378 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [132]   1.0s #058 HIT [ai]📖 io=536/537 -> 'TRUE' gt:'TRUE' q:'Premises: On t…'
+  [133]   0.9s #059 MISS --/1 [ai]📖 io=518/167 -> 'Uncertain' gt:'FALSE' q:'Premises: We c…'
+  [134]   1.5s #064 MISS --/1 [ai]📖 io=602/510 -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [33m⚠ r3round 3 resolved nothing: every one of its 3 readable arms has a lift interval spanning 0 (best reaches +0.121 at its upper bound). An arm this round selects is the best of what it saw, not a measured improvement over its reference[0m
+  Scoreboard: C3.3=17.6% | C3.1=14.7% | C3.2=12.5% (eliminated)
+  [32m[1m✓ SELECTED C3.3[0m  17.6% (vs reference 17.6%, [33m+0.0%[0m)  p=1.00 (ns)
+  [2mwhy: C3.3 won on θ lift +0.162 = +0.001 over the parent + 0.161 parent selection bias (θ -0.307 vs parent -0.308, se 0.206); runner-up C3.1 at +0.055[0m
+  composite_fitness = 0.3342   reference=0.3340  Δ+0.0002
+  formula:  fitness * (0.92 + 0.08 * 692.0 / max(692.0, tokens))
+    tokens=925.176
+  [32m✓ selected C3.3[0m [2m— C3.3 won on θ lift +0.162 = +0.001 over the parent + 0.161 parent selection bias (θ -0.307 vs parent -0.308, se 0.206); runner-up C3.1 at +0.055[0m
+  [2m↻ optimizer call: l1_critique_r3 · openai/gpt-6-luna · 11,467c prompt[0m
+  [2m  · l1_critique_r3 still waiting · 10s · provider openai/gpt-6-luna has not answered[0m
+  [2m  · l1_critique_r3 still waiting · 20s · provider openai/gpt-6-luna has not answered[0m
+  [2m✓ l1_critique_r3 · 24.1s · 5105 tok · 91% reasoning · 0% prefix cached[0m
+
+├─ ROUND 3 SUMMARY — 2m 43s ─────────────────────────────────────────────┤
+│  Round    Accuracy     n  Composite  Ability θ     Trend
+│    0        40.0%    40    0.5161     +0.062         -
+│    1        47.1%    34    0.5682     +0.129    +0.068
+│    2        26.5%    34    0.4042     +0.202    +0.072
+│    3        17.6%    34    0.3342     +0.166    -0.035
+│  [33m-- Plateau: ability flat at +0.166 for 3 rounds[0m
+│  
+│  pobb P(best) @ q34: *c4d96d* 50.0% | 2bd20f 35.6%▲ | 2474d0 23.0%▼
+│  composite_fitness = 0.3342   reference=0.3340  Δ+0.0002
+│  formula:  fitness * (0.92 + 0.08 * 692.0 / max(692.0, tokens))
+│    tokens=925.176
+│  accuracy: 17.6% of 34 samples  |  evaluated: 3 candidates
+│  lift vs reference: +0.000 [-0.121, +0.121]  |  [33mspans 0 — not separable from its reference[0m
+│  overlap (34 shared cells, +12 measured: C0 44.1%  →  C1.1 47.1%  →  C2.3 50.0%  →  C3.3 47.1%)
+│  Recall: top-1=18% top-5=18%
+│  [32m✓ Improvement detected, auto-continuing...[0m
+├────────────────────────────────────────────────────────────────────────┤
+
+├─ L3 MODIFY PLAN ─────────────────────────────────────────── L3 fire 1 ─┤
+│  L2 stalled 2 rounds
+│  Current plan: 
+│  LLM designing new strategy...
+├────────────────────────────────────────────────────────────────────────┤
+  [2m↻ optimizer call: l3_plan_r3 · openai/gpt-6-luna · 5,309c prompt[0m
+  [2m✓ l3_plan_r3 · 7.4s · 2398 tok · 69% reasoning · 0% prefix cached[0m
+  [32m✓[0m New plan: - L2 should show L1 both critique and...
+    L3: The search has concentrated on prompt wording, while the failures point to a…
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ROUND 4/999                                             L2 every round
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+├─ GENERATE ─────────────────────────────────────────────────────────────┤
+│  Parent accuracy 17.6%
+│  Parent prompt   Decide whether the claim follows from the...
+│  Candidates      3   Prior critique: from R3
+│  Model           openai/gpt-6-luna
+├────────────────────────────────────────────────────────────────────────┤
+  [2m↻ optimizer call: l1_generate_r4 · openai/gpt-6-luna · 17,540c prompt[0m
+  [2m  · l1_generate_r4 still waiting · 10s · provider openai/gpt-6-luna has not answered[0m
+  [2m  · l1_generate_r4 still waiting · 20s · provider openai/gpt-6-luna has not answered[0m
+  [2m✓ l1_generate_r4 · 27.3s · 7498 tok · 81% reasoning · 0% prefix cached[0m
+  [32m✓[0m 3 candidates generated (from LLM)
+
+│  [36mRound 4 SPs:[0m
+│                   Start  Parent  C4.1  C4.2  C4.3  
+│  [2m─── llm_only ────[0m
+│  llm_only.prompt  [a]    [b]     ·     ·     ·     
+│  [2m─── prompt ──────[0m
+│    answer_format  [c]    [d]     ·     ·     ·     
+│      instruction  -      -       -     [e]   -     
+│   thinking_style  -      [f]     [g]   ·     [h]   
+│  
+│  [36mValues[0m [2m— full text in round_0004.json::candidate_scores[].prompt_fields / .pipeline_params, joined on label[0m
+│    [a] llm_only.prompt      257 B  [2mStart[0m
+│    [b] llm_only.prompt      783 B  [2mParent[0m
+│    [c] answer_format         71 B  [2mStart[0m
+│    [d] answer_format        116 B  [2mParent[0m
+│    [e] instruction          193 B  [2mC4.2[0m
+│    [f] thinking_style       228 B  [2mParent[0m
+│    [g] thinking_style       184 B  [2mC4.1[0m
+│    [h] thinking_style       185 B  [2mC4.3[0m
+
+├─ MEASURE ──────────────────────── l1_score · 3 candidates on 34 cells ─┤
+  C4.1/3  [36mReplace verbal derivation with an all-model test, targeting incomplete classification of the claim; this should…[0m
+  [2mshared order:[0m #036, #005, #006, …  (34 samples, win-opportunities first; 1 candidate prior)
+  [  1]   0.8s #036 MISS --/1 io=611/114 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [  2]   0.8s #005 MISS --/1 io=579/206 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [  3]   0.9s #006 MISS --/1 io=588/503 c0% -> 'TRUE' gt:'FALSE' q:'Premises: Eith…'
+  [  4]   0.6s #021 MISS --/1 io=609/113 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [  5]   0.8s #035 MISS --/1 io=524/346 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [  6]   0.7s #049 MISS --/1 io=767/192 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: Ther…'
+  [  7]   0.5s #059 MISS --/1 io=526/166 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: We c…'
+  [  8]   1.6s #014 HIT io=562/668 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: Shou…'
+  [2mpobb:[0m P(best)=50.0% @ q8  vs hardest=R3_win (P(c>p)=50.0%)  (of 1 prior)
+  [  9]   0.9s #064 MISS --/1 io=610/431 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [ 10]   0.7s #056 MISS --/1 io=588/125 c44% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 11]   1.0s #053 MISS --/1 io=545/363 c47% -> 'TRUE' gt:'FALSE' q:'Premises: Eith…'
+  [ 12]   1.1s #034 HIT io=478/522 c0% -> 'FALSE' gt:'FALSE' q:'Premises: It i…'
+  [ 13]   0.4s #050 MISS --/1 io=734/117 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [ 14]   1.2s #057 MISS --/1 io=565/473 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 15]   0.6s #037 MISS --/1 io=658/262 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 16]   1.1s #029 HIT io=550/490 c0% -> 'TRUE' gt:'TRUE' q:'Premises: It i…'
+  [ 17]   0.8s #030 MISS --/1 io=523/191 c49% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 18]   0.8s #020 MISS --/1 io=578/159 c44% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 19]   0.7s #033 MISS --/1 io=500/259 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: If b…'
+  [ 20]   1.2s #058 MISS --/1 io=544/508 c47% -> 'Uncertain' gt:'TRUE' q:'Premises: On t…'
+  [ 21]   0.6s #028 MISS --/1 io=530/250 c48% -> 'FALSE' gt:'TRUE' q:'Premises: It i…'
+  [ 22]   0.5s #003 MISS --/1 io=595/204 c43% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 23]   0.7s #000 MISS --/1 io=680/135 c38% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 24]   0.7s #013 MISS --/1 io=583/157 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 25]   0.7s #027 MISS --/1 io=669/290 c38% -> 'Uncertain' gt:'FALSE' q:'Premises: When…'
+  [ 26]   1.3s #031 MISS --/1 io=511/665 c50% -> 'TRUE' gt:'FALSE' q:'Premises: On t…'
+  [ 27]   0.8s #017 MISS --/1 io=630/207 c41% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 28]   1.0s #009 MISS --/1 io=544/502 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 29]   1.2s #011 MISS --/1 io=585/577 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 30]   0.8s #002 MISS --/1 io=762/313 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 31]   0.8s #065 HIT io=463/199 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: We c…'
+  [2m↻ pobb catch-up #65:[0m R3_winner
+  [ 32]   0.9s #066 MISS --/1 io=475/440 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [2m↻ pobb catch-up #66:[0m R3_winner
+  [ 33]   0.9s #067 MISS --/1 io=525/431 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: The …'
+  [2m↻ pobb catch-up #67:[0m R3_winner
+  [ 34]   0.5s #068 HIT io=584/130 c44% -> 'Uncertain' gt:'Uncertain' q:'Premises: Give…'
+  [2m↻ pobb catch-up #68:[0m R3_winner
+  ┌─ C4.1/3 ───────────────────────────────── 14.7% [2.6%, 26.8%] ─┐
+  │  34 samples                                                    │
+  └─ composite_fitness=0.3123 ─────────────────────────────────────┘
+  [32m★ leader: C4.1 14.7%[0m
+  C4.2/3  [36mAdd a focused instruction to combine conflicting conditional consequences and eliminate impossible antecedents,…[0m
+  [2mshared order:[0m #036, #005, #006, …  (34 samples, win-opportunities first; 2 candidate priors)
+  [ 35]   0.6s #036 HIT io=646/310 c0% -> 'FALSE' gt:'FALSE' q:'Premises: One …'
+  [ 36]   1.0s #005 MISS --/1 io=614/521 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 37]   1.0s #006 MISS --/1 io=623/416 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 38]   0.6s #021 MISS --/1 io=644/119 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 39]   1.0s #035 MISS --/1 io=559/395 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 40]   0.7s #049 MISS --/1 io=802/342 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: Ther…'
+  [ 41]   0.5s #059 MISS --/1 io=561/175 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: We c…'
+  [ 42]   1.3s #014 MISS --/1 io=597/720 c0% -> 'FALSE' gt:'Uncertain' q:'Premises: Shou…'
+  [2mpobb:[0m P(best)=30.8% @ q8  vs hardest=R3_win (P(c>p)=30.8%)  (of 2 priors)
+  [ 43]   1.1s #064 MISS --/1 io=645/572 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [ 44]   0.9s #056 MISS --/1 io=623/310 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 45]   0.6s #053 MISS --/1 io=580/322 c0% -> 'TRUE' gt:'FALSE' q:'Premises: Eith…'
+  [ 46]   1.2s #034 MISS --/1 io=513/646 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  ┌─ C4.2/3 ────────────────────────────────── 8.3% [0.0%, 24.7%] ─┐
+  │  12 samples [33m⚠ eliminated 12/34[0m                                 │
+  │  [33m✂ eliminated q12/34  p_best=16.6% < eps=30%  vs R3_winner (of[0m…│
+  └─ composite_fitness=0.2604 ─────────────────────────────────────┘
+  [2m→ C4.2 8.3%  (-6.4% from C4.1)[0m
+  C4.3/3  [36mMake contraposition an explicit inference move and carry its result through connected premises, targeting the missed…[0m
+  [2mshared order:[0m #036, #005, #006, …  (34 samples, win-opportunities first; 2 candidate priors)
+  [ 47]   0.5s #036 MISS --/1 io=619/155 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [ 48]   1.0s #005 MISS --/1 io=587/496 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 49]   0.9s #006 MISS --/1 io=596/476 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 50]   0.5s #021 MISS --/1 io=617/170 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 51]   1.0s #035 HIT io=532/428 c0% -> 'FALSE' gt:'FALSE' q:'Premises: So l…'
+  [ 52]   0.7s #049 MISS --/1 io=775/194 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: Ther…'
+  [ 53]   0.7s #059 MISS --/1 io=534/173 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: We c…'
+  [ 54]   1.1s #014 MISS --/1 io=570/596 c0% -> 'TRUE' gt:'Uncertain' q:'Premises: Shou…'
+  [2mpobb:[0m P(best)=50.0% @ q8  vs hardest=R3_win (P(c>p)=50.0%)  (of 2 priors)
+  [ 55]   1.0s #064 MISS --/1 io=618/391 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [ 56]   0.7s #056 MISS --/1 io=596/209 c43% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 57]   2.2s #053 HIT io=553/516 c46% -> 'FALSE' gt:'FALSE' q:'Premises: Eith…'
+  [ 58]   0.8s #034 MISS --/1 io=486/353 c0% -> 'TRUE' gt:'FALSE' q:'Premises: It i…'
+  [ 59]   0.8s #050 MISS --/1 io=742/136 c35% -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [ 60]   0.8s #057 MISS --/1 io=573/385 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 61]   0.7s #037 MISS --/1 io=666/383 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 62]   1.1s #029 HIT io=558/531 c0% -> 'TRUE' gt:'TRUE' q:'Premises: It i…'
+  [ 63]   0.7s #030 MISS --/1 io=531/212 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 64]   0.8s #020 MISS --/1 io=586/205 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 65]   1.1s #033 MISS --/1 io=508/252 c50% -> 'Uncertain' gt:'TRUE' q:'Premises: If b…'
+  [ 66]   0.9s #058 HIT io=552/289 c0% -> 'TRUE' gt:'TRUE' q:'Premises: On t…'
+  [ 67]   1.4s #028 MISS --/1 io=538/540 c48% -> 'FALSE' gt:'TRUE' q:'Premises: It i…'
+  [ 68]   1.0s #003 MISS --/1 io=603/196 c42% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 69]   0.8s #000 MISS --/1 io=688/250 c37% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 70]   0.7s #013 MISS --/1 io=591/216 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 71]   0.9s #027 MISS --/1 io=677/360 c38% -> 'TRUE' gt:'FALSE' q:'Premises: When…'
+  [ 72]   1.1s #031 MISS --/1 io=519/455 c0% -> 'TRUE' gt:'FALSE' q:'Premises: On t…'
+  [ 73]   2.7s #017 MISS --/1 io=638/171 c0% -> 'TRUE' gt:'FALSE' q:'Premises: It i…'
+  [ 74]   0.7s #009 HIT io=552/277 c0% -> 'TRUE' gt:'TRUE' q:'Premises: It i…'
+  [ 75]   3.4s #011 MISS --/1 io=593/628 c43% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [2m⇉ sample look-ahead depth 16 (armed — expires when this round finishes scoring)[0m
+  [ 76]   1.5s #002 MISS --/1 io=770/264 c33% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 77]   0.9s #065 HIT io=471/239 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: We c…'
+  [ 78]   0.9s #066 MISS --/1 io=483/477 c0% -> 'FALSE' gt:'TRUE' q:'Premises: It i…'
+  [ 79]   1.8s #067 MISS --/1 io=533/507 c48% -> 'Uncertain' gt:'FALSE' q:'Premises: The …'
+  [ 80]   0.5s #068 HIT io=592/129 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: Give…'
+  ┌─ C4.3/3 ───────────────────────────────── 20.6% [6.8%, 34.4%] ─┐
+  │  34 samples                                                    │
+  └─ composite_fitness=0.3584 ─────────────────────────────────────┘
+  [32m★ leader: C4.3 20.6%[0m
+  [ 81]   1.3s #014 HIT [ai]📖 io=564/822 -> 'Uncertain' gt:'Uncertain' q:'Premises: Shou…'
+  [ 82]   1.0s #035 MISS --/1 [ai]📖 io=526/389 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 83]   1.6s #006 MISS --/1 [ai]📖 io=590/562 -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 84]   1.2s #005 MISS --/1 [ai]📖 io=581/654 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 85]   1.0s #057 MISS --/1 [ai]📖 io=567/368 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 86]   1.0s #030 MISS --/1 [ai]📖 io=525/223 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 87]   1.0s #021 HIT [ai]📖 io=611/177 -> 'FALSE' gt:'FALSE' q:'Premises: Eith…'
+  [ 88]   0.7s #020 MISS --/1 [ai]📖 io=580/206 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 89]   0.7s #033 MISS --/1 [ai]📖 io=502/251 -> 'Uncertain' gt:'TRUE' q:'Premises: If b…'
+  [ 90]   0.9s #028 MISS --/1 [ai]📖 io=532/475 -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 91]   0.8s #003 MISS --/1 [ai]📖 io=597/284 -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 92]   0.5s #000 MISS --/1 [ai]📖 io=682/205 -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 93]   1.1s #013 MISS --/1 [ai]📖 io=585/451 -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 94]   0.9s #027 MISS --/1 [ai]📖 io=671/313 -> 'TRUE' gt:'FALSE' q:'Premises: When…'
+  [ 95]   1.0s #031 MISS --/1 [ai]📖 io=513/481 -> 'Uncertain' gt:'FALSE' q:'Premises: On t…'
+  [ 96]   1.2s #017 MISS --/1 [ai]📖 io=632/310 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 97]   1.6s #009 MISS --/1 [ai]📖 io=546/413 -> 'FALSE' gt:'TRUE' q:'Premises: It i…'
+  [ 98]   0.9s #011 MISS --/1 [ai]📖 io=587/302 -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 99]   1.0s #002 MISS --/1 [ai]📖 io=764/249 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [100]   0.8s #036 MISS --/1 [ai]📖 io=613/277 -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [101]   1.4s #034 HIT [ai]📖 io=480/669 -> 'FALSE' gt:'FALSE' q:'Premises: It i…'
+  [102]   0.8s #059 MISS --/1 [ai]📖 io=528/162 -> 'Uncertain' gt:'FALSE' q:'Premises: We c…'
+  [103]   1.0s #056 MISS --/1 [ai]📖 io=590/334 -> 'FALSE' gt:'TRUE' q:'Premises: When…'
+  [104]   0.7s #053 MISS --/1 [ai]📖 io=547/192 -> 'TRUE' gt:'FALSE' q:'Premises: Eith…'
+  [105]   0.9s #050 MISS --/1 [ai]📖 io=736/167 -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [106]   1.1s #064 MISS --/1 [ai]📖 io=612/510 -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [107]   0.7s #037 MISS --/1 [ai]📖 io=660/156 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [108]   0.9s #058 HIT [ai]📖 io=546/290 -> 'TRUE' gt:'TRUE' q:'Premises: On t…'
+  [109]   0.9s #029 HIT [ai]📖 io=552/406 -> 'TRUE' gt:'TRUE' q:'Premises: It i…'
+  [110]   0.8s #049 MISS --/1 [ai]📖 io=769/220 -> 'Uncertain' gt:'TRUE' q:'Premises: Ther…'
+  [111]   0.8s #065 HIT [ai]📖 io=465/244 -> 'Uncertain' gt:'Uncertain' q:'Premises: We c…'
+  [112]   0.9s #066 MISS --/1 [ai]📖 io=477/405 -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [113]   0.9s #067 MISS --/1 [ai]📖 io=527/427 -> 'Uncertain' gt:'FALSE' q:'Premises: The …'
+  [114]   0.9s #068 HIT [ai]📖 io=586/136 -> 'Uncertain' gt:'Uncertain' q:'Premises: Give…'
+  [33m⚠ r4round 4 resolved nothing: every one of its 3 readable arms has a lift interval spanning 0 (best reaches +0.200 at its upper bound). An arm this round selects is the best of what it saw, not a measured improvement over its reference[0m
+  Scoreboard: C4.3=20.6% | C4.1=14.7% | C4.2=8.3% (eliminated)
+  [32m[1m✓ SELECTED C4.3[0m  20.6% (vs reference 20.6%, [33m+0.0%[0m)  p=1.00 (ns)
+  [2mwhy: C4.3 won on θ lift +0.167 = +0.001 over the parent + 0.165 parent selection bias (θ -0.275 vs parent -0.276, se 0.207); runner-up C4.1 at -0.028[0m
+  composite_fitness = 0.3584   reference=0.3580  Δ+0.0003
+  formula:  fitness * (0.92 + 0.08 * 692.0 / max(692.0, tokens))
+    tokens=920.765
+  [32m✓ selected C4.3[0m [2m— C4.3 won on θ lift +0.167 = +0.001 over the parent + 0.165 parent selection bias (θ -0.275 vs parent -0.276, se 0.207); runner-up C4.1 at -0.028[0m
+  [2m↻ optimizer call: l1_critique_r4 · openai/gpt-6-luna · 11,362c prompt[0m
+  [2m  · l1_critique_r4 still waiting · 10s · provider openai/gpt-6-luna has not answered[0m
+  [2m  · l1_critique_r4 still waiting · 20s · provider openai/gpt-6-luna has not answered[0m
+  [2m✓ l1_critique_r4 · 24.2s · 5238 tok · 94% reasoning · 0% prefix cached[0m
+
+├─ ROUND 4 SUMMARY — 2m 10s ─────────────────────────────────────────────┤
+│  Round    Accuracy     n  Composite  Ability θ     Trend
+│    0        40.0%    40    0.5161     +0.062         -
+│    1        47.1%    34    0.5682     +0.129    +0.068
+│    2        26.5%    34    0.4042     +0.202    +0.072
+│    3        17.6%    34    0.3342     +0.166    -0.035
+│    4        20.6%    34    0.3584     +0.162    -0.004
+│  [33m-- Plateau: ability flat at +0.177 for 3 rounds[0m
+│  
+│  pobb P(best) @ q34: 1b6599 50.0% | *0f1dd6* 50.0% | b53a4a 16.6%▼
+│  composite_fitness = 0.3584   reference=0.3580  Δ+0.0003
+│  formula:  fitness * (0.92 + 0.08 * 692.0 / max(692.0, tokens))
+│    tokens=920.765
+│  accuracy: 20.6% of 34 samples  |  evaluated: 3 candidates
+│  lift vs reference: +0.000 [-0.149, +0.149]  |  [33mspans 0 — not separable from its reference[0m
+│  overlap (34 shared cells, +12 measured: C0 44.1%  →  C1.1 47.1%  →  C2.3 50.0%  →  C3.3 47.1%  →  C4.3 44.1%)
+│  Recall: top-1=21% top-5=21%
+│  [32m✓ Improvement detected, auto-continuing...[0m
+├────────────────────────────────────────────────────────────────────────┤
+
+├─ L2 REFINE CONTEXT ──────────────────────────────────────── L2 fire 1 ─┤
+│  L1 stalled 1 rounds  |  acc=20.6%  best=47.1%
+│  l1_overrides: (none)
+│  LLM analyzing failure patterns...
+├────────────────────────────────────────────────────────────────────────┤
+  [2m↻ optimizer call: l2_context_r4 · openai/gpt-6-luna · 9,473c prompt[0m
+  [2m  · l2_context_r4 still waiting · 10s · provider openai/gpt-6-luna has not answered[0m
+  [2m✓ l2_context_r4 · 14.4s · 4204 tok · 91% reasoning · 0% prefix cached[0m
+  [32m✓[0m L2 decision: 2 param changes, axis=answer_format
+    L2: The indirect-inference stop affected 22 of 30 failures; on #56, the model…
+  [36mL2 call[0m [2m→ .runtime/cache/rounds/round_NNNN.json::nodes.l2_context (prompt · response · usage)[0m
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ROUND 5/999                                             L2 every round
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+├─ GENERATE ─────────────────────────────────────────────────────────────┤
+│  Parent accuracy 20.6%
+│  Parent prompt   Decide whether the claim follows from the...
+│  Candidates      4   Prior critique: from R4
+│  Model           openai/gpt-6-luna
+├────────────────────────────────────────────────────────────────────────┤
+  [2m↻ optimizer call: l1_generate_r5 · openai/gpt-6-luna · 17,625c prompt[0m
+  [2m  · l1_generate_r5 still waiting · 10s · provider openai/gpt-6-luna has not answered[0m
+  [2m  · l1_generate_r5 still waiting · 20s · provider openai/gpt-6-luna has not answered[0m
+  [2m  · l1_generate_r5 still waiting · 30s · provider openai/gpt-6-luna has not answered[0m
+  [2m  · l1_generate_r5 still waiting · 40s · provider openai/gpt-6-luna has not answered[0m
+  [2m  · l1_generate_r5 still waiting · 50s · provider openai/gpt-6-luna has not answered[0m
+  [2m  · l1_generate_r5 still waiting · 60s · provider openai/gpt-6-luna has not answered[0m
+  [2m✓ l1_generate_r5 · 64.5s · 10414 tok · 89% reasoning · 0% prefix cached[0m
+  [32m✓[0m 4 candidates generated (from LLM)
+
+│  [36mRound 5 SPs:[0m
+│                   Start  Parent  C5.1  C5.2  C5.3  C5.4  
+│  [2m─── llm_only ────[0m
+│  llm_only.prompt  [a]    [b]     ·     ·     ·     ·     
+│  [2m─── prompt ──────[0m
+│    answer_format  [c]    [d]     [e]   ·     ·     ·     
+│      task_intent  [f]    ·       ·     [g]   ·     ·     
+│   thinking_style  -      [h]     ·     ·     [i]   [j]   
+│  
+│  [36mValues[0m [2m— full text in round_0005.json::candidate_scores[].prompt_fields / .pipeline_params, joined on label[0m
+│    [a] llm_only.prompt      257 B  [2mStart[0m
+│    [b] llm_only.prompt      740 B  [2mParent[0m
+│    [c] answer_format         71 B  [2mStart[0m
+│    [d] answer_format        116 B  [2mParent[0m
+│    [e] answer_format        228 B  [2mC5.1[0m
+│    [f] task_intent          184 B  [2mStart[0m
+│    [g] task_intent          255 B  [2mC5.2[0m
+│    [h] thinking_style       185 B  [2mParent[0m
+│    [i] thinking_style       140 B  [2mC5.3[0m
+│    [j] thinking_style       109 B  [2mC5.4[0m
+
+├─ MEASURE ──────────────────────── l1_score · 4 candidates on 34 cells ─┤
+  C5.1/4  [36mTargets stopping when the claim is not directly stated. A compact ledger makes indirect consequences visible before…[0m
+  [2mshared order:[0m #034, #036, #005, …  (34 samples, win-opportunities first; 1 candidate prior)
+  [  1]   1.2s #034 HIT io=506/400 c51% -> 'FALSE' gt:'FALSE' q:'Premises: It i…'
+  [  2]   0.7s #036 MISS --/1 io=639/183 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [  3]   0.9s #005 MISS --/1 io=607/231 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [  4]   1.1s #009 MISS --/1 io=572/505 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [  5]   1.3s #006 HIT io=616/456 c0% -> 'FALSE' gt:'FALSE' q:'Premises: Eith…'
+  [  6]   1.2s #014 HIT io=590/558 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: Shou…'
+  [  7]   1.2s #066 MISS --/1 io=503/605 c51% -> 'FALSE' gt:'TRUE' q:'Premises: It i…'
+  [  8]   0.7s #053 MISS --/1 io=573/216 c45% -> 'TRUE' gt:'FALSE' q:'Premises: Eith…'
+  [2mpobb:[0m P(best)=50.0% @ q8  vs hardest=R4_win (P(c>p)=50.0%)  (of 1 prior)
+  [  9]   1.0s #067 MISS --/1 io=553/495 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: The …'
+  [ 10]   1.0s #059 HIT io=554/547 c0% -> 'FALSE' gt:'FALSE' q:'Premises: We c…'
+  [ 11]   1.0s #064 MISS --/1 io=638/374 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [ 12]   1.0s #035 HIT io=552/358 c0% -> 'FALSE' gt:'FALSE' q:'Premises: So l…'
+  [ 13]   0.7s #056 MISS --/1 io=616/252 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 14]   0.7s #050 MISS --/1 io=762/217 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [ 15]   1.0s #057 MISS --/1 io=593/367 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 16]   1.0s #058 HIT io=572/446 c0% -> 'TRUE' gt:'TRUE' q:'Premises: On t…'
+  [ 17]   1.5s #037 HIT io=686/428 c37% -> 'FALSE' gt:'FALSE' q:'Premises: It i…'
+  [ 18]   0.6s #030 MISS --/1 io=551/279 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 19]   0.4s #021 MISS --/1 io=637/130 c40% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 20]   0.7s #020 MISS --/1 io=606/164 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 21]   1.7s #033 MISS --/1 io=528/237 c48% -> 'Uncertain' gt:'TRUE' q:'Premises: If b…'
+  [ 22]   1.0s #028 MISS --/1 io=558/539 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 23]   0.6s #003 MISS --/1 io=623/207 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 24]   0.7s #000 MISS --/1 io=708/252 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 25]   2.5s #013 MISS --/1 io=528/327 c6% -> 'TRUE' gt:'FALSE' q:'Premises: If t…'
+  [ 26]   1.4s #027 MISS --/1 io=697/482 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: When…'
+  [ 27]   1.8s #031 MISS --/1 io=539/469 c47% -> 'TRUE' gt:'FALSE' q:'Premises: On t…'
+  [ 28]   0.7s #017 MISS --/1 io=658/379 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 29]   1.0s #011 MISS --/1 io=613/436 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 30]   0.8s #002 MISS --/1 io=790/296 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 31]   2.1s #069 MISS --/1 io=601/583 c43% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [2m↻ pobb catch-up #69:[0m R4_winner
+  [ 32]   1.0s #070 MISS --/1 io=601/384 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Give…'
+  [2m↻ pobb catch-up #70:[0m R4_winner
+  [ 33]   1.5s #071 MISS --/1 io=719/365 c36% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [2m↻ pobb catch-up #71:[0m R4_winner
+  [ 34]   1.2s #072 MISS --/1 io=671/341 c38% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [2m↻ pobb catch-up #72:[0m R4_winner
+  ┌─ C5.1/4 ───────────────────────────────── 20.6% [6.8%, 34.4%] ─┐
+  │  34 samples                                                    │
+  └─ composite_fitness=0.3559 ─────────────────────────────────────┘
+  [32m★ leader: C5.1 20.6%[0m
+  C5.2/4  [36mTargets retreating to Uncertain before closing the inference. The all-model test requires checking whether the…[0m
+  [2mshared order:[0m #034, #036, #005, …  (34 samples, win-opportunities first; 2 candidate priors)
+  [ 35]   1.2s #034 HIT io=495/593 c0% -> 'FALSE' gt:'FALSE' q:'Premises: It i…'
+  [ 36]   1.5s #036 MISS --/1 io=628/626 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [ 37]   1.5s #005 MISS --/1 io=596/844 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 38]   1.9s #009 MISS --/1 io=1089/579 c0% -> 'FALSE' gt:'TRUE' q:'Premises: It i…'
+        [33m⚠ llm_only: finish_reason=error reasoning_chars=1453[0m
+        [33m⚠ llm_only: schema_repair attempt=1: Response was not valid JSON.[0m
+  [ 39]   1.5s #006 HIT io=605/432 c0% -> 'FALSE' gt:'FALSE' q:'Premises: Eith…'
+  [ 40]   1.0s #014 HIT io=579/563 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: Shou…'
+  [ 41]   1.1s #066 MISS --/1 io=492/548 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 42]   1.4s #053 MISS --/1 io=562/619 c0% -> 'TRUE' gt:'FALSE' q:'Premises: Eith…'
+  [2mpobb:[0m P(best)=49.4% @ q8  vs hardest=f8f424 (P(c>p)=49.4%)  (of 2 priors)
+  [ 43]   1.0s #067 HIT io=542/627 c0% -> 'FALSE' gt:'FALSE' q:'Premises: The …'
+  [ 44]   1.3s #059 HIT io=543/501 c0% -> 'FALSE' gt:'FALSE' q:'Premises: We c…'
+  [ 45]   0.9s #064 MISS --/1 io=627/322 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [ 46]   0.7s #035 MISS --/1 io=541/371 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 47]   0.9s #056 MISS --/1 io=605/189 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 48]   0.9s #050 MISS --/1 io=751/461 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [ 49]   1.2s #057 MISS --/1 io=582/617 c44% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 50]   1.3s #058 MISS --/1 io=561/647 c46% -> 'Uncertain' gt:'TRUE' q:'Premises: On t…'
+  [ 51]   1.1s #037 MISS --/1 io=675/488 c38% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  ┌─ C5.2/4 ───────────────────────────────── 29.4% [7.1%, 51.7%] ─┐
+  │  17 samples [33m⚠ eliminated 17/34[0m                                 │
+  │  [33m✂ eliminated q17/34  p_best=24.3% < eps=30%  vs C5.1 (of 2 pr[0m…│
+  └─ composite_fitness=0.4223 ─────────────────────────────────────┘
+  [32m★ leader: C5.2 29.4%[0m
+  C5.3/4  [36mTargets unsupported inferences from conditionals. The added guard distinguishes a conditional constraint from evidence…[0m
+  [2mshared order:[0m #034, #036, #005, …  (34 samples, win-opportunities first; 2 candidate priors)
+  [ 52]   1.6s #034 HIT io=478/472 c0% -> 'FALSE' gt:'FALSE' q:'Premises: It i…'
+  [ 53]   0.8s #036 MISS --/1 io=611/226 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [ 54]   1.5s #005 MISS --/1 io=579/736 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 55]   0.9s #009 MISS --/1 io=544/368 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 56]   1.1s #006 MISS --/1 io=588/493 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 57]   1.8s #014 HIT io=562/603 c46% -> 'Uncertain' gt:'Uncertain' q:'Premises: Shou…'
+  [ 58]   0.9s #066 MISS --/1 io=475/447 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 59]   0.8s #053 MISS --/1 io=545/294 c0% -> 'TRUE' gt:'FALSE' q:'Premises: Eith…'
+  [2mpobb:[0m P(best)=31.7% @ q8  vs hardest=f8f424 (P(c>p)=31.7%)  (of 2 priors)
+  [ 60]   3.8s #067 MISS --/1 io=525/297 c49% -> 'Uncertain' gt:'FALSE' q:'Premises: The …'
+  [ 61]   1.2s #059 MISS --/1 io=526/175 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: We c…'
+  ┌─ C5.3/4 ───────────────────────────────── 20.0% [0.0%, 46.1%] ─┐
+  │  10 samples [33m⚠ eliminated 10/34[0m                                 │
+  │  [33m✂ eliminated q10/34  p_best=18.7% < eps=25%  vs C5.1 (of 2 pr[0m…│
+  └─ composite_fitness=0.3516 ─────────────────────────────────────┘
+  [2m→ C5.3 20.0%  (-9.4% from C5.2)[0m
+  C5.4/4  [36mTargets possible overhead from the recently added conditional-specific wording, which showed no measured lift. This…[0m
+  [2mshared order:[0m #034, #036, #005, …  (34 samples, win-opportunities first; 2 candidate priors)
+  [ 62]   1.3s #034 MISS --/1 io=462/606 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 63]   1.1s #036 HIT io=595/413 c0% -> 'FALSE' gt:'FALSE' q:'Premises: One …'
+  [ 64]   0.6s #005 MISS --/1 io=563/203 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 65]   1.0s #009 MISS --/1 io=528/494 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 66]   0.8s #006 MISS --/1 io=572/314 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 67]   1.1s #014 HIT io=546/592 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: Shou…'
+  [ 68]   1.1s #066 MISS --/1 io=459/445 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 69]   1.1s #053 MISS --/1 io=529/406 c0% -> 'TRUE' gt:'FALSE' q:'Premises: Eith…'
+  [2mpobb:[0m P(best)=50.0% @ q8  vs hardest=R4_win (P(c>p)=50.0%)  (of 2 priors)
+  [ 70]   1.1s #067 MISS --/1 io=509/525 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: The …'
+  [ 71]   0.7s #059 MISS --/1 io=510/217 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: We c…'
+  [ 72]   1.0s #064 MISS --/1 io=594/426 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [ 73]   1.2s #035 HIT io=508/414 c50% -> 'FALSE' gt:'FALSE' q:'Premises: So l…'
+  [ 74]   1.1s #056 MISS --/1 io=572/145 c45% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 75]   0.5s #050 MISS --/1 io=718/128 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [ 76]   1.0s #057 MISS --/1 io=549/411 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 77]   0.8s #058 MISS --/1 io=528/311 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: On t…'
+  [ 78]   0.8s #037 MISS --/1 io=642/144 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 79]   0.5s #030 MISS --/1 io=507/202 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 80]   0.8s #021 MISS --/1 io=593/168 c43% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 81]   0.8s #020 MISS --/1 io=562/206 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 82]   1.2s #033 MISS --/1 io=484/231 c53% -> 'Uncertain' gt:'TRUE' q:'Premises: If b…'
+  [ 83]   0.9s #028 MISS --/1 io=514/333 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 84]   0.8s #003 MISS --/1 io=579/200 c44% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 85]   0.6s #000 MISS --/1 io=664/158 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 86]   0.5s #013 MISS --/1 io=567/216 c45% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 87]   0.8s #027 MISS --/1 io=653/307 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: When…'
+  [ 88]   1.5s #031 MISS --/1 io=495/422 c52% -> 'Uncertain' gt:'FALSE' q:'Premises: On t…'
+  [ 89]   0.7s #017 MISS --/1 io=614/239 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 90]   1.1s #011 MISS --/1 io=569/382 c45% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 91]   0.7s #002 MISS --/1 io=746/269 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 92]   0.5s #069 MISS --/1 io=557/185 c46% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 93]   1.2s #070 MISS --/1 io=557/275 c46% -> 'TRUE' gt:'FALSE' q:'Premises: Give…'
+  [ 94]   0.8s #071 MISS --/1 io=675/251 c38% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 95]   0.8s #072 MISS --/1 io=627/290 c41% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  ┌─ C5.4/4 ────────────────────────────────── 8.8% [0.0%, 18.5%] ─┐
+  │  34 samples                                                    │
+  └─ composite_fitness=0.2656 ─────────────────────────────────────┘
+  [2m→ C5.4 8.8%  (-20.6% from C5.2)[0m
+  [ 96]   1.1s #014 MISS --/1 [ai]📖 io=570/596 -> 'TRUE' gt:'Uncertain' q:'Premises: Shou…'
+  [ 97]   1.0s #035 HIT [ai]📖 io=532/428 -> 'FALSE' gt:'FALSE' q:'Premises: So l…'
+  [ 98]   1.0s #006 MISS --/1 [ai]📖 io=596/476 -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 99]   1.0s #005 MISS --/1 [ai]📖 io=587/496 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [100]   0.8s #057 MISS --/1 [ai]📖 io=573/385 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [101]   0.7s #030 MISS --/1 [ai]📖 io=531/212 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [102]   0.5s #021 MISS --/1 [ai]📖 io=617/170 -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [103]   0.8s #020 MISS --/1 [ai]📖 io=586/205 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [104]   1.1s #033 MISS --/1 [ai]📖 io=508/252 -> 'Uncertain' gt:'TRUE' q:'Premises: If b…'
+  [105]   1.4s #028 MISS --/1 [ai]📖 io=538/540 -> 'FALSE' gt:'TRUE' q:'Premises: It i…'
+  [106]   1.0s #003 MISS --/1 [ai]📖 io=603/196 -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [107]   0.8s #000 MISS --/1 [ai]📖 io=688/250 -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [108]   0.7s #013 MISS --/1 [ai]📖 io=591/216 -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [109]   0.9s #027 MISS --/1 [ai]📖 io=677/360 -> 'TRUE' gt:'FALSE' q:'Premises: When…'
+  [110]   1.1s #031 MISS --/1 [ai]📖 io=519/455 -> 'TRUE' gt:'FALSE' q:'Premises: On t…'
+  [111]   2.7s #017 MISS --/1 [ai]📖 io=638/171 -> 'TRUE' gt:'FALSE' q:'Premises: It i…'
+  [112]   0.7s #009 HIT [ai]📖 io=552/277 -> 'TRUE' gt:'TRUE' q:'Premises: It i…'
+  [113]   3.3s #011 MISS --/1 [ai]📖 io=593/628 -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [114]   1.5s #002 MISS --/1 [ai]📖 io=770/264 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [115]   0.5s #036 MISS --/1 [ai]📖 io=619/155 -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [116]   0.8s #034 MISS --/1 [ai]📖 io=486/353 -> 'TRUE' gt:'FALSE' q:'Premises: It i…'
+  [117]   0.7s #059 MISS --/1 [ai]📖 io=534/173 -> 'Uncertain' gt:'FALSE' q:'Premises: We c…'
+  [118]   0.7s #056 MISS --/1 [ai]📖 io=596/209 -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [119]   2.2s #053 HIT [ai]📖 io=553/516 -> 'FALSE' gt:'FALSE' q:'Premises: Eith…'
+  [120]   0.7s #050 MISS --/1 [ai]📖 io=742/136 -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [121]   1.0s #064 MISS --/1 [ai]📖 io=618/391 -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [122]   0.9s #066 MISS --/1 [ai]📖 io=483/477 -> 'FALSE' gt:'TRUE' q:'Premises: It i…'
+  [123]   1.8s #067 MISS --/1 [ai]📖 io=533/507 -> 'Uncertain' gt:'FALSE' q:'Premises: The …'
+  [124]   0.7s #037 MISS --/1 [ai]📖 io=666/383 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [125]   0.9s #058 HIT [ai]📖 io=552/289 -> 'TRUE' gt:'TRUE' q:'Premises: On t…'
+  [126]   0.7s #069 MISS --/1 [ai]📖 io=581/200 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [127]   0.8s #070 MISS --/1 [ai]📖 io=581/277 -> 'TRUE' gt:'FALSE' q:'Premises: Give…'
+  [128]   0.8s #071 MISS --/1 [ai]📖 io=699/262 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [129]   1.1s #072 MISS --/1 [ai]📖 io=651/345 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [33m⚠ r5round 5 resolved nothing: every one of its 4 readable arms has a lift interval spanning 0 (best reaches +0.477 at its upper bound). An arm this round selects is the best of what it saw, not a measured improvement over its reference[0m
+  ┌─ SCOREBOARD ───────────────────────────────────────────────────────────────┐
+  │  #   Label   Accuracy             95% CI   Composite   Ability θ     Delta │
+  │  1   C5.1       20.6%      [6.8%, 34.4%]      0.3559      -0.174     +8.8%…│
+  │  2   C5.2       29.4%      [7.1%, 51.7%]      0.4223      -0.037       ---…│
+  │  3   C5.3       20.0%      [0.0%, 46.1%]      0.3516      -0.297       ---…│
+  │  4   C5.4        8.8%      [0.0%, 18.5%]      0.2656      -0.575     -2.9% │
+  └────────────────────────────────────────────────────────────────────────────┘
+  [32m[1m✓ SELECTED C5.1[0m  20.6% (vs reference 11.8%, [32m+8.8%[0m)  p=0.26 (ns)
+  [2mwhy: C5.1 won on θ lift +0.459 = +0.293 over the parent + 0.166 parent selection bias (θ -0.174 vs parent -0.467, se 0.215); runner-up C5.2 at +0.532[0m
+  composite_fitness = 0.3559   reference=0.2885  Δ+0.0674
+  formula:  fitness * (0.92 + 0.08 * 692.0 / max(692.0, tokens))
+    tokens=978.471
+  [32m✓ selected C5.1[0m [2m— C5.1 won on θ lift +0.459 = +0.293 over the parent + 0.166 parent selection bias (θ -0.174 vs parent -0.467, se 0.215); runner-up C5.2 at +0.532[0m
+  [2m↻ optimizer call: l1_critique_r5 · openai/gpt-6-luna · 11,265c prompt[0m
+  [2m  · l1_critique_r5 still waiting · 10s · provider openai/gpt-6-luna has not answered[0m
+  [2m  · l1_critique_r5 still waiting · 20s · provider openai/gpt-6-luna has not answered[0m
+  [2m✓ l1_critique_r5 · 21.1s · 5215 tok · 93% reasoning · 0% prefix cached[0m
+
+├─ ROUND 5 SUMMARY — 1m 39s ─────────────────────────────────────────────┤
+│  Round    Accuracy     n  Composite  Ability θ     Trend
+│    0        40.0%    40    0.5161     +0.062         -
+│    1        47.1%    34    0.5682     +0.129    +0.068
+│    2        26.5%    34    0.4042     +0.202    +0.072
+│    3        17.6%    34    0.3342     +0.166    -0.035
+│    4        20.6%    34    0.3584     +0.162    -0.004
+│    5        20.6%    34    0.3559     +0.258    +0.096
+│  
+│  pobb P(best) @ q34: f8f424 50.0% | *d8b9df* 50.0% | d791d5 24.3%▼ | 798b0a 18.7%▼
+│  composite_fitness = 0.3559   reference=0.2885  Δ+0.0674
+│  formula:  fitness * (0.92 + 0.08 * 692.0 / max(692.0, tokens))
+│    tokens=978.471
+│  accuracy: 20.6% of 34 samples  |  evaluated: 4 candidates
+│  lift vs reference: +0.088 [-0.069, +0.246]  |  [33mspans 0 — not separable from its reference[0m
+│  overlap (34 shared cells, +13 measured: C0 44.1%  →  C1.1 47.1%  →  C2.3 50.0%  →  C3.3 47.1%  →  C4.3 44.1%  →  C5.1 50.0%)
+│  Recall: top-1=21% top-5=21%
+│  [32m✓ Improvement detected, auto-continuing...[0m
+├────────────────────────────────────────────────────────────────────────┤
+
+├─ L2 REFINE CONTEXT ──────────────────────────────────────── L2 fire 2 ─┤
+│  L1 stalled 1 rounds  |  acc=20.6%  best=47.1%
+│  l1_overrides: n_variants=4, creativity=0.8
+│  LLM analyzing failure patterns...
+├────────────────────────────────────────────────────────────────────────┤
+  [2m↻ optimizer call: l2_context_r5 · openai/gpt-6-luna · 10,067c prompt[0m
+  [2m  · l2_context_r5 still waiting · 10s · provider openai/gpt-6-luna has not answered[0m
+  [2m✓ l2_context_r5 · 10.8s · 4119 tok · 89% reasoning · 0% prefix cached[0m
+  [32m✓[0m L2 decision: 2 param changes, axis=instruction
+    L2: The failure cluster is negation-scope misparsing: in the one detailed tadpoles…
+  [36mL2 call[0m [2m→ .runtime/cache/rounds/round_NNNN.json::nodes.l2_context (prompt · response · usage)[0m
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ROUND 6/999                                             L2 every round
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+├─ GENERATE ─────────────────────────────────────────────────────────────┤
+│  Parent accuracy 20.6%
+│  Parent prompt   Decide whether the claim follows from the...
+│  Candidates      6   Prior critique: from R5
+│  Model           openai/gpt-6-luna
+├────────────────────────────────────────────────────────────────────────┤
+  [2m↻ optimizer call: l1_generate_r6 · openai/gpt-6-luna · 18,325c prompt[0m
+  [2m  · l1_generate_r6 still waiting · 10s · provider openai/gpt-6-luna has not answered[0m
+  [2m  · l1_generate_r6 still waiting · 20s · provider openai/gpt-6-luna has not answered[0m
+  [2m✓ l1_generate_r6 · 28.1s · 8083 tok · 72% reasoning · 0% prefix cached[0m
+  [32m✓[0m 6 candidates generated (from LLM)
+
+│  [33m⚠ L1 produced 1 repeat variant(s) — synthetic-zeroed (no API cost). yield=83% (5/6 valid).[0m
+│  [36mRound 6 SPs:[0m
+│                                                 Start  Parent  C6.1  C6.2  C6.3  C6.4  C6.5  C6.6  
+│  [2m─── llm_only ──────────────────────────────────[0m
+│  llm_only.output_schema_descriptions.reasoning  -      -       -     -     -     -     -     [a]   
+│                                llm_only.prompt  [b]    [c]     ·     ·     ·     ·     ·     ·     
+│  [2m─── prompt ────────────────────────────────────[0m
+│                                  answer_format  [d]    [e]     ·     ·     ·     ·     ·     ·     
+│                                    instruction  -      -       [f]   -     [g]   [h]   -     -     
+│                                    task_intent  [i]    ·       ·     [j]   ·     ·     ·     ·     
+│                                 thinking_style  -      [k]     ·     ·     ·     ·     [l]   ·     
+│  
+│  [36mValues[0m [2m— full text in round_0006.json::candidate_scores[].prompt_fields / .pipeline_params, joined on label[0m
+│    [a] llm_only.output_schema_descriptions.reasoning      175 B  [2mC6.6[0m
+│    [b] llm_only.prompt                                    257 B  [2mStart[0m
+│    [c] llm_only.prompt                                    852 B  [2mParent[0m
+│    [d] answer_format                                       71 B  [2mStart[0m
+│    [e] answer_format                                      228 B  [2mParent[0m
+│    [f] instruction                                        168 B  [2mC6.1[0m
+│    [g] instruction                                        194 B  [2mC6.3[0m
+│    [h] instruction                                        167 B  [2mC6.4[0m
+│    [i] task_intent                                        184 B  [2mStart[0m
+│    [j] task_intent                                        233 B  [2mC6.2[0m
+│    [k] thinking_style                                     185 B  [2mParent[0m
+│    [l] thinking_style                                     211 B  [2mC6.5[0m
+
+├─ MEASURE ──────────────────────── l1_score · 6 candidates on 34 cells ─┤
+  C6.1/6  [36mAdds a brief scope-and-polarity check before reasoning to prevent invented negations from flipping the entailment.[0m
+  [2mshared order:[0m #036, #005, #066, …  (34 samples, win-opportunities first; 1 candidate prior)
+  [  1]   1.0s #036 MISS --/1 io=671/346 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [  2]   1.1s #005 MISS --/1 io=639/607 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [  3]   1.6s #066 MISS --/1 io=535/940 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [  4]   1.2s #059 MISS --/1 io=586/548 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: We c…'
+  [  5]   0.9s #067 HIT io=585/519 c0% -> 'FALSE' gt:'FALSE' q:'Premises: The …'
+  [  6]   2.0s #069 MISS --/1 io=1262/618 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+        [33m⚠ llm_only: finish_reason=error reasoning_chars=1675[0m
+        [33m⚠ llm_only: schema_repair attempt=1: Response was not valid JSON.[0m
+  [  7]   1.3s #070 MISS --/1 io=633/690 c0% -> 'TRUE' gt:'FALSE' q:'Premises: Give…'
+  [  8]   2.1s #014 HIT io=622/846 c41% -> 'Uncertain' gt:'Uncertain' q:'Premises: Shou…'
+  [2mpobb:[0m P(best)=49.4% @ q8  vs hardest=R5_win (P(c>p)=49.4%)  (of 1 prior)
+  [  9]   1.1s #064 MISS --/1 io=670/185 c38% -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [ 10]   1.3s #056 MISS --/1 io=648/328 c40% -> 'FALSE' gt:'TRUE' q:'Premises: When…'
+  [ 11]   0.7s #053 MISS --/1 io=605/303 c0% -> 'TRUE' gt:'FALSE' q:'Premises: Eith…'
+  [ 12]   0.9s #035 HIT io=584/422 c0% -> 'FALSE' gt:'FALSE' q:'Premises: So l…'
+  [ 13]   1.2s #050 MISS --/1 io=794/433 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [ 14]   0.8s #057 MISS --/1 io=625/215 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 15]   0.7s #030 MISS --/1 io=583/205 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 16]   0.8s #006 HIT io=648/484 c0% -> 'FALSE' gt:'FALSE' q:'Premises: Eith…'
+  [ 17]   0.6s #021 MISS --/1 io=669/148 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 18]   1.0s #020 MISS --/1 io=638/114 c40% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 19]   0.9s #033 MISS --/1 io=560/315 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: If b…'
+  [ 20]   1.3s #034 MISS --/1 io=538/504 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 21]   0.8s #028 MISS --/1 io=590/364 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 22]   1.9s #003 MISS --/1 io=655/511 c39% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 23]   0.7s #000 MISS --/1 io=740/282 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 24]   2.6s #013 MISS --/1 io=643/306 c40% -> 'TRUE' gt:'FALSE' q:'Premises: If t…'
+  [ 25]   0.9s #027 HIT io=729/306 c35% -> 'FALSE' gt:'FALSE' q:'Premises: When…'
+  [ 26]   1.4s #031 MISS --/1 io=571/563 c45% -> 'Uncertain' gt:'FALSE' q:'Premises: On t…'
+  [ 27]   1.6s #017 MISS --/1 io=690/479 c37% -> 'TRUE' gt:'FALSE' q:'Premises: It i…'
+  [ 28]   1.1s #009 MISS --/1 io=604/489 c0% -> 'FALSE' gt:'TRUE' q:'Premises: It i…'
+  [ 29]   1.2s #011 MISS --/1 io=645/615 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 30]   0.7s #002 MISS --/1 io=822/191 c31% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 31]   1.2s #073 MISS --/1 io=643/285 c40% -> 'Uncertain' gt:'FALSE' q:'Premises: If u…'
+  [2m↻ pobb catch-up #73:[0m R5_winner
+  [ 32]   1.6s #074 MISS --/1 io=716/657 c36% -> 'TRUE' gt:'FALSE' q:'Premises: Give…'
+  [2m↻ pobb catch-up #74:[0m R5_winner
+  [ 33]   1.2s #075 HIT io=663/834 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: The …'
+  [2m↻ pobb catch-up #75:[0m R5_winner
+  [ 34]   2.1s #076 HIT io=1187/470 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: So l…'
+        [33m⚠ llm_only: finish_reason=error reasoning_chars=1228[0m
+        [33m⚠ llm_only: schema_repair attempt=1: Response was not valid JSON.[0m
+  [2m↻ pobb catch-up #76:[0m R5_winner
+  ┌─ C6.1/6 ───────────────────────────────── 20.6% [6.8%, 34.4%] ─┐
+  │  34 samples                                                    │
+  └─ composite_fitness=0.3533 ─────────────────────────────────────┘
+  [32m★ leader: C6.1 20.6%[0m
+  C6.2/6  [36mReplaces a direct entailment judgment with a model-based test, making the label depend on all consistent…[0m
+  [2mshared order:[0m #036, #005, #066, …  (34 samples, win-opportunities first; 2 candidate priors)
+  ┌─ C6.2/6 ───────────────────────────────────────────── [33mINVALID[0m ─┐
+  │  [33m⚠[0m variant = 're-proposes the idea measured and lost in round [0m…│
+  └─   ↳ scored 0 (no backend call); the next l1_generate reads it in l1_wounds ──┘
+  [2m→ C6.2 0.0%  (-20.6% from C6.1)[0m
+  C6.3/6  [36mBlocks the unsupported move from a conditional to its antecedent, while retaining the valid forward and contrapositive…[0m
+  [2mshared order:[0m #036, #005, #066, …  (34 samples, win-opportunities first; 2 candidate priors)
+  [ 35]   0.9s #036 MISS --/1 io=678/254 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [ 36]   0.9s #005 MISS --/1 io=646/421 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 37]   1.0s #066 MISS --/1 io=542/433 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 38]   0.8s #059 MISS --/1 io=593/159 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: We c…'
+  [ 39]   1.4s #067 MISS --/1 io=592/597 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: The …'
+  [ 40]   0.6s #069 MISS --/1 io=640/256 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  ┌─ C6.3/6 ─────────────────────────────────── 0.0% [0.0%, 8.2%] ─┐
+  │  6 samples [33m⚠ eliminated 6/34[0m                                   │
+  │  [33m✂ answer collapsed q6/34  one label for every sample — no mea[0m…│
+  └─ composite_fitness=0.1957 ─────────────────────────────────────┘
+  [2m→ C6.3 0.0%  (-20.6% from C6.1)[0m
+  C6.4/6  [36mRequires coverage of the full premise set before labeling, reducing answers based on only the most salient one or two…[0m
+  [2mshared order:[0m #036, #005, #066, …  (34 samples, win-opportunities first; 2 candidate priors)
+  [ 41]   0.8s #036 MISS --/1 io=668/270 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [ 42]   0.9s #005 MISS --/1 io=636/267 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 43]   1.2s #066 MISS --/1 io=532/420 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 44]   0.9s #059 MISS --/1 io=583/194 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: We c…'
+  [ 45]   1.1s #067 MISS --/1 io=582/509 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: The …'
+  [ 46]   0.9s #069 MISS --/1 io=630/382 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  ┌─ C6.4/6 ─────────────────────────────────── 0.0% [0.0%, 8.2%] ─┐
+  │  6 samples [33m⚠ eliminated 6/34[0m                                   │
+  │  [33m✂ answer collapsed q6/34  one label for every sample — no mea[0m…│
+  └─ composite_fitness=0.1958 ─────────────────────────────────────┘
+  [2m→ C6.4 0.0%  (-20.6% from C6.1)[0m
+  C6.5/6  [36mAdds an explicit falsity test for conditionals and asks that it be applied jointly with other premises, helping catch…[0m
+  [2mshared order:[0m #036, #005, #066, …  (34 samples, win-opportunities first; 2 candidate priors)
+  [ 47]   1.6s #036 MISS --/1 io=552/234 c23% -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [ 48]   1.3s #005 MISS --/1 io=603/693 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 49]   2.0s #066 MISS --/1 io=963/484 c0% -> 'FALSE' gt:'TRUE' q:'Premises: It i…'
+        [33m⚠ llm_only: finish_reason=error reasoning_chars=1115[0m
+        [33m⚠ llm_only: schema_repair attempt=1: Response was not valid JSON.[0m
+  [ 50]   1.2s #059 MISS --/1 io=550/205 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: We c…'
+  [ 51]   3.0s #067 MISS --/1 io=466/603 c27% -> 'Uncertain' gt:'FALSE' q:'Premises: The …'
+  [ 52]   0.8s #069 MISS --/1 io=597/239 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 53]   0.9s #070 MISS --/1 io=597/409 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Give…'
+  [ 54]   1.3s #014 MISS --/1 io=586/678 c0% -> 'FALSE' gt:'Uncertain' q:'Premises: Shou…'
+  [2mpobb:[0m P(best)=10.4% @ q8  vs hardest=R5_win (P(c>p)=10.4%)  (of 2 priors)
+  ┌─ C6.5/6 ─────────────────────────────────── 0.0% [0.0%, 6.1%] ─┐
+  │  8 samples [33m⚠ eliminated 8/34[0m                                   │
+  │  [33m✂ eliminated q8/34  p_best=10.4% < eps=20%  vs R5_winner (of [0m…│
+  └─ composite_fitness=0.1950 ─────────────────────────────────────┘
+  [2m→ C6.5 0.0%  (-20.6% from C6.1)[0m
+  C6.6/6  [36mllm_only.output_schema_descriptions.reasoning: At most five short steps, one line each. For Uncertain, establish that premises allow both the claim and its negation; do not use it merely because a derivation is unfinished.[0m
+  [2mshared order:[0m #036, #005, #066, …  (34 samples, win-opportunities first; 2 candidate priors)
+  [ 55]   2.1s #036 HIT io=1382/478 c19% -> 'FALSE' gt:'FALSE' q:'Premises: One …'
+        [33m⚠ llm_only: finish_reason=error reasoning_chars=1165[0m
+        [33m⚠ llm_only: schema_repair attempt=1: Response was not valid JSON.[0m
+  [ 56]   1.2s #005 MISS --/1 io=663/648 c39% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 57]   1.5s #066 MISS --/1 io=559/474 c46% -> 'FALSE' gt:'TRUE' q:'Premises: It i…'
+  [ 58]   1.3s #059 HIT io=610/510 c42% -> 'FALSE' gt:'FALSE' q:'Premises: We c…'
+  [ 59]   1.1s #067 MISS --/1 io=609/568 c42% -> 'Uncertain' gt:'FALSE' q:'Premises: The …'
+  [ 60]   1.6s #069 MISS --/1 io=657/530 c39% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 61]   1.2s #070 MISS --/1 io=657/477 c39% -> 'Uncertain' gt:'FALSE' q:'Premises: Give…'
+  [ 62]   1.1s #014 MISS --/1 io=646/664 c0% -> 'FALSE' gt:'Uncertain' q:'Premises: Shou…'
+  [2mpobb:[0m P(best)=49.3% @ q8  vs hardest=R5_win (P(c>p)=49.3%)  (of 2 priors)
+  [ 63]   1.1s #064 MISS --/1 io=694/502 c37% -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [ 64]   0.9s #056 MISS --/1 io=672/344 c0% -> 'FALSE' gt:'TRUE' q:'Premises: When…'
+  [ 65]   0.7s #053 MISS --/1 io=629/364 c41% -> 'TRUE' gt:'FALSE' q:'Premises: Eith…'
+  [ 66]   1.2s #035 HIT io=608/500 c42% -> 'FALSE' gt:'FALSE' q:'Premises: So l…'
+  [ 67]   1.0s #050 MISS --/1 io=818/443 c31% -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [ 68]   2.7s #057 MISS --/1 io=649/443 c39% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 69]   2.3s #030 MISS --/1 io=607/212 c42% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 70]   1.1s #006 HIT io=672/465 c38% -> 'FALSE' gt:'FALSE' q:'Premises: Eith…'
+  [ 71]   0.8s #021 MISS --/1 io=693/131 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 72]   2.2s #020 MISS --/1 io=662/218 c39% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 73]   2.1s #033 MISS --/1 io=584/261 c44% -> 'Uncertain' gt:'TRUE' q:'Premises: If b…'
+  [ 74]   1.7s #034 MISS --/1 io=562/666 c46% -> 'TRUE' gt:'FALSE' q:'Premises: It i…'
+  [ 75]   1.2s #028 MISS --/1 io=614/386 c42% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 76]   0.9s #003 MISS --/1 io=679/222 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 77]   0.7s #000 MISS --/1 io=764/261 c34% -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [ 78]   1.3s #013 HIT io=667/501 c38% -> 'FALSE' gt:'FALSE' q:'Premises: If t…'
+  [ 79]   0.8s #027 MISS --/1 io=753/302 c34% -> 'Uncertain' gt:'FALSE' q:'Premises: When…'
+  [ 80]   1.5s #031 MISS --/1 io=595/520 c43% -> 'Uncertain' gt:'FALSE' q:'Premises: On t…'
+  [ 81]   0.9s #017 MISS --/1 io=714/421 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 82]   1.1s #009 HIT io=628/667 c0% -> 'TRUE' gt:'TRUE' q:'Premises: It i…'
+  [ 83]   1.4s #011 MISS --/1 io=669/425 c38% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 84]   0.7s #002 MISS --/1 io=846/220 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 85]   1.3s #073 MISS --/1 io=667/820 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: If u…'
+  [ 86]   0.5s #074 MISS --/1 io=740/225 c0% -> 'Uncertain' gt:'FALSE' q:'Premises: Give…'
+  [ 87]   1.5s #075 HIT io=687/151 c37% -> 'Uncertain' gt:'Uncertain' q:'Premises: The …'
+  [ 88]   0.9s #076 HIT io=621/539 c41% -> 'Uncertain' gt:'Uncertain' q:'Premises: So l…'
+  ┌─ C6.6/6 ───────────────────────────────── 23.5% [9.1%, 38.0%] ─┐
+  │  [36mllm_only.output_schema_descriptions.reasoning: At most five s[0m…│
+  └─ composite_fitness=0.3764 ─────────────────────────────────────┘
+  [32m★ leader: C6.6 23.5%[0m
+  [ 89]   1.2s #014 HIT [ai]📖 io=590/558 -> 'Uncertain' gt:'Uncertain' q:'Premises: Shou…'
+  [ 90]   1.0s #035 HIT [ai]📖 io=552/358 -> 'FALSE' gt:'FALSE' q:'Premises: So l…'
+  [ 91]   1.3s #006 HIT [ai]📖 io=616/456 -> 'FALSE' gt:'FALSE' q:'Premises: Eith…'
+  [ 92]   0.9s #005 MISS --/1 [ai]📖 io=607/231 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 93]   1.0s #057 MISS --/1 [ai]📖 io=593/367 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 94]   0.6s #030 MISS --/1 [ai]📖 io=551/279 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 95]   0.4s #021 MISS --/1 [ai]📖 io=637/130 -> 'Uncertain' gt:'FALSE' q:'Premises: Eith…'
+  [ 96]   0.7s #020 MISS --/1 [ai]📖 io=606/164 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 97]   1.7s #033 MISS --/1 [ai]📖 io=528/237 -> 'Uncertain' gt:'TRUE' q:'Premises: If b…'
+  [ 98]   1.0s #028 MISS --/1 [ai]📖 io=558/539 -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 99]   0.6s #003 MISS --/1 [ai]📖 io=623/207 -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [100]   0.7s #000 MISS --/1 [ai]📖 io=708/252 -> 'Uncertain' gt:'FALSE' q:'Premises: If t…'
+  [101]   2.5s #013 MISS --/1 [ai]📖 io=528/327 -> 'TRUE' gt:'FALSE' q:'Premises: If t…'
+  [102]   1.4s #027 MISS --/1 [ai]📖 io=697/482 -> 'Uncertain' gt:'FALSE' q:'Premises: When…'
+  [103]   1.8s #031 MISS --/1 [ai]📖 io=539/469 -> 'TRUE' gt:'FALSE' q:'Premises: On t…'
+  [104]   0.7s #017 MISS --/1 [ai]📖 io=658/379 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [105]   1.1s #009 MISS --/1 [ai]📖 io=572/505 -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [106]   1.0s #011 MISS --/1 [ai]📖 io=613/436 -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [107]   0.8s #002 MISS --/1 [ai]📖 io=790/296 -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [108]   0.7s #036 MISS --/1 [ai]📖 io=639/183 -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [109]   1.2s #034 HIT [ai]📖 io=506/400 -> 'FALSE' gt:'FALSE' q:'Premises: It i…'
+  [110]   1.0s #059 HIT [ai]📖 io=554/547 -> 'FALSE' gt:'FALSE' q:'Premises: We c…'
+  [111]   0.7s #056 MISS --/1 [ai]📖 io=616/252 -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [112]   0.7s #053 MISS --/1 [ai]📖 io=573/216 -> 'TRUE' gt:'FALSE' q:'Premises: Eith…'
+  [113]   0.7s #050 MISS --/1 [ai]📖 io=762/217 -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [114]   1.0s #064 MISS --/1 [ai]📖 io=638/374 -> 'Uncertain' gt:'TRUE' q:'Premises: One …'
+  [115]   1.2s #066 MISS --/1 [ai]📖 io=503/605 -> 'FALSE' gt:'TRUE' q:'Premises: It i…'
+  [116]   1.0s #067 MISS --/1 [ai]📖 io=553/495 -> 'Uncertain' gt:'FALSE' q:'Premises: The …'
+  [117]   2.1s #069 MISS --/1 [ai]📖 io=601/583 -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [118]   1.0s #070 MISS --/1 [ai]📖 io=601/384 -> 'Uncertain' gt:'FALSE' q:'Premises: Give…'
+  [119]   1.0s #073 MISS --/1 [ai]📖 io=611/296 -> 'Uncertain' gt:'FALSE' q:'Premises: If u…'
+  [120]   1.1s #074 MISS --/1 [ai]📖 io=684/435 -> 'Uncertain' gt:'FALSE' q:'Premises: Give…'
+  [121]   0.7s #075 HIT [ai]📖 io=631/147 -> 'Uncertain' gt:'Uncertain' q:'Premises: The …'
+  [122]   1.0s #076 HIT [ai]📖 io=565/174 -> 'Uncertain' gt:'Uncertain' q:'Premises: So l…'
+  [33m⚠ r6round 6 resolved nothing: every one of its 3 readable arms has a lift interval spanning 0 (best reaches +0.165 at its upper bound). An arm this round selects is the best of what it saw, not a measured improvement over its reference[0m
+  ┌─ SCOREBOARD ───────────────────────────────────────────────────────────────┐
+  │  #   Label   Accuracy             95% CI   Composite   Ability θ     Delta │
+  │  1   C6.6       23.5%      [9.1%, 38.0%]      0.3764      -0.147     +2.9%…│
+  │  2   C6.1       20.6%      [6.8%, 34.4%]      0.3533      -0.244       --- │
+  │  3   C6.5        0.0%       [0.0%, 6.1%]      0.1950      -0.849       ---…│
+  │  4   C6.4        0.0%       [0.0%, 8.2%]      0.1958         ---       ---…│
+  │  5   C6.3        0.0%       [0.0%, 8.2%]      0.1957         ---       ---…│
+  │  6   C6.2        0.0%                  —      0.0000         ---       --- │
+  └────────────────────────────────────────────────────────────────────────────┘
+  [32m[1m✓ SELECTED C6.6[0m  23.5% (vs reference 20.6%, [32m+2.9%[0m)  p=0.66 (ns)
+  [2mwhy: C6.6 won on θ lift +0.280 = +0.081 over the parent + 0.200 parent selection bias (θ -0.147 vs parent -0.228, se 0.223); runner-up C6.1 at +0.193[0m
+  composite_fitness = 0.3764   reference=0.3572  Δ+0.0192
+  formula:  fitness * (0.92 + 0.08 * 692.0 / max(692.0, tokens))
+    tokens=1112.794
+  [32m✓ selected C6.6[0m [2m— C6.6 won on θ lift +0.280 = +0.081 over the parent + 0.200 parent selection bias (θ -0.147 vs parent -0.228, se 0.223); runner-up C6.1 at +0.193[0m
+  [2m↻ optimizer call: l1_critique_r6 · openai/gpt-6-luna · 11,532c prompt[0m
+  [2m  · l1_critique_r6 still waiting · 10s · provider openai/gpt-6-luna has not answered[0m
+  [2m  · l1_critique_r6 still waiting · 20s · provider openai/gpt-6-luna has not answered[0m
+  [2m✓ l1_critique_r6 · 20.3s · 4944 tok · 89% reasoning · 0% prefix cached[0m
+
+├─ ROUND 6 SUMMARY — 1m 25s ─────────────────────────────────────────────┤
+│  Round    Accuracy     n  Composite  Ability θ     Trend
+│    0        40.0%    40    0.5161     +0.062         -
+│    1        47.1%    34    0.5682     +0.129    +0.068
+│    2        26.5%    34    0.4042     +0.202    +0.072
+│    3        17.6%    34    0.3342     +0.166    -0.035
+│    4        20.6%    34    0.3584     +0.162    -0.004
+│    5        20.6%    34    0.3559     +0.258    +0.096
+│    6        23.5%    34    0.3764     +0.298    +0.040
+│  
+│  pobb P(best) @ q34: *e0781b* 50.0% | e167b3 47.9%▼ | acee09 10.4%▼
+│  composite_fitness = 0.3764   reference=0.3572  Δ+0.0192
+│  formula:  fitness * (0.92 + 0.08 * 692.0 / max(692.0, tokens))
+│    tokens=1112.794
+│  accuracy: 23.5% of 34 samples  |  evaluated: 6 candidates
+│  lift vs reference: +0.029 [-0.106, +0.165]  |  [33mspans 0 — not separable from its reference[0m
+│  overlap (34 shared cells, +14 measured: C0 44.1%  →  C1.1 47.1%  →  C2.3 50.0%  →  C3.3 47.1%  →  C4.3 44.1%  →  C5.1 50.0%  →  C6.6 50.0%)
+│  Degradation: 3%
+│  Recall: top-1=24% top-5=24%
+│  L1 yield: 5/6 (1 repeat)
+│  [32m✓ Improvement detected, auto-continuing...[0m
+├────────────────────────────────────────────────────────────────────────┤
+  [  1]   0.9s #001 HIT io=629/188 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: Prov…'
+  [  2]   0.8s #008 MISS --/1 io=696/183 c37% -> 'Uncertain' gt:'FALSE' q:'Premises: Shou…'
+  [  3]   2.3s #015 MISS --/1 io=607/535 c42% -> 'Uncertain' gt:'FALSE' q:'Premises: Once…'
+  [  4]   1.1s #018 HIT io=631/228 c41% -> 'Uncertain' gt:'Uncertain' q:'Premises: Assu…'
+  [  5]   1.0s #019 MISS --/1 io=683/200 c37% -> 'Uncertain' gt:'FALSE' q:'Premises: Once…'
+  [  6]   1.0s #022 MISS --/1 io=586/389 c44% -> 'Uncertain' gt:'TRUE' q:'Premises: head…'
+  [  7]   0.9s #041 MISS --/1 io=639/267 c40% -> 'Uncertain' gt:'TRUE' q:'Premises: At l…'
+  [  8]   1.2s #043 MISS --/1 io=762/245 c34% -> 'Uncertain' gt:'FALSE' q:'Premises: On t…'
+  [  9]   0.8s #045 MISS --/1 io=544/203 c47% -> 'Uncertain' gt:'TRUE' q:'Premises: It i…'
+  [ 10]   1.1s #047 HIT io=636/176 c40% -> 'Uncertain' gt:'Uncertain' q:'Premises: On t…'
+  [ 11]   1.2s #051 HIT io=613/674 c42% -> 'TRUE' gt:'TRUE' q:'Premises: The …'
+  [ 12]   1.5s #060 MISS --/1 io=624/485 c41% -> 'Uncertain' gt:'TRUE' q:'Premises: So l…'
+  [ 13]   1.5s #061 MISS --/1 io=692/655 c37% -> 'TRUE' gt:'FALSE' q:'Premises: The …'
+  [ 14]   0.8s #063 MISS --/1 io=575/188 c45% -> 'TRUE' gt:'FALSE' q:'Premises: Give…'
+  [ 15]   2.5s #080 MISS --/1 io=520/516 c49% -> 'FALSE' gt:'TRUE' q:'Premises: The …'
+  [ 16]   1.6s #087 MISS --/1 io=611/584 c42% -> 'Uncertain' gt:'FALSE' q:'Premises: The …'
+  [ 17]   1.0s #089 MISS --/1 io=689/381 c37% -> 'FALSE' gt:'TRUE' q:'Premises: On t…'
+  [ 18]   1.1s #093 MISS --/1 io=617/481 c41% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 19]   0.7s #104 HIT io=722/148 c35% -> 'Uncertain' gt:'Uncertain' q:'Premises: So l…'
+  [ 20]   0.9s #110 MISS --/1 io=576/337 c44% -> 'TRUE' gt:'FALSE' q:'Premises: Shou…'
+  [ 21]   1.0s #124 MISS --/1 io=594/472 c43% -> 'Uncertain' gt:'TRUE' q:'Premises: Some…'
+  [ 22]   0.8s #134 HIT io=650/165 c39% -> 'Uncertain' gt:'Uncertain' q:'Premises: We k…'
+  [ 23]   0.6s #136 HIT io=645/168 c40% -> 'Uncertain' gt:'Uncertain' q:'Premises: So l…'
+  [ 24]   1.0s #138 MISS --/1 io=779/314 c33% -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [ 25]   1.0s #144 MISS --/1 io=567/444 c45% -> 'Uncertain' gt:'TRUE' q:'Premises: So l…'
+  [ 26]   1.9s #145 MISS --/1 io=628/600 c41% -> 'TRUE' gt:'FALSE' q:'Premises: Shou…'
+  [ 27]   0.8s #155 MISS --/1 io=613/331 c42% -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+  [ 28]   0.9s #157 HIT io=535/294 c48% -> 'TRUE' gt:'TRUE' q:'Premises: The …'
+  [ 29]   0.7s #160 MISS --/1 io=679/229 c38% -> 'Uncertain' gt:'TRUE' q:'Premises: Shou…'
+  [ 30]   0.8s #162 MISS --/1 io=631/358 c41% -> 'TRUE' gt:'FALSE' q:'Premises: We c…'
+  [ 31]   0.6s #166 MISS --/1 io=679/311 c38% -> 'Uncertain' gt:'FALSE' q:'Premises: When…'
+  [ 32]   0.9s #183 MISS --/1 io=616/342 c42% -> 'Uncertain' gt:'FALSE' q:'Premises: Shou…'
+  [ 33]   1.1s #188 HIT io=529/346 c48% -> 'Uncertain' gt:'Uncertain' q:'Premises: When…'
+  [ 34]   0.5s #192 MISS --/1 io=753/151 c34% -> 'Uncertain' gt:'TRUE' q:'Premises: Ther…'
+  [ 35]   1.0s #194 MISS --/1 io=661/451 c39% -> 'Uncertain' gt:'FALSE' q:'Premises: We k…'
+  [ 36]   1.1s #195 HIT io=553/427 c46% -> 'FALSE' gt:'FALSE' q:'Premises: One …'
+  [ 37]   1.4s #202 HIT io=621/335 c41% -> 'FALSE' gt:'FALSE' q:'Premises: It i…'
+  [ 38]   0.9s #213 HIT io=584/178 c44% -> 'Uncertain' gt:'Uncertain' q:'Premises: Prov…'
+  [ 39]   4.0s #214 HIT io=642/775 c40% -> 'TRUE' gt:'TRUE' q:'Premises: It i…'
+  [ 40]   3.4s #216 MISS --/1 io=579/236 c44% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 41]   1.4s #218 MISS --/1 io=643/352 c40% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 42]   0.8s #220 MISS --/1 io=669/168 c38% -> 'Uncertain' gt:'TRUE' q:'Premises: If h…'
+  [ 43]   0.8s #230 HIT io=694/235 c37% -> 'Uncertain' gt:'Uncertain' q:'Premises: Prov…'
+  [ 44]   1.2s #232 MISS --/1 io=591/617 c43% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 45]   1.0s #237 MISS --/1 io=770/285 c33% -> 'Uncertain' gt:'TRUE' q:'Premises: Shou…'
+  [ 46]   1.7s #254 MISS --/1 io=1205/514 c21% -> 'FALSE' gt:'TRUE' q:'Premises: It i…'
+        [33m⚠ llm_only: finish_reason=error reasoning_chars=1141[0m
+        [33m⚠ llm_only: schema_repair attempt=1: Response was not valid JSON.[0m
+  [ 47]   1.1s #273 HIT io=587/169 c5% -> 'Uncertain' gt:'Uncertain' q:'Premises: Ther…'
+  [ 48]   0.7s #280 HIT io=663/131 c39% -> 'FALSE' gt:'FALSE' q:'Premises: Assu…'
+  [ 49]   0.8s #284 MISS --/1 io=605/234 c42% -> 'Uncertain' gt:'TRUE' q:'Premises: Eith…'
+  [ 50]   0.9s #289 HIT io=639/341 c40% -> 'FALSE' gt:'FALSE' q:'Premises: It i…'
+  [ 51]   0.6s #295 HIT io=635/151 c40% -> 'Uncertain' gt:'Uncertain' q:'Premises: Shou…'
+  [ 52]   0.9s #297 HIT io=596/248 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: We k…'
+  [ 53]   3.8s #305 HIT io=546/321 c47% -> 'FALSE' gt:'FALSE' q:'Premises: Eith…'
+  [ 54]   0.7s #315 HIT io=569/236 c45% -> 'Uncertain' gt:'Uncertain' q:'Premises: When…'
+  [ 55]   0.6s #322 HIT io=581/145 c0% -> 'Uncertain' gt:'Uncertain' q:'Premises: Give…'
+  [ 56]   0.6s #330 HIT io=721/181 c36% -> 'Uncertain' gt:'Uncertain' q:'Premises: Give…'
+  [ 57]   1.2s #331 HIT io=712/536 c0% -> 'TRUE' gt:'TRUE' q:'Premises: On t…'
+  [ 58]   0.8s #336 HIT io=616/171 c42% -> 'Uncertain' gt:'Uncertain' q:'Premises: It i…'
+  [ 59]   0.9s #340 MISS --/1 io=833/242 c31% -> 'Uncertain' gt:'TRUE' q:'Premises: Ther…'
+  [ 60]   0.7s #352 MISS --/1 io=648/216 c0% -> 'Uncertain' gt:'TRUE' q:'Premises: We k…'
+  [ 61]   1.3s #355 MISS --/1 io=628/490 c41% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 62]   0.8s #358 MISS --/1 io=663/312 c39% -> 'Uncertain' gt:'TRUE' q:'Premises: Once…'
+  [ 63]   1.1s #362 HIT io=694/177 c37% -> 'Uncertain' gt:'Uncertain' q:'Premises: At l…'
+  [ 64]   1.4s #367 MISS --/1 io=460/211 c28% -> 'Uncertain' gt:'TRUE' q:'Premises: Eith…'
+  [ 65]   0.6s #376 HIT io=690/138 c37% -> 'FALSE' gt:'FALSE' q:'Premises: Assu…'
+  [ 66]   1.4s #377 MISS --/1 io=652/433 c39% -> 'Uncertain' gt:'TRUE' q:'Premises: At l…'
+  [ 67]   0.8s #380 HIT io=592/249 c0% -> 'TRUE' gt:'TRUE' q:'Premises: The …'
+  [ 68]   0.7s #383 HIT io=631/252 c41% -> 'FALSE' gt:'FALSE' q:'Premises: It i…'
+  [ 69]   0.7s #397 HIT io=685/170 c37% -> 'Uncertain' gt:'Uncertain' q:'Premises: Prov…'
+  [ 70]   1.3s #417 MISS --/1 io=582/379 c44% -> 'FALSE' gt:'TRUE' q:'Premises: When…'
+  [ 71]   0.8s #419 MISS --/1 io=700/186 c37% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 72]   0.8s #425 MISS --/1 io=618/310 c41% -> 'Uncertain' gt:'FALSE' q:'Premises: The …'
+  [ 73]   0.7s #427 MISS --/1 io=605/335 c42% -> 'Uncertain' gt:'FALSE' q:'Premises: When…'
+  [ 74]   0.6s #442 HIT io=678/159 c38% -> 'Uncertain' gt:'Uncertain' q:'Premises: It i…'
+  [ 75]   1.9s #445 HIT io=1449/802 c18% -> 'TRUE' gt:'TRUE' q:'Premises: It i…'
+        [33m⚠ llm_only: finish_reason=error reasoning_chars=2040[0m
+        [33m⚠ llm_only: schema_repair attempt=1: Response was not valid JSON.[0m
+  [ 76]   1.8s #453 MISS --/1 io=613/737 c42% -> 'Uncertain' gt:'FALSE' q:'Premises: We k…'
+  [ 77]   0.8s #457 HIT io=673/227 c38% -> 'Uncertain' gt:'Uncertain' q:'Premises: Give…'
+  [ 78]   0.9s #462 HIT io=559/288 c46% -> 'TRUE' gt:'TRUE' q:'Premises: At l…'
+  [ 79]   1.2s #478 HIT io=565/424 c45% -> 'Uncertain' gt:'Uncertain' q:'Premises: Some…'
+  [ 80]   0.6s #484 HIT io=741/170 c35% -> 'Uncertain' gt:'Uncertain' q:'Premises: Thos…'
+  [ 81]   1.9s #487 HIT io=700/850 c37% -> 'FALSE' gt:'FALSE' q:'Premises: On t…'
+  [ 82]   1.9s #488 MISS --/1 io=619/401 c21% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 83]   0.7s #498 HIT io=547/195 c47% -> 'Uncertain' gt:'Uncertain' q:'Premises: The …'
+  [ 84]   0.8s #500 HIT io=583/458 c44% -> 'TRUE' gt:'TRUE' q:'Premises: It i…'
+  [ 85]   0.7s #502 MISS --/1 io=621/235 c41% -> 'Uncertain' gt:'TRUE' q:'Premises: The …'
+  [ 86]   0.7s #504 HIT io=711/297 c36% -> 'TRUE' gt:'TRUE' q:'Premises: Ther…'
+  [ 87]   0.9s #505 HIT io=597/260 c43% -> 'Uncertain' gt:'Uncertain' q:'Premises: Eith…'
+  [ 88]   1.4s #517 MISS --/1 io=615/403 c42% -> 'FALSE' gt:'TRUE' q:'Premises: Give…'
+  [ 89]   0.6s #524 MISS --/1 io=781/243 c33% -> 'Uncertain' gt:'TRUE' q:'Premises: Eith…'
+  [ 90]   1.4s #535 MISS --/1 io=643/503 c40% -> 'Uncertain' gt:'FALSE' q:'Premises: Prov…'
+  [ 91]   0.9s #554 MISS --/1 io=612/508 c42% -> 'Uncertain' gt:'TRUE' q:'Premises: At l…'
+  [ 92]   0.7s #555 HIT io=603/186 c42% -> 'Uncertain' gt:'Uncertain' q:'Premises: Assu…'
+  [ 93]   2.1s #564 HIT io=648/398 c40% -> 'Uncertain' gt:'Uncertain' q:'Premises: At l…'
+  [ 94]   1.0s #567 MISS --/1 io=757/367 c34% -> 'Uncertain' gt:'TRUE' q:'Premises: When…'
+  [ 95]   1.3s #568 MISS --/1 io=657/602 c39% -> 'Uncertain' gt:'FALSE' q:'Premises: It i…'
+  [ 96]   0.8s #569 MISS --/1 io=640/253 c40% -> 'Uncertain' gt:'FALSE' q:'Premises: So l…'
+  [ 97]   1.7s #572 HIT io=632/166 c41% -> 'Uncertain' gt:'Uncertain' q:'Premises: We k…'
+  [ 98]   0.9s #588 MISS --/1 io=557/278 c46% -> 'Uncertain' gt:'TRUE' q:'Premises: We k…'
+  [ 99]   2.0s #596 HIT io=652/1233 c39% -> 'TRUE' gt:'TRUE' q:'Premises: If t…'
+  [100]   0.8s #598 MISS --/1 io=717/438 c36% -> 'Uncertain' gt:'FALSE' q:'Premises: One …'
+Dataset:   justlogic-d234
+Campaign:  justlogic-d234__81a5f7
+Cycle:     cycle_c15deaa5a571
+Directory: C:\Users\dsacc\Desktop\PromptPotter\prompt-potter-optimizer\.scratch\gui-real\projects\197ee2cf2aea7b14\campaigns\justlogic-d234__81a5f7
+  campaign.json          — manifest
+  log.md                 — campaign digest
+  cycles/cycle_c15deaa5a571/  — session telemetry (dashboard.json) + rounds + readout.log

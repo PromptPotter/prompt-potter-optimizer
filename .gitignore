@@ -55,6 +55,7 @@ htmlcov/
 *.log
 logs/
 *.out
+!paper/evidence/**/*.log
 
 # Docker
 .dockerignore
