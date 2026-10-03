@@ -1,17 +1,35 @@
-# Developer
+<h1 align="center">Developer — how the engine is wired</h1>
 
-```
-┌──────────────────────┐                       ┌──────────────────────┐
-│  Your Backend        │  GET  /pipeline   ──► │  PromptPotter        │
-│  (any pipeline)      │                       │  Optimizer           │
-│                      │  POST /matches    ◄── │                      │
-│  runs the task       │   {prompt, params}    │  generates candidates│
-│                      │                       │  scores + critiques  │
-│                      │  → predictions    ──► │  iterates            │
-└──────────────────────┘                       └──────────────────────┘
+<p align="center">
+  Implementation notes for architectural seams not obvious from a single file.<br>
+  AI can read the code — this folder explains the wiring.
+</p>
+
+<p align="center">
+  <a href="#1-prompt-structure"><b>1 Prompt structure</b></a> ·
+  <a href="#2-dispatch-which-layer-fires-when"><b>2 Dispatch</b></a> ·
+  <a href="#3-scoring-node"><b>3 Scoring node</b></a> ·
+  <a href="#4-cross-run-memory"><b>4 Cross-run memory</b></a> ·
+  <a href="#reading-the-three-layer-loop"><b>Reading order</b></a>
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/dev-map-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/dev-map-light.svg">
+    <img src="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/dev-map-light.svg" alt="Map of the optimizer: dispatch decides which layer fires; the layer renders its prompt through the dispatch hub; the scoring node runs the resulting target prompt and pipeline params against your backend; measurements land in the cross-run archive and feed the next round." width="880">
+  </picture>
+</p>
+
+<p align="center"><sub>The numbers are this page's sections.</sub></p>
+
+```bash
+pip install -e ".[all,dev]"            # into the repo venv
+git config core.hooksPath .githooks    # once per clone: the gate on what you staged
+python scripts/gate.py                 # every check CI runs (--py | --web | --only NAME)
 ```
 
-Implementation notes for architectural seams not obvious from a single file. AI can read the code — this folder explains the wiring.
+Use the repo venv's interpreter for everything: a bare `python` imports `promptpotter` but not its dependencies. This page owns the four seams below and is not an index — which doc answers which question is [`../README.md`](../README.md), and what every PR is measured against is [`../architecture.md`](../architecture.md) §0 + §0.5.
 
 Four things every contributor needs to understand:
 
@@ -48,6 +66,14 @@ Every optimizer LLM node — `l1_generate`, `l1_critique`, `l2_context`, `l3_pla
 
 ## 2. Dispatch (which layer fires when)
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/optimizer-pipeline-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/optimizer-pipeline-light.png">
+    <img src="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/optimizer-pipeline-dark.png" alt="The optimizer's own pipeline as the dashboard draws it: adaptive_queue, l1_generate, pobb and l1_score on the round's spine, with l3_plan, l2_context and escalation beneath" width="640">
+  </picture>
+</p>
+
 The runner asks the escalation rules engine after every round. `EscalationFSM.observe_round` builds a frozen `EscalationInputs` snapshot and delegates to `decide_escalation`, which sort-by-priority first-match-wins over `DEFAULT_ESCALATION_RULES`. All three live in `application/optimizers/potter/escalation/rules.py` — the input vocabulary, the rules and the router are one file, so the policy reads without a hop:
 
 ```
@@ -74,6 +100,14 @@ The scoring gateway (`application/scoring/search_point_scorer.py`: `open_walk` �
 - Walks the scoring dataset — one loop drives every walk of a phase — calling the backend per sample and applying the scorer formula.
 - Handles two-tier caching, deprecated-prior eviction, and PoBB elimination stops mid-walk.
 - Returns a `ScoredWalk` per walk — rows, scores, escalation signal, and `stopped`: why it ended before its last cell, which each caller answers for itself.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/backend-contract-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/backend-contract-light.svg">
+    <img src="https://1tw5toebpxy09cvq.public.blob.vercel-storage.com/readme/backend-contract-light.svg" alt="Your backend (any pipeline) runs the task. The optimizer reads GET /pipeline, sends {prompt, params} to POST /matches and receives predictions; it generates candidates, scores, critiques and iterates." width="760">
+  </picture>
+</p>
 
 It's the **bridge between optimizer and target system**. Everything above it generates prompts and pipeline params; the scoring node is the only place those land in the real backend and produce a fitness number. The measurement archive is its output stream.
 
