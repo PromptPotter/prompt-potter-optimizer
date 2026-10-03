@@ -21,6 +21,7 @@ from promptpotter.application.runner.inner.spawn_context import retarget_inner_s
 from promptpotter.application.scoring.classification import build_degradation_checks
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.scoring.formula import compile_scorer, split_scoring_block
+from promptpotter.application.scoring.sample_measurement import cell_bound
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
@@ -288,11 +289,13 @@ async def _emit_preflight_and_init_session(
             "floor and would emit zero content:\n  - " + "\n  - ".join(floor_violations)
         )
 
+    bound = await cell_bound(session, session.pipeline_params or {})
     preflight_warnings = run_preflight_checks(
         config,
         dataset,
         target_models,
         task_context=origin.framing.to_dict(),
+        cell_usd=None if bound is None else bound.usd,
     )
     for w in preflight_warnings:
         logger.warning("preflight[%s]: %s — %s", w.code, w.title, w.detail)
@@ -421,7 +424,9 @@ async def _apply_resume_fork(
         # Rebuilt from the ledger whichever way that went — halt, fork, or carry on — because
         # every one of them replays priors, and what the round documents do not bank is the
         # ledger's to answer. A postcondition of the call belongs at the call.
-        cycle.working_state.resume(session.state.ledger, cycle.optimizer)
+        cycle.working_state.resume(
+            session.state.ledger, cycle.optimizer, before_round=resumed_from_round
+        )
     return resolved_cycle_id, resumed_from_round
 
 

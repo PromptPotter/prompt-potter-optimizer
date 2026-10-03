@@ -115,7 +115,7 @@ The optimizer has already handled it — these exist for audit, not to ask for i
   python -X utf8 -m uvicorn promptpotter.main:app --port 8001
   ```
   then open <http://127.0.0.1:8001/>. Keep `python -m promptpotter resume` running in another terminal for live refresh.
-- For a headless tail of the live run readout (per-sample HIT/MISS, round summaries), read the cycle's `readout.log` — its stdout, ANSI-stripped, the path printed as `Readout:` at launch. The gitignored `logs/latest-readout-path.txt` names the newest launch's.
+- For a headless tail of the live run readout (per-sample HIT/MISS, round summaries), read the cycle's `readout.log` — written by every launch, ANSI-stripped, the path printed as `Readout:` at a terminal launch and listed in the browser's Files tree. The gitignored `logs/latest-readout-path.txt` names the newest terminal launch's.
 
 Full on-disk shape — the exact `dashboard.json` / `active_session.json` paths, fork-directory layout: [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md).
 

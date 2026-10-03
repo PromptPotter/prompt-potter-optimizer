@@ -1,6 +1,5 @@
 """Run observers + callbacks — the single ingress for CLI/notebook/webapp. ``build_run_observers``
-wires audit + dashboard + racing stream + optional ``LiveDisplay`` to one ledger, re-anchoring a
-fork."""
+wires audit + dashboard + racing stream + readout to one ledger, re-anchoring a fork."""
 
 from __future__ import annotations
 
@@ -12,6 +11,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.views.ingress import from_phase_event
+from promptpotter.application.views.readout import ReadoutProjection
 from promptpotter.application.views.view_models import ViewContext
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.dashboard_rows import RunStanding
@@ -51,12 +51,12 @@ from promptpotter.shared.instrument import NO_ROUND_SLOT, instrument_depth
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.application.embedded_run import StatusFn
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizers.nodes import RaceSnapshot
     from promptpotter.application.scoring.query_loop import Flight
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.phases import PhaseEvent
-    from promptpotter.presentation.terminal.live.display import LiveDisplay
 
 logger = logging.getLogger(__name__)
 
@@ -521,14 +521,14 @@ class RunCallbacks:
 
 @dataclass(frozen=True)
 class RunObservers:
-    """Frozen bundle: callbacks + projections + display on one ledger. ``_ledger_token`` resets the
+    """Frozen bundle: callbacks + projections on one ledger. ``_ledger_token`` resets the
     ``_CYCLE_LEDGER`` ContextVar, so no background task inherits a stale ledger from the last cycle."""
 
     callbacks: RunCallbacks
     audit: AuditTrailProjection
     dashboard: LiveDashboardProjection
     racing: RacingStreamProjection
-    display: LiveDisplay | None
+    readout: ReadoutProjection
     _ledger_token: Token[CycleEventLog | None] | None = None
     # The armed spend book's binding, one at a time — see `arm_spend_book`.
     _book_tokens: list[Token[SpendBook | None]] = field(default_factory=list)
@@ -580,16 +580,18 @@ class RunObservers:
 
 @dataclass(frozen=True)
 class ForkInfo:
-    """Forked-cycle wiring: the parent cycle to seed from — the fork gets its own ``dashboard.json``."""
+    """Forked-cycle wiring: the parent cycle to seed from — the fork gets its own ``dashboard.json``
+    and ``readout.log``, written by the parent's ``readout`` rebound so its round table carries over."""
 
     parent_cycle_id: str
+    readout: ReadoutProjection
 
 
 def build_run_observers(
     *,
     session: Session,
     campaign_config: CampaignConfig,
-    display: LiveDisplay | None = None,
+    readout_sink: StatusFn | None = None,
     resumed_from_round: int | None = None,
     origin_accuracy: float | None = None,
     fork: ForkInfo | None = None,
@@ -619,6 +621,12 @@ def build_run_observers(
         else None
     )
     if fork is None:
+        readout = ReadoutProjection.for_campaign(
+            session,
+            campaign_config,
+            sink=readout_sink,
+            origin_acc=0.0 if origin_accuracy is None else origin_accuracy,
+        )
         dashboard = build_campaign_emitter(
             session,
             campaign_config,
@@ -627,6 +635,7 @@ def build_run_observers(
             langfuse_trace_url=trace_url,
         )
     else:
+        readout = fork.readout
         dashboard = build_campaign_emitter(
             session,
             campaign_config,
@@ -664,9 +673,8 @@ def build_run_observers(
     # future MCP client) tails ``.runtime/ledger.jsonl`` directly.
     ledger.bind(dashboard)
     ledger.bind(audit)
-    if display is not None:
-        display.open_readout(cycle_dir)
-        ledger.bind(display)
+    readout.open_readout(cycle_dir)
+    ledger.bind(readout)
     ledger.bind(racing)
     session.state.ledger = ledger
 
@@ -686,6 +694,6 @@ def build_run_observers(
         audit=audit,
         dashboard=dashboard,
         racing=racing,
-        display=display,
+        readout=readout,
         _ledger_token=ledger_token,
     )

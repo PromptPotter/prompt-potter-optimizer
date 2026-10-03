@@ -1,9 +1,23 @@
-"""Terminal render target — typed View → ANSI. The markdown / heatmap renderers are the APPLICATION's emit contract and
-live in ``promptpotter.application.views.render``; import those from there."""
+"""The readout's render target — typed View → ANSI-styled text, beside its markdown peer."""
 
 from __future__ import annotations
 
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
+from promptpotter.application.views.render.primitives import (
+    BOLD,
+    CYAN,
+    DIM,
+    GREEN,
+    RESET,
+    YELLOW,
+    _fmt_delta,
+    _node_block,
+    _node_line,
+    _node_top,
+    _round_rule,
+    _scoreboard,
+    fmt_pvalue,
+)
 from promptpotter.application.views.view_models import (
     AnyView,
     BenchGradedView,
@@ -19,21 +33,6 @@ from promptpotter.application.views.view_models import (
 )
 from promptpotter.domain.candidate_diff import group_diff_keys
 from promptpotter.domain.results import ArmOutcome, scoreboard_rank_key
-from promptpotter.presentation.terminal.primitives import (
-    BOLD,
-    CYAN,
-    DIM,
-    GREEN,
-    RESET,
-    YELLOW,
-    _fmt_delta,
-    _node_block,
-    _node_line,
-    _node_top,
-    _round_rule,
-    _scoreboard,
-    fmt_pvalue,
-)
 from promptpotter.shared.composite import render_composite_fitness_block
 
 

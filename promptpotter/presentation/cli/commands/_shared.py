@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import logging
 import sys
@@ -37,10 +38,9 @@ from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.launch_limits import HeldLimits, LaunchLimits
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
-from promptpotter.infrastructure.store.layout import campaign_cycles_dir
+from promptpotter.infrastructure.store.io import write_text
+from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
-from promptpotter.presentation.terminal.live.display import LiveDisplay
-from promptpotter.presentation.terminal.primitives import set_display_tags
 from promptpotter.shared.identity import IdentityContext
 
 if TYPE_CHECKING:
@@ -185,19 +185,27 @@ def backend_unreachable_result(exc: BackendUnreachableError) -> CommandResult:
     )
 
 
+# Holds the PATH of the newest terminal launch's readout, never a copy: parallel runs each own
+# their cycle's file, and one shared copy interleaves them.
+_LATEST_READOUT_POINTER = Path("logs/latest-readout-path.txt")
+
+
 def _build_observers(
     session: Session,
     campaign_config: CampaignConfig,
     origin_acc: float,
 ) -> RunObservers:
 
-    set_display_tags(session.pipeline_schema)
-    return build_run_observers(
+    observers = build_run_observers(
         session=session,
         campaign_config=campaign_config,
-        display=LiveDisplay.for_campaign(session, campaign_config, origin_acc=origin_acc),
+        readout_sink=functools.partial(print, flush=True),
         origin_accuracy=origin_acc,
     )
+    readout = CycleLayout(session.store.campaigns.cycle_dir(session.hop).absolute()).readout
+    with contextlib.suppress(OSError):
+        write_text(_LATEST_READOUT_POINTER, f"{readout}\n")
+    return observers
 
 
 async def _hold_machine_slot(

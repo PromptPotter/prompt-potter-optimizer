@@ -317,11 +317,6 @@ class Cycle:
         if self.difficulty.calibrate(measured, self.rounds):
             self.origin_restamped = True
 
-    def adopt(self, new_parent: OptSearchPoint) -> None:
-        """The ONE adoption seam for a selection and an optimizer's own transition alike.
-        ``working_state`` is the cycle's, so it carries across by not moving."""
-        self.opt_sp = new_parent
-
     def absorb_round(self, rr: RoundResult) -> RoundResult:
         """Sole sink for a finished round; returns the round, stamped for ``save_round_file``."""
         schema = self.session.pipeline_schema
@@ -333,7 +328,7 @@ class Cycle:
         # match, nothing is adopted and no node is minted.
         winner_opt_sp = rr.opt_sp
         if winner_opt_sp is not None and winner_opt_sp.lineage.id != self.opt_sp.lineage.id:
-            self.adopt(winner_opt_sp)
+            self.opt_sp = winner_opt_sp
         assert tr.current_sp is not None
         _pp = (
             rr.pipeline_params if rr.pipeline_params is not None else tr.current_sp.pipeline_params

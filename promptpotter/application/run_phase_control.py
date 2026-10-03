@@ -23,8 +23,9 @@ def declare_run_phase(
     *,
     stop_reason: str = "",
 ) -> None:
-    """Append a control ``PhaseRecord`` so the projection flips ``run_phase``; no-op before the ledger is bound. Idempotent
-    at the projection, so emitting ``paused`` from several checkpoints is cheap.
+    """Append a control ``PhaseRecord`` so the projection flips ``run_phase``; no-op before the ledger is bound.
+    ``PAUSED`` is declared where a paused exit ENDS (``runner/entry.py``), never at the checkpoint
+    that raised it: every checkpoint converges there, so a second site is a second record.
 
     ``TERMINAL`` carries the reason, and it belongs here for the same purpose the rest do: it was
     pushed straight into the projection by ``LiveDashboardProjection.mark_stopped``, a side door past the

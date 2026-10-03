@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from promptpotter.application.optimizers.nodes import CheckResult, ReviewReading, ReviewStat
 from promptpotter.application.optimizers.potter.escalation.state import exploration_budget
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
-from promptpotter.application.optimizers.potter.records import POTTER_MANIFEST, PotterRoundState
+from promptpotter.application.optimizers.potter.records import PotterRoundState
 from promptpotter.application.optimizers.potter.validators.behavior_base import ValidatorContext
 from promptpotter.application.optimizers.potter.validators.l1_behavior import (
     CHECK_REGISTRY,
@@ -20,7 +20,6 @@ from promptpotter.application.optimizers.potter.validators.l2_behavior import ru
 from promptpotter.application.views.render.optimizer_prompt_text import (
     format_l1_critique_for_prompt,
 )
-from promptpotter.domain.opt_search_point import node_source
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_CHARGED
 from promptpotter.domain.results import OptimizerFact, RoundResult, invariant_collapses
 
@@ -63,9 +62,8 @@ def compute_l1_stats(
     stagnation_max = _max_stagnation_streak(top_lifts)
     behavior_pass_rate = _behavior_pass_rate(behavior_results)
     l2_behavior_pass_rate = _behavior_pass_rate(l2_behavior_results or [])
-    l2_fires = sum(
-        1 for r in rounds if _round_source(r) == node_source(POTTER_MANIFEST, "l2_context")
-    )
+    # A round's L2 checks are empty exactly where L2 did not fire (`_behavior_per_round`).
+    l2_fires = sum(1 for checks in l2_behavior_results or [] if checks)
     round_1_verdict = _compute_round_1_verdict(
         rounds,
         round_1_behavior=behavior_results[0] if behavior_results else [],
@@ -265,7 +263,3 @@ def _behavior_pass_rate(behavior_results: list[list[CheckResult]]) -> float | No
         return None
     passed = sum(1 for r in behavior_results for c in r if c.passed)
     return passed / total
-
-
-def _round_source(rr: RoundResult) -> str:
-    return rr.opt_sp.lineage.source if rr.opt_sp else ""

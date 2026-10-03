@@ -61,7 +61,7 @@ function fitPct(rec: Record<string, unknown>): string | undefined {
   return pct0(num(rec.composite_fitness));
 }
 
-// `{node}` or `{node}·r{round}` — the same label shape `LiveDisplay` prints.
+// `{node}` or `{node}·r{round}` — the same label shape `ReadoutProjection` writes.
 function nodeLabel(p: Record<string, unknown>): string {
   const node = str(p.node) ?? "node";
   const round = num(p.round);

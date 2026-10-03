@@ -646,10 +646,13 @@ class CampaignStore:
             if (n := round_number(p)) is None:
                 continue
             (displaced if n > after_round else survivors).append(p)
-        if candidates_dir.exists():
-            for p in sorted(candidates_dir.glob(ROUND_GLOB)):
-                if (n := round_number(p)) is not None and n > after_round:
-                    displaced.append(p)
+        # Every per-round cache goes with its round: an audit file left behind is read back as a
+        # round the cycle ran (`review.md` counted a discarded round's L2 fire).
+        for cache_dir in (candidates_dir, layout.audit_rounds):
+            if cache_dir.exists():
+                for p in sorted(cache_dir.glob(ROUND_GLOB)):
+                    if (n := round_number(p)) is not None and n > after_round:
+                        displaced.append(p)
 
         if displaced:
             for p in displaced:
@@ -968,6 +971,9 @@ class CampaignStore:
         copy_specs: tuple[tuple[Path, Path, str], ...] = (
             (self._rounds_dir(parent), self._rounds_dir(child), "round_"),
             (self._candidates_dir(parent), self._candidates_dir(child), "round_"),
+            # The audit twin rides with its round: a fork's `review.md` reads these, and without
+            # them every inherited round scores as one where no layer fired.
+            (self._layout(parent).audit_rounds, self._layout(child).audit_rounds, "round_"),
         )
         n_copied = 0
         for src, dst, prefix in copy_specs:

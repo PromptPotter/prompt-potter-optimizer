@@ -1,16 +1,44 @@
-"""``LiveDisplay`` — RunCallbacks adapter; CLI + notebook share this one class."""
+"""``ReadoutProjection`` — the ledger stream as readout lines: every cycle's ``readout.log``, and
+the line sink an entry point with a terminal hands in."""
 
 from __future__ import annotations
 
-import contextlib
+import logging
 import re
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.formula import split_scoring_block
+from promptpotter.application.views.render.ansi import to_text
+from promptpotter.application.views.render.candidate import (
+    fmt_individual_header,
+    individual_summary_from_dict,
+)
+from promptpotter.application.views.render.phase import (
+    fmt_elapsed,
+    render_patience_status,
+    render_progress_table,
+    render_round_stats,
+)
 from promptpotter.application.views.render.prefix_reading import prefix_reading
+from promptpotter.application.views.render.primitives import (
+    DIM,
+    GREEN,
+    RESET,
+    YELLOW,
+    _box_bottom,
+    _box_bottom_info,
+    _box_line,
+    _box_top,
+    _fmt_delta,
+    _node_bottom,
+    _node_line,
+    _node_top,
+    _round_rule,
+    display_tags,
+)
+from promptpotter.application.views.render.sample import fmt_query_result
 from promptpotter.application.views.view_models import AnyView
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.dashboard_rows import RunStanding
@@ -41,55 +69,32 @@ from promptpotter.infrastructure.projections.live_state import (
     roll_p_best_at_round_complete,
     top_n_p_best,
 )
-from promptpotter.infrastructure.store.io import write_text
+from promptpotter.infrastructure.store.io import append_line
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.judges import judge_instrument
-from promptpotter.presentation.terminal.ansi import to_text
-from promptpotter.presentation.terminal.live.candidate import (
-    fmt_individual_header,
-    individual_summary_from_dict,
-)
-from promptpotter.presentation.terminal.live.phase import (
-    fmt_elapsed,
-    render_patience_status,
-    render_progress_table,
-    render_round_stats,
-)
-from promptpotter.presentation.terminal.live.sample import fmt_query_result
-from promptpotter.presentation.terminal.primitives import (
-    DIM,
-    GREEN,
-    RESET,
-    YELLOW,
-    _box_bottom,
-    _box_bottom_info,
-    _box_line,
-    _box_top,
-    _fmt_delta,
-    _node_bottom,
-    _node_line,
-    _node_top,
-    _round_rule,
-)
 from promptpotter.shared.composite import render_composite_fitness_block
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.application.embedded_run import StatusFn
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import RoundResult
 
 
-# Holds the PATH of the newest launch's readout, never a copy: parallel runs each own their
-# cycle's file, and one shared copy interleaves them.
-_LATEST_READOUT_POINTER = Path("logs/latest-readout-path.txt")
+logger = logging.getLogger(__name__)
+
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
-class LiveDisplay(Projection):
+class ReadoutProjection(Projection):
     def __init__(
         self,
         *,
+        # Where each styled line also goes; `None` leaves the cycle's file the only reader.
+        sink: StatusFn | None,
         origin_acc: float,
         # The optimizer's patience (`OptimizerPacing.patience`); `None` on one that keeps none,
         # which prints no patience line at all.
@@ -100,8 +105,10 @@ class LiveDisplay(Projection):
         measured_unit: MeasuredUnit = "sample",
     ) -> None:
         self._core = LiveStateCore(origin_acc=origin_acc)
+        self._sink = sink
         self.patience = patience
         self.pipeline_schema = pipeline_schema
+        self._display_tags = display_tags(pipeline_schema)
         self.scoring_formula = scoring_formula
         # The terminal's half of the one noun (`Connector.measured_unit`).
         self.measured_unit = measured_unit
@@ -137,12 +144,11 @@ class LiveDisplay(Projection):
         session: Session,
         campaign_config: CampaignConfig,
         *,
-        origin_acc: float = 0.0,
-    ) -> LiveDisplay:
-        """The one construction from a session + its config. Every entry point spelled these four
-        arguments out by hand, so the per-sample half of the scoring block was re-derived per caller."""
-
+        sink: StatusFn | None,
+        origin_acc: float,
+    ) -> ReadoutProjection:
         return cls(
+            sink=sink,
             origin_acc=origin_acc,
             patience=select_optimizer(campaign_config.optimization).pacing.patience,
             pipeline_schema=session.pipeline_schema,
@@ -153,29 +159,29 @@ class LiveDisplay(Projection):
         )
 
     def open_readout(self, cycle_dir: Path) -> None:
-        """Mirror every later line into *cycle_dir*'s readout. A fork rebinds the display, so the
+        """Mirror every later line into *cycle_dir*'s readout. A fork rebinds the projection, so the
         readout follows the ledger, and the file it leaves ends on the line naming the next one."""
         path = CycleLayout(cycle_dir.absolute()).readout
         line = f"Readout: {path} · {time.strftime('%Y-%m-%d %H:%M:%S')}"
         self._write(line)
         self._readout = path
         self._mirror(line)
-        with contextlib.suppress(OSError):
-            write_text(_LATEST_READOUT_POINTER, f"{path}\n")
 
     def _write(self, line: str) -> None:
-        print(line, flush=True)
+        if self._sink is not None:
+            self._sink(line)
         self._mirror(line)
 
     def _mirror(self, line: str) -> None:
         if self._readout is None:
             return
-        # Reopened per line, as the ledger is: a held handle blocks a stub fork's delete on Windows.
         try:
-            with self._readout.open("a", encoding="utf-8") as fh:
-                fh.write(_ANSI_RE.sub("", line) + "\n")
-        except OSError:
-            self._readout = None  # stop retrying; never break the run for its mirror
+            append_line(self._readout, _ANSI_RE.sub("", line))
+        except OSError as exc:
+            # Stop retrying and never break the run for its mirror — but say so once, where the
+            # operator is looking: a readout that just ends reads as a run that stopped.
+            logger.warning("readout.log stopped at %s: %s", self._readout, exc)
+            self._readout = None
 
     @property
     def origin_acc(self) -> float:
@@ -239,8 +245,8 @@ class LiveDisplay(Projection):
         file's block, the same fact on every channel. ``message`` is composed at the emit site, so this just prints it."""
         round_tag = f"r{record.round}" if record.round is not None else ""
         glyph = "✗" if record.severity == "error" else "⚠"
-        prefix = f"{glyph} {round_tag} ".rstrip() if round_tag else f"{glyph} "
-        self._write(f"  {YELLOW}{prefix}{record.message}{RESET}")
+        prefix = f"{glyph} {round_tag}".rstrip()
+        self._write(f"  {YELLOW}{prefix} {record.message}{RESET}")
 
     def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
         """Heartbeat tick; cached replays skip it. A BARE tick proves only that the process is alive, one carrying ``detail`` reports
@@ -312,7 +318,7 @@ class LiveDisplay(Projection):
         qi = int(record.sample_idx or 0)
         qt = int(record.sample_total or 0)
         ev = record.event
-        # sample_started: LiveDashboardProjection pulses the in-flight row; CLI has no equivalent (sample_scored covers it).
+        # sample_started: LiveDashboardProjection pulses the in-flight row; the readout has no equivalent (sample_scored covers it).
         if ev == "sample_started":
             # …except a look-ahead TRANSITION: armed mid-run, expiring a round later, and nothing
             # else on the tape would show it. Per-sample repetition would bury the tape.
@@ -438,6 +444,7 @@ class LiveDisplay(Projection):
                 cached=bool(result.get("cached", False)),
                 prefix=prefix,
                 scoring_formula=self.scoring_formula,
+                display_tags=self._display_tags,
             )
         )
 
@@ -680,4 +687,4 @@ class LiveDisplay(Projection):
         self._write(_node_bottom())
 
 
-__all__ = ["LiveDisplay"]
+__all__ = ["ReadoutProjection"]

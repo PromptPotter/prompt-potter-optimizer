@@ -600,6 +600,14 @@ class GepaRuntime:
         # One reflective child a round (`GepaReflect`).
         return nodes.OptimizerPacing(patience=None, stalls_left=None, arms_per_round=1, limits=())
 
+    def round_cells_ceiling(self, selected: SelectedOptimizer, pool: int) -> int:
+        knobs = cast("MinibatchKnobs", selected.knobs(Minibatch.name))
+        pareto = round(knobs.pareto_share * pool)
+        if not pareto or pool - pareto < knobs.size:
+            return 0
+        # The child and its parent each walk the minibatch, then the Pareto set.
+        return 2 * (knobs.size + pareto)
+
     def opening(self, ctx: RoundContext) -> nodes.RoundOpening:
         return nodes.standing_opening(ctx)
 

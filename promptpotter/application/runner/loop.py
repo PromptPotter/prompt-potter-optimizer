@@ -13,7 +13,7 @@ from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizers.nodes import RoundContext
 from promptpotter.application.run_observers import RunCallbacks
-from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
+from promptpotter.application.run_phase_control import pause_requested
 from promptpotter.application.runner.inner.ruler import refresh_inner_rulers
 from promptpotter.application.runner.origin_gate import run_origin_gate
 from promptpotter.application.runner.round import (
@@ -29,11 +29,7 @@ from promptpotter.application.runner.termination import (
     run_stop_reason,
     target_tripped,
 )
-from promptpotter.domain.phases import (
-    RunPhase,
-    StopLoop,
-    StopReason,
-)
+from promptpotter.domain.phases import StopLoop, StopReason
 from promptpotter.domain.run_records import ErrorRecord, PhaseRecord, RebaseRequest
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.llm.telemetry import emit_error_record
@@ -126,7 +122,6 @@ async def run_round_loop(
             # (generate / L2 / L3) that have no inner loop. The cycle stays
             # resumable — `_finalize_run` skips terminal marking on PAUSED.
             if pause_requested(session):
-                declare_run_phase(session, RunPhase.PAUSED)
                 return LoopEnd(StopReason.PAUSED)
 
             # `step-cycle` boundary: once this invocation has advanced its allotted
@@ -135,7 +130,6 @@ async def run_round_loop(
                 stop_after_rounds is not None
                 and clean_rounds - clean_rounds_at_start >= stop_after_rounds
             ):
-                declare_run_phase(session, RunPhase.PAUSED)
                 return LoopEnd(StopReason.PAUSED)
 
             logger.debug(

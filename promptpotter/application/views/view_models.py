@@ -63,7 +63,7 @@ class ViewContext:
     node_param_keys: dict[str, list[str]] | None = None
 
     def ledger_anchors(self) -> dict[str, Any]:
-        """The five scalars a ledger subscriber re-syncs from (``LiveDisplay._phase_ctx``). Not
+        """The five scalars a ledger subscriber re-syncs from (``ReadoutProjection._phase_ctx``). Not
         ``asdict``: that re-emitted both whole ``*_sp_flat`` prompts per candidate and per round."""
         return {
             "parent_accuracy": self.parent_accuracy,

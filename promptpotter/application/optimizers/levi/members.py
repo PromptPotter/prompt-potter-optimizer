@@ -665,6 +665,13 @@ class LeviRuntime:
             limits=(),
         )
 
+    def round_cells_ceiling(self, selected: SelectedOptimizer, pool: int) -> int:
+        # Calibration walks the whole pool, every later round the proxy; the parent walks each too.
+        shift = cast("LeviParadigmShiftKnobs", selected.knobs(LeviParadigmShift.name))
+        return max(
+            (shift.n_diverse_seeds + 1) * pool, (shift.interval + 1) * selected.round_cells(pool)
+        )
+
     def opening(self, ctx: RoundContext) -> nodes.RoundOpening:
         return nodes.standing_opening(ctx)
 

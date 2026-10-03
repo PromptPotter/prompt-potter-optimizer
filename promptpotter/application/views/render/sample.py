@@ -3,6 +3,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.views.render.prefix_reading import prefix_reading
+from promptpotter.application.views.render.primitives import (
+    DIM,
+    RED,
+    RESET,
+    YELLOW,
+    _step_tag,
+)
 from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS
 from promptpotter.domain.results_health import classify_result
 from promptpotter.domain.scoring import (
@@ -12,14 +19,6 @@ from promptpotter.domain.scoring import (
     shown_seconds,
 )
 from promptpotter.domain.spend import TokenAccount
-from promptpotter.presentation.terminal.primitives import (
-    DIM,
-    DISPLAY_TAGS,
-    RED,
-    RESET,
-    YELLOW,
-    _step_tag,
-)
 from promptpotter.shared import (
     extract_boxed_number,
     extract_gsm8k_number,
@@ -104,6 +103,7 @@ def fmt_query_result(
     *,
     prefix: str = "",
     scoring_formula: str | None = None,
+    display_tags: dict[str, str],
 ) -> str:
     """Format one query result as a HIT/MISS line. *scoring_formula* routes ``predicted`` through ``extract_display_answer``
     so a bold or boxed answer collapses to one token."""
@@ -118,7 +118,7 @@ def fmt_query_result(
     if step_name is None and (st := pd.get("step_timings")):
         # Last non-None entry wins (dict insertion order).
         step_name = next((n for n, t in reversed(list(st.items())) if t is not None), None)
-    step = _step_tag(step_name)
+    step = _step_tag(step_name, display_tags)
 
     tt = shown_seconds(cast("QueryMeasurement", r), cached=cached)
 
@@ -156,7 +156,7 @@ def fmt_query_result(
     cache_marker = "\U0001f4d6" if cached else ""
 
     # Per-LLM-node token column: `[tag] io=N/M`; `~` prefix = chars/4 estimate.
-    single_node = len(DISPLAY_TAGS) == 1
+    single_node = len(display_tags) == 1
     step_tokens = pd.get("step_tokens") or {}
     tok_col = ""
     if step_tokens:
@@ -172,7 +172,7 @@ def fmt_query_result(
             if single_node:
                 groups.append(io_seg)
             else:
-                tag_name = DISPLAY_TAGS.get(node_name, node_name[:4])
+                tag_name = display_tags.get(node_name, node_name[:4])
                 groups.append(f"[{tag_name}] {io_seg}")
         tok_col = " " + " ".join(groups)
 

@@ -7,13 +7,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.campaign_config import freeze_campaign_config
-from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import resolved_dataset_name
 from promptpotter.application.run_observers import build_campaign_emitter
 from promptpotter.application.runner.campaign_ids import mint_campaign_id, mint_checkin_cycle_id
 from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.bench import BankPartition
-from promptpotter.domain.campaign import Arm, Campaign
+from promptpotter.domain.campaign import Arm, Campaign, Treatment
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.phases import StopReason
@@ -248,6 +247,7 @@ def auto_mint_session(
     pipeline_params: dict[str, Any] | None = None,
     active_steps: list[str] | None = None,
     label: str = "",
+    treatment: Treatment,
     arm: Arm | None,
 ) -> tuple[str, str, str]:
     """Mint fresh campaign + session + root cycle; claim the active pointer. ``campaign_id`` comes from the CALLER, so an
@@ -286,7 +286,7 @@ def auto_mint_session(
             created_at=now,
             root_cycle_id=root_cycle,
             root_content_hash=target_hash,
-            treatment=select_optimizer(campaign_config.optimization).treatment(),
+            treatment=treatment,
             arm=arm,
             backend_id=session.backend_id,
             backend_type=backend_type_of_dataset(session.store, dataset_name),
@@ -409,9 +409,7 @@ def finalize_checkin_to_active(
         hop.campaign_id,
         {
             "root_content_hash": target_hash,
-            "treatment": select_optimizer(campaign_config.optimization)
-            .treatment()
-            .model_dump(mode="json"),
+            "treatment": cycle_plan.treatment.model_dump(mode="json"),
             "backend_id": session.backend_id,
             # Re-read rather than trusted from the skeleton: the check-in wrote the slug's
             # `pipeline.yaml` between the two, and the operator may have picked a different

@@ -1,5 +1,5 @@
-// The ONE place hearts' filled/empty is derived. Mirrors the CLI's
-// `presentation/terminal/ansi.py::_heart_bar` — the two must not disagree.
+// The ONE place hearts' filled/empty is derived. Mirrors the readout's
+// `application/views/render/ansi.py::_heart_bar` — the two must not disagree.
 
 export type HeartPips = {
   filled: number;

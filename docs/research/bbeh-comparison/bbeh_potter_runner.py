@@ -24,8 +24,6 @@ from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
 from promptpotter.presentation.terminal.completion import report_completion
-from promptpotter.presentation.terminal.live.display import LiveDisplay
-from promptpotter.presentation.terminal.primitives import set_display_tags
 
 # datasets/bbeh/ is the SoT for everything about the task — pipeline.yaml drives the
 # target-layer schema (read by open_session via dataset_name="bbeh"), campaign.yaml
@@ -97,7 +95,6 @@ async def run_bbeh_campaign(
             sp_budget_round=sp_budget_round,
         )
         pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=print)
-        set_display_tags(session.pipeline_schema)
         # The model this run actually reaches, resolved from datasets/bbeh/pipeline.yaml — never
         # shared_config's MODEL_ID, which describes the route the Colab peers take. Raise rather
         # than default: a results file naming the wrong model is worse than no results file.
@@ -112,7 +109,7 @@ async def run_bbeh_campaign(
             session,
             train_norm,
             campaign_config,
-            display=LiveDisplay.for_campaign(session, campaign_config),
+            readout_sink=print,
             limits=LaunchLimits(),
             mode=RunMode(),
         )

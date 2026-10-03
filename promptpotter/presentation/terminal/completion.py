@@ -7,14 +7,7 @@ import html
 import json
 from typing import TYPE_CHECKING
 
-from promptpotter.domain.phases import (
-    STOP_REASON_INFO,
-    StopOutcome,
-    StopReason,
-    stop_reason_outcome,
-)
-from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
-from promptpotter.presentation.terminal.primitives import (
+from promptpotter.application.views.render.primitives import (
     BOLD,
     GREEN,
     RESET,
@@ -22,6 +15,13 @@ from promptpotter.presentation.terminal.primitives import (
     _dbox_block,
     render_pipeline_overlay,
 )
+from promptpotter.domain.phases import (
+    STOP_REASON_INFO,
+    StopOutcome,
+    StopReason,
+    stop_reason_outcome,
+)
+from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session

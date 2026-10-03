@@ -881,13 +881,19 @@ class CapoRuntime:
     ) -> ReviewReading | None:
         return None
 
-    def pacing(self, selected: SelectedOptimizer) -> nodes.OptimizerPacing:
+    def _arms(self, selected: SelectedOptimizer) -> int:
         # The population races beside the round's offspring (`PopulationRejoin`).
         size = cast("PopulationKnobs", selected.knobs(PopulationSelector.name)).size
         offspring = cast("CapoCrossoverKnobs", selected.knobs(CapoCrossover.name)).crossovers
+        return size + offspring
+
+    def pacing(self, selected: SelectedOptimizer) -> nodes.OptimizerPacing:
         return nodes.OptimizerPacing(
-            patience=None, stalls_left=None, arms_per_round=size + offspring, limits=()
+            patience=None, stalls_left=None, arms_per_round=self._arms(selected), limits=()
         )
+
+    def round_cells_ceiling(self, selected: SelectedOptimizer, pool: int) -> int:
+        return (self._arms(selected) + 1) * selected.round_cells(pool)
 
     def opening(self, ctx: RoundContext) -> nodes.RoundOpening:
         return nodes.standing_opening(ctx)

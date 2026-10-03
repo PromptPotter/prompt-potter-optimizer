@@ -1,4 +1,4 @@
-"""Round-summary renderers (``LiveDisplay.on_round_complete``). Pure: no campaign
+"""Round-summary renderers (``ReadoutProjection.on_round_complete``). Pure: no campaign
 I/O, no mutation (errors log, never abort the live readout)."""
 
 from __future__ import annotations
@@ -12,20 +12,20 @@ from promptpotter.application.scoring.classification import (
 )
 from promptpotter.application.scoring.row_diagnostics import find_rank
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
-from promptpotter.domain.connector import MeasuredUnit, unit_count
-from promptpotter.domain.results import (
-    ArmOutcome,
-    overlap_series,
-    resolved_fitness,
-    scoreboard_rank_key,
-)
-from promptpotter.presentation.terminal.primitives import (
+from promptpotter.application.views.render.primitives import (
     BOLD,
     GREEN,
     RED,
     RESET,
     YELLOW,
     _node_line,
+)
+from promptpotter.domain.connector import MeasuredUnit, unit_count
+from promptpotter.domain.results import (
+    ArmOutcome,
+    overlap_series,
+    resolved_fitness,
+    scoreboard_rank_key,
 )
 from promptpotter.shared.errors import is_error_result
 

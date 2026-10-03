@@ -38,7 +38,7 @@ def sigmoid(x: float) -> float:
 # --------------------------------------------------------------------------- #
 # Answer-label extraction — the regexes + isolators that pull a final answer    #
 # out of raw model output. Both the scorer (application/scoring/.../matchers)   #
-# and the display side (presentation/terminal/live/sample) read a label the     #
+# and the display side (application/views/render/sample) read a label the       #
 # same way through these, so the displayed answer never diverges from the one   #
 # that was scored. They live in this pure leaf so that neither consumer         #
 # imports the other one's layer.                                                #

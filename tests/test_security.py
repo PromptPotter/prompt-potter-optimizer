@@ -1704,3 +1704,39 @@ def test_an_exhausted_account_cannot_spend_before_a_campaign_exists(
 
     # The box operator spends their own money and is refused on neither arm.
     admit_spend(stores=_stores(None), bucket="turn")
+
+
+async def test_a_refused_mint_bills_no_check_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The framing's check-in bills a scratch ledger that only a minted cycle inherits, so a mint
+    refused after it leaves a paid call on no ledger at all. Both refusals the config and the bank
+    decide alone — an overlay the optimizer does not declare, a search pool holding no round —
+    land before it."""
+    import types
+
+    from promptpotter.application.datasets.authored import load_dataset_campaign_config
+    from promptpotter.application.initialization.wiring import complete_registries
+    from promptpotter.application.jobs import mint
+    from promptpotter.domain.sample import Sample
+    from promptpotter.shared.errors import PayloadInvalidError
+
+    complete_registries()
+    billed: list[str] = []
+
+    async def _framing(*_args: Any, **_kwargs: Any) -> None:
+        billed.append("checkin")
+
+    monkeypatch.setattr(mint, "commit_task_framing", _framing)
+    template = Path(__file__).parents[1] / "datasets" / "justlogic-d234" / "campaign.yaml"
+    session: Any = types.SimpleNamespace()
+    # The split holds 100 rows out, so the search keeps 20: under CAPO's block of 30.
+    bank = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(120)]
+    for optimization in (
+        {"optimizer": "capo", "nodes": {"l1_generate": {"config": {}}}},
+        {"optimizer": "capo", "nodes": {}},
+    ):
+        config = load_dataset_campaign_config(template, overrides={"optimization": optimization})
+        with pytest.raises(PayloadInvalidError):
+            await mint.mint_framed_cycle(
+                session, config, bank, campaign_id="c", task_text="what the task is", arm=None
+            )
+    assert billed == []

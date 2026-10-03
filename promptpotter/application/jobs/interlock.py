@@ -8,6 +8,7 @@ and the window is exactly where the bug lives."""
 
 from __future__ import annotations
 
+import atexit
 import contextlib
 import logging
 import os
@@ -28,7 +29,7 @@ _ADMISSION_LOCK = ".admission.lock"
 _PRODUCERS_DIR = "producers"
 
 # jobs dir -> (producer id, the lock proving this process is behind it). The lock is held for the
-# life of the process and never released; the reference lives here so nothing collects it early.
+# life of the process; the reference lives here so nothing collects it early.
 _token_lock = threading.Lock()
 _tokens: dict[Path, tuple[str, BaseFileLock]] = {}
 
@@ -61,8 +62,10 @@ def this_producer(jobs_dir: Path) -> str:
         path = _producer_path(jobs_dir, producer_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         lock = FileLock(str(path), timeout=0)
-        # A fresh unique path, so this cannot block; deliberately never released.
+        # A fresh unique path, so this cannot block. A clean exit retires its own file: its jobs
+        # are terminal by then, so no `producer_alive` probe would ever come to reclaim it.
         lock.acquire()
+        atexit.register(_retire, lock, path)
         _tokens[key] = (producer_id, lock)
         logger.debug("producer %s holds %s", producer_id, path)
         return producer_id
@@ -102,6 +105,12 @@ def producer_alive(jobs_dir: Path, producer_id: str) -> bool:
         path.unlink()
     probe.release()
     return False
+
+
+def _retire(lock: BaseFileLock, path: Path) -> None:
+    lock.release()
+    with contextlib.suppress(OSError):
+        path.unlink()
 
 
 def _producer_path(jobs_dir: Path, producer_id: str) -> Path:

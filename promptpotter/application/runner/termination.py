@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.domain.phases import REFUSAL_STOPS, StopLoop, StopReason
+from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 from promptpotter.shared.errors import SendRefusedError, is_repairable_hole
 
 if TYPE_CHECKING:
@@ -30,6 +31,7 @@ RUN_STOPS = (StopLoop, SendRefusedError)
 def run_stop_reason(stop: StopLoop | SendRefusedError) -> StopReason:
     if isinstance(stop, SendRefusedError):
         logger.warning("Run halted: %s", stop)
+        emit_round_warning(kind="send_refused", severity="error", message=str(stop))
         return REFUSAL_STOPS[stop.category]
     return stop.reason
 

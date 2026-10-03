@@ -96,11 +96,12 @@ class EscalationFSM:
         self._lives: int | None = None
         self._l2_round = 0
         self._l2_stall_count = 0
-        self._l2_best_composite_fitness_at_entry = 0.0
+        # ``None`` until the layer fires: an entry reading exists only once there was an entry.
+        self._l2_best_composite_fitness_at_entry: float | None = None
         self._l2_best_theta_at_entry: float | None = None
         self._l3_round = 0
         self._l3_stall_count = 0
-        self._l3_best_composite_fitness_at_entry = 0.0
+        self._l3_best_composite_fitness_at_entry: float | None = None
         self._l3_best_theta_at_entry: float | None = None
         # WHICH scale the last stall verdict was read on. `_improved` picks between two, and the
         # four numbers behind that choice were already recorded while the choice itself was not —
@@ -168,7 +169,7 @@ class EscalationFSM:
         return self._l2_stall_count
 
     @property
-    def l2_best_composite_fitness_at_entry(self) -> float:
+    def l2_best_composite_fitness_at_entry(self) -> float | None:
         return self._l2_best_composite_fitness_at_entry
 
     @property
@@ -188,7 +189,7 @@ class EscalationFSM:
         return self._l3_stall_count
 
     @property
-    def l3_best_composite_fitness_at_entry(self) -> float:
+    def l3_best_composite_fitness_at_entry(self) -> float | None:
         return self._l3_best_composite_fitness_at_entry
 
     @property
@@ -286,10 +287,10 @@ class EscalationFSM:
     ) -> EscalationEvent:
         """L2 escalation requested. First-invocation grace: stall only advances after a layer has fired at
         least once, and the entry θ/composite is the comparator."""
-        if self._l2_round > 0:
+        if (l2_entry := self._l2_best_composite_fitness_at_entry) is not None:
             l2_improved, self._l2_comparator = self._improved(
                 current_composite_fitness,
-                self._l2_best_composite_fitness_at_entry,
+                l2_entry,
                 current_theta,
                 self._l2_best_theta_at_entry,
                 current_theta_se,
@@ -299,10 +300,10 @@ class EscalationFSM:
         if not escalation_ladder.fires_l3 or self._l2_stall_count < l2_patience:
             return EscalationEvent(next_action=NextAction.FIRE_L2)
 
-        if self._l3_round > 0:
+        if (l3_entry := self._l3_best_composite_fitness_at_entry) is not None:
             l3_improved, self._l3_comparator = self._improved(
                 current_composite_fitness,
-                self._l3_best_composite_fitness_at_entry,
+                l3_entry,
                 current_theta,
                 self._l3_best_theta_at_entry,
                 current_theta_se,
@@ -340,8 +341,8 @@ class EscalationFSM:
         self._l3_best_theta_at_entry = best_theta
         self._l2_round = 0
         self._l2_stall_count = 0
-        self._l2_best_composite_fitness_at_entry = best_composite_fitness
-        self._l2_best_theta_at_entry = best_theta
+        self._l2_best_composite_fitness_at_entry = None
+        self._l2_best_theta_at_entry = None
 
     # Reducer: round-complete → L1 stall; refine_strategy.exit → l2 state; modify_plan.exit → l3
     # state + l2 reset. Live mutators above are the in-memory cache; from_ledger rebuilds on resume.
@@ -403,19 +404,44 @@ class EscalationFSM:
             # New plan invalidates L2's progress — wipe.
             self._l2_round = 0
             self._l2_stall_count = 0
-            self._l2_best_composite_fitness_at_entry = best_comp
-            self._l2_best_theta_at_entry = best_theta
+            self._l2_best_composite_fitness_at_entry = None
+            self._l2_best_theta_at_entry = None
 
     @classmethod
     def from_ledger(
-        cls, ledger: CycleEventLog | None, *, lives: LivesConfig | None
+        cls, ledger: CycleEventLog | None, *, lives: LivesConfig | None, before_round: int
     ) -> EscalationFSM:
-        """Rebuild by folding every record; ``None`` ⇒ fresh state. ``lives`` is REQUIRED — defaulting it
-        rebuilt the accumulator empty, handing a cycle one stall from ``LIVES_EXHAUSTED`` its bank back."""
+        """Rebuild by folding the rounds that SURVIVE; ``None`` ⇒ fresh state. ``lives`` is REQUIRED —
+        defaulting it rebuilt the accumulator empty, handing a cycle one stall from ``LIVES_EXHAUSTED``
+        its bank back.
+
+        A rewind deletes round files and leaves the ledger whole, so the records of a discarded round
+        are still on it. Two cuts drop them, the same line ``resolve_resume_state`` draws for the
+        trajectory: rounds at or past ``before_round`` (this resume re-runs them), and everything from
+        a round's first close onward once that round closes AGAIN (an earlier rewind re-ran it). Round
+        0 is the one round that legitimately closes twice, and ``fold`` banks nothing from it."""
         s = cls()
         if ledger is None:
             return s
+        live: list[PhaseRecord] = []
         for _offset, rec in ledger.iter():
+            if not isinstance(rec, PhaseRecord) or (rec.round or 0) >= before_round:
+                continue
+            if rec.phase == "round" and rec.event == "complete" and rec.round:
+                reclosed = next(
+                    (
+                        i
+                        for i, kept in enumerate(live)
+                        if kept.phase == "round"
+                        and kept.event == "complete"
+                        and (kept.round or 0) >= rec.round
+                    ),
+                    None,
+                )
+                if reclosed is not None:
+                    del live[reclosed:]
+            live.append(rec)
+        for rec in live:
             s.fold(rec, lives=lives)
         return s
 

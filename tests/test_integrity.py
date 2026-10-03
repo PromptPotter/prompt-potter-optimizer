@@ -673,6 +673,7 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
     from factories import measurement
 
     from promptpotter.application.runner.termination import run_stop_reason
+    from promptpotter.application.scoring import sample_measurement
     from promptpotter.connectors import harbor
     from promptpotter.domain.phases import StopReason
     from promptpotter.infrastructure.llm.anthropic import AnthropicClient
@@ -708,6 +709,16 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
         failure = harbor._infrastructure_failure(t)
         return None if failure is None else failure[1]
 
+    def relayed_as(code: int, upstream_message: str) -> ErrorCategory:
+        detail = {"upstream_provider": "openrouter", "upstream_message": upstream_message}
+        reply = httpx.Response(
+            code, json={"detail": detail}, request=httpx.Request("POST", "http://b/matches")
+        )
+        refused = httpx.HTTPStatusError("relayed", request=reply.request, response=reply)
+        return sample_measurement._classify_http_error(refused)[0]
+
+    assert relayed_as(403, "model is not allowed for this key") is ErrorCategory.CLIENT
+
     timeout = "Agent execution timed out after 600.0 seconds"
     for throttle in (
         trial("clock", throttled, "AgentTimeoutError", timeout),
@@ -724,6 +735,8 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
     for code, body in refusals:
         failed = trial(f"{code}-{len(body)}", "", "APIError", f"litellm.APIError: {body}")
         assert banked_as(failed) is ErrorCategory.PROVIDER_CREDIT
+        # Relayed by a backend it is the same hole: filed CLIENT, every arm reads broken instead.
+        assert relayed_as(code, body) is ErrorCategory.PROVIDER_CREDIT
 
         # The same refusal on an optimizer's own call ends the run on its stop, never a crash.
         async def _openrouter_refuses(_code: int = code, _body: str = body, **_: Any) -> None:
@@ -852,6 +865,45 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
         with pytest.raises(SendRefusedError) as quota:
             asyncio.run(cell(sent(daily)))
         assert quota.value.category is ErrorCategory.PROVIDER_THROTTLED
+
+    # A connection broken before any reply is re-sent, as our own sends are: one attempt banks a
+    # charged error inside the arm's race.
+    breaks = [httpx.ReadError("reset")]
+
+    def broken_once(_request: httpx.Request) -> httpx.Response:
+        if breaks:
+            raise breaks.pop()
+        return httpx.Response(200, json=reward)
+
+    flaky = backend()
+    flaky._http = httpx.AsyncClient(transport=httpx.MockTransport(broken_once))
+    assert asyncio.run(cell(flaky)) == reward
+
+    # Once the re-sends are spent the cell is a hole that halts the walk, never an errored row
+    # the arm is charged a miss for. The session is a wiring seam: the client is the fault.
+    async def _still_broken(*_a: Any, **_k: Any) -> dict[str, Any]:
+        raise httpx.ReadError("reset")
+
+    down = SimpleNamespace(
+        pipeline_schema=parse_pipeline_response(
+            {
+                "nodes": {"llm_only": {"type": "llm", "config": {"model": "m", "provider": "p"}}},
+                "pipelines": {"default": ["llm_only"]},
+            }
+        ),
+        backend_client=SimpleNamespace(
+            holds_own_sends=True,
+            derives_spend_bounds=False,
+            cell_envelope_s=lambda _query, _params: None,
+            run_query=_still_broken,
+        ),
+        state=SimpleNamespace(ledger=None),
+    )
+    hole = asyncio.run(
+        sample_measurement.measure_sample(Sample(id=0, query="q", ground_truth="a"), down)  # type: ignore[arg-type]
+    )
+    assert hole["error_category"] is ErrorCategory.CONNECTION
+    assert query_loop._WALK_STOPS[hole["error_category"]] is StopReason.BACKEND_UNREACHABLE
 
 
 def test_a_skill_in_the_system_prompt_reaches_the_first_request_and_is_measured_there(
@@ -3696,7 +3748,6 @@ def test_a_round_missing_its_critique_is_re_sent_before_the_generator_reads() ->
     with (
         patch.object(critique_mod, "run_l1_critique", side_effect=_always_down),
         patch.object(critique_mod, "emit_round_warning", lambda **kw: seen.append(kw)),
-        patch.object(critique_mod, "declare_run_phase", lambda *a, **k: None),
         pytest.raises(StopLoop) as halted,
     ):
         asyncio.run(critique_mod.ensure_prior_critique(cycle, state))
@@ -5129,10 +5180,11 @@ def test_first_mint_decomposes_once_and_bills_the_run_it_frames(
 
     monkeypatch.setattr(task_context, "run_checkin", scripted_checkin)
     monkeypatch.setattr(mint, "prepare_fresh_cycle", minting)
+    bank = [Sample(id=1, query="q", ground_truth="a")]
     for campaign_id in ("c1", "c2"):
         asyncio.run(
             mint.mint_framed_cycle(
-                session, config, [], campaign_id=campaign_id, task_text=None, arm=None
+                session, config, bank, campaign_id=campaign_id, task_text=None, arm=None
             )
         )
 

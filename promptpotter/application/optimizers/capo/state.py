@@ -69,7 +69,9 @@ class CapoState:
     def replay(self, last: RoundResult) -> None:
         self._take_up(last.optimizer_state.payload_as(CapoRoundState))
 
-    def resume(self, ledger: CycleEventLog | None, selected: SelectedOptimizer) -> None:
+    def resume(
+        self, ledger: CycleEventLog | None, selected: SelectedOptimizer, *, before_round: int
+    ) -> None:
         return None
 
     def absorb(self, round_result: RoundResult) -> None:

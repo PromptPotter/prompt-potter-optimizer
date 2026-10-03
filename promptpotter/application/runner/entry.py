@@ -278,7 +278,8 @@ async def _prepare_run(
         limits.operator != BudgetChange(None, None) or limits.halt_at_accuracy is not None
     ):
         raise ConflictError(
-            "an arm runs its head-to-head's declared budget: no launch ceiling, no halt accuracy",
+            "an arm runs its head-to-head's declared budget: no launch ceiling, no halt accuracy. "
+            "`set-limits --max-usd` on a stopped arm moves it for every arm; then `resume`",
             code="arm_budget_declared",
         )
 
@@ -361,8 +362,7 @@ async def _prepare_run(
         seed=seed,
         listener=cb,
     )
-    if observers.display is not None and hasattr(observers.display, "set_origin"):
-        observers.display.set_origin(origin.report.accuracy)
+    observers.readout.set_origin(origin.report.accuracy)
 
     return _PreparedRun(
         origin=origin,
@@ -534,15 +534,6 @@ def _close_cycle(
     return cycle_result
 
 
-def _bench_grades(stop_reason: StopReason) -> bool:
-    """A cycle that ended holding a selection is graded, a spend halt included — that is what the
-    set-aside is for. A rebase is graded as the fork it hands its line to, when that ends."""
-    outcome = STOP_REASON_INFO[stop_reason].outcome
-    return (
-        outcome in (StopOutcome.SUCCESS, StopOutcome.HALTED) and stop_reason != StopReason.REBASED
-    )
-
-
 @dataclass
 class _CycleOutcome:
     """One cycle run to completion. The observers may have been REBUILT mid-run by fork-on-divergence,
@@ -607,10 +598,9 @@ async def _run_single_cycle(
             observers = build_run_observers(
                 session=session,
                 campaign_config=campaign_config,
-                display=observers.display,
                 resumed_from_round=session.state.resumed_from_round,
                 origin_accuracy=origin.report.accuracy,
-                fork=ForkInfo(parent_cycle_id=pre_loop_cycle_id),
+                fork=ForkInfo(parent_cycle_id=pre_loop_cycle_id, readout=observers.readout),
             )
             observers.callbacks._phase_ctx = parent_phase_ctx
             cb = observers.callbacks
@@ -695,7 +685,7 @@ async def _run_single_cycle(
         cycle is not None
         and budget_gate is not None
         and banked is not None
-        and _bench_grades(stop_reason)
+        and STOP_REASON_INFO[stop_reason].grades_selection
     ):
         budget_gate.book.set_aside(0.0, 0)
         try:
@@ -779,10 +769,9 @@ def _mint_and_rebase_fork(
     observers = build_run_observers(
         session=session,
         campaign_config=prep.campaign_config,
-        display=observers.display,
         resumed_from_round=rebase_req.fork_from_round,
         origin_accuracy=prep.origin.report.accuracy,
-        fork=ForkInfo(parent_cycle_id=parent_cycle_id),
+        fork=ForkInfo(parent_cycle_id=parent_cycle_id, readout=observers.readout),
     )
     observers.callbacks._phase_ctx = parent_phase_ctx
     logger.info(
@@ -943,7 +932,6 @@ def _finalize_run(
         # only two ways to read `paused` — the flag or a declaration — and Ctrl+C inside the
         # round loop sets neither, so it falls through to freshness, returns DETACHED, and the
         # reaper stamps `producer_vanished` on a cycle its owner deliberately cancelled.
-        # Idempotent at the projection, so a checkpoint that already declared it pays nothing.
         declare_run_phase(session, RunPhase.PAUSED)
     # A pause leaves the cycle ACTIVE and resumable, so every terminal-marking write is skipped
     # and `index.json` keeps no `finished_at` for `derive_run_phase` to read past the PAUSED

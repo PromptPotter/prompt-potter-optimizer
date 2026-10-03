@@ -475,7 +475,6 @@ export interface SpendBucket {
   cache_read_tokens: number;
   cache_write_tokens: number;
   rate_known: boolean;
-  model: string | null;
   unpriced_tokens: number;
   incurred_usd: number;
   incurred_unpriced_tokens: number;
@@ -1019,13 +1018,16 @@ export interface BenchScore {
   /** The headline. `None` where its pass read nothing; `missing_reason` says why. */
   selected: BenchReading | null;
   /** Why a reading above is `None`: each pass that stopped before its last row, or
-   * ended past its split's `tolerance` of rows with no verdict. `None` when
-   * both read. */
+   * ended past its split's `tolerance` of rows with no verdict — and, for
+   * `selected`, a line that closed no round and so selected nothing. `None`
+   * when both read. */
   missing_reason: string | null;
   /** `selected` over `origin` in `composite_fitness`, paired per bench row both
    * scored; `None` below two shared rows, and 0.0 where the origin is the
    * selection. */
   lift: number | null;
+  /** The 95% band on `lift`; `None` where `lift` is, and where the origin is the
+   * selection — one pass read twice has no spread. */
   lift_ci_lo: number | null;
   lift_ci_hi: number | null;
 }

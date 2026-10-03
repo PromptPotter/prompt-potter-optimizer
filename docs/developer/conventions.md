@@ -15,8 +15,9 @@ collects everything else.
   server banner, first-run setup, the interactive origin gate and the maintenance
   verbs (`restamp`, `reindex`, `compact-archive`) — anywhere else it writes to a stream nothing
   captures. Inside the live run readout it is narrower still: every line goes through
-  `LiveDisplay._write`, the single stdout funnel that mirrors ANSI-stripped to the
-  cycle's `readout.log`, so a bare `print()` there is a line no headless reader can recover.
+  `ReadoutProjection._write`, the single funnel that writes ANSI-stripped to the cycle's
+  `readout.log` and hands the line to the entry point's sink, so a bare `print()` there is a
+  line no headless reader can recover.
 - **Ruff line-length: 100.** Enforced by `scripts/gate.py`, which is what CI runs.
 - **Direct field access** — `dict[key]` for guaranteed fields, not
   `.get(key, fallback)`. Fallbacks announce uncertainty; if you have a

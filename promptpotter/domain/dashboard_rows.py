@@ -314,8 +314,8 @@ class RoundSummary(StrictModel):
     # fabricates a number no individual scored. Mirrors `RoundResult.ability` where the round's
     # selector stamps θ, and is ``None`` everywhere else.
     ability: AbilityReading | None = None
-    # The highest `accuracy` any round of this cycle had measured when this one closed, a fork's
-    # seeded rounds included — the BEST line, served so no surface folds its own.
+    # The cycle's best on shared cells as it stood when this round closed, a fork's seeded rounds
+    # included — the BEST line, served so no surface folds its own.
     best_so_far: float | None = None
     # The bench's grade of the selection this round declared — the origin at round 0, the final
     # pick, and under `bench_each_round` every round that selected. ``None`` where none graded it.

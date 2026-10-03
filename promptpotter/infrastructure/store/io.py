@@ -284,11 +284,15 @@ def read_yaml_optional(path: Path) -> Any | None:
         return None
 
 
-def append_jsonl(path: Path, item: dict[str, Any]) -> Path:
+def append_line(path: Path, line: str) -> None:
+    """Reopened per call, never held: a held handle blocks a stub fork's delete on Windows."""
     ensure_parent_dir(path)
     with open(_long_path(path), "a", encoding="utf-8") as f:
-        f.write(json.dumps(item, ensure_ascii=False) + "\n")
-        f.flush()
+        f.write(line + "\n")
+
+
+def append_jsonl(path: Path, item: dict[str, Any]) -> Path:
+    append_line(path, json.dumps(item, ensure_ascii=False))
     return path
 
 

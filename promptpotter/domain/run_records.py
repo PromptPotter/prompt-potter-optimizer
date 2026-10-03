@@ -90,7 +90,7 @@ class PhaseRecord(StrictModel):
     live_round_result: Any = Field(default=None, exclude=True, repr=False)
     # ``PhaseEvent.data`` — the live handles and bulk a phase builder was called with. Same
     # ``exclude=True`` rationale and the same audit: no disk re-reader consumes it. Ledger
-    # subscribers read the typed, capped ``payload['view']``; ``LiveDisplay`` alone reads this
+    # subscribers read the typed, capped ``payload['view']``; ``ReadoutProjection`` alone reads this
     # for the ``env``/``state`` handles a resume-rewind rebuild needs.
     data: dict[str, Any] = Field(default_factory=dict, exclude=True, repr=False)
     timestamp: str = Field(default_factory=utcnow_iso)
@@ -362,6 +362,8 @@ RoundWarningKind = Literal[
     # The cycle STOPPED and a human has to act. Its reason is the layer's own sentence, and it
     # rides a warning rather than a log line so the why reaches disk with the halt.
     "layer_terminated_cycle",
+    # The same for a refused send: the refusal's sentence names the ceiling or the unpriced route.
+    "send_refused",
     # A layer emitted `terminate_proposal` carrying no reason. Ignored — a contentless stop is a
     # volunteered field, not a decision — but never silently: it means the layer's schema let it
     # fill the kill switch with "" while its actual output was a healthy steer.

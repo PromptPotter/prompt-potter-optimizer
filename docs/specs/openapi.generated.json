@@ -679,6 +679,7 @@
                 "type": "null"
               }
             ],
+            "description": "The 95% band on `lift`; `None` where `lift` is, and where the origin is the selection — one pass read twice has no spread.",
             "title": "Lift Ci Lo"
           },
           "missing_reason": {
@@ -690,7 +691,7 @@
                 "type": "null"
               }
             ],
-            "description": "Why a reading above is `None`: each pass that stopped before its last row, or ended past its split's `tolerance` of rows with no verdict. `None` when both read.",
+            "description": "Why a reading above is `None`: each pass that stopped before its last row, or ended past its split's `tolerance` of rows with no verdict — and, for `selected`, a line that closed no round and so selected nothing. `None` when both read.",
             "title": "Missing Reason"
           },
           "origin": {
@@ -6448,17 +6449,6 @@
             "default": 0,
             "title": "Input Tokens",
             "type": "integer"
-          },
-          "model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model"
           },
           "output_tokens": {
             "default": 0,

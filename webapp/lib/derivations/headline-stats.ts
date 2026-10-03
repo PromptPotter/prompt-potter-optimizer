@@ -74,7 +74,7 @@ function finite(v: unknown): number | null {
 }
 
 export function headlineStats(dash: DashboardSnapshot | null): HeadlineStats {
-  // `best` is the max a round MEASURED on the search pool — the optimizer's own reading.
+  // `best` is the best round on the shared origin-panel cells — the cycle index's number.
   const best = finite(dash?.best);
   const round0 = (dash?.rounds ?? []).find((r) => r.round === 0);
   const origin = round0 ? finite(round0.accuracy) : null;

@@ -42,8 +42,6 @@ from promptpotter.application.pipeline_resolve import (  # noqa: E402
 from promptpotter.application.runner.entry import RunMode  # noqa: E402
 from promptpotter.domain.launch_limits import LaunchLimits  # noqa: E402
 from promptpotter.presentation.terminal.completion import report_completion  # noqa: E402
-from promptpotter.presentation.terminal.live.display import LiveDisplay  # noqa: E402
-from promptpotter.presentation.terminal.primitives import set_display_tags  # noqa: E402
 
 
 def _build_config(
@@ -135,7 +133,6 @@ async def _run(args: argparse.Namespace) -> int:
         )
     )
     configure_and_apply_pipeline(session, campaign_config, log=print)
-    set_display_tags(session.pipeline_schema)
 
     train_slice = (session.samples or [])[: args.samples]
     if not train_slice:
@@ -146,7 +143,7 @@ async def _run(args: argparse.Namespace) -> int:
         session,
         train_slice,
         campaign_config,
-        display=LiveDisplay.for_campaign(session, campaign_config),
+        readout_sink=print,
         limits=LaunchLimits(),
         mode=RunMode(),
     )

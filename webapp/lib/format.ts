@@ -88,7 +88,7 @@ export function fmtTokens(n: number): string {
   return `${n} tok`;
 }
 
-// Mirrors `terminal/primitives.py::fmt_pvalue`. `null` means nothing was tested — never render
+// Mirrors `views/render/primitives.py::fmt_pvalue`. `null` means nothing was tested — never render
 // it as a test that found nothing.
 export function fmtPValue(p: number | null): string {
   if (p == null) return "—";

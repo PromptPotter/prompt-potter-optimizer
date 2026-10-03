@@ -87,7 +87,10 @@ from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
 from promptpotter.shared.instrument import NO_ROUND_SLOT
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from promptpotter.domain.connector import MeasuredUnit
+    from promptpotter.domain.results import RoundResult
 
 logger = logging.getLogger(__name__)
 
@@ -425,9 +428,7 @@ class LiveDashboardProjection(Projection):
             self.state.run_standing = RunStanding.model_validate(payload["run_standing"])
             # The headline scalars come off the PERSISTED lean form — the same numbers the full
             # result carries, so they fold whether or not a live producer is behind the record.
-            accuracy = (payload.get("round_result") or {}).get("accuracy")
-            if accuracy is not None:
-                self._absorb_round_complete(float(accuracy))
+            self._update_current_acc(payload.get("round_result") or {})
             # The trajectory row needs the WHOLE `RoundResult`. It rides the in-memory-only field
             # for a live producer and comes off `rounds/round_NNNN.json` for a fold with none —
             # one document, two carriers, resolved HERE so no caller has to know which it got.
@@ -439,13 +440,12 @@ class LiveDashboardProjection(Projection):
                 origin_rows = (
                     [] if round_result.round == 0 else origin_rows_from_disk(self.cycle_dir)
                 )
+                prior = [r for r in self.state.rounds if r.round != round_result.round]
+                self.state.best = _best_on_shared_cells([*prior, round_result])
                 summary = build_round_summary(
                     round_result, origin_rows, best_so_far=self.state.best
                 )
-                rounds_list = [r for r in self.state.rounds if r.round != round_result.round]
-                rounds_list.append(summary)
-                rounds_list.sort(key=lambda r: r.round)
-                self.state.rounds = rounds_list
+                self.state.rounds = sorted([*prior, summary], key=lambda r: r.round)
                 self._flush_pending_persist()
             return
 
@@ -593,7 +593,7 @@ class LiveDashboardProjection(Projection):
             n_samples = int(payload.get("n_samples") or 0)
             p_best = float(payload.get("p_best") or 0.0)
             self._buffer.update_p_best(ci, ct, current_id, n_samples, p_best)
-            # Mirrored into the shared core so LiveDisplay sees the same round-wide state.
+            # Mirrored into the shared core so ReadoutProjection sees the same round-wide state.
             apply_race_standing(self._core, str(payload["member"]), current_id, n_samples, p_best)
         elif ev == "flight":
             self._flight = (
@@ -665,13 +665,12 @@ class LiveDashboardProjection(Projection):
             if short is not None:
                 self.short_formula_template = short
         elif event.phase == CampaignPhase.PROPOSE and event.event == "enter":
-            s.degraded_count = 0
             # Rewind/fork-in-place clamp: drop rounds this run will overwrite. Sole clamp
             # writer; `round:display` is the sole growth site.
             s.rounds = [r for r in s.rounds if r.round < s.round]
 
-        # Mirrored for LiveDisplay parity. The core's ``best_acc`` is a hard-first SUBSET score
-        # and must NOT feed ``s.best``, whose sole writer is ``_absorb_round_complete``.
+        # Mirrored for ReadoutProjection parity. The core's ``best_acc`` is a hard-first SUBSET
+        # score and must NOT feed ``s.best``, which `round:display` derives from ``s.rounds``.
         apply_phase(self._core, event, view)
 
     def _refresh_open_sample_markers(self) -> None:
@@ -702,12 +701,13 @@ class LiveDashboardProjection(Projection):
         # BACKEND reporting a fault on a row PP classified clean, which no PP-side category covers.
         if is_error_result(result) or pd.get("error"):
             s.error_count += 1
-        if has_pipeline_warnings(result):
-            s.degraded_count += 1
 
         s.total_queries_scored += 1
         if not is_cached:
             s.total_backend_calls += 1
+            # Counted where it was MEASURED: a replay re-reads the banked row, it degrades nothing.
+            if has_pipeline_warnings(result):
+                s.degraded_count += 1
 
         # Not cleared outright: under look-ahead another sample is often still open when this
         # one lands, and blanking the panel would report "nothing in flight" mid-request.
@@ -791,15 +791,6 @@ class LiveDashboardProjection(Projection):
         acc = scores.get("accuracy")
         if acc is not None:
             self.state.current_acc = round(float(acc), 4)
-
-    def _absorb_round_complete(self, round_accuracy: float) -> None:
-        """Never settle to ``cumulative_accuracy`` — nothing rescores it, so that pooled series can
-        exceed everything the cycle measured. The round's own ``total`` is the answer beside it."""
-        s = self.state
-        acc = round(round_accuracy, 4)
-        s.current_acc = acc
-        if s.best is None or acc > s.best:
-            s.best = acc
 
     # -- Round-state mutations (snapshot-record fan-out) ----------------------
     # Per-candidate / per-sample / P(best) writes live on the ``RoundBuffer``;
@@ -944,6 +935,15 @@ class LiveDashboardProjection(Projection):
         return s
 
 
+def _best_on_shared_cells(rounds: Iterable[RoundSummary | RoundResult]) -> float | None:
+    """``state.best`` for *rounds*, through the projection the cycle index elects on: handed a
+    row without the flattened overlap pair, the derivation collapses the trajectory onto round 0."""
+    best, at_round = best_round_on_shared_cells(
+        [{"round": r.round, "accuracy": r.accuracy, **overlap_row(r.overlap)} for r in rounds]
+    )
+    return None if at_round is None else best
+
+
 def resolve_resume_state(
     seed: Cut,
     active_cycle_dir: Path,
@@ -962,12 +962,7 @@ def resolve_resume_state(
     surviving = [
         r for r in prior.rounds if resumed_from_round is None or r.round < resumed_from_round
     ]
-    # A `RoundSummary` carries the reading WHOLE and the election reads the flattened pair, so the
-    # rows go through the same projection the cycle index does — handed the summary's own dump the
-    # derivation sees no shared cell anywhere and collapses the whole trajectory onto round 0.
-    best, _ = best_round_on_shared_cells(
-        [{**r.model_dump(), **overlap_row(r.overlap)} for r in surviving]
-    )
+    best = _best_on_shared_cells(surviving)
     rounds_dir = CycleLayout(active_cycle_dir).rounds
     on_disk = max(
         (n for p in rounds_dir.glob(ROUND_GLOB) if (n := round_number(p)) is not None),

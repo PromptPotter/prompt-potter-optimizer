@@ -84,7 +84,6 @@ async def run_origin_gate(
 
         outcome = await _await_gate_decision(session, stdin_q)
         if outcome == "pause":
-            declare_run_phase(session, RunPhase.PAUSED)
             return StopReason.PAUSED
         if outcome == "abort":
             logger.warning("Origin gate: abort — ending cycle (origin_gate).")

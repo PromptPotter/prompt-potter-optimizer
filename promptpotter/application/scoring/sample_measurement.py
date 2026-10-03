@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 
-from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
+from promptpotter.application.run_phase_control import pause_requested
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.classification import terminal_ranking
 from promptpotter.application.scoring.evaluators import materialize_sample_values
@@ -22,7 +22,6 @@ from promptpotter.domain.l4.proxies import (
     INNER_FACT_KEYS,
     PARENT_LEVEL_SE_KEY,
 )
-from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_schema import WebSpendBound
 from promptpotter.domain.results_health import classify_result, terminal_node
 from promptpotter.domain.sample import Sample
@@ -42,6 +41,7 @@ from promptpotter.shared.errors import (
     CellUnscoreableError,
     ErrorCategory,
     SendRefusedError,
+    is_provider_credit_refusal,
 )
 
 if TYPE_CHECKING:
@@ -470,10 +470,11 @@ def _classify_http_error(exc: httpx.HTTPStatusError) -> tuple[ErrorCategory, str
     the candidate."""
     code = exc.response.status_code
     upstream = _extract_upstream_detail(exc)
-    if 400 <= code < 500:
-        tail = f" :: {upstream}" if upstream else ""
-        return ErrorCategory.CLIENT, f"HTTP {code} — caller config rejected by backend{tail}"
     tail = f" :: {upstream}" if upstream else ""
+    if 400 <= code < 500:
+        if is_provider_credit_refusal(exc.response.text):
+            return ErrorCategory.PROVIDER_CREDIT, f"HTTP {code} — provider credit refused{tail}"
+        return ErrorCategory.CLIENT, f"HTTP {code} — caller config rejected by backend{tail}"
     return ErrorCategory.SERVER, f"HTTP {code} — backend transient error{tail}"
 
 
@@ -646,8 +647,8 @@ async def measure_sample(
         category, error_msg = _classify_http_error(exc)
         logger.warning("measure_sample for %s: %s", query[:60], error_msg)
         return _error_result(sample, error_msg, category=category)
-    except (httpx.ConnectError, httpx.TimeoutException) as exc:
-        error_msg = f"{exc} — Backend may be down or unreachable."
+    except httpx.TransportError as exc:
+        error_msg = f"{type(exc).__name__}: {exc} — Backend may be down or unreachable."
         logger.warning("measure_sample CONNECTION for %s: %s", query[:60], error_msg)
         return _error_result(sample, error_msg, category=ErrorCategory.CONNECTION)
     except (KeyboardInterrupt, asyncio.CancelledError, SendRefusedError):
@@ -757,7 +758,6 @@ async def execute_stale_data_protocol(
 
     for step in protocol_steps:
         if pause_requested(session):
-            declare_run_phase(session, RunPhase.PAUSED)
             return {**result, "cached": result.get("cached", False)}, "paused"
         if step == "rerun":
             historical = sample_index.degradation_count(sample.id) if sample_index else 0

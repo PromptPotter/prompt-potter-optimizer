@@ -14,6 +14,7 @@ from promptpotter.application.evidence.read import (
     subject_evidence,
 )
 from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
+from promptpotter.application.views.render.primitives import fmt_ci, fmt_pvalue
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.bench import BenchScore, DatasetSplit
@@ -26,7 +27,6 @@ from promptpotter.presentation.cli.commands._shared import (
     identity_from_args,
     resolve_campaign_hint,
 )
-from promptpotter.presentation.terminal.primitives import fmt_ci, fmt_pvalue
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 

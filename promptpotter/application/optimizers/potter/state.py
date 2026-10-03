@@ -112,9 +112,11 @@ class PotterState:
     def replay(self, last: RoundResult) -> None:
         self.memory = last.optimizer_state.payload_as(PotterRoundState).memory.model_copy(deep=True)
 
-    def resume(self, ledger: CycleEventLog | None, selected: SelectedOptimizer) -> None:
+    def resume(
+        self, ledger: CycleEventLog | None, selected: SelectedOptimizer, *, before_round: int
+    ) -> None:
         self.escalation = EscalationFSM.from_ledger(
-            ledger, lives=potter_knobs(selected).escalation.lives
+            ledger, lives=potter_knobs(selected).escalation.lives, before_round=before_round
         )
 
     def absorb(self, round_result: RoundResult) -> None:

@@ -225,8 +225,8 @@ class LiveDashboardState(StrictModel):
 
     rounds: list[RoundSummary] = Field(default_factory=list)
 
-    # ``None`` until round 0 settles — a `0.0` default reports "Best 0%" for the whole origin
-    # pass, which is a measurement nothing has taken (`_update_current_acc` refuses it mid-round).
+    # `best_round_on_shared_cells` over `rounds` — `index.json::best_accuracy`'s number, never a
+    # max over each round's own subset. ``None`` until round 0 settles, never a `0.0`.
     best: float | None = None
     current_acc: float | None = None
     # The headline for every optimizer: the selection and the origin graded on the held-out bench
@@ -249,6 +249,8 @@ class LiveDashboardState(StrictModel):
     # rather than a candidate's `None` theta, which a cold ruler leaves `None` too.
     stamps_theta: bool = False
 
+    # Run totals. `degraded_count` is over `total_backend_calls`; a round's own is its
+    # document's `degraded_samples`.
     degraded_count: int = 0
     error_count: int = 0
 
