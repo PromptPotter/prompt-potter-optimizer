@@ -224,9 +224,6 @@ def _ruler(
     )
 
 
-scipy = pytest.importorskip("scipy")  # transitively required by the PoBB math
-
-
 # 1. Scorer formulas and the AST allowlist
 
 
@@ -3438,12 +3435,10 @@ def test_paired_reading_matches_ttest_rel_and_brackets_the_same_evidence_it_test
     p that does not, or the reverse. The floor case pins the documented deviation instead of
     hiding it: ``_normal_posterior`` clips the SE at ``1/(4n)``, so a near-constant difference
     reads far LESS significant here than a textbook paired t-test."""
-    from scipy.stats import ttest_rel
-
     # Spread wide enough that the 1/(4n) floor does not bind, so the two must agree exactly.
     cand = [0.90, 0.10, 0.85, 0.20, 0.75, 0.30, 0.95, 0.05]
     prior = [0.10, 0.85, 0.15, 0.80, 0.20, 0.70, 0.05, 0.90]
-    reference = float(ttest_rel(cand, prior).pvalue)
+    reference = 0.8750918683549795  # scipy 1.17.1 `ttest_rel(cand, prior).pvalue`
 
     mean_d, lo, hi, p_two, n = paired_reading(cand, prior)
     assert n == len(cand)
@@ -3465,7 +3460,9 @@ def test_paired_reading_matches_ttest_rel_and_brackets_the_same_evidence_it_test
     tight_cand = [0.5000001 * i for i in range(1, 7)]
     tight_prior = [0.5 * i for i in range(1, 7)]
     tight_p = paired_reading(tight_cand, tight_prior)[3]
-    assert tight_p is not None and tight_p > float(ttest_rel(tight_cand, tight_prior).pvalue)
+    assert (
+        tight_p is not None and tight_p > 0.00593354451968529
+    )  # scipy's `ttest_rel` on the same pair
 
     # One pair tests nothing and brackets nothing — absent, not a p of 1.0 nor a zero-width bar.
     assert paired_reading([0.5], [0.1])[1:4] == (None, None, None)

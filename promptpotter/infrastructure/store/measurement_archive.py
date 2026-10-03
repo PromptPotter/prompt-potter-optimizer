@@ -525,37 +525,26 @@ class MeasurementArchive:
         *,
         run_ids: set[str] | list[str] | None = None,
         dataset_name: str | None = None,
-    ) -> list[Measurement]:
-        """Every measurement under configs matching *predicate*, across samples. Empty predicate → [].
-        *run_ids* hint turns O(N) into O(K + matches); must be dataset-scoped at source.
-        """
+    ) -> Iterator[Measurement]:
+        """Every measurement under configs matching *predicate*, across samples; an empty predicate
+        yields none. *run_ids* hint turns O(N) into O(K + matches); must be dataset-scoped at source.
+
+        One run at a time, never the lot: a dataset's archive outgrows memory long before it
+        outgrows disk, and a reader averaging one channel held every row's node I/O to do it."""
         if not predicate:
-            return []
-
-        if run_ids is not None:
-            out: list[Measurement] = []
-            for rid in run_ids:
-                detail = self.load_by_id(rid)
-                if detail is None:
-                    continue
-                for item in detail.get("measurements", []):
-                    out.append(_to_measurement(rid, detail, item))
-            return out
-
-        out = []
-        for entry in self.list_all(dataset_name=dataset_name):
-            stored = entry.get("node_configs")
-            if not stored:
-                continue
-            if not _matches_subset(stored, predicate):
-                continue
-            run_id = entry["run_id"]
+            return
+        if run_ids is None:
+            run_ids = [
+                entry["run_id"]
+                for entry in self.list_all(dataset_name=dataset_name)
+                if (stored := entry.get("node_configs")) and _matches_subset(stored, predicate)
+            ]
+        for run_id in run_ids:
             detail = self.load_by_id(run_id)
             if detail is None:
                 continue
             for item in detail.get("measurements", []):
-                out.append(_to_measurement(run_id, detail, item))
-        return out
+                yield _to_measurement(run_id, detail, item)
 
 
 class CellClaim:

@@ -87,9 +87,9 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 
 ## Missing dependency on import
 
-**What you see:** `ImportError` or "install the `[stats]` extra" messages.
+**What you see:** `ImportError` or "install the `[excel]` extra" messages.
 
-**Why:** Core install is intentionally minimal. Optional features (Wilson CI, Jupyter, Excel loaders, Langfuse, Anthropic) live under extras.
+**Why:** Core install is intentionally minimal. Optional features (Jupyter, Excel loaders, Langfuse, Anthropic) live under extras.
 
 **What to try:**
 - Install `[all]` if you haven't: `pip install -e ".[all]"`.

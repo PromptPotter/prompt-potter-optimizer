@@ -103,9 +103,6 @@ jupyter = [
     "jupyterlab>=4.0",  # why kept: notebook UI for `notebooks/bbeh_potter.ipynb`
     "ipython>=8.0",     # why kept: in-notebook HTML rendering (presentation/terminal/completion.py)
 ]
-stats = [
-    "scipy>=1.12.0",    # why kept: Rasch fit + Wilson/normal-CI statistics
-]
 benchmarks = [
     # why kept: HuggingFace loader for the public benchmark banks (BBEH / GSM8K / AIME /
     # JustLogic). OPT-IN ONLY, and deliberately absent from `all`: it drags a large transitive
@@ -152,7 +149,6 @@ all = [
     "openpyxl>=3.1.0",
     "jupyterlab>=4.0",
     "ipython>=8.0",
-    "scipy>=1.12.0",
     "langfuse>=2.0.0",
     "mlflow-skinny>=3.15.0",
     "anthropic>=0.18.0",
@@ -257,7 +253,6 @@ module = [
     "datasets.*",
     "dspy.*",
     "harbor.*",
-    "scipy.*",
     "IPython.*",
     "tests.*",
     # Pure transitive (0 first-party imports) — pulled in by the skipped sinks /

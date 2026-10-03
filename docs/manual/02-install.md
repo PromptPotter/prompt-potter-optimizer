@@ -76,7 +76,6 @@ that drags a web server along is one nobody adds.
 ```bash
 pip install -e ".[api]"            # the API + the dashboard mount + OIDC identity
 pip install -e ".[excel]"          # ingest .xlsx as well as CSV/TSV/JSON/JSONL
-pip install -e ".[stats]"          # Wilson CI, significance tests (scipy)
 pip install -e ".[jupyter]"        # JupyterLab + IPython display
 pip install -e ".[benchmarks]"     # GSM8K, AIME 2025, BBEH (HuggingFace datasets)
 pip install -e ".[observability]"  # Langfuse cloud tracing

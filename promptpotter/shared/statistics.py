@@ -1,25 +1,81 @@
-"""Pure statistics — leaf-level, depending only on stdlib + numpy + scipy. Requires the ``[stats]`` extra."""
+"""Pure statistics — leaf-level, depending only on stdlib + numpy. The three distributions it reads
+(normal, Student-t, beta) are computed here."""
 
 from __future__ import annotations
 
-import contextlib
 import math
-import threading
 from collections.abc import Mapping, Sequence
+from statistics import NormalDist
 from typing import Literal
 
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
-def warm_stats_backend() -> None:
-    """Import ``scipy.stats`` on a daemon thread so the round loop never pays for it — otherwise the first PoBB check of round 1
-    triggers it and reads as a freeze. A missing scipy is swallowed; the real call site raises naming the ``[stats]`` extra."""
+@shapes_optimizer_prompt
+def _beta_fraction(a: float, b: float, x: float) -> float:
+    """The continued fraction of the incomplete beta function, by modified Lentz."""
+    tiny = 1e-300
+    c = 1.0
+    d = 1.0 - (a + b) * x / (a + 1.0)
+    d = 1.0 / (d if abs(d) > tiny else tiny)
+    h = d
+    for m in range(1, 400):
+        for num in (
+            m * (b - m) * x / ((a + 2 * m - 1) * (a + 2 * m)),
+            -(a + m) * (a + b + m) * x / ((a + 2 * m) * (a + 2 * m + 1)),
+        ):
+            d = 1.0 + num * d
+            d = 1.0 / (d if abs(d) > tiny else tiny)
+            c = 1.0 + num / c
+            c = c if abs(c) > tiny else tiny
+            h *= d * c
+        if abs(d * c - 1.0) < 1e-16:
+            break
+    return h
 
-    def _warm() -> None:
-        with contextlib.suppress(ImportError):
-            import scipy.stats  # noqa: F401
 
-    threading.Thread(target=_warm, name="stats-warm", daemon=True).start()
+@shapes_optimizer_prompt
+def _beta_cdf(x: float, a: float, b: float, *, rest: float | None = None) -> float:
+    """The regularized incomplete beta function ``I_x(a, b)`` — the Beta(a, b) CDF at *x*. *rest*
+    is ``1 - x`` where the caller holds it exactly: near 1 the subtraction has no digits left."""
+    rest = 1.0 - x if rest is None else rest
+    if x <= 0.0:
+        return 0.0
+    if rest <= 0.0:
+        return 1.0
+    front = math.exp(
+        math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b) + a * math.log(x) + b * math.log(rest)
+    )
+    # The fraction converges fast on one side of the mean only; the other side is the mirror.
+    if x < (a + 1.0) / (a + b + 2.0):
+        return front * _beta_fraction(a, b, x) / a
+    return 1.0 - front * _beta_fraction(b, a, rest) / b
+
+
+@shapes_optimizer_prompt
+def _t_sf(x: float, df: float) -> float:
+    """Student-t upper tail ``P(T > x)``."""
+    scale = df + x * x
+    tail = 0.5 * _beta_cdf(df / scale, df / 2.0, 0.5, rest=x * x / scale)
+    return tail if x >= 0.0 else 1.0 - tail
+
+
+@shapes_optimizer_prompt
+def _t_ppf(p: float, df: float) -> float:
+    """Student-t quantile for ``p >= 0.5``, by bisection on the upper tail."""
+    target = 1.0 - p
+    lo, hi = 0.0, 1.0
+    while _t_sf(hi, df) > target:
+        hi *= 2.0
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if _t_sf(mid, df) > target:
+            lo = mid
+        else:
+            hi = mid
+        if hi - lo <= 1e-15 * max(1.0, hi):
+            break
+    return 0.5 * (lo + hi)
 
 
 @shapes_optimizer_prompt
@@ -28,10 +84,7 @@ def t_critical(df: int, alpha: float = 0.05) -> float:
     quantile understates the interval at the panel sizes the paired verdicts run on."""
     if df < 1:
         raise ValueError(f"t_critical: df must be >= 1, got {df}")
-
-    from scipy.stats import t
-
-    return float(t.ppf(1 - alpha / 2, df))
+    return _t_ppf(1 - alpha / 2, df)
 
 
 @shapes_optimizer_prompt
@@ -40,10 +93,8 @@ def min_detectable_effect(se: float, alpha: float = 0.05, power: float = 0.8) ->
     binomial worst case, wrong for every caller here, and overstated the panel's MDE 3.8x."""
     if se <= 0.0:
         return 0.0
-
-    from scipy.stats import norm
-
-    return float((norm.ppf(1 - alpha / 2) + norm.ppf(power)) * se)
+    normal = NormalDist()
+    return (normal.inv_cdf(1 - alpha / 2) + normal.inv_cdf(power)) * se
 
 
 def p_exceeds(mean_a: float, se_a: float, mean_b: float, se_b: float) -> float:
@@ -56,10 +107,7 @@ def p_exceeds(mean_a: float, se_a: float, mean_b: float, se_b: float) -> float:
     denom = math.sqrt(se_a * se_a + se_b * se_b)
     if denom <= 1e-12:
         return 1.0 if mean_a > mean_b else 0.0
-
-    from scipy.stats import norm
-
-    return float(norm.cdf((mean_a - mean_b) / denom))
+    return NormalDist().cdf((mean_a - mean_b) / denom)
 
 
 # --- PoBB: Posterior-of-Being-Best (Russo 2016 / Top-Two Thompson family) ---
@@ -110,11 +158,8 @@ def mean_ci(values: list[float], alpha: float = 0.05) -> tuple[float, float, flo
     than as a difference. ``n=0`` is degenerate."""
     if not values:
         return (0.0, 0.0, 0.0)
-
-    from scipy.stats import norm
-
     mean, se = _normal_posterior(values)
-    z = norm.ppf(1 - alpha / 2)
+    z = NormalDist().inv_cdf(1 - alpha / 2)
     return (mean, mean - z * se, mean + z * se)
 
 
@@ -159,19 +204,13 @@ def paired_reading(
     mean_d, se_d, n = paired_diff_posterior(candidate_scores, prior_scores)
     if n < 2:
         return (mean_d, None, None, None, n)
-
-    from scipy.stats import t
-
     # `_normal_posterior` floors the SE strictly above zero, so there is no degenerate branch here.
     half = t_critical(n - 1, alpha) * se_d
-    upper = float(t.sf(mean_d / se_d, n - 1))
-    return (
-        mean_d,
-        mean_d - half,
-        mean_d + half,
-        2.0 * min(upper, 1.0 - upper) if tail == "two" else upper,
-        n,
-    )
+    # The tail past |t| is one number whichever way the pair was read, so the two-sided p is too.
+    t = mean_d / se_d
+    beyond = _t_sf(abs(t), n - 1)
+    one_sided = beyond if t >= 0.0 else 1.0 - beyond
+    return (mean_d, mean_d - half, mean_d + half, 2.0 * beyond if tail == "two" else one_sided, n)
 
 
 def exact_p_floor(n: int) -> float:
@@ -207,10 +246,7 @@ def sign_posterior(wins: int, losses: int) -> float:
     pairs at all. One adverse cell and no wins caps it at 0.25, two at 0.125."""
     if wins + losses == 0:
         return 0.5
-
-    from scipy.stats import beta
-
-    return float(beta.sf(0.5, wins + 1, losses + 1))
+    return 1.0 - _beta_cdf(0.5, wins + 1, losses + 1)
 
 
 def _signed_rank_counts(n: int) -> list[int]:
@@ -345,11 +381,28 @@ def rank_correlation(xs: list[float], ys: list[float]) -> float | None:
     exists to correlate."""
     if len(xs) != len(ys) or len(xs) < 3:
         return None
+    rx, ry = _average_ranks(xs), _average_ranks(ys)
+    mx, my = sum(rx) / len(rx), sum(ry) / len(ry)
+    sxx = sum((x - mx) ** 2 for x in rx)
+    syy = sum((y - my) ** 2 for y in ry)
+    if sxx == 0.0 or syy == 0.0:
+        return None
+    return sum((x - mx) * (y - my) for x, y in zip(rx, ry, strict=True)) / math.sqrt(sxx * syy)
 
-    from scipy.stats import spearmanr
 
-    rho = float(spearmanr(xs, ys).statistic)
-    return None if math.isnan(rho) else rho
+def _average_ranks(values: list[float]) -> list[float]:
+    """1-based ranks, ties sharing the mean of the places they span."""
+    order = sorted(range(len(values)), key=values.__getitem__)
+    ranks = [0.0] * len(values)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and values[order[j + 1]] == values[order[i]]:
+            j += 1
+        for k in range(i, j + 1):
+            ranks[order[k]] = (i + j) / 2.0 + 1.0
+        i = j + 1
+    return ranks
 
 
 def _order(a: float, b: float) -> int:
@@ -435,5 +488,4 @@ __all__ = [
     "sign_posterior",
     "t_critical",
     "two_way_effect_sds",
-    "warm_stats_backend",
 ]

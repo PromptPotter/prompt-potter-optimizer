@@ -120,7 +120,7 @@ def measurements_for_config(
     *,
     run_ids: set[str] | list[str] | None = None,
     dataset_name: str | None = None,
-) -> list[Measurement]:
+) -> Iterator[Measurement]:
     return stores.archive.measurements_for_config(
         predicate,
         run_ids=run_ids,

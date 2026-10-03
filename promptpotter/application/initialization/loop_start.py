@@ -47,7 +47,6 @@ from promptpotter.infrastructure.store import archive_queries
 from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 from promptpotter.judges import build_evaluators, judge_instrument
 from promptpotter.shared.errors import graceful
-from promptpotter.shared.statistics import warm_stats_backend
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -270,14 +269,15 @@ def _measured_cell_usd(
     """What a cell of this dataset billed on the models it runs on now, as the archive priced it;
     ``None`` where no archived row answers."""
     on_models = {name: {"model": cfg["model"]} for name, cfg in node_configs if cfg.get("model")}
-    billed = [
-        cost
-        for m in archive_queries.measurements_for_config(
-            session.store, on_models, dataset_name=session.dataset_name
-        )
-        if (cost := cell_channels_of(m.row).get("cost")) is not None
-    ]
-    return sum(billed) / len(billed) if billed else None
+    total, cells = 0.0, 0
+    for m in archive_queries.measurements_for_config(
+        session.store, on_models, dataset_name=session.dataset_name
+    ):
+        cost = cell_channels_of(m.row).get("cost")
+        if cost is not None:
+            total += cost
+            cells += 1
+    return total / cells if cells else None
 
 
 async def _emit_preflight_and_init_session(
@@ -509,9 +509,6 @@ async def init_optimization_loop(
     session: Session,
     started_at: str,
 ) -> Cycle:
-
-    warm_stats_backend()
-
     await _emit_preflight_and_init_session(config, dataset, cb, session, origin)
 
     cycle, resolved_cycle_id, resumed_from_round = _build_and_start_cycle(

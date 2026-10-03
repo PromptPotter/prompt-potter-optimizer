@@ -554,7 +554,7 @@ def _execute(check: Check, sel: Sel) -> Result:
 # resolve fastapi, and reports it as a first-party error. `harbor` is here because this env is
 # where the verdict is TAKEN: without it `import harbor` fails here while succeeding at the desk,
 # which is the drift this function exists to stop, pointing the other way.
-_PINNED_EXTRAS = ("stats", "dev", "api", "harbor")
+_PINNED_EXTRAS = ("dev", "api", "harbor")
 
 
 def _reexec_pinned() -> None:

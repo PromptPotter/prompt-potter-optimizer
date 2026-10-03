@@ -325,10 +325,11 @@ class SpendRollup(StrictModel):
     def _retotal(self) -> None:
         # Over `buckets`, never a hand-named pair: the budget gate reads `total_used_usd`, so a
         # bucket left out of this fold is spend the cap cannot see.
-        self.total_used_usd = round(sum(b.used_usd for b in self.buckets), 6)
-        self.total_incurred_usd = round(sum(b.incurred_usd for b in self.buckets), 6)
-        self.total_tokens_used = sum(b.input_tokens + b.output_tokens for b in self.buckets)
-        self.unpriced_tokens = sum(b.unpriced_tokens for b in self.buckets)
+        buckets = self.buckets
+        self.total_used_usd = round(sum(b.used_usd for b in buckets), 6)
+        self.total_incurred_usd = round(sum(b.incurred_usd for b in buckets), 6)
+        self.total_tokens_used = sum(b.input_tokens + b.output_tokens for b in buckets)
+        self.unpriced_tokens = sum(b.unpriced_tokens for b in buckets)
 
     @property
     def buckets(self) -> tuple[SpendBucket, ...]:

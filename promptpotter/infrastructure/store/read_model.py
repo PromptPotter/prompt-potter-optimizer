@@ -151,16 +151,24 @@ _Roster = tuple[Callable[[], LedgerFold[Any]], ...]
 class LedgerIndex:
     """A file's folds, kept current by reading only what was appended since the last read.
 
+    Every roster whose folds all screen by probe shares ONE index per file, so the file is read
+    once however many modules ask of it — two rosters over one ledger were two cold passes over
+    every byte. A roster holding a fold that parses every line keeps an index of its own: sharing
+    it would charge that parse to every file some cheap read touches.
+
     ``offset`` handed to a fold is the PHYSICAL 0-based line index — a blank or unparseable line
     still consumes one — which is the space ``CycleEventLog.append`` assigns and a live SSE frame's
     ``sequence`` joins on. A torn trailing line is not folded until its newline lands."""
 
-    _registry: ClassVar[OrderedDict[tuple[Path, _Roster], LedgerIndex]] = OrderedDict()
+    _registry: ClassVar[OrderedDict[tuple[Path, _Roster | None], LedgerIndex]] = OrderedDict()
+    _screened: ClassVar[list[Callable[[], LedgerFold[Any]]]] = []
     _registry_lock: ClassVar[threading.Lock] = threading.Lock()
 
-    def __init__(self, path: Path, roster: Sequence[Callable[[], LedgerFold[Any]]]) -> None:
+    def __init__(
+        self, path: Path, roster: Sequence[Callable[[], LedgerFold[Any]]] | None = None
+    ) -> None:
         self._path = path
-        self._roster: _Roster = tuple(roster)
+        self._own = None if roster is None else tuple(roster)
         self._lock = threading.Lock()
         self._reset()
 
@@ -168,11 +176,14 @@ class LedgerIndex:
     def of(cls, path: Path, roster: _Roster) -> LedgerIndex:
         """The process-wide index of *path* under *roster* — a module constant, so every reader
         of one roster shares one cursor."""
-        key = (path, roster)
+        shared = all(getattr(fold, "probes", None) for fold in roster)
+        key = (path, None if shared else roster)
         with cls._registry_lock:
+            if shared:
+                cls._screened.extend(fold for fold in roster if fold not in cls._screened)
             index = cls._registry.get(key)
             if index is None:
-                index = cls._registry[key] = cls(path, roster)
+                index = cls._registry[key] = cls(path, key[1])
                 while len(cls._registry) > LEDGER_INDEX_MAX:
                     cls._registry.popitem(last=False)
             else:
@@ -180,7 +191,8 @@ class LedgerIndex:
             return index
 
     def _reset(self) -> None:
-        self._folds = [make() for make in self._roster]
+        roster = tuple(self._screened) if self._own is None else self._own
+        self._folds = [make() for make in roster]
         self._by_type = {type(fold): fold for fold in self._folds}
         probes = sorted({p for fold in self._folds for p in fold.probes})
         self._screens_all = any(not fold.probes for fold in self._folds)
@@ -192,6 +204,9 @@ class LedgerIndex:
     def view[V](self, fold: Callable[[], LedgerFold[V]]) -> V:
         """*fold*'s value over the file as it stands now."""
         with self._lock:
+            if fold not in self._by_type:
+                # A roster first named after this index was built: fold the file again with it.
+                self._reset()
             self._refresh()
             return cast("LedgerFold[V]", self._by_type[cast("type[Any]", fold)]).value()
 
