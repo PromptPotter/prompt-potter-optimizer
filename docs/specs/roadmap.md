@@ -358,7 +358,7 @@ The read side is [`../operations/mask-projection.md`](../operations/mask-project
 Open as **Lane C8**: the SAMPLE-SET half, and it is a different substrate rather than a second knob. A scoring mask forks on the existing rails because it re-selects a *candidate* from arms the run measured; a mask that changes which samples a round buys needs a replayable measurement ORDER seeded into the fork, which `CycleSeed` does not carry and `ForkSpec` does not root at. Until it does, a sample-subset mask previews and stops there.
 
 ### Plus-backlog (opportunistic, unscheduled)
-Hard-Sample Sorter Phase 2/3 · Webapp perf: SSE client cutover for the **dashboard** (the *chat* already consumes `events:subscribe` via `useCycleEvents`; the dashboard still 2 s-polls), SWR/TanStack, strip redundant memos under React Compiler · MCP server mode · research extensions.
+Hard-Sample Sorter Phase 2/3 · MCP server mode · research extensions.
 
 ## Captured — pending triage
 

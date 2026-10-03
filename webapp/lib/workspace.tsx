@@ -38,6 +38,7 @@ import {
   type Tab,
 } from "./view-tab";
 import { usePoll } from "./hooks/usePoll";
+import { readThrough } from "./read-cache";
 import { bumpRevalidation, useRevalidation } from "./revalidate";
 import { useAuthGate } from "./auth-context";
 import { isSelfOptimization } from "./derivations";
@@ -244,9 +245,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const registryTick = useCallback(
     async (signal: AbortSignal) => {
+      // Through the read cache: a 304 hands back the array already held, so an unchanged
+      // registry sets no state and re-renders no forest.
       const [cyclesRes, campaignsRes] = await Promise.allSettled([
-        fetchCycles(signal),
-        fetchCampaigns(undefined, signal, lifecycleFilter),
+        readThrough("registry\x1fcycles", (s, etag) => fetchCycles(s, [], etag), signal),
+        readThrough(
+          `registry\x1fcampaigns\x1f${lifecycleFilter}`,
+          (s, etag) => fetchCampaigns(undefined, s, lifecycleFilter, [], etag),
+          signal,
+        ),
       ]);
       if (signal.aborted) return;
       for (const r of [cyclesRes, campaignsRes]) {
@@ -427,46 +434,90 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     bumpRevalidation();
   }, []);
 
-  const value: WorkspaceState = {
-    sessionId,
-    activeCycleId,
-    activeCampaignId,
-    viewedPath,
-    cycleId,
-    campaignId,
-    leafCampaignId,
-    leafCycleId,
-    leafIsL4,
-    viewedCandidateId,
-    datasetName,
-    following,
-    tab,
-    setTab: selectTab,
-    openCell,
-    openCellOwner,
-    setOpenCell,
-    releaseCell,
-    accountPane,
-    openAccount,
-    closeAccount,
-    cycles,
-    cyclesLoaded,
-    campaignsLoaded: campaignsFilter === lifecycleFilter,
-    cyclesError,
-    runningCycles,
-    campaigns,
-    activeError,
-    lifecycleFilter,
-    setLifecycleFilter: selectLifecycle,
-    selectCyclePath,
-    selectCycle,
-    drillInto,
-    backToOuter,
-    followActive,
-    reportAddressGone,
-    goneAddress,
-    dismissGoneNotice,
-  };
+  const campaignsLoaded = campaignsFilter === lifecycleFilter;
+  // Memoized: two polls tick this provider, and a fresh object would re-render every consumer.
+  const value = useMemo<WorkspaceState>(
+    () => ({
+      sessionId,
+      activeCycleId,
+      activeCampaignId,
+      viewedPath,
+      cycleId,
+      campaignId,
+      leafCampaignId,
+      leafCycleId,
+      leafIsL4,
+      viewedCandidateId,
+      datasetName,
+      following,
+      tab,
+      setTab: selectTab,
+      openCell,
+      openCellOwner,
+      setOpenCell,
+      releaseCell,
+      accountPane,
+      openAccount,
+      closeAccount,
+      cycles,
+      cyclesLoaded,
+      campaignsLoaded,
+      cyclesError,
+      runningCycles,
+      campaigns,
+      activeError,
+      lifecycleFilter,
+      setLifecycleFilter: selectLifecycle,
+      selectCyclePath,
+      selectCycle,
+      drillInto,
+      backToOuter,
+      followActive,
+      reportAddressGone,
+      goneAddress,
+      dismissGoneNotice,
+    }),
+    [
+      sessionId,
+      activeCycleId,
+      activeCampaignId,
+      viewedPath,
+      cycleId,
+      campaignId,
+      leafCampaignId,
+      leafCycleId,
+      leafIsL4,
+      viewedCandidateId,
+      datasetName,
+      following,
+      tab,
+      selectTab,
+      openCell,
+      openCellOwner,
+      setOpenCell,
+      releaseCell,
+      accountPane,
+      openAccount,
+      closeAccount,
+      cycles,
+      cyclesLoaded,
+      campaignsLoaded,
+      cyclesError,
+      runningCycles,
+      campaigns,
+      activeError,
+      lifecycleFilter,
+      selectLifecycle,
+      selectCyclePath,
+      selectCycle,
+      drillInto,
+      backToOuter,
+      followActive,
+      reportAddressGone,
+      goneAddress,
+      dismissGoneNotice,
+    ],
+  );
   return (
     <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>
   );

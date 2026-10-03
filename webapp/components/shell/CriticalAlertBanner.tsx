@@ -6,30 +6,41 @@ import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import { readyData } from "@/lib/hooks/useRead";
 import type { StatusKind } from "@/lib/poll";
+import { useWorkspace } from "@/lib/workspace";
 
-// The sticky failure bar on every tab; the verdict and its precedence are the pure
-// `criticalAlert` derivation, and this is only its presentation.
+// The sticky failure bar on every tab, presenting the pure `criticalAlert` verdict. It reads the
+// dashboard itself, so a tick re-renders the bar and not the shell around it.
 
 interface Props {
-  bannerStatus: StatusKind;
-  bannerText: string;
-  bannerHint?: string;
-  // Silences the bar: an empty workspace on a reachable server has nothing wrong with it.
-  emptyWorkspace?: boolean;
   onOpenFiles: () => void;
   // The run never auto-pauses — this is the operator pulling the trigger.
   onPauseCampaign?: () => void;
 }
 
-export function CriticalAlertBanner({
-  bannerStatus,
-  bannerText,
-  bannerHint,
-  emptyWorkspace,
-  onOpenFiles,
-  onPauseCampaign,
-}: Props) {
-  const { dash } = useDashboard();
+export function CriticalAlertBanner({ onOpenFiles, onPauseCampaign }: Props) {
+  const { dash, status, statusText, statusHint } = useDashboard();
+  const { cycleId, cycles, cyclesLoaded, activeError, cyclesError, goneAddress } = useWorkspace();
+
+  const noUnit = !cycleId;
+  const netDown = Boolean(activeError || cyclesError);
+  // Its own fact, not a status, and it silences the bar: the poll rests at `offline`, which would
+  // paint a fresh account as an outage. A down server also reports zero cycles, hence `!netDown`.
+  const emptyWorkspace = noUnit && cyclesLoaded && !netDown && cycles.length === 0;
+  let bannerStatus: StatusKind = status;
+  let bannerText = statusText;
+  let bannerHint = statusHint;
+  if (goneAddress) {
+    // The WORKSPACE's verdict wins outright: the dashboard has already reset onto another
+    // address and would replace this notice within a frame.
+    bannerStatus = "gone";
+    bannerText = "This campaign no longer exists";
+    bannerHint = "It was deleted, or its store was reset — returning to the active run.";
+  } else if (noUnit && netDown) {
+    bannerStatus = "offline";
+    bannerText = "Server unreachable — retrying";
+    bannerHint = activeError ?? cyclesError ?? "";
+  }
+
   const { health, connector } = useConnector();
   const { down: connectorDown } = connectorReachability(health);
   const machine = readyData(useMachineStatus());

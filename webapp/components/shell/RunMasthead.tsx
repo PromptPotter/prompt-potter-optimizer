@@ -31,10 +31,12 @@ import type { Tab } from "@/lib/view-tab";
 export function RunMasthead({
   tab,
   onSelectTab,
+  onTabIntent,
   onFollowed,
 }: {
   tab: Tab;
   onSelectTab: (t: Tab) => void;
+  onTabIntent: () => void;
   onFollowed: () => void;
 }) {
   const { campaignId, leafCycleId, viewedPath, campaigns, cycles, following, followActive } =
@@ -188,7 +190,7 @@ export function RunMasthead({
             {metered && <span className="chip-of"> {METER_WORD[metered.meter]}</span>}
           </span>
         </div>
-        <ViewTabs tab={tab} onSelect={onSelectTab} />
+        <ViewTabs tab={tab} onSelect={onSelectTab} onIntent={onTabIntent} />
       </div>
     </header>
   );

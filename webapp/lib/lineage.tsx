@@ -10,6 +10,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
@@ -27,6 +28,7 @@ import { usePoll } from "@/lib/hooks/usePoll";
 import { encodeCyclePath, rootCycleId, type CyclePath } from "@/lib/ids";
 import { useRevalidation } from "@/lib/revalidate";
 import { useSelection } from "@/lib/SelectionContext";
+import { useWorkspace } from "@/lib/workspace";
 
 // The server validator is the subtree's ledger mtime, which bumps the moment a candidate is
 // minted, so no proxy for "the dashboard moved" is needed.
@@ -121,8 +123,7 @@ export function LineageProvider({
       : (LENS_LABELS[lens] ?? "");
 
   // Keyed on the derived root id, not `cycleId`: a same-campaign cycle switch must keep this
-  // array's identity, or the self-subscribe below drops the refcount and the registry deletes the
-  // body + ETag it just fetched.
+  // array's identity, or the self-subscribe below re-subscribes and re-asks for a tree it holds.
   const rootId = cycleId ? rootCycleId(cycleId) : null;
   const viewedPath = useMemo<CyclePath | null>(() => {
     if (!campaignId || !rootId) return null;
@@ -134,7 +135,7 @@ export function LineageProvider({
   const [entries, setEntries] = useState<Map<string, CampaignTree>>(() => new Map());
 
   // External state because its writers are mount/unmount effects (`lib/lineage-registry.ts`).
-  // The last subscriber leaving drops the body too, or it grows as the operator browses.
+  // The registry bounds what it retains; a key it evicts, or a gone one, drops its body here.
   const [registry] = useState(() =>
     createRegistry((key) => {
       setEntries((prev) => {
@@ -199,9 +200,31 @@ export function LineageProvider({
     [registry, onAuthError],
   );
 
+  // A campaign whose every `/cycles` row is terminal has no writer left, so its tree is read once
+  // and not polled. A command can still change one, so a revalidation bump asks for every key.
+  const { cycles } = useWorkspace();
+  const resting = useMemo(() => {
+    const all = new Set<string>();
+    const live = new Set<string>();
+    for (const c of cycles) {
+      all.add(c.campaign_id);
+      if (c.run_phase !== "terminal") live.add(c.campaign_id);
+    }
+    return new Set([...all].filter((id) => !live.has(id)));
+  }, [cycles]);
+  const wakeRef = useRef(false);
+  useEffect(() => {
+    wakeRef.current = true;
+  }, [reval]);
+  const pollKeys = (): string[] => {
+    const wake = wakeRef.current;
+    wakeRef.current = false;
+    return registry.liveKeys(wake ? undefined : (path) => resting.has(path[0]?.campaignId ?? ""));
+  };
+
   usePoll(tick, {
     intervalMs: POLL_MS,
-    keys: registry.liveKeys,
+    keys: pollKeys,
     tickOnFocus: true,
     enabled: authed,
     revalidateOn: subsVersion + reval,

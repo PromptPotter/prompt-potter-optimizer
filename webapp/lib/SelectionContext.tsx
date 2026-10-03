@@ -1,5 +1,5 @@
 "use client";
-import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import type { SelectedCandidate } from "@/lib/types";
 
 // The dashboard's INSPECTION axes: candidate, round (null = follow live), node and sampleSet.
@@ -81,22 +81,30 @@ export function SelectionProvider({
     setSampleSet(ids);
   }, []);
 
-  return (
-    <SelectionCtx.Provider
-      value={{
-        candidate,
-        round,
-        node,
-        sampleSet,
-        setSelectionForCandidate,
-        setSelectionForRound,
-        setSelectionForNode,
-        setSelectionForSampleSet,
-      }}
-    >
-      {children}
-    </SelectionCtx.Provider>
+  const value = useMemo<Ctx>(
+    () => ({
+      candidate,
+      round,
+      node,
+      sampleSet,
+      setSelectionForCandidate,
+      setSelectionForRound,
+      setSelectionForNode,
+      setSelectionForSampleSet,
+    }),
+    [
+      candidate,
+      round,
+      node,
+      sampleSet,
+      setSelectionForCandidate,
+      setSelectionForRound,
+      setSelectionForNode,
+      setSelectionForSampleSet,
+    ],
   );
+
+  return <SelectionCtx.Provider value={value}>{children}</SelectionCtx.Provider>;
 }
 
 export function useSelection(): Ctx {

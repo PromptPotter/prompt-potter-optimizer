@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { createRegistry } from "@/lib/lineage-registry";
+import { RETAINED_TREE_KEYS, createRegistry } from "@/lib/lineage-registry";
 import type { CyclePath } from "@/lib/ids";
 
 const PATH: CyclePath = [{ campaignId: "camp", cycleId: "cycle_root" }];
 
 describe("createRegistry", () => {
-  it("drops the body and the ETag exactly when the last subscriber leaves", () => {
+  it("retains the body and the ETag past the last subscriber, up to its bound", () => {
     const dropped: string[] = [];
     const reg = createRegistry((k) => dropped.push(k));
     const un1 = reg.subscribe("k", PATH);
@@ -14,15 +14,18 @@ describe("createRegistry", () => {
 
     un1();
     expect(reg.spec("k")).not.toBeNull();
-    expect(reg.etag("k")).toBe('W/"x"');
-    expect(dropped).toEqual([]);
 
     un2();
     // `spec()` going null is the tick's mid-flight guard: a response landing after this
-    // moment must not resurrect the key.
+    // moment must not replace half of the retained pair.
     expect(reg.spec("k")).toBeNull();
-    expect(reg.etag("k")).toBe(null);
+    expect(reg.liveKeys()).toEqual([]);
+    expect(reg.etag("k")).toBe('W/"x"');
+    expect(dropped).toEqual([]);
+
+    for (let i = 0; i < RETAINED_TREE_KEYS; i++) reg.subscribe(`k${i}`, PATH)();
     expect(dropped).toEqual(["k"]);
+    expect(reg.etag("k")).toBe(null);
   });
 
   it("latches the fetch spec from the subscriber that names it", () => {
@@ -58,7 +61,8 @@ describe("createRegistry", () => {
   });
 
   it("does not resurrect a gone key on a re-tick, but clears the mark on unsubscribe", () => {
-    const reg = createRegistry(() => {});
+    const dropped: string[] = [];
+    const reg = createRegistry((k) => dropped.push(k));
     const un = reg.subscribe("k", PATH);
     reg.markGone("k");
     // A second subscriber must not un-kill it — the address is still gone.
@@ -67,9 +71,25 @@ describe("createRegistry", () => {
 
     un();
     un2();
+    expect(dropped).toEqual(["k"]);
     reg.subscribe("k", PATH);
     expect(reg.isGone("k")).toBe(false);
     expect(reg.liveKeys()).toEqual(["k"]);
+  });
+
+  it("stops polling a resting key once it holds a validated body", () => {
+    const reg = createRegistry(() => {});
+    const rests = (path: typeof PATH): boolean => path === PATH;
+    reg.subscribe("k", PATH);
+    expect(reg.liveKeys(rests)).toEqual(["k"]);
+
+    reg.setEtag("k", 'W/"x"');
+    expect(reg.liveKeys(rests)).toEqual([]);
+    expect(reg.liveKeys()).toEqual(["k"]);
+
+    // A failed read drops the validator, so the key is asked again.
+    reg.setEtag("k", null);
+    expect(reg.liveKeys(rests)).toEqual(["k"]);
   });
 
   it("ignores markGone for a key nobody subscribes", () => {

@@ -4,15 +4,17 @@
 // (`webapp/CLAUDE.md` § Failure handling).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { failureKind, operatorMessage, type FailureKind } from "@/lib/api";
+import { failureKind, operatorMessage, type Conditional, type FailureKind } from "@/lib/api";
 import { useAuthGate } from "@/lib/auth-context";
 import { reportIncident } from "@/lib/diagnostics";
+import { cachedRead, dropCachedRead, readThrough, type ReadLoad } from "@/lib/read-cache";
 import { usePoll } from "./usePoll";
 
-export interface ReadSpec<T> {
-  key: string;
-  fetch: (signal: AbortSignal) => Promise<T>;
-}
+export type ReadSpec<T> = { key: string } & (
+  | { fetch: (signal: AbortSignal) => Promise<T> }
+  // Sent the held body's validator; a 304 keeps that body.
+  | { conditional: ReadLoad<T> }
+);
 
 export interface ReadFailure {
   kind: FailureKind;
@@ -48,37 +50,61 @@ export function readyData<T>(read: ReadResult<T>): T | null {
   return read.status === "ready" ? read.data : null;
 }
 
+function loadOf<T>(spec: ReadSpec<T>): ReadLoad<T> {
+  if ("conditional" in spec) return spec.conditional;
+  const { fetch } = spec;
+  return async (signal): Promise<Conditional<T>> => ({
+    kind: "ok",
+    data: await fetch(signal),
+    validator: null,
+  });
+}
+
+function landed<T>(stamp: number, data: T): Held<T> {
+  return { outcome: { stamp, ok: true, data }, last: { stamp, data } };
+}
+
 export function useRead<T>(spec: ReadSpec<T> | null, opts: ReadOptions): ReadResult<T> {
   const { surface, auth = false, survive, intervalMs, revalidateOn = 0 } = opts;
   const { authed, onAuthError } = useAuthGate();
   const activeKey = spec !== null && (!auth || authed) ? spec.key : null;
+  const readId = activeKey === null ? null : `${surface}\x1f${activeKey}`;
 
   const [generation, setGeneration] = useState({ key: activeKey, n: 0 });
-  if (generation.key !== activeKey) setGeneration({ key: activeKey, n: generation.n + 1 });
+  const [held, setHeld] = useState<Held<T>>(() => {
+    const hit = readId === null ? null : cachedRead<T>(readId);
+    return hit ? landed(0, hit.data) : { outcome: null, last: null };
+  });
+  if (generation.key !== activeKey) {
+    const n = generation.n + 1;
+    setGeneration({ key: activeKey, n });
+    const hit = readId === null ? null : cachedRead<T>(readId);
+    if (hit) setHeld(landed(n, hit.data));
+  }
   const gen = generation.n;
 
-  const fetchRef = useRef(spec?.fetch);
+  const issueRef = useRef<{ id: string; load: ReadLoad<T> } | null>(null);
   const genRef = useRef(gen);
   useEffect(() => {
-    fetchRef.current = spec?.fetch;
+    issueRef.current = spec !== null && readId !== null ? { id: readId, load: loadOf(spec) } : null;
     genRef.current = gen;
   });
 
-  const [held, setHeld] = useState<Held<T>>({ outcome: null, last: null });
-
   const run = useCallback(
     async (stamp: number, signal: AbortSignal): Promise<void> => {
-      const fetch = fetchRef.current;
-      if (!fetch) return;
+      const issue = issueRef.current;
+      if (!issue) return;
       try {
-        const data = await fetch(signal);
+        const data = await readThrough(issue.id, issue.load, signal);
         if (signal.aborted || genRef.current !== stamp) return;
-        setHeld({ outcome: { stamp, ok: true, data }, last: { stamp, data } });
+        setHeld(landed(stamp, data));
       } catch (e) {
         if (signal.aborted || genRef.current !== stamp) return;
         if (auth) onAuthError(e);
         reportIncident(e, { surface });
         const kind = failureKind(e);
+        // A body for an address that no longer exists must not paint the next mount.
+        if (kind === "gone") dropCachedRead(issue.id);
         const failure = { kind, message: operatorMessage(e, kind) };
         setHeld((prev) => ({ ...prev, outcome: { stamp, ok: false, failure } }));
       }

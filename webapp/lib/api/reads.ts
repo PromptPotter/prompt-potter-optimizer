@@ -111,10 +111,12 @@ export function fetchCampaignPipeline(
   campaignId: string,
   at?: string | null,
   signal?: AbortSignal,
-): Promise<CampaignPipelineResponse> {
+  etag: string | null = null,
+): Promise<Conditional<CampaignPipelineResponse>> {
   const q = at ? `?at=${encodeURIComponent(at)}` : "";
-  return jget<CampaignPipelineResponse>(
+  return jgetIfNoneMatch<CampaignPipelineResponse>(
     `${API}/campaigns/${encodeURIComponent(campaignId)}/pipeline${q}`,
+    etag,
     signal,
   );
 }
@@ -232,6 +234,7 @@ export interface CellsFilter {
 export function fetchCells(
   name: string,
   signal: AbortSignal | undefined,
+  etag: string | null,
   scope: HardSamplesScope,
   campaignId?: string,
   cycleId?: string,
@@ -239,13 +242,14 @@ export function fetchCells(
   order?: HardSampleOrder,
   filter: CellsFilter = {},
   limit = 1000,
-): Promise<CellsResponse> {
+): Promise<Conditional<CellsResponse>> {
   const params = hardSamplesParams(limit, scope, campaignId, cycleId, descend, order);
   if (filter.candidateId) params.set("candidate_id", filter.candidateId);
   if (filter.round != null) params.set("round", String(filter.round));
   if (filter.status) params.set("status", filter.status);
-  return jget<CellsResponse>(
+  return jgetIfNoneMatch<CellsResponse>(
     `${API}/datasets/${encodeURIComponent(name)}/cells?${params.toString()}`,
+    etag,
     signal,
   );
 }
@@ -288,21 +292,27 @@ export function fetchCampaigns(
   signal?: AbortSignal,
   lifecycle?: LifecycleFilter,
   at: CyclePath = [],
-): Promise<CampaignListResponse> {
+  etag: string | null = null,
+): Promise<Conditional<CampaignListResponse>> {
   const params = new URLSearchParams();
   if (dataset) params.set("dataset", dataset);
   if (lifecycle && lifecycle !== "active") params.set("lifecycle", lifecycle);
   if (at.length) params.set("descend", encodeCyclePath(at));
   const qs = params.toString();
-  return jget<CampaignListResponse>(`${API}/campaigns${qs ? `?${qs}` : ""}`, signal);
+  return jgetIfNoneMatch<CampaignListResponse>(
+    `${API}/campaigns${qs ? `?${qs}` : ""}`,
+    etag,
+    signal,
+  );
 }
 
 export function fetchCycles(
   signal?: AbortSignal,
   at: CyclePath = [],
-): Promise<CyclesResponse> {
+  etag: string | null = null,
+): Promise<Conditional<CyclesResponse>> {
   const qs = at.length ? `?descend=${encodeURIComponent(encodeCyclePath(at))}` : "";
-  return jget<CyclesResponse>(`${API}/cycles${qs}`, signal);
+  return jgetIfNoneMatch<CyclesResponse>(`${API}/cycles${qs}`, etag, signal);
 }
 
 export function fetchCampaignStorage(
@@ -435,7 +445,8 @@ export function fetchEvidence(
     grid?: string;
   } = {},
   signal?: AbortSignal,
-): Promise<Evidence> {
+  etag: string | null = null,
+): Promise<Conditional<Evidence>> {
   const qs = subjects.map((s) => `subject=${encodeURIComponent(s)}`);
   if (opts.ranking) qs.push("ranking=true");
   if (opts.winnerChain) qs.push("winner_chain=true");
@@ -446,7 +457,7 @@ export function fetchEvidence(
   // `row,col` over two of the served `factors`. Sent rather than grouped here because the cell is
   // POOLED — an aggregate, and this layer computes none (webapp/CLAUDE.md § Scoring authority).
   if (opts.grid) qs.push(`grid=${encodeURIComponent(opts.grid)}`);
-  return jget<Evidence>(`${API}/evidence?${qs.join("&")}`, signal);
+  return jgetIfNoneMatch<Evidence>(`${API}/evidence?${qs.join("&")}`, etag, signal);
 }
 
 // An ETag, not a date: the validator covers the lens/samples mask, so a masked read gets its own

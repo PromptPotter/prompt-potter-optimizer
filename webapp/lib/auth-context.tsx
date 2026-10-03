@@ -12,6 +12,7 @@ import {
   type ReactNode,
 } from "react";
 import { ApiError, fetchMe, type MeResponse } from "@/lib/api";
+import { clearReadCache } from "@/lib/read-cache";
 
 export type AuthStatus = "loading" | "authed" | "unauthed";
 
@@ -41,6 +42,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authPrompt, setAuthPrompt] = useState<AuthPrompt>(PROMPT_CLOSED);
   const [nonce, setNonce] = useState(0);
   const probeIdRef = useRef(0);
+  // Every cached read belongs to one identity; `undefined` is "not probed yet".
+  const identityRef = useRef<string | null | undefined>(undefined);
 
   const refresh = useCallback(() => {
     setNonce((n) => n + 1);
@@ -50,14 +53,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const probeId = probeIdRef.current + 1;
     probeIdRef.current = probeId;
     let cancelled = false;
+    const adopt = (identity: string | null) => {
+      if (identityRef.current === identity) return;
+      identityRef.current = identity;
+      clearReadCache();
+    };
     fetchMe()
       .then((data) => {
         if (cancelled || probeIdRef.current !== probeId) return;
+        adopt(`${data.tenant_id}\x1f${data.user_id}`);
         setMe(data);
         setStatus("authed");
       })
       .catch(() => {
         if (cancelled || probeIdRef.current !== probeId) return;
+        adopt(null);
         setMe(null);
         setStatus("unauthed");
       });

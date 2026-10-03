@@ -1,4 +1,4 @@
-// The transport seam. Internal to `lib/api`, except the failure vocabulary `index.ts` re-exports.
+// The transport seam. Internal to `lib/api`, except the vocabulary `index.ts` re-exports.
 
 export const API = "/api/v1";
 

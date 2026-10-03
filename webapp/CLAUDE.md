@@ -116,7 +116,7 @@ Three rules a plausible edit undoes. Positioning and the open conversational end
 
 ## Failure handling — classify, don't bucket
 
-**Every read rides `lib/hooks/useRead.ts`** — one keyed hook owning the gate, the abort, the auth idle, `reportIncident` and the tagged `idle | loading | ready | failed` a caller branches on; `intervalMs` is its polled form, and a hand-rolled `useEffect` fetch beside it is a second mechanism.
+**Every read rides `lib/hooks/useRead.ts`** — one keyed hook owning the gate, the abort, the auth idle, `reportIncident` and the tagged `idle | loading | ready | failed` a caller branches on; `intervalMs` is its polled form, and a hand-rolled `useEffect` fetch beside it is a second mechanism. **`(surface, key)` NAMES the read**: every instance naming the same pair shares one flight and one last body (`lib/read-cache.ts`), so a remount paints at once and revalidates behind it — two call sites share a read by spelling both alike, and two different reads must never share a `surface`.
 
 **Every write rides `lib/hooks/useCommand.ts`**, for the same reason in the other direction: `slot.run(verb, send, then?)` owns the double-submit guard, the pending mark, `onAuthError`, `reportIncident`, the classified sentence and `bumpRevalidation`, and it NEVER throws, never retries (each send mints a fresh idempotency key, so a retry is a second command) and never reports an address gone (a write's 404 is a missing capability). The caller keeps only what is its own: which subject, whether the control is enabled, the confirmation, and the success side effect. The operator sentence is `operatorMessage(e, kind)` (`lib/api/errors.ts`), one per kind — rendering `err.message` is the I2 violation.
 

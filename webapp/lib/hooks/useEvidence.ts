@@ -32,11 +32,12 @@ export function useEvidence(
     selection
       ? {
           key: [selection, ranking, winnerChain, config, metric, grid].join("\x1f"),
-          fetch: (signal) =>
+          conditional: (signal, etag) =>
             fetchEvidence(
               selection.split(SEP),
               { ranking, winnerChain, config, metric, grid },
               signal,
+              etag,
             ),
         }
       : null,

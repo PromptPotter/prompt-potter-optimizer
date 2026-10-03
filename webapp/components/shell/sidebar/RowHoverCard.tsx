@@ -39,7 +39,7 @@ function RowCardBody({ card }: { card: RowCardFacts }) {
     campaignId != null && configAsked
       ? { key: campaignId, fetch: (signal) => fetchConfigMap(campaignId, signal) }
       : null,
-    { surface: "campaign-config-map" },
+    { surface: "config-map" },
   );
   const configMap = readyData(configRead);
   const knobs = configMap ? declaredKnobs(configMap) : null;

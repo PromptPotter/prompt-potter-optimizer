@@ -1,12 +1,18 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+} from "react";
 import dynamic from "next/dynamic";
-import { fetchCycleFile, subjectKey } from "@/lib/api";
+import { subjectKey } from "@/lib/api";
 import { postPauseCycle } from "@/lib/api/commands";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { CycleStreamProvider } from "@/lib/poll";
 import { ConnectorProvider } from "@/lib/hooks/useConnector";
-import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import { HardSamplesProvider } from "@/lib/hard-samples";
 import { useLeafCycleIndex } from "@/lib/hooks/useLeafCycleIndex";
@@ -48,6 +54,18 @@ const VerifyPane = dynamic(() => import("@/components/verify/VerifyPane").then((
 const IngestPane = dynamic(() => import("@/components/ingest/IngestPane").then((m) => m.IngestPane), {
   ssr: false,
 });
+// The specifiers of the `dynamic` panes above, so intent on the tab strip warms their chunks.
+// A miss resurfaces at the real load, which `ui/ErrorBoundary` owns.
+function preloadLazyPanes(): void {
+  for (const chunk of [
+    import("@/components/chat/ChatPane"),
+    import("@/components/tree/FilesPane"),
+    import("@/components/verify/VerifyPane"),
+  ]) {
+    void chunk.catch(() => undefined);
+  }
+}
+
 const GONE_NOTICE_MS = 8000;
 
 const SIDEBAR_DEFAULT = 200;
@@ -77,9 +95,6 @@ function AppShellInner() {
     campaignId,
     cycleId,
     datasetName,
-    activeError,
-    cyclesError,
-    cyclesLoaded,
     cycles,
     selectCyclePath,
     leafCycleId,
@@ -137,9 +152,10 @@ function AppShellInner() {
     },
     [campaignId, viewFor, cycles],
   );
-  const { datasetName: leafDatasetName, createdAt: leafCreatedAt } = useLeafCycleIndex(
+  const { datasetName: leafDatasetName, createdAt: cycleStartedAt } = useLeafCycleIndex(
     viewedPath,
     datasetName,
+    cycles,
   );
   // The sandbox chain is the hops ABOVE the leaf, so an L4 inner run resolves its OWN pipeline
   // rather than the outer campaign's (`frontend-surface-contract.md::I9`).
@@ -156,7 +172,6 @@ function AppShellInner() {
   const [listScreen, setListScreen] = useState(false);
   const [newCampaignOpen, setNewCampaignOpen] = useState(false);
   const { flow: ingestFlow, startNew, mintCount } = useIngest();
-  const [cycleStartedAt, setCycleStartedAt] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useLocalStorage<boolean>(
     "promptpotter.sidebar.collapsed",
     false,
@@ -178,14 +193,19 @@ function AppShellInner() {
       },
     },
   );
-  // The ONE call site that switches views; leaving the phone's list screen rides here
-  // rather than at every caller.
-  const openView = useCallback(
+  // The ONE place a view switches; leaving the phone's list screen rides here rather than at
+  // every caller.
+  const switchView = useCallback(
     (t: Tab) => {
       setTab(t);
       setListScreen(false);
     },
     [setTab],
+  );
+  // A transition, so the pane being left stays interactive while the next one renders.
+  const openView = useCallback(
+    (t: Tab) => startTransition(() => switchView(t)),
+    [switchView],
   );
 
   // A mint lands the operator on what it created. Selecting the new cycle is the provider's
@@ -204,56 +224,13 @@ function AppShellInner() {
     setPrevIngestStage(ingestStage);
     if (newCampaignOpen && ingestStage !== "idle") {
       setNewCampaignOpen(false);
-      openView("chat");
+      switchView("chat");
     }
   }
-
-  const dashState = useDashboard();
-
-  // Hand-rolled rather than `useRead`: it must KEEP the prior stamp across a unit switch,
-  // where a keyed read starts empty and the remote strip's ETA would flash "—".
-  useEffect(() => {
-    if (!campaignId || !cycleId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetchCycleFile(campaignId, cycleId, "cycle", "index.json");
-        const idx = r.content ? JSON.parse(r.content) : {};
-        if (!cancelled) {
-          setCycleStartedAt(typeof idx.created_at === "string" ? idx.created_at : null);
-        }
-      } catch {
-        // Leave the prior stamp standing — a failed read is not a new cycle.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [campaignId, cycleId]);
 
   useEffect(() => {
     applyChartDefaults();
   }, []);
-
-  const noUnit = !cycleId;
-  const netDown = Boolean(activeError || cyclesError);
-  // Its own fact, not a status: the poll rests at `offline`, which would paint a fresh
-  // account as an outage. A down server also reports zero cycles, hence `!netDown`.
-  const emptyWorkspace = noUnit && cyclesLoaded && !netDown && cycles.length === 0;
-  let bannerStatus = dashState.status;
-  let bannerText = dashState.statusText;
-  let bannerHint = dashState.statusHint;
-  if (goneAddress) {
-    // The WORKSPACE's verdict wins outright: `dashState` has already reset onto another
-    // address and would replace this notice within a frame.
-    bannerStatus = "gone";
-    bannerText = "This campaign no longer exists";
-    bannerHint = "It was deleted, or its store was reset — returning to the active run.";
-  } else if (noUnit && netDown) {
-    bannerStatus = "offline";
-    bannerText = "Server unreachable — retrying";
-    bannerHint = activeError ?? cyclesError ?? "";
-  }
 
   const isCheckin = useCallback(
     (campaign: string, cycle: string | null) =>
@@ -266,6 +243,29 @@ function AppShellInner() {
   const selectedCheckin = !!campaignId && isCheckin(campaignId, cycleId);
   // Scoped to the chat tab, not every tab, so a selected check-in never traps navigation.
   const showCheckin = selectedCheckin && tab === "chat";
+
+  // Stable identities: the sidebar memoizes its whole forest on `onSelectPath`.
+  const onSelectPath = useCallback(
+    (path: CyclePath, candidate?: string | null) => {
+      selectCyclePath(...restoreNavigation(path, candidate));
+      setListScreen(false);
+      // Selecting never hijacks the tab, except a check-in (no dashboard.json) goes to Chat.
+      // An inner run is never a check-in, so a descended path never redirects.
+      if (path.length > 1) return;
+      const hop = path[0]!;
+      if (isCheckin(hop.campaignId, hop.cycleId)) openView("chat");
+    },
+    [selectCyclePath, restoreNavigation, isCheckin, openView],
+  );
+  const onNewCycle = useCallback(() => {
+    // Two doors onto one thread: on the chat tab it resets in place; elsewhere the modal
+    // opens and hands over once something is picked.
+    if (tab === "chat") startNew();
+    else setNewCampaignOpen(true);
+    setListScreen(false);
+  }, [tab, startNew]);
+  const openFiles = useCallback(() => openView("files"), [openView]);
+  const openDashboard = useCallback(() => openView("dashboard"), [openView]);
 
   return (
     <SelectionProvider cycleId={leafCycleId}>
@@ -291,22 +291,8 @@ function AppShellInner() {
         Skip to content
       </a>
       <Sidebar
-        onSelectPath={(path, candidate) => {
-          selectCyclePath(...restoreNavigation(path, candidate));
-          setListScreen(false);
-          // Selecting never hijacks the tab, except a check-in (no dashboard.json) goes to Chat.
-          // An inner run is never a check-in, so a descended path never redirects.
-          if (path.length > 1) return;
-          const hop = path[0]!;
-          if (isCheckin(hop.campaignId, hop.cycleId)) openView("chat");
-        }}
-        onNewCycle={() => {
-          // Two doors onto one thread: on the chat tab it resets in place; elsewhere the modal
-          // opens and hands over once something is picked.
-          if (tab === "chat") startNew();
-          else setNewCampaignOpen(true);
-          setListScreen(false);
-        }}
+        onSelectPath={onSelectPath}
+        onNewCycle={onNewCycle}
         collapsed={sidebarCollapsed}
         onToggleCollapse={toggleSidebar}
       />
@@ -319,7 +305,7 @@ function AppShellInner() {
         />
       )}
       {/* A `.shell` child, not a sidebar one: the sidebar clips its overflow. */}
-      <JobsDock onPicked={() => openView("dashboard")} />
+      <JobsDock onPicked={openDashboard} />
       <main className="main" id="main-content" tabIndex={-1}>
         {/* The view axis is NOT here: ViewTabs owns it. */}
         <MobileAppBar
@@ -330,11 +316,7 @@ function AppShellInner() {
         {/* Not gated on cycleId, so a server-down state with no unit in view still shows;
             mounted on the phone list screen too, where a dead address gets fixed. */}
         <CriticalAlertBanner
-          bannerStatus={bannerStatus}
-          bannerText={bannerText}
-          bannerHint={bannerHint}
-          emptyWorkspace={emptyWorkspace}
-          onOpenFiles={() => openView("files")}
+          onOpenFiles={openFiles}
           onPauseCampaign={
             campaignId && cycleId
               ? () =>
@@ -346,12 +328,13 @@ function AppShellInner() {
         <RunMasthead
           tab={tab}
           onSelectTab={openView}
-          onFollowed={() => openView("dashboard")}
+          onTabIntent={preloadLazyPanes}
+          onFollowed={openDashboard}
         />
         {tab === "chat" ? (
           <ChatPane
             checkinCampaignId={showCheckin ? campaignId : null}
-            onOpenDashboard={() => openView("dashboard")}
+            onOpenDashboard={openDashboard}
           />
         ) : tab === "dashboard" ? (
           <DashboardTab />
@@ -365,7 +348,7 @@ function AppShellInner() {
           <VerifyPane />
         )}
       </main>
-      <RemoteControl cycleStartedAt={leafCreatedAt ?? cycleStartedAt} />
+      <RemoteControl cycleStartedAt={cycleStartedAt} />
       {/* Mounted only while open so its chunk stays off first paint. */}
       {newCampaignOpen && <IngestPane open onClose={() => setNewCampaignOpen(false)} />}
       {/* A `.shell` child, not a sidebar one: the phone hides the sidebar off its list

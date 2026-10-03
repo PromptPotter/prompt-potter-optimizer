@@ -1,15 +1,18 @@
-// The React-free ref-count half of `lib/lineage.tsx`. It owns each key's ETag so the validator
-// dies with its body: a stale ETag would 304 into an empty entry.
+// The React-free ref-count half of `lib/lineage.tsx`. An unsubscribed key's body and ETag are
+// RETAINED and dropped as a pair: a stale ETag would 304 into an empty entry.
 
 import type { CyclePath } from "@/lib/ids";
 
 export type TreeFetchOpts = { lens?: string | null; samples?: number[] | null };
 
+export const RETAINED_TREE_KEYS = 16;
+
 export interface Registry {
   subscribe: (key: string, path: CyclePath, opts?: TreeFetchOpts) => () => void;
   onVersionChange: (listener: () => void) => () => void;
   version: () => number;
-  liveKeys: () => string[];
+  /** A key `rests` names leaves the poll once it holds a validated body. */
+  liveKeys: (rests?: (path: CyclePath) => boolean) => string[];
   /** Null = no longer subscribed. */
   spec: (key: string) => { path: CyclePath; opts: TreeFetchOpts } | null;
   etag: (key: string) => string | null;
@@ -23,15 +26,23 @@ export function createRegistry(onDrop: (key: string) => void): Registry {
   const counts = new Map<string, { count: number; path: CyclePath; opts: TreeFetchOpts }>();
   const etags = new Map<string, string>();
   const gone = new Set<string>();
+  // Unsubscribed keys still holding a body, oldest first.
+  const retained = new Set<string>();
   const listeners = new Set<() => void>();
   let version = 0;
   const bump = (): void => {
     version += 1;
     for (const l of listeners) l();
   };
+  const drop = (key: string): void => {
+    retained.delete(key);
+    etags.delete(key);
+    onDrop(key);
+  };
   return {
     subscribe(key, path, opts) {
       const cur = counts.get(key);
+      retained.delete(key);
       // An address-only subscriber passes no opts and must not erase the latched mask.
       counts.set(key, { count: (cur?.count ?? 0) + 1, path, opts: opts ?? cur?.opts ?? {} });
       bump();
@@ -40,10 +51,16 @@ export function createRegistry(onDrop: (key: string) => void): Registry {
         if (!entry) return;
         if (entry.count <= 1) {
           counts.delete(key);
-          etags.delete(key);
           // Leaking the gone mark would make a re-subscribe silently unfetchable.
-          gone.delete(key);
-          onDrop(key);
+          if (gone.delete(key)) {
+            drop(key);
+          } else {
+            retained.add(key);
+            for (const oldest of retained) {
+              if (retained.size <= RETAINED_TREE_KEYS) break;
+              drop(oldest);
+            }
+          }
         } else {
           counts.set(key, { ...entry, count: entry.count - 1 });
         }
@@ -55,7 +72,10 @@ export function createRegistry(onDrop: (key: string) => void): Registry {
       return () => listeners.delete(listener);
     },
     version: () => version,
-    liveKeys: () => [...counts.keys()].filter((k) => !gone.has(k)),
+    liveKeys: (rests) =>
+      [...counts]
+        .filter(([k, v]) => !gone.has(k) && !(etags.has(k) && rests?.(v.path)))
+        .map(([k]) => k),
     spec: (key) => {
       const v = counts.get(key);
       return v ? { path: v.path, opts: v.opts } : null;

@@ -14,7 +14,7 @@ import type {
   MeteredSpend,
   SubjectReading,
 } from "@/lib/api";
-import { fetchCampaignPipeline } from "@/lib/api";
+import { useCampaignPipeline } from "@/lib/hooks/useConnector";
 import { candidateSubject, readingPath } from "@/lib/api/reads";
 import { SteerForkAction } from "@/components/shell/searchpoint/SteerForkAction";
 import { VerifyAction } from "@/components/shell/searchpoint/VerifyAction";
@@ -56,7 +56,7 @@ import {
   type MainLineStep,
   type RunGroup,
 } from "@/lib/derivations";
-import { readyData, useRead } from "@/lib/hooks/useRead";
+import { readyData } from "@/lib/hooks/useRead";
 import { useRoundFile } from "@/lib/hooks/useRoundFile";
 import { useLineageTree } from "@/lib/lineage";
 import { cx } from "@/lib/cx";
@@ -512,15 +512,7 @@ function ChannelCard({
     [pickedPath, selected],
   );
   const pickedCampaign = pickedPath?.at(-1)?.campaignId ?? "";
-  const pipelineRead = useRead(
-    detailOpen && pickedCampaign && at
-      ? {
-          key: `${pickedCampaign}\x1f${at}`,
-          fetch: (s) => fetchCampaignPipeline(pickedCampaign, at, s),
-        }
-      : null,
-    { surface: "campaign-pipeline" },
-  );
+  const pipelineRead = useCampaignPipeline(detailOpen && at ? pickedCampaign || null : null, at);
   const pipeline = readyData(pipelineRead);
   const pipelineStatus = pipelineReadStatus({
     bound: pipelineRead.status !== "idle",

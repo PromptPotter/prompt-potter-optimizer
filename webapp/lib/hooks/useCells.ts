@@ -2,10 +2,8 @@
 // The measurement log for the unit in view — `GET /datasets/{name}/cells`, the sole source for
 // every list of measured cells. A live unit re-reads on a poll; a stopped one reads once.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { usePoll } from "./usePoll";
+import { useMemo, useState } from "react";
 import {
-  failureKind,
   fetchCells,
   type CellCandidate,
   type CellRow,
@@ -16,6 +14,7 @@ import {
   type HardSamplesScope,
 } from "../api";
 import { encodeCyclePath, encodeDescend, pathRoot, type CyclePath } from "../ids";
+import { useRead } from "./useRead";
 
 export type SeriesTotals = Pick<CellsResponse, "total_measurements" | "total_hits" | "mean_fitness">;
 
@@ -28,13 +27,6 @@ interface ScopeSlice {
   unmeasuredCount: number;
   // Null until a read lands: unread and zero-measured must not spell the same headline.
   totals: SeriesTotals | null;
-}
-
-// `slice` null with no `error` = still in flight.
-interface ScopeState {
-  slice: ScopeSlice | null;
-  error: string | null;
-  order: HardSampleOrder | null;
 }
 
 export interface CellsState extends ScopeSlice {
@@ -78,19 +70,6 @@ function sliceFrom(r: CellsResponse): ScopeSlice {
 
 const SEP = "\u001f";
 
-type SliceKey = string;
-
-function keepUnit(
-  slices: Record<SliceKey, ScopeState>,
-  unitKey: string,
-): Record<SliceKey, ScopeState> {
-  const prefix = `${unitKey}${SEP}`;
-  const out: Record<SliceKey, ScopeState> = {};
-  for (const [k, v] of Object.entries(slices)) if (k.startsWith(prefix)) out[k] = v;
-  return out;
-}
-
-// The route carries no validator, so every tick is a full body.
 const LIVE_REFRESH_MS = 8000;
 
 export function useCells(
@@ -109,112 +88,57 @@ export function useCells(
   const rootCycleId = root?.cycleId ?? null;
   const descend = path ? encodeDescend(path) : "";
   const unitKey = path ? encodeCyclePath(path) : null;
-  const sliceKey: SliceKey | null = unitKey
-    ? [unitKey, scope, order ?? "", candidateId ?? "", round ?? "", status ?? ""].join(SEP)
-    : null;
-  // ONE value guards both the claim and the fetch: `datasetName` lands from a LATER read, and a
-  // claim made before it would refuse the retry that arrives with it.
-  const req = useMemo(
-    () =>
-      sliceKey && unitKey && rootCampaignId && rootCycleId && datasetName
-        ? { key: sliceKey, unit: unitKey, rootCampaignId, rootCycleId, datasetName }
-        : null,
-    [sliceKey, unitKey, rootCampaignId, rootCycleId, datasetName],
+
+  // Parked until `datasetName` lands from its own, later read.
+  const read = useRead(
+    unitKey && rootCampaignId && rootCycleId && datasetName
+      ? {
+          key: [
+            unitKey,
+            datasetName,
+            scope,
+            order ?? "",
+            candidateId ?? "",
+            round ?? "",
+            status ?? "",
+          ].join(SEP),
+          conditional: (signal, etag) =>
+            fetchCells(
+              datasetName,
+              signal,
+              etag,
+              scope,
+              rootCampaignId,
+              rootCycleId,
+              descend,
+              order ?? undefined,
+              { candidateId, round, status },
+            ),
+        }
+      : null,
+    { surface: "cells", intervalMs: live ? LIVE_REFRESH_MS : undefined },
   );
 
-  const [slices, setSlices] = useState<Record<SliceKey, ScopeState>>({});
-  // A ref, not state: it must not re-run the effect that writes it.
-  const started = useRef<Set<SliceKey>>(new Set());
+  // A failed refresh leaves the measured rows on screen alone, hence `kept`.
+  const own = read.status === "ready" ? read.data : read.status === "idle" ? null : read.kept;
+  // The last body this unit showed, so a slice still in flight dims it rather than blanking.
+  const [shown, setShown] = useState<{ unit: string; body: CellsResponse } | null>(null);
+  if (own && unitKey && shown?.body !== own) setShown({ unit: unitKey, body: own });
+  const body = own ?? (shown && shown.unit === unitKey ? shown.body : null);
+  const slice = useMemo(() => (body ? sliceFrom(body) : EMPTY_SLICE), [body]);
 
-  // `seeding` decides FAILURE only: an empty slice reports why; a failed refresh leaves the
-  // measured rows on screen alone.
-  const load = useCallback(
-    async (signal: AbortSignal, seeding: boolean) => {
-      if (!req) return;
-      const { key, unit, rootCampaignId, rootCycleId, datasetName } = req;
-      try {
-        const r = await fetchCells(
-          datasetName,
-          signal,
-          scope,
-          rootCampaignId,
-          rootCycleId,
-          descend,
-          order ?? undefined,
-          { candidateId, round, status },
-        );
-        // The MARK is released by the effect's cleanup, never here.
-        if (signal.aborted) return;
-        setSlices((prev) => ({
-          ...keepUnit(prev, unit),
-          [key]: { slice: sliceFrom(r), error: null, order: r.order },
-        }));
-      } catch (e) {
-        if (signal.aborted || !seeding) return;
-        // 404 is an honest EMPTY: no pooled slice exists before the first round closes.
-        const gone = failureKind(e) === "gone";
-        setSlices((prev) => ({
-          ...keepUnit(prev, unit),
-          [key]: {
-            slice: gone ? EMPTY_SLICE : null,
-            error: gone ? null : e instanceof Error ? e.message : String(e),
-            order: null,
-          },
-        }));
-      }
-    },
-    [req, descend, scope, order, candidateId, round, status],
-  );
-
-  useEffect(() => {
-    if (!req) return;
-    const claims = started.current;
-    const prefix = `${req.unit}${SEP}`;
-    for (const k of [...claims]) if (!k.startsWith(prefix)) claims.delete(k);
-    if (claims.has(req.key)) return;
-    claims.add(req.key);
-    const ac = new AbortController();
-    // Released HERE: cleanup precedes the next effect body, while a release inside the aborted
-    // `load` lands a microtask late and strands the slice "loading" for the life of the tab.
-    let settled = false;
-    void load(ac.signal, true).then(
-      () => {
-        settled = true;
-      },
-      () => claims.delete(req.key),
-    );
-    return () => {
-      ac.abort();
-      if (!settled) claims.delete(req.key);
-    };
-  }, [req, load]);
-
-  usePoll((signal) => load(signal, false), {
-    intervalMs: LIVE_REFRESH_MS,
-    enabled: live && req !== null,
-  });
-
-  if (!sliceKey) return EMPTY;
-  if (!req) return { ...EMPTY_SLICE, order: null, isStale: true, error: null };
-  const state = slices[sliceKey];
-
-  // In flight: show any slice held for this unit, marked stale, rather than blank the panel.
-  if (!state || (!state.slice && !state.error)) {
-    const sibling = unitKey
-      ? Object.entries(slices).find(([k, v]) => k.startsWith(`${unitKey}${SEP}`) && v.slice)?.[1]
-      : undefined;
-    return {
-      ...(sibling?.slice ?? EMPTY_SLICE),
-      order: sibling?.order ?? null,
-      isStale: true,
-      error: null,
-    };
+  if (!unitKey) return EMPTY;
+  if (read.status === "idle") return { ...EMPTY_SLICE, order: null, isStale: true, error: null };
+  if (read.status === "loading") {
+    return { ...slice, order: body?.order ?? null, isStale: true, error: null };
   }
-
+  if (own) return { ...slice, order: own.order, isStale: false, error: null };
+  // 404 is an honest EMPTY: no pooled slice exists before the first round closes.
+  const dead = read.status === "failed" && read.failure.kind !== "gone";
   return {
-    ...(state.slice ?? EMPTY_SLICE),
-    order: state.order,
+    ...EMPTY_SLICE,
+    order: null,
     isStale: false,
-    error: state.error,
+    error: dead ? read.failure.message : null,
   };
 }

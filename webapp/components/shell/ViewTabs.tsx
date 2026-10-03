@@ -78,10 +78,13 @@ const RECORDS_SEGMENTS: readonly Segment<RecordsTab>[] = RECORDS_TABS.map((t) =>
 export function ViewTabs({
   tab,
   onSelect,
+  onIntent,
   className,
 }: {
   tab: Tab;
   onSelect: (tab: Tab) => void;
+  // The pointer or the focus reached the strip: the moment to warm what a click will ask for.
+  onIntent?: () => void;
   className?: string;
 }) {
   // The group segment fires even when already on; re-clicking it while reading Files must
@@ -92,7 +95,7 @@ export function ViewTabs({
   };
 
   return (
-    <div className={cx("view-tabs", className)}>
+    <div className={cx("view-tabs", className)} onPointerEnter={onIntent} onFocus={onIntent}>
       <SegmentedControl
         size="lg"
         options={PRIMARY_SEGMENTS}

@@ -118,7 +118,7 @@ export function CandidatesCard() {
   const diagRunsResp = readyData(
     useRead(
       {
-        key: `${campaignId}\x1f${cycleId}`,
+        key: "diagnostic-runs",
         fetch: (s) => fetchDiagnosticRuns(undefined, s),
       },
       { surface: "diagnostic-runs", auth: true },

@@ -5,30 +5,21 @@
 import {
   createContext,
   createElement,
-  useCallback,
   useContext,
-  useEffect,
   useMemo,
-  useState,
   type ReactNode,
 } from "react";
 import {
   fetchBackendHealth,
   fetchBackends,
   fetchCampaignPipeline,
-  type BackendHealthResponse,
   type BackendResponse,
-  type ModelCapability,
-  type NestedPipelineRef,
-  type NodeConfigParam,
-  type NodeOutputSchema,
-  type NodeReach,
+  type CampaignPipelineResponse,
 } from "@/lib/api";
-import { useAuthGate } from "@/lib/auth-context";
 import { useDashboard } from "@/lib/hooks/useDashboard";
-import { usePoll } from "@/lib/hooks/usePoll";
+import { readyData, useRead, type ReadResult } from "@/lib/hooks/useRead";
 import type { ConnectorView, PipelineStatus } from "@/lib/types";
-import type { NodeDataLike, PipelineView } from "@/components/workflow";
+import type { NodeDataLike } from "@/components/workflow";
 
 const EMPTY: ConnectorView = {
   connector: null,
@@ -54,129 +45,49 @@ const EMPTY: ConnectorView = {
 };
 
 const HEALTH_INTERVAL_MS = 5000;
+const NO_BACKENDS: BackendResponse[] = [];
 
-// Minted HERE only, so the reset, the freshness test and the fetch stamp cannot disagree.
-function connectorKey(campaignId: string, at: string | null): string {
-  return `${campaignId}|${at ?? ""}`;
+// The one named read of a campaign's resolved pipeline; a null or "" `at` is the campaign root.
+export function useCampaignPipeline(
+  campaignId: string | null,
+  at: string | null,
+): ReadResult<CampaignPipelineResponse> {
+  return useRead(
+    campaignId
+      ? {
+          key: `${campaignId}\x1f${at ?? ""}`,
+          conditional: (signal, etag) => fetchCampaignPipeline(campaignId, at, signal, etag),
+        }
+      : null,
+    { surface: "campaign-pipeline" },
+  );
 }
 
 function useConnectorViewEngine(campaignId: string | null, at: string | null): ConnectorView {
-  const key = campaignId ? connectorKey(campaignId, at) : null;
-  const { authed, onAuthError } = useAuthGate();
-  const [backends, setBackends] = useState<BackendResponse[]>([]);
-  const [view, setView] = useState<PipelineView | null>(null);
-  const [loaded, setLoaded] = useState<{ key: string; failed: boolean } | null>(null);
-  const [connector, setConnector] = useState<string | null>(null);
-  const [backendType, setBackendType] = useState<string | null>(null);
-  const [optimizer, setOptimizer] = useState<string | null>(null);
-  const [optimizerKnobs, setOptimizerKnobs] = useState<Record<
-    string,
-    Record<string, unknown>
-  > | null>(null);
-  const [nodeConfigSchema, setNodeConfigSchema] = useState<Record<
-    string,
-    NodeConfigParam[]
-  > | null>(null);
-  const [nodeOutputSchema, setNodeOutputSchema] = useState<Record<
-    string,
-    NodeOutputSchema | null
-  > | null>(null);
-  // `{}`, not `null`: unresolved and empty both read UNKNOWN — render nothing struck.
-  const [modelCapabilities, setModelCapabilities] = useState<Record<string, ModelCapability>>({});
-  const [reach, setReach] = useState<Record<string, NodeReach> | null>(null);
-  const [isSingleNode, setIsSingleNode] = useState(false);
-  const [nests, setNests] = useState<NestedPipelineRef | null>(null);
+  // Gated on the session: an anon preview must never fire the protected read (I5).
+  const backendsRead = useRead(
+    { key: "", fetch: (signal) => fetchBackends(signal) },
+    { surface: "backends", auth: true },
+  );
+  const backends =
+    backendsRead.status === "ready"
+      ? backendsRead.data
+      : backendsRead.status === "idle"
+        ? NO_BACKENDS
+        : (backendsRead.kept ?? NO_BACKENDS);
 
-  const [prevKey, setPrevKey] = useState(key);
-  if (key !== prevKey) {
-    setPrevKey(key);
-    setView(null);
-    setConnector(null);
-    setBackendType(null);
-    setOptimizer(null);
-    setOptimizerKnobs(null);
-    setNodeConfigSchema(null);
-    setNodeOutputSchema(null);
-    setModelCapabilities({});
-    setReach(null);
-    setIsSingleNode(false);
-    setNests(null);
-  }
-
-  const [prevAuthed, setPrevAuthed] = useState(authed);
-  if (authed !== prevAuthed) {
-    setPrevAuthed(authed);
-    if (!authed) setBackends([]);
-  }
-
-  // Gated on `authed`: an anon preview must never fire the protected read (I5).
-  useEffect(() => {
-    if (!authed) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const list = await fetchBackends();
-        if (!cancelled) setBackends(list);
-      } catch (e) {
-        if (!cancelled) {
-          onAuthError(e);
-          setBackends([]);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [authed, onAuthError]);
-
-  // Every field is server-resolved; the browser joins nothing (I9).
-  useEffect(() => {
-    if (!campaignId) return;
-    let cancelled = false;
-    const stamp = connectorKey(campaignId, at);
-    (async () => {
-      try {
-        // `backend_type` is top-level, never in `view`: the parsed `PipelineSchema` drops it.
-        const resp = await fetchCampaignPipeline(campaignId, at);
-        if (!cancelled) {
-          setView((resp?.view ?? null) as PipelineView | null);
-          setConnector(resp?.connector ?? null);
-          setBackendType(resp?.backend_type ?? null);
-          setOptimizer(resp?.optimizer ?? null);
-          setOptimizerKnobs(resp?.optimizer_knobs ?? null);
-          setNodeConfigSchema(resp?.node_config_schema ?? null);
-          setNodeOutputSchema(
-            (resp?.node_output_schema ?? null) as Record<string, NodeOutputSchema | null> | null,
-          );
-          setModelCapabilities(
-            (resp?.model_capabilities ?? {}) as Record<string, ModelCapability>,
-          );
-          setReach(resp?.reach ?? null);
-          setIsSingleNode(!!resp?.is_single_node);
-          setNests(resp?.nests ?? null);
-          setLoaded({ key: stamp, failed: false });
-        }
-      } catch {
-        if (!cancelled) {
-          setView(null);
-          setConnector(null);
-          setBackendType(null);
-          setOptimizer(null);
-          setOptimizerKnobs(null);
-          setNodeConfigSchema(null);
-          setNodeOutputSchema(null);
-          setModelCapabilities({});
-          setReach(null);
-          setIsSingleNode(false);
-          setNests(null);
-          setLoaded({ key: stamp, failed: true });
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [campaignId, at]);
+  // Every field is server-resolved; the browser joins nothing (I9). A failed revalidation keeps
+  // the body it painted over, so `error` is a read with nothing to show.
+  const read = useCampaignPipeline(campaignId, at);
+  const resp = read.status === "ready" ? read.data : read.status === "idle" ? null : read.kept;
+  const pipelineStatus: PipelineStatus =
+    read.status === "idle"
+      ? "unbound"
+      : resp
+        ? "ok"
+        : read.status === "loading"
+          ? "loading"
+          : "error";
 
   const { dash, isLive } = useDashboard();
   const currentNodes = useMemo(
@@ -185,50 +96,34 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
   );
   const phase = typeof dash?.state === "string" ? dash.state : null;
 
+  const connector = resp?.connector ?? null;
   const activeId = useMemo(
     () => (connector ? backends.find((b) => b.name === connector)?.id ?? null : null),
     [connector, backends],
   );
 
-  const [health, setHealth] = useState<BackendHealthResponse | null>(null);
-  const [prevActiveId, setPrevActiveId] = useState(activeId);
-  if (activeId !== prevActiveId) {
-    setPrevActiveId(activeId);
-    setHealth(null);
-  }
-  const healthTick = useCallback(
-    async (signal: AbortSignal) => {
-      if (!activeId) return;
-      try {
-        const h = await fetchBackendHealth(activeId, signal);
-        if (!signal.aborted) setHealth(h);
-      } catch (e) {
-        // Our own API down is the dashboard banner's to say: health stays unknown, not offline.
-        if (!signal.aborted) {
-          onAuthError(e);
-          setHealth(null);
-        }
-      }
-    },
-    [activeId, onAuthError],
+  // Our own API down is the dashboard banner's to say: a failed read is unknown, not offline.
+  const health = readyData(
+    useRead(
+      activeId ? { key: activeId, fetch: (signal) => fetchBackendHealth(activeId, signal) } : null,
+      { surface: "backend-health", auth: true, intervalMs: HEALTH_INTERVAL_MS },
+    ),
   );
-  usePoll(healthTick, { intervalMs: HEALTH_INTERVAL_MS, enabled: !!activeId && authed });
 
   return useMemo<ConnectorView>(() => {
-    if (!key) return { ...EMPTY, isLive, currentNodes, phase };
-    // Until this key's fetch lands, every field below belongs to the PREVIOUS campaign.
-    if (loaded?.key !== key) {
-      return { ...EMPTY, pipelineStatus: "loading", isLive, currentNodes, phase };
+    if (!resp) {
+      const others = pipelineStatus === "error" ? backends : [];
+      return { ...EMPTY, pipelineStatus, others, isLive, currentNodes, phase };
     }
-    const pipelineStatus: PipelineStatus = loaded.failed ? "error" : "ok";
-    const active = connector ? backends.find((b) => b.name === connector) ?? null : null;
+    const active = resp.connector ? backends.find((b) => b.name === resp.connector) ?? null : null;
     const baseUrl = active?.base_url ?? null;
     return {
-      connector,
-      backendType,
-      optimizer,
-      optimizerKnobs,
-      view,
+      connector: resp.connector,
+      // Top-level, never in `view`: the parsed `PipelineSchema` drops it.
+      backendType: resp.backend_type,
+      optimizer: resp.optimizer,
+      optimizerKnobs: resp.optimizer_knobs,
+      view: resp.view,
       pipelineStatus,
       active,
       others: active ? backends.filter((b) => b !== active) : backends,
@@ -237,34 +132,15 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
       currentNodes,
       isLive,
       health,
-      nodeConfigSchema,
-      nodeOutputSchema,
-      modelCapabilities,
-      reach,
-      isSingleNode,
+      nodeConfigSchema: resp.node_config_schema,
+      nodeOutputSchema: resp.node_output_schema,
+      modelCapabilities: resp.model_capabilities,
+      reach: resp.reach,
+      isSingleNode: resp.is_single_node,
       phase,
-      nests,
+      nests: resp.nests,
     };
-  }, [
-    key,
-    connector,
-    backendType,
-    optimizer,
-    optimizerKnobs,
-    view,
-    loaded,
-    backends,
-    currentNodes,
-    isLive,
-    health,
-    nodeConfigSchema,
-    nodeOutputSchema,
-    modelCapabilities,
-    reach,
-    isSingleNode,
-    phase,
-    nests,
-  ]);
+  }, [resp, pipelineStatus, backends, currentNodes, isLive, health, phase]);
 }
 
 const ConnectorContext = createContext<ConnectorView | null>(null);
