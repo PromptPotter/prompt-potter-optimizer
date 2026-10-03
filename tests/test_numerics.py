@@ -1537,6 +1537,25 @@ def test_a_round_that_measured_nothing_usable_names_which_way_it_broke():
     assert holed.hole_count == 9 and holed.samples == 10
     assert holed.degraded_rate == 0.0  # the one classifiable cell was clean — and says so
 
+    # A retry that RECOVERED is not a starved node: re-asked, answered and scored, its cell is
+    # measured, and a round graded `evidence_starved` on it tells L2 the backend is down.
+    retried = {"step": "llm_only", "code": "llm_retry", "kind": "transient"}
+    recovered = compute_round_health(
+        results=[_health_row({"llm_only": "success"}, retried, predicted="TRUE") for _ in range(11)]
+        + answered("TRUE")[:9],
+        prior_healths=[],
+    )
+    assert recovered is not None
+    assert recovered.node_failure_rates == {} and recovered.cause != "evidence_starved"
+    # The same warning on a node that did NOT finish is starvation.
+    starved = compute_round_health(
+        results=[_health_row({"llm_only": "failed"}, retried) for _ in range(11)]
+        + answered("TRUE")[:9],
+        prior_healths=[],
+    )
+    assert starved is not None
+    assert (starved.cause, starved.node_failure_rates) == ("evidence_starved", {"llm_only": 0.55})
+
 
 def _peer_cycle(
     built_stores: Any,

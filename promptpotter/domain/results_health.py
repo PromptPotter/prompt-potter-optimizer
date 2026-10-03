@@ -489,10 +489,14 @@ def compute_node_failure_rates(results: list[dict[str, Any]]) -> dict[str, float
         warnings = diag.get("warnings") or []
         failed_nodes: set[str] = {n for n, st in statuses.items() if st == "failed"}
         for w in warnings:
-            if w.get("kind") in ("structural", "transient"):
-                wn = str(w.get("step") or "") or None
-                if wn is not None:
-                    failed_nodes.add(wn)
+            wn = str(w.get("step") or "")
+            # A retry that recovered is a cost, never a failed node: its node finished `success`.
+            if (
+                wn
+                and w.get("kind") in ("structural", "transient")
+                and statuses.get(wn) != "success"
+            ):
+                failed_nodes.add(wn)
         for n in failed_nodes:
             counts[n] = counts.get(n, 0) + 1
     return {n: c / total for n, c in counts.items()}
