@@ -140,7 +140,7 @@ A run that looks frozen is usually one of five things, and they are distinguisha
 
 ### `declared_phase` is not `run_phase`
 
-Two different facts, and conflating them is the costliest mistake here. **`declared_phase`** is written into `dashboard.json` by the runner's own process — the process that dies — so served raw it reports `running` forever after a `kill -9`. **`run_phase`** is **derived**, in exactly one place (`derive_run_phase`, `infrastructure/runtime_flags.py`), for every reader, and is never written to disk. The declaration is one *input* to that derivation, consulted for `paused` and `gate` only.
+Two different facts, and conflating them is the costliest mistake here. **`declared_phase`** is written into `dashboard.json` by the runner's own process — the process that dies — so served raw it reports `running` forever after a `kill -9`. **`run_phase`** is **derived**, in exactly one place (`derive_run_phase`, `infrastructure/runtime_flags.py`), for every reader, and is never written to disk. The declaration is one *input* to that derivation, read off the ledger's last `control` record (the dashboard field mirrors it) and consulted for `paused` and `gate` only.
 
 ### The phase vocabulary
 

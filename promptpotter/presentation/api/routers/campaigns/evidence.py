@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Query
+from fastapi import Query, Request, Response
 
 from promptpotter.application.evidence.metric_catalogue import MEASURAND
 from promptpotter.application.evidence.read import (
@@ -19,6 +19,7 @@ from promptpotter.application.evidence.read import (
 )
 from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
 from promptpotter.presentation.api.deps import StoresDep
+from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import BadRequestError
 
@@ -28,6 +29,7 @@ from promptpotter.shared.errors import BadRequestError
 # campaign and a self-optimizing one take exactly the same path through here.
 @campaigns_router.get("/evidence", response_model=Evidence)
 def get_evidence(
+    request: Request,
     stores: StoresDep,
     subject: Annotated[
         list[str],
@@ -123,12 +125,12 @@ def get_evidence(
             )
         ),
     ] = "",
-) -> Evidence:
+) -> Response:
     """The campaign subjects' bench head-to-head, guarded by whether one bench set graded them;
     then roster, comparability, replicates, the cell/subject/residual decomposition, what the
     selection can resolve, the run-order confound, and — under the selected metric — a merged
-    interval per subject with every pairwise test. Reduced fresh from disk on each fetch
-    (on-demand, not the 2 s poll); zero LLM, nothing persisted."""
+    interval per subject with every pairwise test. Reduced on each fetch (on-demand, not the 2 s
+    poll) from per-subject reads held until a file they read moves; zero LLM, nothing persisted."""
     try:
         specs = [parse_subject(raw) for raw in subject]
     except ValueError as exc:
@@ -149,7 +151,7 @@ def get_evidence(
             "two axes at any number of factors — the rest are marginalised into the cells."
         )
     try:
-        return subject_evidence(
+        evidence = subject_evidence(
             stores,
             specs,
             include_ranking=ranking,
@@ -162,3 +164,4 @@ def get_evidence(
         # Passed through unprefixed — the read says whether the METRIC or the SELECTION was the
         # problem, and an "Invalid metric:" stamp read every unmeasured campaign as a bad formula.
         raise BadRequestError(str(exc)) from exc
+    return conditional_json(request, evidence, stamp="generated_at")

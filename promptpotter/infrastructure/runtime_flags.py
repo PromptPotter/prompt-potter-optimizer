@@ -14,6 +14,9 @@ from promptpotter.domain.launch_limits import RoundsCap
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.run_records import RunLimitsRecord
 from promptpotter.domain.spend import BudgetChange
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    scan_ledger_declared_phase,
+)
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
 from promptpotter.infrastructure.store.layout import CycleLayout
 
@@ -238,13 +241,6 @@ def _producer_fresh(cycle_dir: Path, *, fresh_s: float) -> bool:
     return edge is not None and time.time() < edge
 
 
-def _declared_phase(cycle_dir: Path) -> str:
-    """``paused`` has TWO writers: the operator's flag, and the runner declaring it (a Ctrl+C out of
-    a long phase writes no flag). Consulted for that and ``gate`` only; the rest is derived."""
-    data = read_json_tolerant(CycleLayout(cycle_dir).dashboard)
-    return str(data.get("declared_phase", "")) if isinstance(data, dict) else ""
-
-
 def _is_terminal(cycle_dir: Path) -> bool:
     """``index.json::finished_at`` — the lifecycle half, for a caller that does not already hold the
     manifest it was reading anyway."""
@@ -256,25 +252,21 @@ def derive_run_phase(
     cycle_dir: Path,
     *,
     is_terminal: bool | None = None,
-    declared: str | None = None,
     fresh_s: float = RUN_FRESH_S,
 ) -> RunPhase:
     """The single run-phase derivation, for EVERY reader — the cycle list, the lineage tree and the
     live surfaces alike. ``paused`` is deliberately NOT freshness-gated (a paused producer has
     exited) while ``gate`` is.
 
-    Both inputs a caller may already be holding are optional, and reading them here is the whole
-    point: the live dashboard route and the SSE snapshot hold neither, and serving
-    ``dashboard.json``'s stored DECLARATION instead had them saying ``running`` forever after a kill
-    (its only writer lives in the runner's own process) while every derived reader said terminal."""
+    ``paused`` has TWO writers: the operator's flag, and the runner declaring it on the LEDGER (a
+    Ctrl+C out of a long phase writes no flag) — consulted for that and ``gate`` only."""
     if is_checkin(cycle_dir):
         return RunPhase.CHECKIN
     if is_terminal is None:
         is_terminal = _is_terminal(cycle_dir)
     if is_terminal:
         return RunPhase.TERMINAL
-    if declared is None:
-        declared = _declared_phase(cycle_dir)
+    declared = scan_ledger_declared_phase(CycleLayout(cycle_dir).ledger)
     if is_paused(cycle_dir) or declared == RunPhase.PAUSED:
         return RunPhase.PAUSED
     fresh = _producer_fresh(cycle_dir, fresh_s=fresh_s)

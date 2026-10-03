@@ -4,7 +4,6 @@ shared with the tree route, so "who belongs to this campaign" has exactly one an
 from __future__ import annotations
 
 from fastapi import Query, Request, Response
-from fastapi.responses import JSONResponse
 
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.store.family_ray_queries import (
@@ -20,6 +19,7 @@ from promptpotter.infrastructure.store.lineage_queries import iter_family_course
 from promptpotter.presentation.api.deps import StoresDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._conditional import (
     client_has_etag,
+    model_json,
     weak_etag,
 )
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
@@ -70,4 +70,4 @@ def get_family_ray(
     if client_has_etag(request.headers.get("if-none-match"), etag):
         return Response(status_code=304, headers=headers)
     body = build_family_ray(courses, limit=limit, before=cursor)
-    return JSONResponse(body.model_dump(mode="json"), headers=headers)
+    return model_json(body, headers=headers)

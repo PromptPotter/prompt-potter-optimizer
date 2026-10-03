@@ -4,7 +4,6 @@ offshoot) is not the campaign's result, so it banks nothing and grades nothing."
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from promptpotter.application.datasets.authored import config_cell_scorer
@@ -18,7 +17,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_spend,
     scan_ledger_wall_clock,
 )
-from promptpotter.infrastructure.store.io import stat_key
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.clock import utcnow_iso
 
@@ -137,22 +135,12 @@ async def bench_origin(
     return banked
 
 
-_LINE_SPEND: dict[tuple[Path, ...], tuple[tuple[tuple[int, int] | None, ...], SpendRollup]] = {}
-
-
 def read_line_spend(stores: Stores, campaign: Campaign) -> SpendRollup:
-    """The line's spend as ``bank_campaign_result`` folds it, live — refolded only when one of its
-    ledgers moved, because the campaign list is polled."""
-    ledgers = tuple(
+    """The line's spend as ``bank_campaign_result`` folds it, live."""
+    spend, _ = scan_ledger_spend(
         CycleLayout(stores.campaigns.cycle_dir(h)).ledger
         for h in stores.campaigns.line(campaign.root_hop)
     )
-    stats = tuple(stat_key(p) for p in ledgers)
-    hit = _LINE_SPEND.get(ledgers)
-    if hit is not None and hit[0] == stats:
-        return hit[1]
-    spend, _ = scan_ledger_spend(ledgers)
-    _LINE_SPEND[ledgers] = (stats, spend)
     return spend
 
 

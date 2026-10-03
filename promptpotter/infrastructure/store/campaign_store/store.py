@@ -36,6 +36,7 @@ from promptpotter.infrastructure.runtime_flags import (
 from promptpotter.infrastructure.store.account_spend import bank_spend, sandbox_cycle_dirs
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_cycle_seed,
+    scan_ledger_declared_phase,
     scan_ledger_round_closes,
     scan_ledger_rulers,
     scan_ledger_run_limits,
@@ -192,7 +193,7 @@ def _strip_to_keepsake(campaign_dir: Path) -> None:
             for p in [
                 f
                 for f, _st in iter_files(cdir)
-                if not classify(f.relative_to(campaign_dir)).keepsake
+                if not classify(f.relative_to(campaign_dir).parts).keepsake
             ]:
                 unlink_robust(p)
             _prune_empty_dirs(cdir)
@@ -795,11 +796,7 @@ class CampaignStore:
         layout = CycleLayout(cycle_dir)
         if layout.pause_flag.is_file() or is_checkin(cycle_dir):
             return False
-        dash = read_json_optional(layout.dashboard)
-        if isinstance(dash, dict) and dash.get("declared_phase") in (
-            RunPhase.GATE,
-            RunPhase.PAUSED,
-        ):
+        if scan_ledger_declared_phase(layout.ledger) in (RunPhase.GATE, RunPhase.PAUSED):
             return False
         return self._stamp_terminal(hop, StopReason.PRODUCER_VANISHED)
 

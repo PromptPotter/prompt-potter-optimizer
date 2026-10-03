@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.run_records import RebaseRequest
 
 __all__ = [
+    "CONTROL_PHASE",
     "REFUSAL_STOPS",
     "CampaignPhase",
     "DashboardState",
@@ -25,6 +26,10 @@ __all__ = [
     "emit_phase",
     "stop_reason_outcome",
 ]
+
+
+CONTROL_PHASE = "control"
+"""The ``PhaseRecord.phase`` a run-phase DECLARATION rides: its ``event`` is the ``RunPhase``."""
 
 
 class CampaignPhase(enum.StrEnum):

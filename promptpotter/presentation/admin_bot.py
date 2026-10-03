@@ -91,7 +91,7 @@ def handle_command(command: str, argument: str, actor: str) -> str:
 def _render_install_spend() -> str:
     """Cost and data per account, costliest first — the half of metering the account itself never
     sees."""
-    rows = read_install_spend(DEFAULT_PROJECTS_ROOT, until=time.time())
+    rows = read_install_spend(DEFAULT_PROJECTS_ROOT)
     if not rows:
         return "No accounts on this install."
     # An unreadable account contributes nothing to the totals, so the header SAYS so — a headline

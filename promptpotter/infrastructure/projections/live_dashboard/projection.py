@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, assert_never, cast
 
@@ -9,7 +10,13 @@ from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.bench import BenchReading, BenchScore
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RoundSummary, RunStanding
-from promptpotter.domain.phases import CampaignPhase, DashboardState, PhaseEvent, RunPhase
+from promptpotter.domain.phases import (
+    CONTROL_PHASE,
+    CampaignPhase,
+    DashboardState,
+    PhaseEvent,
+    RunPhase,
+)
 from promptpotter.domain.results import (
     DisplayMetric,
     best_round_on_shared_cells,
@@ -37,7 +44,7 @@ from promptpotter.domain.scoring import (
     weighted_sum_weights,
 )
 from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup
-from promptpotter.infrastructure.ledger import open_with_history
+from promptpotter.infrastructure.ledger import CycleEventLog, open_with_history
 from promptpotter.infrastructure.projections.audit_trail import (
     audit_rounds_dir,
     build_node_block,
@@ -98,6 +105,9 @@ logger = logging.getLogger(__name__)
 # Coalesces the per-sample / per-token / per-LLM-call hot paths onto one disk write. Phase
 # boundaries still flush immediately, so `dashboard.json` is current at every transition.
 _DASHBOARD_DEBOUNCE_S = 0.25
+# The write holds the lock every ledger append takes and its cost grows with the live round, so
+# the next write waits this many times what the last one cost.
+_PERSIST_REST_FACTOR = 9.0
 
 
 # MEASURE absent: driven by sample_started / sample_scored. An optimizer's own phase is absent
@@ -192,6 +202,7 @@ class LiveDashboardProjection(Projection):
         self._persist_lock: threading.RLock = threading.RLock()
         self._persist_timer: threading.Timer | None = None
         self._persist_dirty: bool = False
+        self._persist_cost_s: float = 0.0
 
         self._persist()
 
@@ -273,8 +284,18 @@ class LiveDashboardProjection(Projection):
         interrupted: bool,
     ) -> None:
         """Stamps a cycle whose run stopped BEFORE the projection bound, so the tree shows what
-        happened. Pair with ``mark_finished`` only on a crash — a ``finished_at`` unresumes a pause."""
+        happened. ``mark_finished`` only on a crash — a ``finished_at`` unresumes a pause."""
         cycle_path = Path(cycle_dir)
+        stop_reason = "" if interrupted else f"{type(exc).__name__}: {exc}"
+        # On the LEDGER first: `derive_run_phase` reads the declaration there, so a stop written
+        # only into this file is one no reader sees.
+        CycleEventLog.open(cycle_dir).append(
+            PhaseRecord(
+                phase=CONTROL_PHASE,
+                event=str(RunPhase.PAUSED if interrupted else RunPhase.TERMINAL),
+                payload={"stop_reason": stop_reason} if stop_reason else {},
+            )
+        )
         state = resolve_resume_state(Cut(cycle=CycleDir(cycle_path), hop=hop), cycle_path, None)
         if session_id:
             state.session_id = session_id
@@ -286,7 +307,7 @@ class LiveDashboardProjection(Projection):
                 message=str(exc) or type(exc).__name__,
                 stop_reason="launch_aborted",
             )
-            state.stop_reason = f"{type(exc).__name__}: {exc}"
+            state.stop_reason = stop_reason
             state.declared_phase = RunPhase.TERMINAL
             state.state = DashboardState.STOPPED
         state.state_since = utcnow_iso()
@@ -315,7 +336,8 @@ class LiveDashboardProjection(Projection):
         self._persist_dirty = True
         if self._persist_timer is not None:
             return
-        timer = threading.Timer(_DASHBOARD_DEBOUNCE_S, self._fire_debounced_persist)
+        rest = max(_DASHBOARD_DEBOUNCE_S, self._persist_cost_s * _PERSIST_REST_FACTOR)
+        timer = threading.Timer(rest, self._fire_debounced_persist)
         timer.daemon = True
         self._persist_timer = timer
         timer.start()
@@ -350,7 +372,7 @@ class LiveDashboardProjection(Projection):
     # Phases → scalars; snapshots → per-round candidate structures. No second dispatch.
 
     def _handle_phase(self, record: PhaseRecord) -> None:
-        if record.phase == "control":
+        if record.phase == CONTROL_PHASE:
             # The SOLE writer of `declared_phase` — and nothing here writes `run_phase`, which is
             # wire-only and derived at the read. Flushing bumps the mtime, so the 304-cached route
             # re-derives immediately. TERMINAL arrives here like every other phase, so a fold
@@ -848,9 +870,11 @@ class LiveDashboardProjection(Projection):
         stale poll, while raising costs the caller whatever it was measuring."""
         if self.state_path is None:
             return
+        started = time.perf_counter()
         self.compose()
         try:
             write_json(self.state_path, self.state.model_dump(), default=str)
+            self._persist_cost_s = time.perf_counter() - started
         except OSError as exc:
             # Logged, not emitted: a round warning appends to the ledger and this view subscribes
             # to that append, so reporting the failure re-enters the path that failed.

@@ -3023,11 +3023,16 @@ def test_the_campaign_list_names_the_model_its_root_course_runs(built_stores: An
     an operator tells them apart. Three layers name a model here; the root's seed is the one that
     runs, and a list reading the shared file or the frozen config names the wrong model with every
     row rendering. The campaign read without `at` skipped that same seed."""
+    from starlette.requests import Request
+
     from promptpotter.application.evidence.subjects import SubjectSpec
     from promptpotter.application.pipeline_resolve import resolve_pipeline_for_campaign
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.run_records import CycleSeed
-    from promptpotter.presentation.api.routers.campaigns.manifests import list_campaigns
+    from promptpotter.presentation.api.routers.campaigns.manifests import (
+        CampaignListResponse,
+        list_campaigns,
+    )
 
     stores = built_stores
     dataset = stores.tenant_datasets.dataset_dir("ds")
@@ -3051,7 +3056,9 @@ def test_the_campaign_list_names_the_model_its_root_course_runs(built_stores: An
     seed = CycleSeed(pipeline_overlay={"llm_only": {"model": "C"}}, origin_source="campaign_origin")
     stores.campaigns.write_cycle_seed(campaign.root_hop, seed)
 
-    listed = list_campaigns(stores, dataset=None, lifecycle="active", descend=None)
+    request = Request({"type": "http", "headers": []})
+    served = list_campaigns(request, stores, dataset=None, lifecycle="active", descend=None)
+    listed = CampaignListResponse.model_validate_json(served.body)
     runs_with = listed.campaigns[0].runs_with
     assert runs_with is not None
     models = [(p.value, p.source) for p in runs_with.params if p.key == "model"]
@@ -5311,6 +5318,85 @@ def test_the_bench_pass_bills_and_clocks_under_its_own_name(built_stores, tmp_pa
         [ledger.path], started_at=started, finished_at=utcnow_iso(), optimizer_phases=frozenset()
     )
     assert clock.phase_s["bench"] > 0 and set(clock.unbracketed_call_s) == {"diagnostic"}, clock
+
+
+def test_a_ledger_index_serves_the_file_as_it_stands(tmp_path: Path) -> None:
+    """A polled read folds only what was appended since its last read, so it is wrong the moment
+    the tail it trusts is not the file's: an append it missed under-reads a bill or keeps a
+    superseded seed, a rewrite it reads through counts rows the file no longer holds, and a read
+    racing an append reports a call count and a total from two different moments."""
+    import threading
+
+    from promptpotter.domain.run_records import CycleSeed, CycleSeedRecord, TokenUsageRecord
+    from promptpotter.infrastructure.ledger import CycleEventLog
+    from promptpotter.infrastructure.store.account_spend import iter_user_token_usage
+    from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+        scan_ledger_cycle_seed,
+        scan_ledger_spend,
+    )
+    from promptpotter.infrastructure.store.io import write_jsonl
+    from promptpotter.infrastructure.store.read_model import iter_jsonl
+
+    ledger = CycleEventLog.open(CycleDir(tmp_path))
+
+    def bill(n: int) -> None:
+        for _ in range(n):
+            ledger.append(
+                TokenUsageRecord(
+                    kind="backend",
+                    node="llm_only",
+                    model="openai/gpt-oss-20b",
+                    provider="openrouter",
+                    input_tokens=1,
+                    output_tokens=1,
+                    duration_s=1.0,
+                    cost_usd=1.0,
+                )
+            )
+
+    def seed(model: str) -> None:
+        overlay = {"llm_only": {"model": model}}
+        ledger.append(CycleSeedRecord(seed=CycleSeed(pipeline_overlay=overlay)))
+
+    def tailed() -> tuple[float, int, CycleSeed | None, float]:
+        spend, calls = scan_ledger_spend([ledger.path])
+        wallet = iter_user_token_usage(ledgers=[ledger.path], since=0.0, until=float("inf"))
+        charted = sum(row["cost_usd"] for row in wallet)
+        return spend.total_used_usd, calls, scan_ledger_cycle_seed(ledger.path), charted
+
+    def cold() -> tuple[float, int, CycleSeed | None, float]:
+        rows = iter_jsonl(ledger.path)
+        bills = [row["cost_usd"] for row in rows if row["record_type"] == "token_usage"]
+        seeds = [row["seed"] for row in rows if row["record_type"] == "cycle_seed"]
+        seeded = CycleSeed.model_validate(seeds[-1]) if seeds else None
+        return sum(bills), len(bills), seeded, sum(bills)
+
+    bill(3)
+    seed("first")
+    assert tailed() == cold() and cold()[1] == 3
+    bill(2)
+    seed("second")
+    assert tailed() == cold() and cold()[1] == 5
+
+    # A compaction swaps the file for a shorter one; the index must not keep its old rows.
+    write_jsonl(ledger.path, iter_jsonl(ledger.path)[:2])
+    assert tailed() == cold() == (2.0, 2, None, 2.0)
+
+    seen: list[tuple[float, int]] = []
+
+    def read() -> None:
+        for _ in range(200):
+            seen.append(tailed()[:2])
+
+    readers = [threading.Thread(target=read) for _ in range(4)]
+    for reader in readers:
+        reader.start()
+    bill(40)
+    seed("third")
+    for reader in readers:
+        reader.join()
+    assert all(usd == calls for usd, calls in seen), [s for s in seen if s[0] != s[1]][:3]
+    assert tailed() == cold() and cold()[1] == 42
 
 
 # 8. Where the package reads and writes

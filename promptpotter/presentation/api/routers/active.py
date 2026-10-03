@@ -6,7 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request, Response
 from pydantic import Field
 
 from promptpotter.application.campaign_config import OptimizationConfig
@@ -39,6 +39,7 @@ from promptpotter.presentation.api.deps import (
     StoresDep,
     decode_descend,
 )
+from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json
 
 active_router = APIRouter()
 
@@ -183,7 +184,7 @@ class CyclesResponse(StrictModel):
 
 
 @active_router.get("/cycles", response_model=CyclesResponse, tags=["Cycles"])
-def get_cycles(stores: StoresDep, descend: str | None = Query(None)) -> CyclesResponse:
+def get_cycles(request: Request, stores: StoresDep, descend: str | None = Query(None)) -> Response:
     """Every cycle in one store + that store's active pointer — one round-trip per forest.
 
     ``descend`` names the chain of cycles to descend INTO (``~``-joined
@@ -201,11 +202,14 @@ def get_cycles(stores: StoresDep, descend: str | None = Query(None)) -> CyclesRe
     leaf = descend_store(stores, decode_descend(descend))
     _, active_cmp, active_cid = read_active_pointer(leaf.base_dir)
     entries = leaf.campaigns.enumerate_cycles()
-    return CyclesResponse(
-        tenant_id=leaf.tenant_id,
-        active_campaign_id=active_cmp or None,
-        active_cycle_id=active_cid or None,
-        cycles=[CycleListEntry(**e) for e in entries],
+    return conditional_json(
+        request,
+        CyclesResponse(
+            tenant_id=leaf.tenant_id,
+            active_campaign_id=active_cmp or None,
+            active_cycle_id=active_cid or None,
+            cycles=[CycleListEntry(**e) for e in entries],
+        ),
     )
 
 

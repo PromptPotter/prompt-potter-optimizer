@@ -519,9 +519,7 @@ def quota_status(request: Request, stores: StoresDep) -> QuotaStatus:
     # Lifetime usage straight from the ledger — uncapped on purpose, so an over-budget
     # account reports the true overage instead of clamping to the cap (the caps themselves
     # ride the `*_total` fields below).
-    spent = sum_user_spend(
-        ledgers=account_ledgers(stores.campaigns), since=0.0, until=datetime.now(UTC).timestamp()
-    )
+    spent = sum_user_spend(ledgers=account_ledgers(stores.campaigns))
     ceilings = lifetime_ceilings(user=user, spends_own_key=spends_the_hosts_own_key(stores))
 
     return QuotaStatus(

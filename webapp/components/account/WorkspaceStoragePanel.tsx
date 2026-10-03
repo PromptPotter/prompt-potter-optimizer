@@ -8,7 +8,7 @@ import { ArchiveCompactionControl } from "./ArchiveCompactionControl";
 
 export function WorkspaceStoragePanel() {
   const read = useRead(
-    { key: "workspace-storage", fetch: fetchWorkspaceStorage },
+    { key: "workspace-storage", conditional: fetchWorkspaceStorage },
     { surface: "workspace-storage" },
   );
 

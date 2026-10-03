@@ -308,23 +308,31 @@ export function fetchCycles(
 export function fetchCampaignStorage(
   campaignId: string,
   signal?: AbortSignal,
-): Promise<CampaignStorageResponse> {
-  return jget<CampaignStorageResponse>(
+  etag: string | null = null,
+): Promise<Conditional<CampaignStorageResponse>> {
+  return jgetIfNoneMatch<CampaignStorageResponse>(
     `${API}/campaigns/${encodeURIComponent(campaignId)}/storage`,
+    etag,
     signal,
   );
 }
 
 export function fetchWorkspaceStorage(
   signal?: AbortSignal,
-): Promise<WorkspaceStorageResponse> {
-  return jget<WorkspaceStorageResponse>(`${API}/workspace/storage`, signal);
+  etag: string | null = null,
+): Promise<Conditional<WorkspaceStorageResponse>> {
+  return jgetIfNoneMatch<WorkspaceStorageResponse>(`${API}/workspace/storage`, etag, signal);
 }
 
 export function fetchStorageByDataset(
   signal?: AbortSignal,
-): Promise<DatasetStorageResponse> {
-  return jget<DatasetStorageResponse>(`${API}/workspace/storage-by-dataset`, signal);
+  etag: string | null = null,
+): Promise<Conditional<DatasetStorageResponse>> {
+  return jgetIfNoneMatch<DatasetStorageResponse>(
+    `${API}/workspace/storage-by-dataset`,
+    etag,
+    signal,
+  );
 }
 
 export function fetchOptimizerKnobs(

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+from collections.abc import Hashable
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -64,6 +67,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 )
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import ROUND_GLOB, CycleLayout, campaign_cycles_dir
+from promptpotter.infrastructure.store.read_model import derived, file_sig
 from promptpotter.infrastructure.store.stores import descend_store
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import BadRequestError, NotFoundError
@@ -247,6 +251,23 @@ class _Head(NamedTuple):
     chain: list[_ChainPoint] | None = None
 
 
+class _CycleFacts(NamedTuple):
+    arm_id: str | None
+    instrument_id: str | None
+    ability: AbilityReading | None
+    spend_usd: float | None
+    rounds_scored: int
+    spend_to_round: dict[str, float]
+
+
+class _SubjectRead(NamedTuple):
+    """Everything one subject takes off disk. Shared between fetches, so it is read-only."""
+
+    head: _Head
+    channels: dict[str, dict[str, float]]
+    cycle: _CycleFacts
+
+
 def subject_evidence(
     stores: Stores,
     specs: list[SubjectSpec],
@@ -272,23 +293,30 @@ def subject_evidence(
     no two numbers on the page can be about different quantities.
     """
     wanted: dict[str, SubjectSpec] = {s.key: s for s in specs}
-    heads: dict[str, _Head] = {}
+    reads: dict[str, _SubjectRead] = {}
     leaves: dict[str, Stores] = {}
-    channels_by_subject: dict[str, dict[str, dict[str, float]]] = {}
     for key, spec in wanted.items():
         resolved = _at(stores, spec)
         if resolved is None:
             continue
         leaf_stores, campaign_dir = resolved
-        head = _resolve_head(leaf_stores, spec, campaign_dir)
-        if head is None:
+        read = partial(_read_subject, leaf_stores, spec, campaign_dir)
+        # A lens grades through the campaign's resolved config, which no signature here covers.
+        found = (
+            read()
+            if spec.lens
+            else derived(
+                ("evidence_subject", campaign_dir, spec.key),
+                sig=_files_read(spec, campaign_dir),
+                compute=read,
+            )
+        )
+        if found is None:
             continue
-        channels = cell_channels(head.point.rows)
-        if not channels:
-            continue
-        heads[key] = head
+        reads[key] = found
         leaves[key] = leaf_stores
-        channels_by_subject[key] = channels
+    heads = {key: found.head for key, found in reads.items()}
+    channels_by_subject = {key: found.channels for key, found in reads.items()}
 
     # An unmeasured selection is not a metric problem, so it may not be answered as one: two
     # ordinary actions reach here — ticking a campaign whose origin has not run, mistyping an id
@@ -311,6 +339,7 @@ def subject_evidence(
             head,
             compiled,
             channels_by_subject[key],
+            reads[key].cycle,
             include_winner_chain=include_winner_chain,
             include_config=include_config,
         )
@@ -411,6 +440,33 @@ def _at(stores: Stores, spec: SubjectSpec) -> tuple[Stores, Path] | None:
         (d for d in leaf.campaigns.iter_campaign_dirs() if d.name == spec.campaign_id), None
     )
     return None if campaign_dir is None else (leaf, campaign_dir)
+
+
+def _files_read(spec: SubjectSpec, campaign_dir: Path) -> Hashable:
+    """The signature of every file a subject WITHOUT a lens reads: the campaign manifest and, in
+    the one cycle it sits in, the index, the ledger, the dashboard and each round document."""
+    manifest = campaign_dir / "campaign.json"
+    cycle_id = spec.cycle_id or str(read_json_tolerant(manifest, {}).get("root_cycle_id", ""))
+    layout = CycleLayout(campaign_cycles_dir(campaign_dir) / cycle_id)
+    try:
+        with os.scandir(layout.rounds) as it:
+            rounds = sorted((e.name, (st := e.stat()).st_size, st.st_mtime_ns) for e in it)
+    except OSError:
+        rounds = []
+    signed = (manifest, layout.manifest, layout.ledger, layout.dashboard)
+    return (*(file_sig(path) for path in signed), *rounds)
+
+
+def _read_subject(stores: Stores, spec: SubjectSpec, campaign_dir: Path) -> _SubjectRead | None:
+    head = _resolve_head(stores, spec, campaign_dir)
+    if head is None:
+        return None
+    channels = cell_channels(head.point.rows)
+    if not channels:
+        return None
+    # The rows are spent: every later reading of this point is off `channels`.
+    spent = head._replace(point=head.point._replace(rows=[]))
+    return _SubjectRead(spent, channels, _cycle_facts(head.cycle_dir))
 
 
 def _resolve_head(stores: Stores, spec: SubjectSpec, campaign_dir: Path) -> _Head | None:
@@ -639,7 +695,10 @@ def _candidate_point(cycle_dir: Path, candidate_id: str) -> _ChainPoint | None:
 
 
 def _winner_chain(
-    head: _Head, spec: SubjectSpec, compiled: CompiledExpression
+    head: _Head,
+    spec: SubjectSpec,
+    compiled: CompiledExpression,
+    channels: dict[str, dict[str, float]],
 ) -> list[WinnerChainPoint]:
     """The branch standing behind a head: the origin, every winner before it, then the head itself.
     Each point is read on ITS OWN cells — the subsets move between rounds, so restricting the chain
@@ -648,16 +707,19 @@ def _winner_chain(
     Under a lens the chain is already resolved (the counterfactual winners, which no ledger holds)
     and ENDS at the round the two readings part; otherwise it is the crowns, off the elections."""
     if head.chain is not None:
-        return [_winner_chain_point(p, compiled) for p in head.chain]
+        return [_winner_chain_point(p, cell_channels(p.rows), compiled) for p in head.chain]
     crowns = _crowns(head.cycle_dir)
     at = head.point.round
     rounds = [r for r in sorted({0, *(r for r in crowns if r < at)}) if r != at]
     points = [
-        p
+        _masked(p, spec.samples)
         for r in rounds
         if (p := _point_at(head.cycle_dir, r, label=crowns.get(r, ""))) is not None
     ]
-    return [_winner_chain_point(_masked(p, spec.samples), compiled) for p in (*points, head.point)]
+    return [
+        *(_winner_chain_point(p, cell_channels(p.rows), compiled) for p in points),
+        _winner_chain_point(head.point, channels, compiled),
+    ]
 
 
 def _config_of(point: _ChainPoint) -> dict[str, str]:
@@ -680,8 +742,10 @@ def _config_of(point: _ChainPoint) -> dict[str, str]:
     )
 
 
-def _winner_chain_point(point: _ChainPoint, compiled: CompiledExpression) -> WinnerChainPoint:
-    values, _ = _score_cells(compiled, cell_channels(point.rows))
+def _winner_chain_point(
+    point: _ChainPoint, channels: dict[str, dict[str, float]], compiled: CompiledExpression
+) -> WinnerChainPoint:
+    values, _ = _score_cells(compiled, channels)
     value, ci_lo, ci_hi, n_cells = merge_cells(values)
     return WinnerChainPoint(
         candidate_id=point.candidate_id,
@@ -753,20 +817,8 @@ def _spend_to_round(dash: dict[str, Any]) -> dict[str, float]:
     return out
 
 
-def _reading_row(
-    spec: SubjectSpec,
-    head: _Head,
-    compiled: CompiledExpression,
-    channels: dict[str, dict[str, float]],
-    *,
-    include_winner_chain: bool,
-    include_config: bool,
-) -> SubjectReading:
-    """One roster row. The arm, the instrument, the ruler and the spend are facts about the CYCLE
-    the subject sits in, so a course and a candidate read them off their own cycle rather than off
-    the campaign's root — two courses of one campaign can sit on different rulers."""
-    values, unscorable = _score_cells(compiled, channels)
-    layout = CycleLayout(head.cycle_dir)
+def _cycle_facts(cycle_dir: Path) -> _CycleFacts:
+    layout = CycleLayout(cycle_dir)
     doc = read_json_tolerant(layout.round_file(0), {})
     dash = read_json_tolerant(layout.dashboard, {})
     spend = dash.get("spend")
@@ -777,6 +829,32 @@ def _reading_row(
     # so the arm alone is the whole grouping there.
     instrument = instrument_of(doc.get("pipeline_params"))
     raw = doc.get("ability")
+    return _CycleFacts(
+        # An UNSTAMPED round is an UNKNOWN arm, never the origin's: on one hash, `replicates`
+        # reports every unstamped campaign as a replicate of the rest over a shared absence.
+        arm_id=_arm_hash(dict(hashes)) if isinstance(hashes, dict) and hashes else None,
+        instrument_id=str(instrument) if isinstance(instrument, str) else None,
+        ability=AbilityReading.model_validate(raw) if isinstance(raw, dict) else None,
+        spend_usd=(spend or {}).get("total_used_usd") if isinstance(spend, dict) else None,
+        rounds_scored=max(len(list(layout.rounds.glob(ROUND_GLOB))) - 1, 0),
+        spend_to_round=_spend_to_round(dash),
+    )
+
+
+def _reading_row(
+    spec: SubjectSpec,
+    head: _Head,
+    compiled: CompiledExpression,
+    channels: dict[str, dict[str, float]],
+    cycle: _CycleFacts,
+    *,
+    include_winner_chain: bool,
+    include_config: bool,
+) -> SubjectReading:
+    """One roster row. The arm, the instrument, the ruler and the spend are facts about the CYCLE
+    the subject sits in, so a course and a candidate read them off their own cycle rather than off
+    the campaign's root — two courses of one campaign can sit on different rulers."""
+    values, unscorable = _score_cells(compiled, channels)
     # Straight off the point's own report, and left ABSENT where it carries none: a 0 here is the
     # measurement "every cell was earned", which is the opposite claim (`evidence/CLAUDE.md`).
     banked = head.point.scores.get("cached_samples")
@@ -807,24 +885,21 @@ def _reading_row(
         scenario=head.scenario,
         # A campaign is its origin and nothing precedes it; the other two stand on a branch.
         winner_chain=(
-            _winner_chain(head, spec, compiled)
+            _winner_chain(head, spec, compiled, channels)
             if include_winner_chain and spec.kind != "campaign"
             else None
         ),
         config=_config_of(head.point) if include_config else None,
-        # An UNSTAMPED round is not the origin arm — it is an UNKNOWN one, which groups with
-        # nothing. Collapsing the two onto one hash makes `replicates` report every unstamped
-        # campaign as a replicate of the rest, spread and all, over a shared absence.
-        arm_id=_arm_hash(dict(hashes)) if isinstance(hashes, dict) and hashes else None,
+        arm_id=cycle.arm_id,
         authorship=head.authorship,
         human_intervened=head.human_intervened,
         cached_samples=replayed,
-        instrument_id=str(instrument) if isinstance(instrument, str) else None,
-        ability=(AbilityReading.model_validate(raw) if isinstance(raw, dict) else None),
+        instrument_id=cycle.instrument_id,
+        ability=cycle.ability,
         round=head.point.round,
-        cycle_spend_usd=(spend or {}).get("total_used_usd") if isinstance(spend, dict) else None,
-        cycle_rounds_scored=max(len(list(layout.rounds.glob(ROUND_GLOB))) - 1, 0),
-        spend_to_round=_spend_to_round(dash),
+        cycle_spend_usd=cycle.spend_usd,
+        cycle_rounds_scored=cycle.rounds_scored,
+        spend_to_round=cycle.spend_to_round,
         values=values,
         value=value,
         ci_lo=ci_lo,

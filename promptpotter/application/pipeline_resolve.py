@@ -4,6 +4,7 @@ import copy
 import logging
 from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from pydantic import Field, ValidationError
@@ -66,8 +67,9 @@ from promptpotter.infrastructure.store.dataset_access import (
     dataset_pipeline_path,
     readable_dataset_dir,
 )
-from promptpotter.infrastructure.store.io import read_yaml_optional, stat_key
+from promptpotter.infrastructure.store.io import read_json_tolerant, read_yaml_optional
 from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.read_model import derived, file_sig
 from promptpotter.judges import judge_instrument
 from promptpotter.shared.errors import (
     CellUnscoreableError,
@@ -655,20 +657,30 @@ def _evolved_overlay(stores: Stores, at: SubjectSpec) -> tuple[dict[str, Any], d
     if at.kind != "candidate" or not at.cycle_id:
         return {}, {}
     hop = CycleHop(campaign_id=at.campaign_id, cycle_id=at.cycle_id)
-    index = stores.campaigns.load(hop) or {}
     # Newest round first: a candidate id is unique, but scanning down means a re-measured point
     # answers from the document that measured it last.
-    for round_num in reversed(range(int(index.get("n_rounds") or 0) + 1)):
-        doc = stores.campaigns.load_round_file(hop, round_num)
-        if doc is None:
-            continue
-        for cand in doc.candidate_scores:
-            if cand.candidate_id == at.candidate_id:
-                return (
-                    dict(cand.pipeline_overlay or {}),
-                    dict(cand.resolved_pipeline_params or {}),
-                )
+    for path in reversed(CycleLayout(stores.campaigns.cycle_dir(hop)).round_files()):
+        by_candidate = derived(
+            ("overlay_by_candidate", path),
+            sig=file_sig(path),
+            compute=partial(_round_overlays, path),
+        )
+        if by_candidate and (hit := by_candidate.get(at.candidate_id)) is not None:
+            return dict(hit[0]), dict(hit[1])
     return {}, {}
+
+
+def _round_overlays(path: Path) -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
+    """One closed round's ``candidate_id -> (pipeline_overlay, resolved_pipeline_params)``."""
+    doc = read_json_tolerant(path, {})
+    return {
+        str(cand.get("candidate_id")): (
+            cand.get("pipeline_overlay") or {},
+            cand.get("resolved_pipeline_params") or {},
+        )
+        for cand in doc.get("candidate_scores") or []
+        if isinstance(cand, dict)
+    }
 
 
 def nested_pipeline_ref(dataset_dir: Path, view: PipelineView | None) -> NestedPipelineRef | None:
@@ -1010,53 +1022,55 @@ class CampaignRunsWith(StrictModel):
 
 # A prompt, a description and a nested value are no setting one line can print.
 _RUNS_WITH_KINDS = frozenset({"model", "enum", "number", "bool", "string"})
-_RUNS_WITH: dict[Path, tuple[tuple[Any, ...], CampaignRunsWith | None]] = {}
+_RUNS_WITH_UNRESOLVED = (
+    OSError,
+    ValueError,
+    KeyError,
+    TypeError,
+    StoredConfigInvalidError,
+    PayloadInvalidError,
+)
 
 
 def campaign_runs_with(stores: Stores, campaign: Campaign) -> CampaignRunsWith | None:
     """The campaign LIST's reading of what a root runs with — the two merges
     :func:`resolve_pipeline_for_campaign` takes, without the identity and evolved layers or the
-    rows. Cached per root on the stat of every file the merge reads, because the list is polled.
-    ``None`` is a root whose pipeline did not resolve; one broken dataset drops its own row only."""
+    rows. Held per root on everything the merge reads, because the list is polled. ``None`` is a
+    root whose pipeline did not resolve; one broken dataset drops its own row only."""
     root = stores.campaigns.cycle_dir(campaign.root_hop)
-    key: tuple[Any, ...] | None = None
-    answer: CampaignRunsWith | None
+
+    def resolve() -> CampaignRunsWith | None:
+        try:
+            return _runs_with(stores, campaign, draft)
+        except _RUNS_WITH_UNRESOLVED:
+            logger.exception("runs_with: root pipeline of %s did not resolve", campaign.campaign_id)
+            return None
+
     try:
         draft = _authoring_draft(stores, campaign)
         key = _runs_with_key(stores, campaign, root, draft)
-        hit = _RUNS_WITH.get(root)
-        if hit is not None and hit[0] == key:
-            return hit[1]
-        answer = _runs_with(stores, campaign, draft)
-    except (
-        OSError,
-        ValueError,
-        KeyError,
-        TypeError,
-        StoredConfigInvalidError,
-        PayloadInvalidError,
-    ):
+    except _RUNS_WITH_UNRESOLVED:
         logger.exception("runs_with: root pipeline of %s did not resolve", campaign.campaign_id)
-        answer = None
-    if key is not None:
-        _RUNS_WITH[root] = (key, answer)
-    return answer
+        return None
+    return derived(("runs_with", root), sig=key, compute=resolve)
 
 
 def _runs_with_key(
     stores: Stores, campaign: Campaign, root: Path, draft: DraftCampaign | None
 ) -> tuple[Any, ...]:
     dataset_dir = _dataset_dir_of(stores, campaign)
-    layout = CycleLayout(root)
+    # The seed's VALUE, never its ledger's stat: a running root appends to that ledger on every
+    # sample, and the seed it carries does not move.
+    seed = stores.campaigns.read_cycle_seed(campaign.root_hop)
     return (
         stable_hash(campaign.config),
         campaign.backend_type,
         campaign.dataset_name,
         campaign.root_cycle_id,
         dataset_dir,
-        stat_key(dataset_pipeline_path(dataset_dir)) if dataset_dir is not None else None,
-        stat_key(layout.resolved_pipeline),
-        stat_key(layout.ledger),
+        file_sig(dataset_pipeline_path(dataset_dir)) if dataset_dir is not None else None,
+        file_sig(CycleLayout(root).resolved_pipeline),
+        None if seed is None else stable_hash(seed.model_dump(mode="json")),
         None if draft is None else stable_hash(draft.to_disk()),
     )
 

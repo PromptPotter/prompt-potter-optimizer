@@ -12,9 +12,11 @@ import hashlib
 import json
 import logging
 import os
+import threading
 from collections.abc import Callable, Iterable, Iterator
+from functools import partial
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, ClassVar, NamedTuple
 
 from filelock import BaseFileLock, FileLock, Timeout
 
@@ -36,8 +38,11 @@ from promptpotter.infrastructure.store.io import (
 )
 from promptpotter.infrastructure.store.layout import MEASUREMENTS_DIR
 from promptpotter.infrastructure.store.read_model import (
+    Signature,
     append_row,
     compact,
+    derived,
+    file_sig,
     fold_jsonl,
     fold_jsonl_from,
 )
@@ -168,8 +173,22 @@ class MeasurementArchive:
     """**Identity does not include the execution path.** A measurement is keyed by content, and no
     read or write takes a ``backend_id`` — repointing a dataset at another connector serves the old rows."""
 
+    _open: ClassVar[dict[Path, MeasurementArchive]] = {}
+    _open_lock: ClassVar[threading.Lock] = threading.Lock()
+
+    @classmethod
+    def at(cls, base_dir: Path) -> MeasurementArchive:
+        """The process's ONE archive over *base_dir*, so every reader of it shares the index tail
+        instead of re-folding the whole index per request."""
+        with cls._open_lock:
+            archive = cls._open.get(base_dir)
+            if archive is None:
+                archive = cls._open[base_dir] = cls(base_dir)
+            return archive
+
     def __init__(self, base_dir: Path):
         self._base_dir = base_dir
+        self._lock = threading.RLock()
         self._rows: dict[str, dict[str, Any]] | None = None
         self._stat: tuple[int, int] | None = None
         self._cursor: tuple[int, int] | None = None
@@ -217,40 +236,41 @@ class MeasurementArchive:
         """Tailed rather than re-folded, and every read STATS the file first — an L4 inner cycle runs
         in-process over the same dir, so a memo trusting only its own writes goes blind to its appends."""
         path = self._index_path()
-        try:
-            st = path.stat()
-        except FileNotFoundError:
-            self._invalidate()
-            return {}
-        sig = (st.st_mtime_ns, st.st_size)
-        if self._rows is not None and sig == self._stat:
+        with self._lock:
+            try:
+                st = path.stat()
+            except FileNotFoundError:
+                self._invalidate()
+                return {}
+            sig = (st.st_mtime_ns, st.st_size)
+            if self._rows is not None and sig == self._stat:
+                return self._rows
+            start = 0 if self._rows is None else _tail_from(st, self._cursor)
+            # The fold returns the newline-aligned offset, so a crash-truncated trailing line stays
+            # pending instead of being skipped forever once the writer completes it.
+            fresh, offset = fold_jsonl_from(path, _INDEX_FOLD_KEY, start)
+            # A NEW dict on every change: the instance is shared, and a reader still iterating
+            # the one it was handed must not see it grow.
+            self._rows = {**self._rows, **fresh} if start and self._rows is not None else fresh
+            self._cursor = (st.st_ino, offset)
+            for run_id in fresh:
+                self._ticks.pop(run_id, None)
+                self._clock += 1
+                self._ticks[run_id] = self._clock
+            self._stat = sig
             return self._rows
-        start = 0 if self._rows is None else _tail_from(st, self._cursor)
-        # The fold returns the newline-aligned offset, so a crash-truncated trailing line stays
-        # pending instead of being skipped forever once the writer completes it.
-        fresh, offset = fold_jsonl_from(path, _INDEX_FOLD_KEY, start)
-        if start and self._rows is not None:
-            self._rows.update(fresh)
-        else:
-            self._rows = fresh
-        self._cursor = (st.st_ino, offset)
-        for run_id in fresh:
-            self._ticks.pop(run_id, None)
-            self._clock += 1
-            self._ticks[run_id] = self._clock
-        self._stat = sig
-        return self._rows
 
     def _entries_since(self, mark: int) -> tuple[list[dict[str, Any]], int]:
         """Index entries changed after tick *mark*, and the tick to pass next time."""
-        rows = self._live_rows()
-        changed: list[dict[str, Any]] = []
-        for run_id, tick in reversed(self._ticks.items()):
-            if tick <= mark:
-                break
-            if run_id in rows:
-                changed.append(rows[run_id])
-        return changed, self._clock
+        with self._lock:
+            rows = self._live_rows()
+            changed: list[dict[str, Any]] = []
+            for run_id, tick in reversed(self._ticks.items()):
+                if tick <= mark:
+                    break
+                if run_id in rows:
+                    changed.append(rows[run_id])
+            return changed, self._clock
 
     # -- complete runs --------------------------------------------------------
 
@@ -370,6 +390,20 @@ class MeasurementArchive:
         """Fold a run's detail log into the full run dict (no index scan); ``None`` if the log
         is absent or carries no header row yet."""
         return _fold_detail(self._detail_path(run_id))
+
+    def sample_ids(self, run_id: str) -> frozenset[int]:
+        """The samples one run measured — the answer to "did this run touch that set", for a
+        reader that would otherwise fold the whole detail to look at one column of it."""
+        path = self._detail_path(run_id)
+        ids = derived(
+            ("run_sample_ids", path), sig=file_sig(path), compute=partial(_sample_ids, path)
+        )
+        return ids or frozenset()
+
+    def signature(self, run_id: str | None = None) -> Signature | None:
+        """What a memo over one run's detail is keyed on — over the index where *run_id* is
+        ``None``, which every ``append_run`` moves, so it stands for "the archive changed"."""
+        return file_sig(self._index_path() if run_id is None else self._detail_path(run_id))
 
     def detail_signatures(self) -> dict[str, tuple[int, int]]:
         """Lets a caller memoize a DERIVATION of the details rather than the details themselves. A run_id
@@ -689,6 +723,15 @@ def _fold_detail(path: Path) -> dict[str, Any] | None:
         {k: v for k, v in row.items() if k != _FOLD_KEY} for row in rows.values()
     ]
     return data
+
+
+def _sample_ids(path: Path) -> frozenset[int]:
+    detail = _fold_detail(path)
+    if detail is None:
+        return frozenset()
+    return frozenset(
+        sid for row in detail["measurements"] if isinstance(sid := row.get("sample_id"), int)
+    )
 
 
 def _to_measurement(

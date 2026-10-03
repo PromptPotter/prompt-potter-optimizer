@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import Query
+from fastapi import Query, Request, Response
 from pydantic import Field
 
 from promptpotter.application.campaign_config import (
@@ -39,6 +39,7 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.account_spend import campaign_spend
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.presentation.api.deps import StoresDep, decode_descend
+from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import BadRequestError, NotFoundError, PayloadInvalidError
 
@@ -185,6 +186,7 @@ _LIFECYCLE_FILTERS = ("active", "archived", "deleted", "checkin", "all")
 
 @campaigns_router.get("/campaigns", response_model=CampaignListResponse)
 def list_campaigns(
+    request: Request,
     stores: StoresDep,
     dataset: str | None = Query(default=None, description="Filter to one dataset"),
     lifecycle: str = Query(
@@ -193,7 +195,7 @@ def list_campaigns(
         "'checkin' — the authoring phase, asked of the root cycle's flag; or 'all'",
     ),
     descend: str | None = Query(None),
-) -> CampaignListResponse:
+) -> Response:
     """Every campaign in one store owned by the caller, newest first.
 
     Filters: optional ``?dataset=`` for one dataset, ``?lifecycle=`` for the
@@ -218,9 +220,12 @@ def list_campaigns(
     owner = str(leaf.identity.user_id)
     campaigns = leaf.campaigns.list_campaigns(dataset, lifecycle=lifecycle, owner_user_id=owner)
     campaigns.sort(key=lambda c: c.created_at, reverse=True)
-    return CampaignListResponse(
-        campaigns=[_campaign_summary(c, leaf) for c in campaigns],
-        total=len(campaigns),
+    return conditional_json(
+        request,
+        CampaignListResponse(
+            campaigns=[_campaign_summary(c, leaf) for c in campaigns],
+            total=len(campaigns),
+        ),
     )
 
 
@@ -270,13 +275,14 @@ def get_campaign(stores: StoresDep, campaign_id: str) -> CampaignDetailResponse:
 
 @campaigns_router.get("/campaigns/{campaign_id}/pipeline", response_model=CampaignPipelineResponse)
 def get_campaign_pipeline(
+    request: Request,
     stores: StoresDep,
     campaign_id: str,
     at: str = Query(
         default="",
         description="Searchpoint subject (`parse_subject` grammar); defaults to the campaign root",
     ),
-) -> CampaignPipelineResponse:
+) -> Response:
     """What this campaign RUNS — the one server-owned answer (`frontend-surface-contract.md::I9`).
     Ownership-gated by `load_owned`, 404 on cross-tenant: this body carries the operator's own
     model choices."""
@@ -287,7 +293,7 @@ def get_campaign_pipeline(
     campaign = leaf.campaigns.load_owned(campaign_id, str(leaf.identity.user_id))
     if campaign is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
-    return resolve_pipeline_for_campaign(leaf, campaign, at=spec)
+    return conditional_json(request, resolve_pipeline_for_campaign(leaf, campaign, at=spec))
 
 
 class ForkPreviewRequest(StrictModel):

@@ -5,16 +5,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
-from promptpotter.domain.phases import RunPhase
+from promptpotter.domain.phases import CONTROL_PHASE, RunPhase
 from promptpotter.domain.run_records import PhaseRecord
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
 
 __all__ = ["declare_run_phase", "pause_requested"]
-
-# The PhaseRecord.phase discriminator that LiveDashboardProjection routes to run_phase.
-_CONTROL_PHASE = "control"
 
 
 def declare_run_phase(
@@ -35,7 +32,7 @@ def declare_run_phase(
     if ledger is None:
         return
     payload = {"stop_reason": stop_reason} if stop_reason else {}
-    ledger.append(PhaseRecord(phase=_CONTROL_PHASE, event=str(phase), payload=payload))
+    ledger.append(PhaseRecord(phase=CONTROL_PHASE, event=str(phase), payload=payload))
 
 
 def pause_requested(session: Session) -> bool:

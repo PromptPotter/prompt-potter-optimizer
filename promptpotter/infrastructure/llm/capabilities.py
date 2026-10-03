@@ -46,6 +46,7 @@ from promptpotter.infrastructure.store.io import (
     read_yaml_optional,
     write_json,
 )
+from promptpotter.infrastructure.store.read_model import derived, file_sig
 from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)
@@ -136,7 +137,12 @@ def resolve_model_capabilities(model: str, *, workspace: Path) -> ModelCapabilit
     A caller holding a node's declared ladder uses it only where the answer is ``None``."""
     key = normalize_model_id(model)
 
-    override = read_yaml_optional(_override_path(workspace)) or {}
+    override_path = _override_path(workspace)
+    override = derived(
+        ("model_capability_override", override_path),
+        sig=file_sig(override_path),
+        compute=lambda: read_yaml_optional(override_path),
+    )
     entry = override.get(key) if isinstance(override, dict) else None
     if isinstance(entry, dict):
         raw = entry.get("reasoning_efforts")
@@ -155,7 +161,16 @@ def resolve_model_capabilities(model: str, *, workspace: Path) -> ModelCapabilit
                 model=model, reasoning_efforts=None, reasoning_note=note, source="override"
             )
 
-    cached = read_json_tolerant(_cache_path(workspace), default={}) or {}
+    # The snapshot is hundreds of KB and a menu asks once per model, so it is parsed per write.
+    path = _cache_path(workspace)
+    cached = (
+        derived(
+            ("model_capabilities", path),
+            sig=file_sig(path),
+            compute=lambda: read_json_tolerant(path, default={}),
+        )
+        or {}
+    )
     models = cached.get("models") if isinstance(cached, dict) else None
     record = models.get(key) if isinstance(models, dict) else None
     if not isinstance(record, dict):

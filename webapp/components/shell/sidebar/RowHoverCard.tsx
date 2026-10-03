@@ -24,7 +24,10 @@ function RowCardBody({ card }: { card: RowCardFacts }) {
   const { campaignId, settings } = card;
   const read = useRead(
     campaignId != null
-      ? { key: campaignId, fetch: (signal) => fetchCampaignStorage(campaignId, signal) }
+      ? {
+          key: campaignId,
+          conditional: (signal, etag) => fetchCampaignStorage(campaignId, signal, etag),
+        }
       : null,
     { surface: "campaign-storage" },
   );

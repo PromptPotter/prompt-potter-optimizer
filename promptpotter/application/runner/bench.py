@@ -20,6 +20,7 @@ from promptpotter.domain.bench import BenchPass, BenchPasses, BenchReading, Benc
 from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopOutcome, emit_phase
 from promptpotter.domain.results import resolved_fitness
 from promptpotter.infrastructure.store.archive_queries import load_run
+from promptpotter.infrastructure.store.read_model import derived
 from promptpotter.shared.instrument import NO_ROUND_SLOT, MeasurementRole
 
 if TYPE_CHECKING:
@@ -99,6 +100,24 @@ def read_bench(
 ) -> BenchScore:
     """The headline, derived from the passes' archived facts under *scorer* — for the run that
     graded them and every later reader alike, so a copy of it is only ever a cache."""
+    archive = stores.archive
+    # Regraded only when a pass's archived run moves: the campaign list asks on every poll.
+    runs = tuple(
+        None if p is None or p.run_id is None else archive.signature(p.run_id)
+        for p in (passes.origin, passes.selected)
+    )
+    score = derived(
+        ("bench", archive.base_dir, passes.model_dump_json(), scorer_id),
+        sig=runs,
+        compute=lambda: _grade_bench(stores, passes, scorer, scorer_id=scorer_id),
+    )
+    assert score is not None
+    return score
+
+
+def _grade_bench(
+    stores: Stores, passes: BenchPasses, scorer: CellScorer, *, scorer_id: str
+) -> BenchScore:
     origin = read_pass(stores, passes.origin, scorer, tolerance=passes.tolerance)
     if passes.selected is None:
         selected = PassReading(None, "not graded until the line's run ends", [])

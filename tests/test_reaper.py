@@ -31,8 +31,8 @@ import pytest
 from promptpotter.application.jobs import reaper
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
-from promptpotter.domain.phases import RunPhase
-from promptpotter.domain.run_records import TokenUsageRecord
+from promptpotter.domain.phases import CONTROL_PHASE, RunPhase
+from promptpotter.domain.run_records import PhaseRecord, TokenUsageRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import heartbeat as heartbeat_mod
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
@@ -111,7 +111,9 @@ def test_a_pause_that_set_no_flag_is_still_never_reaped(built_stores: Stores) ->
     had never crashed. The declaration is the whole difference and it must bind here, not
     just in the freshness read."""
     cycle_dir = _mint(built_stores, dashboard=True)
-    write_json(cycle_dir / "dashboard.json", {"declared_phase": RunPhase.PAUSED.value})
+    CycleEventLog.open(CycleDir(cycle_dir)).append(
+        PhaseRecord(phase=CONTROL_PHASE, event=RunPhase.PAUSED.value)
+    )
     _age(cycle_dir, seconds_ago=1000.0)
 
     assert derive_run_phase(cycle_dir, is_terminal=False, fresh_s=1.0) is RunPhase.PAUSED
@@ -155,7 +157,9 @@ def test_a_cycle_held_at_the_origin_gate_is_never_reaped(built_stores: Stores) -
     SECOND line: even from a stale tree (a machine sleep beat the heartbeat), a
     declared gate is not a dead producer."""
     cycle_dir = _mint(built_stores, dashboard=True)
-    write_json(cycle_dir / "dashboard.json", {"declared_phase": "gate"})
+    CycleEventLog.open(CycleDir(cycle_dir)).append(
+        PhaseRecord(phase=CONTROL_PHASE, event=RunPhase.GATE.value)
+    )
     _age(cycle_dir, seconds_ago=1000.0)
 
     assert sweep_dead_cycles(built_stores.projects_root, dead_after_s=1.0) == 0

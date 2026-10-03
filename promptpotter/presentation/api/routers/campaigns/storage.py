@@ -8,12 +8,14 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from fastapi import Request, Response
 from pydantic import Field
 
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import iter_files, read_json_tolerant
 from promptpotter.infrastructure.store.layout import SHARED_CACHE_DIRS, FileKind, classify
 from promptpotter.presentation.api.deps import StoresDep
+from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError
 
@@ -58,8 +60,11 @@ def _campaign_split(root: Path) -> dict[str, int]:
     acc = dict.fromkeys(_LEAVES, 0)
     if not root.is_dir():
         return acc
+    # Walked per request: only the whole listing covers these bytes (a directory's mtime stands
+    # still while a file below it grows), and taking that listing IS this walk.
+    below = len(root.parts)
     for path, st in iter_files(root):
-        kind = classify(path.relative_to(root))
+        kind = classify(path.parts[below:])
         if kind is FileKind.ROUND_PUBLIC:
             conn = min(_connector_bytes_of(str(path), st.st_mtime_ns, st.st_size), st.st_size)
             acc["connector"] += conn
@@ -102,14 +107,17 @@ class CampaignStorageResponse(StrictModel):
 
 
 @campaigns_router.get("/campaigns/{campaign_id}/storage", response_model=CampaignStorageResponse)
-def get_campaign_storage(stores: StoresDep, campaign_id: str) -> CampaignStorageResponse:
+def get_campaign_storage(request: Request, stores: StoresDep, campaign_id: str) -> Response:
     """On-disk size of the campaign tree, split into the six MECE leaves. 404 on cross-user."""
     campaign = stores.campaigns.load_owned(campaign_id, str(stores.identity.user_id))
     if campaign is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
     acc = _campaign_split(stores.campaigns.campaign_root_dir(campaign_id))
-    return CampaignStorageResponse(
-        campaign_id=campaign_id, on_disk_bytes=sum(acc.values()), **_leaf_fields(acc)
+    return conditional_json(
+        request,
+        CampaignStorageResponse(
+            campaign_id=campaign_id, on_disk_bytes=sum(acc.values()), **_leaf_fields(acc)
+        ),
     )
 
 
@@ -133,7 +141,7 @@ class DatasetStorageResponse(StrictModel):
 
 
 @campaigns_router.get("/workspace/storage-by-dataset", response_model=DatasetStorageResponse)
-def get_storage_by_dataset(stores: StoresDep) -> DatasetStorageResponse:
+def get_storage_by_dataset(request: Request, stores: StoresDep) -> Response:
     """Per-dataset on-disk leaf breakdown (the Files-view 'cake') — every campaign of a
     dataset pooled, then split into the six MECE leaves. Includes archived campaigns; the
     shared measurement store is excluded (it's not per-dataset-owned)."""
@@ -147,7 +155,10 @@ def get_storage_by_dataset(stores: StoresDep) -> DatasetStorageResponse:
         for name, acc in by_dataset.items()
     ]
     entries.sort(key=lambda e: e.total_bytes, reverse=True)
-    return DatasetStorageResponse(total_bytes=sum(e.total_bytes for e in entries), datasets=entries)
+    return conditional_json(
+        request,
+        DatasetStorageResponse(total_bytes=sum(e.total_bytes for e in entries), datasets=entries),
+    )
 
 
 # --- workspace rollup — accounts for 100% of the tenant's disk ----------------
@@ -184,7 +195,7 @@ class WorkspaceStorageResponse(StrictModel):
 
 
 @campaigns_router.get("/workspace/storage", response_model=WorkspaceStorageResponse)
-def get_workspace_storage(stores: StoresDep) -> WorkspaceStorageResponse:
+def get_workspace_storage(request: Request, stores: StoresDep) -> Response:
     """Per-campaign on-disk slices across the caller's whole workspace, fattest first,
     plus the shared caches and a residual ``other`` slice so the grand total equals the
     tenant's real footprint — answers "where did the bucket sizes go?", nothing excluded.
@@ -211,9 +222,12 @@ def get_workspace_storage(stores: StoresDep) -> WorkspaceStorageResponse:
     # and a clamp on a residual is the shape of two walks that disagreed. Both halves read the ONE
     # declaration: named in the sum but not the skip set, a cache would be counted twice.
     other = _dir_size(base, skip=frozenset({"campaigns", *SHARED_CACHE_DIRS}))
-    return WorkspaceStorageResponse(
-        total_bytes=campaigns_total + shared + other,
-        shared_cache_bytes=shared,
-        other_bytes=other,
-        campaigns=entries,
+    return conditional_json(
+        request,
+        WorkspaceStorageResponse(
+            total_bytes=campaigns_total + shared + other,
+            shared_cache_bytes=shared,
+            other_bytes=other,
+            campaigns=entries,
+        ),
     )

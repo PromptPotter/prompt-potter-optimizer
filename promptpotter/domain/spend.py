@@ -306,6 +306,23 @@ class SpendRollup(StrictModel):
                 # Tracked so the dashboard flags the cap as inactive.
                 bucket.unpriced_tokens += in_tok + out_tok
 
+        self._retotal()
+
+    def absorb(self, other: SpendRollup) -> None:
+        """Add *other* — another ledger's whole rollup — bucket by bucket. A line's spend is the
+        sum over its ledgers, each folded once."""
+        for mine, theirs in zip(self.buckets, other.buckets, strict=True):
+            for name in SpendBucket.model_fields:
+                held, added = getattr(mine, name), getattr(theirs, name)
+                if isinstance(held, bool):
+                    setattr(mine, name, held or added)
+                elif isinstance(held, float):
+                    setattr(mine, name, round(held + added, 6))
+                else:
+                    setattr(mine, name, held + added)
+        self._retotal()
+
+    def _retotal(self) -> None:
         # Over `buckets`, never a hand-named pair: the budget gate reads `total_used_usd`, so a
         # bucket left out of this fold is spend the cap cannot see.
         self.total_used_usd = round(sum(b.used_usd for b in self.buckets), 6)

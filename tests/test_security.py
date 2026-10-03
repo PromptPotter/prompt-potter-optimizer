@@ -636,7 +636,7 @@ def test_deleting_a_campaign_does_not_un_spend_what_it_spent(built_stores: Any) 
         "utf-8",
     )
 
-    before = sum_user_spend(ledgers=account_ledgers(stores.campaigns), since=0.0, until=2e9)
+    before = sum_user_spend(ledgers=account_ledgers(stores.campaigns))
     assert before.used_usd == pytest.approx(0.25)
     assert before.used_tokens == 1_500
 
@@ -645,7 +645,7 @@ def test_deleting_a_campaign_does_not_un_spend_what_it_spent(built_stores: Any) 
     )
     assert not ledger.exists()
 
-    after = sum_user_spend(ledgers=account_ledgers(stores.campaigns), since=0.0, until=2e9)
+    after = sum_user_spend(ledgers=account_ledgers(stores.campaigns))
     assert after == before
 
 
@@ -708,9 +708,7 @@ def test_deleting_a_spent_stub_fork_does_not_un_spend_it(built_stores: Any) -> N
     retried_ledger = _spent_cycle(retried, n_rounds=0, cost_usd=0.05)
 
     def _account_usd() -> float:
-        return sum_user_spend(
-            ledgers=account_ledgers(stores.campaigns), since=0.0, until=2e9
-        ).used_usd
+        return sum_user_spend(ledgers=account_ledgers(stores.campaigns)).used_usd
 
     before = _account_usd()
     assert before == pytest.approx(0.23)
@@ -1637,7 +1635,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
         )
     finally:
         reset_cycle_ledger(bound)
-    priced = sum_user_spend(ledgers=[tmp_path / "priced.jsonl"], since=0.0, until=2e9)
+    priced = sum_user_spend(ledgers=[tmp_path / "priced.jsonl"])
     assert priced.unpriced_tokens == 0
     assert priced.used_usd == pytest.approx(400_000 * 1e-6 + 100_000 * 2e-6)
 

@@ -16,6 +16,7 @@ from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.domain.measurement_provenance import entry_grade, meets_grade
 from promptpotter.domain.scoring import is_graded
 from promptpotter.infrastructure.store import archive_queries
+from promptpotter.infrastructure.store.read_model import derived
 
 if TYPE_CHECKING:
     from promptpotter.domain.scoring import CellScorer
@@ -31,25 +32,6 @@ __all__ = [
 # heatmap the operator reads must be the same scale, so this is not a knob.
 _RULER_GRADE = "A"
 
-# Derived observations per run, revalidated against the detail file's signature.
-#
-# The round-close writers rebuild the dataset-scope artifact EVERY round, and each rebuild
-# re-parsed all 676 grade-A detail files — 90 MB of json.loads, ~1.2 s, for an archive that
-# gained one run. Caching the DERIVATION (8834 triples, 1.3 MB) instead of the details
-# themselves keeps this bounded; caching the details would not.
-#
-# Keyed by (archive dir, run_id, scorer_id) — run_ids are content-addressed, but the archive is
-# tenant-scoped and an L4 inner cycle runs in-process over a sandboxed one, so the dir belongs in
-# the key; and the grade is the READER's formula (below), so a sweep running two ``per_cell``
-# formulas over one dataset in one process must not share a memo. The signature is what makes it
-# correct: the scoring walk re-saves the same run_id after every sample, so a run's detail GROWS
-# under us.
-#
-# Cells, not Observations: the candidate a run belongs to is decided by the caller (the
-# origin alias below), so baking it into the memo would serve one caller's naming to another.
-_CELLS: dict[tuple[str, str, str], tuple[tuple[int, int], tuple[tuple[int, float], ...]]] = {}
-_CELLS_MAX = 4096
-
 
 def _run_cells(
     stores: Stores,
@@ -59,25 +41,22 @@ def _run_cells(
     scorer: CellScorer,
     scorer_id: str,
 ) -> tuple[tuple[int, float], ...]:
-    if sig is None:
-        return ()
-    key = (str(stores.archive.base_dir), run_id, scorer_id)
-    hit = _CELLS.get(key)
-    if hit is not None and hit[0] == sig:
-        return hit[1]
-    detail = archive_queries.load_run(stores, run_id)
-    if detail is None:
-        return ()
-    rows = rescore_results([dict(item) for item in detail.get("measurements", [])], scorer)
-    cells = tuple(
-        (int(sid), float(row["objective"]))
-        for row in rows
-        if (sid := row.get("sample_id")) is not None and is_graded(row)
-    )
-    if len(_CELLS) >= _CELLS_MAX:
-        _CELLS.clear()
-    _CELLS[key] = (sig, cells)
-    return cells
+    """Keyed by archive dir and scorer beside the run: the archive is tenant-scoped, the grade is
+    the READER's formula, and a run's detail GROWS under the scoring walk."""
+
+    def grade() -> tuple[tuple[int, float], ...]:
+        detail = archive_queries.load_run(stores, run_id)
+        if detail is None:
+            return ()
+        rows = rescore_results([dict(item) for item in detail.get("measurements", [])], scorer)
+        return tuple(
+            (int(sid), float(row["objective"]))
+            for row in rows
+            if (sid := row.get("sample_id")) is not None and is_graded(row)
+        )
+
+    key = ("run_cells", stores.archive.base_dir, run_id, scorer_id)
+    return derived(key, sig=sig, compute=grade) or ()
 
 
 def build_archive_observations(

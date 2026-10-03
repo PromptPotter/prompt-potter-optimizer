@@ -81,7 +81,7 @@ function Cake({
 export function StorageCakes() {
   const data = readyData(
     useRead(
-      { key: "storage-by-dataset", fetch: fetchStorageByDataset },
+      { key: "storage-by-dataset", conditional: fetchStorageByDataset },
       { surface: "storage-by-dataset" },
     ),
   );

@@ -14,6 +14,7 @@ decides nothing."""
 
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.cells import CellCandidate, CellRow
@@ -23,6 +24,7 @@ from promptpotter.domain.scoring import recorded_cost_s
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import ROUND_GLOB, CycleLayout, cycle_dir_for
+from promptpotter.infrastructure.store.read_model import derived, file_sig
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -62,18 +64,19 @@ def row_cell(item: dict[str, Any], *, run_id: str, key: str) -> CellRow | None:
     )
 
 
-def _live_cells(
-    cycle_dir: Path, cycle_id: str, closed: set[int], wanted: set[int] | None
-) -> ScopeCells:
+_RoundCells = tuple[int, ScopeCells]
+
+
+def _live_round(dashboard: Path, cycle_id: str) -> _RoundCells | None:
     """The round IN FLIGHT, off `dashboard.json`'s served rows — the projection's own grading, not
-    a second one. A round a file already carries is skipped."""
-    dash = read_json_tolerant(CycleLayout(cycle_dir).dashboard)
+    a second one."""
+    dash = read_json_tolerant(dashboard)
     current = dash.get("current_round") if isinstance(dash, dict) else None
     if not isinstance(current, dict):
-        return [], []
+        return None
     round_no = current.get("round")
-    if not isinstance(round_no, int) or round_no in closed:
-        return [], []
+    if not isinstance(round_no, int):
+        return None
     candidates: list[CellCandidate] = []
     cells: list[CellRow] = []
     for cand in current.get("candidates") or []:
@@ -100,7 +103,7 @@ def _live_cells(
             continue
         for s in samples:
             sid = s.get("sample_id") if isinstance(s, dict) else None
-            if not isinstance(sid, int) or (wanted is not None and sid not in wanted):
+            if not isinstance(sid, int):
                 continue
             cells.append(
                 CellRow(
@@ -116,55 +119,79 @@ def _live_cells(
                     output_tokens=s.get("output_tokens"),
                 )
             )
-    return candidates, cells
+    return round_no, (candidates, cells)
+
+
+def _closed_round(round_path: Path, cycle_id: str) -> _RoundCells | None:
+    doc = read_json_tolerant(round_path)
+    if not isinstance(doc, dict) or not isinstance(doc.get("round"), int):
+        return None
+    round_no = int(doc["round"])
+    candidates: list[CellCandidate] = []
+    cells: list[CellRow] = []
+    acr = doc.get("all_candidate_results") or {}
+    for cs in doc.get("candidate_scores") or []:
+        if not isinstance(cs, dict) or not isinstance(cs.get("candidate_id"), str):
+            continue
+        label = str(cs["label"])
+        key = f"{cycle_id}/{label}"
+        run_id = cs["run_id"]
+        candidates.append(
+            CellCandidate(
+                key=key,
+                label=label,
+                candidate_id=cs["candidate_id"],
+                run_id=run_id,
+                round=round_no,
+                cycle_id=cycle_id,
+            )
+        )
+        rows = acr.get(cs["candidate_id"]) or []
+        if run_id is None:
+            if rows:
+                raise ValueError(f"{round_path} candidate {label} holds cells but names no run")
+            continue
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            cell = row_cell(item, run_id=run_id, key=key)
+            if cell is not None:
+                cells.append(cell)
+    return round_no, (candidates, cells)
 
 
 def cycle_cells(stores: Stores, hop: CycleHop, wanted: set[int] | None = None) -> ScopeCells:
     """One cycle's cells: its closed rounds, then the round in flight. *wanted* keeps only those
     samples' cells; the candidates are kept whole, since a candidate is a column, not a row."""
-    cycle_dir = cycle_dir_for(stores.base_dir, hop)
-    rounds_dir = CycleLayout(cycle_dir).rounds
+    layout = CycleLayout(cycle_dir_for(stores.base_dir, hop))
     candidates: list[CellCandidate] = []
     cells: list[CellRow] = []
     closed: set[int] = set()
-    for round_path in sorted(rounds_dir.glob(ROUND_GLOB)) if rounds_dir.is_dir() else ():
-        doc = read_json_tolerant(round_path)
-        if not isinstance(doc, dict) or not isinstance(doc.get("round"), int):
+    cycle_id = hop.cycle_id
+    paths = sorted(layout.rounds.glob(ROUND_GLOB)) if layout.rounds.is_dir() else []
+    reads = [
+        derived(
+            ("round_cells", path),
+            sig=file_sig(path),
+            compute=partial(_closed_round, path, cycle_id),
+        )
+        for path in paths
+    ]
+    live = derived(
+        ("live_cells", layout.dashboard),
+        sig=file_sig(layout.dashboard),
+        compute=partial(_live_round, layout.dashboard, cycle_id),
+    )
+    for read in reads:
+        if read is not None:
+            closed.add(read[0])
+    for read in [*reads, None if live is None or live[0] in closed else live]:
+        if read is None:
             continue
-        round_no = int(doc["round"])
-        closed.add(round_no)
-        acr = doc.get("all_candidate_results") or {}
-        for cs in doc.get("candidate_scores") or []:
-            if not isinstance(cs, dict) or not isinstance(cs.get("candidate_id"), str):
-                continue
-            label = str(cs["label"])
-            key = f"{hop.cycle_id}/{label}"
-            run_id = cs["run_id"]
-            candidates.append(
-                CellCandidate(
-                    key=key,
-                    label=label,
-                    candidate_id=cs["candidate_id"],
-                    run_id=run_id,
-                    round=round_no,
-                    cycle_id=hop.cycle_id,
-                )
-            )
-            rows = acr.get(cs["candidate_id"]) or []
-            if run_id is None:
-                if rows:
-                    raise ValueError(f"{round_path} candidate {label} holds cells but names no run")
-                continue
-            for item in rows:
-                if not isinstance(item, dict):
-                    continue
-                if wanted is not None and item.get("sample_id") not in wanted:
-                    continue
-                cell = row_cell(item, run_id=run_id, key=key)
-                if cell is not None:
-                    cells.append(cell)
-    live_candidates, live_cells = _live_cells(cycle_dir, hop.cycle_id, closed, wanted)
-    return candidates + live_candidates, cells + live_cells
+        round_candidates, round_cells = read[1]
+        candidates.extend(round_candidates)
+        cells.extend(c for c in round_cells if wanted is None or c.sample_id in wanted)
+    return candidates, cells
 
 
 def campaign_cells(stores: Stores, campaign_id: str, wanted: set[int] | None = None) -> ScopeCells:

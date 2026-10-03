@@ -7,6 +7,9 @@ import hashlib
 from datetime import UTC, datetime
 from email.utils import format_datetime, parsedate_to_datetime
 
+from fastapi import Request, Response
+from pydantic import BaseModel
+
 
 def http_date(epoch_seconds: float) -> str:
     """Format an mtime as an HTTP-date (RFC 7231 §7.1.1.1). Second resolution."""
@@ -45,3 +48,27 @@ def client_has_etag(if_none_match: str | None, etag: str) -> bool:
         if tag == "*" or tag.removeprefix("W/") == wanted:
             return True
     return False
+
+
+def model_json(model: BaseModel, *, headers: dict[str, str] | None = None) -> Response:
+    """A served model, serialized ONCE: returned as a model, FastAPI dumps it to Python objects,
+    validates and encodes it again. ``response_model=`` stays on the decorator, for the spec."""
+    return Response(
+        content=model.model_dump_json(by_alias=True),
+        media_type="application/json",
+        headers=headers,
+    )
+
+
+def conditional_json(request: Request, model: BaseModel, *, stamp: str | None = None) -> Response:
+    """``model_json`` under a validator cut from the body itself, so no caller can leave out a part
+    it depends on. ``stamp`` names a field that moves on every request: it stays out of the cut."""
+    response = model_json(model)
+    validated = (
+        model.model_dump_json(by_alias=True, exclude={stamp}).encode() if stamp else response.body
+    )
+    etag = f'W/"{hashlib.sha256(validated).hexdigest()[:32]}"'
+    if client_has_etag(request.headers.get("if-none-match"), etag):
+        return Response(status_code=304, headers={"ETag": etag})
+    response.headers["ETag"] = etag
+    return response

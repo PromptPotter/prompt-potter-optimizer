@@ -5,14 +5,15 @@ from __future__ import annotations
 
 import base64
 import json
-import logging
 from collections import deque
+from functools import partial
 from pathlib import Path
-from typing import Any, NamedTuple, cast
+from typing import Any, ClassVar, NamedTuple, cast
 
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, encode_cycle_path
+from promptpotter.domain.phases import CONTROL_PHASE
 from promptpotter.domain.projection_envelope import (
     NON_ACTIVITY_KINDS,
     RAY_PAYLOAD_FIELDS,
@@ -27,9 +28,8 @@ from promptpotter.infrastructure.store.layout import (
     cycle_dir_for,
 )
 from promptpotter.infrastructure.store.lineage_queries import FamilyCourse
+from promptpotter.infrastructure.store.read_model import LedgerIndex
 from promptpotter.shared.clock import epoch_seconds
-
-logger = logging.getLogger(__name__)
 
 __all__ = [
     "DEFAULT_RAY_LIMIT",
@@ -72,7 +72,7 @@ _NEVER_KINDS: frozenset[str] = NON_ACTIVITY_KINDS
 # `llm_call_progress`: while an inner campaign runs, the OUTER cycle emits its own
 # heartbeat, so the same wall-clock is already proven alive by a record the ray keeps.
 _INNER_KINDS: frozenset[str] = frozenset({"cycle_seed", "round_warning", "error"})
-_INNER_PHASES: frozenset[str] = frozenset({"round", "control", "backend"})
+_INNER_PHASES: frozenset[str] = frozenset({"round", CONTROL_PHASE, "backend"})
 
 # A typo in a hand-typed kind silently never matches — fail at import instead. `_NEVER_KINDS`
 # needs no such guard now: it is keyed off `ProjectionKind` itself.
@@ -169,74 +169,85 @@ def _curated(kind: str, rec: dict[str, Any], *, depth: int) -> bool:
     return kind == "phase" and rec.get("phase") in _INNER_PHASES
 
 
+class _Tail(NamedTuple):
+    rows: list[_Raw]
+    total: int
+
+
+class _RayTail:
+    """One ledger's newest ``limit`` curated records under both curations: depth is the REQUEST's.
+    Clamped over the WHOLE file: records are stamped at construction but appended later."""
+
+    probes: ClassVar[frozenset[str]] = frozenset()
+
+    def __init__(
+        self, limit: int = MAX_RAY_LIMIT, path_and_bound: tuple[str, RayCursor] | None = None
+    ) -> None:
+        self._below = path_and_bound
+        self._own: deque[_Raw] = deque(maxlen=limit)
+        self._inner: deque[_Raw] = deque(maxlen=limit)
+        self._own_total = 0
+        self._inner_total = 0
+        self._last_epoch: float | None = None
+        self._last_ts = ""
+
+    def feed(self, offset: int, rec: dict[str, Any]) -> None:
+        kind = rec.get("record_type")
+        if not isinstance(kind, str) or kind not in _VALID_KINDS:
+            return
+        own = epoch_seconds(rec.get("timestamp"))
+        if own is None or (self._last_epoch is not None and own < self._last_epoch):
+            if self._last_epoch is None:
+                # No usable time yet. A fabricated epoch would sort below every
+                # outstanding cursor and mutate windows that were already served.
+                return
+        else:
+            self._last_epoch, self._last_ts = own, str(rec.get("timestamp"))
+        if not _curated(kind, rec, depth=0):
+            return
+        # Projected HERE rather than at `RayItem` construction: the tail holds only what a
+        # chronology reads, never a record's bulk.
+        assert self._last_epoch is not None
+        if self._below and (self._last_epoch, self._below[0], offset) >= self._below[1]:
+            return
+        row = _Raw(
+            offset,
+            self._last_epoch,
+            self._last_ts,
+            kind,
+            ray_payload(cast(ProjectionKind, kind), rec),
+        )
+        self._own.append(row)
+        self._own_total += 1
+        if _curated(kind, rec, depth=1):
+            self._inner.append(row)
+            self._inner_total += 1
+
+    def value(self) -> tuple[_Tail, _Tail]:
+        return (
+            _Tail(list(self._own), self._own_total),
+            _Tail(list(self._inner), self._inner_total),
+        )
+
+
+_RAY_FOLDS = (_RayTail,)
+
+
 def _read_curated(
     ledger: Path, *, encoded_path: str, depth: int, keep: int, bound: RayCursor | None
 ) -> tuple[list[_Raw], bool]:
-    """The newest ``keep`` curated records below ``bound``, oldest-first, plus whether older ones fell
-    out. Clamped over the WHOLE file: records are stamped at construction but appended later."""
-    if not ledger.is_file():
-        return [], False
-    window: deque[_Raw] = deque(maxlen=keep)
-    dropped = False
-    last_epoch: float | None = None
-    last_ts = ""
-    clamped = 0
-    with ledger.open("rb") as fh:
-        # `enumerate` counts every physical line, exactly as `CycleEventLog.append` assigns
-        # offsets — these indices join against a live SSE frame's `sequence`. Do not
-        # skip-without-counting.
-        for offset, raw in enumerate(fh):
-            line = raw.strip()
-            if not line:
-                continue
-            try:
-                rec = json.loads(line)
-            except ValueError:
-                # A torn final line (append is not crash-atomic) or a version-skewed record.
-                # Skip-and-continue, as every sibling reader does — one bad line must not
-                # blind the whole chronology.
-                logger.warning(
-                    "skipping unparseable ledger line at offset %d in %s", offset, ledger
-                )
-                continue
-            if not isinstance(rec, dict):
-                continue
-            kind = rec.get("record_type")
-            if not isinstance(kind, str) or kind not in _VALID_KINDS:
-                continue
-
-            own = epoch_seconds(rec.get("timestamp"))
-            if own is None:
-                if last_epoch is None:
-                    # No usable time yet. A fabricated epoch would sort below every
-                    # outstanding cursor and mutate windows that were already served.
-                    logger.warning(
-                        "no parseable timestamp yet at offset %d in %s — skipped", offset, ledger
-                    )
-                    continue
-                eff_epoch, eff_ts = last_epoch, last_ts
-            elif last_epoch is not None and own < last_epoch:
-                eff_epoch, eff_ts = last_epoch, last_ts
-                clamped += 1
-            else:
-                eff_epoch, eff_ts = own, str(rec.get("timestamp"))
-            last_epoch, last_ts = eff_epoch, eff_ts
-
-            if bound is not None and (eff_epoch, encoded_path, offset) >= bound:
-                break
-            if not _curated(kind, rec, depth=depth):
-                continue
-            if len(window) == keep:
-                dropped = True
-            # Projected HERE rather than at `RayItem` construction: the window holds `keep`
-            # records per ledger across the whole family, so a merge over a deep L4 family
-            # would otherwise carry every dropped payload in memory to discard it at the end.
-            window.append(
-                _Raw(offset, eff_epoch, eff_ts, kind, ray_payload(cast(ProjectionKind, kind), rec))
-            )
-    if clamped:
-        logger.warning("clamped %d inverted timestamp(s) in %s", clamped, ledger)
-    return list(window), dropped
+    """The newest ``keep`` curated records below ``bound``, oldest-first, plus whether older ones
+    fell out. A window older than the index's tail costs one whole pass."""
+    tail = LedgerIndex.of(ledger, _RAY_FOLDS).view(_RayTail)[min(depth, 1)]
+    if bound is not None:
+        below = [r for r in tail.rows if (r.epoch, encoded_path, r.offset) < bound]
+        if len(below) < keep and tail.total > len(tail.rows):
+            window = partial(_RayTail, keep, (encoded_path, bound))
+            older_tail = LedgerIndex(ledger, (window,)).view(_RayTail)[min(depth, 1)]
+            return older_tail.rows, older_tail.total > keep
+        older = tail.total - len(tail.rows) + len(below)
+        return below[-keep:], older > keep
+    return tail.rows[-keep:], tail.total > keep
 
 
 def encode_ray_cursor(key: RayCursor) -> str:

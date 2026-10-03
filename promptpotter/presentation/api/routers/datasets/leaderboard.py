@@ -6,18 +6,20 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Query
+from fastapi import Query, Request, Response
 
 from promptpotter.application.scoring.cells import measurement_log, open_cell
 from promptpotter.domain.cells import Cell, CellsResponse, HeatmapScope
 from promptpotter.domain.dashboard_rows import SampleStatus
 from promptpotter.domain.results import HardSampleOrder
 from promptpotter.presentation.api.deps import StoresDep, decode_descend
+from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json
 from promptpotter.presentation.api.routers.datasets._router import datasets_router
 
 
 @datasets_router.get("/{name}/cells", response_model=CellsResponse)
 def get_dataset_cells(
+    request: Request,
     name: str,
     stores: StoresDep,
     limit: int = Query(default=50, ge=1, le=1000, description="Samples per page."),
@@ -66,10 +68,10 @@ def get_dataset_cells(
     status: Annotated[
         SampleStatus | None, Query(description="Keep only cells with this mark.")
     ] = None,
-) -> CellsResponse:
+) -> Response:
     """The measurement log. Under a filter, ``samples`` and ``candidates`` shrink to the ones
     holding a kept cell, so a preset (one candidate, one round) serves exactly its own rows."""
-    return measurement_log(
+    log = measurement_log(
         stores,
         name,
         scope=scope,
@@ -83,6 +85,7 @@ def get_dataset_cells(
         round=round,
         status=status,
     )
+    return conditional_json(request, log)
 
 
 @datasets_router.get("/{name}/cells/{run_id}/{sample_id}", response_model=Cell)

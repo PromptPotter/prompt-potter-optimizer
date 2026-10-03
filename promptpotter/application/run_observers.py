@@ -10,11 +10,13 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.optimizer_manifest import select_optimizer
+from promptpotter.application.run_phase_control import declare_run_phase
 from promptpotter.application.views.ingress import from_phase_event
 from promptpotter.application.views.readout import ReadoutProjection
 from promptpotter.application.views.view_models import ViewContext
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.dashboard_rows import RunStanding
+from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import (
     CycleRecord,
@@ -677,6 +679,9 @@ def build_run_observers(
     ledger.bind(readout)
     ledger.bind(racing)
     session.state.ledger = ledger
+    # Every launch says so on the ledger: a resume of a paused cycle is otherwise a run the
+    # ledger still calls paused, and the ledger is where the run phase is read.
+    declare_run_phase(session, RunPhase.RUNNING)
 
     callbacks = RunCallbacks(ledger=ledger)
     # Bind the ledger into the per-asyncio-task ContextVar so emit_token_usage

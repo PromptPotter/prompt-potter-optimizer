@@ -144,12 +144,9 @@ def bench_reads(stores: Stores, *, dataset_name: str, sample_ids: frozenset[int]
     The RAW index, never the evidence epoch: a holdout was spent by every read, seen or not."""
     graded: set[str] = set()
     for entry in stores.archive.list_all(dataset_name=dataset_name):
-        if (
-            entry.get("name") != MeasurementRole.BENCH
-            or (detail := stores.archive.load_by_id(entry["run_id"])) is None
-        ):
+        if entry.get("name") != MeasurementRole.BENCH:
             continue
-        if any(row.get("sample_id") in sample_ids for row in detail["measurements"]):
+        if not sample_ids.isdisjoint(stores.archive.sample_ids(entry["run_id"])):
             graded.add(str(entry.get("prompt_fields_id") or entry["run_id"]))
     return len(graded)
 

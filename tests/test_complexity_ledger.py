@@ -723,7 +723,9 @@ LEDGER_BASELINE = {
     # scratch one it filed to never being inherited (test_security).
     # +1: a rewind's discarded rounds still on the ledger fold into the stall count and the lives
     # bank, so the re-run escalates or stops on rounds it never ran (test_resume).
-    "test_functions": 233,
+    # +1: a polled spend read folding only the appended tail misses an append, reads through a
+    # compaction, or pairs a call count with another moment's total (test_integrity § 7).
+    "test_functions": 234,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

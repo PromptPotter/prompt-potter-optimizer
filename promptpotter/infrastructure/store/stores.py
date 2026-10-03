@@ -174,7 +174,7 @@ def build_stores(
         sessions=SessionStore(tenant_dir),
         campaigns=CampaignStore(tenant_dir),
         checkin=CheckinDraftStore(tenant_dir),
-        archive=MeasurementArchive(shared_tenant),
+        archive=MeasurementArchive.at(shared_tenant),
         optimizer_reuse=LLMReuseCache(shared_tenant, OPTIMIZER_REUSE_DIR),
         judge_reuse=LLMReuseCache(shared_tenant, JUDGE_REUSE_DIR),
         diagnostic_runs=DiagnosticRunStore(tenant_dir),

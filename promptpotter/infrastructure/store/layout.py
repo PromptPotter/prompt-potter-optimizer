@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -364,10 +365,10 @@ class FileKind(Enum):
         self.keepsake = keepsake
 
 
-def classify(rel: Path) -> FileKind:
-    """First match wins; the final branch makes the partition exhaustive. ``ROUND_PUBLIC`` is the
-    lone file whose bytes straddle two leaves, so the rollup splits it rather than reading ``.leaf``."""
-    parts = rel.parts
+def classify(parts: Sequence[str]) -> FileKind:
+    """*parts* is the path below the campaign root. ``ROUND_PUBLIC`` is the lone file whose bytes
+    straddle two leaves, so the rollup splits it rather than reading ``.leaf``."""
+    name = parts[-1]
     if "langfuse" in parts:
         i = parts.index("langfuse")
         sub = parts[i + 1] if i + 1 < len(parts) else ""
@@ -377,12 +378,12 @@ def classify(rel: Path) -> FileKind:
         sub = parts[j + 1] if j + 1 < len(parts) else ""
         if sub == "cache":
             return FileKind.CONNECTOR_CACHE
-        if rel.name == "ledger.jsonl":
+        if name == "ledger.jsonl":
             return FileKind.LEDGER
         return FileKind.LOOP_TELEMETRY  # streams/ + anything else under .runtime
-    if rel.name in _REPORT_NAMES:
+    if name in _REPORT_NAMES:
         return FileKind.REPORT
-    if "rounds" in parts and rel.name.startswith("round_") and rel.suffix == ".json":
+    if "rounds" in parts and name.startswith("round_") and name.endswith(".json"):
         return FileKind.ROUND_PUBLIC
     return FileKind.LOOP_TELEMETRY  # prompts/, residual → loop telemetry
 

@@ -93,8 +93,7 @@ class CycleLedgerTail:
         except json.JSONDecodeError:
             logger.warning("dashboard.json malformed at %s; warming_up snapshot", dashboard)
             reason = "dashboard_unreadable"
-        declared = str(body.get("declared_phase", "")) if isinstance(body, dict) else None
-        run_phase = str(derive_run_phase(self._layout.cycle_dir, declared=declared))
+        run_phase = str(derive_run_phase(self._layout.cycle_dir))
         if isinstance(body, dict):
             body["run_phase"] = run_phase
             overlay_armed_controls(body, self._layout.cycle_dir)

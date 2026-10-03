@@ -50,6 +50,7 @@ from promptpotter.presentation.api.routers.campaigns._conditional import (
     client_has_etag,
     client_seen_at_or_after,
     http_date,
+    model_json,
     weak_etag,
 )
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
@@ -125,8 +126,7 @@ def serve_dashboard_response(
     # than a per-field judgement — `runtime_flags.py::overlay_armed_controls` states it and owns
     # the set.
     body = read_json_tolerant(path) if present else None
-    declared = str(body.get("declared_phase", "")) if isinstance(body, dict) else None
-    run_phase = str(derive_run_phase(cycle_path, declared=declared))
+    run_phase = str(derive_run_phase(cycle_path))
     if at is not None:
         # A replay. Two overlays, for the same reason and neither optional: `run_phase` answers
         # what the producer is doing NOW, a clock fact rather than a property of the moment; the
@@ -411,4 +411,4 @@ def get_lineage_tree(
             serves_value=formula is not None,
             serves_subset=bool(masked),
         ).apply(tree)
-    return JSONResponse(tree.model_dump(mode="json"), headers=headers)
+    return model_json(tree, headers=headers)

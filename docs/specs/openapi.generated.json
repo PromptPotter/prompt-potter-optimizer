@@ -9454,7 +9454,7 @@
     },
     "/api/v1/evidence": {
       "get": {
-        "description": "The campaign subjects' bench head-to-head, guarded by whether one bench set graded them;\nthen roster, comparability, replicates, the cell/subject/residual decomposition, what the\nselection can resolve, the run-order confound, and — under the selected metric — a merged\ninterval per subject with every pairwise test. Reduced fresh from disk on each fetch\n(on-demand, not the 2 s poll); zero LLM, nothing persisted.",
+        "description": "The campaign subjects' bench head-to-head, guarded by whether one bench set graded them;\nthen roster, comparability, replicates, the cell/subject/residual decomposition, what the\nselection can resolve, the run-order confound, and — under the selected metric — a merged\ninterval per subject with every pairwise test. Reduced on each fetch (on-demand, not the 2 s\npoll) from per-subject reads held until a file they read moves; zero LLM, nothing persisted.",
         "operationId": "get_evidence_api_v1_evidence_get",
         "parameters": [
           {

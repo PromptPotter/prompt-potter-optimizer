@@ -60,12 +60,12 @@ Certified contract:
 
 **Every cycle — root, fork, diag — owns its live stream** at
 `cycles/{cycle_id}/dashboard.json`, stamped with its own id; a fork's view can never
-surface the parent's; read sites serve the viewed cycle's own file — no `root_cycle_id` collapse. **`dashboard.json::declared_phase` is the runner's
-DECLARATION, never the served answer** — one input to `runtime_flags.py::derive_run_phase`, the
-ONE function every surface is served from; the two holding no `index.json` (the dashboard route
-and the SSE snapshot) pass neither optional input and let it read both. The file's only writer
-lives in the process that dies, so served raw it reads `running` forever after a kill; `run_phase`
-stays on the model `exclude=True` — wire-only, never on disk. The
+surface the parent's; read sites serve the viewed cycle's own file — no `root_cycle_id` collapse. **`dashboard.json::declared_phase` is a MIRROR of the runner's
+declaration and no served read parses it.** The declaration is a ledger record (`phase="control"`),
+and `runtime_flags.py::derive_run_phase` — the ONE function every surface is served from — reads
+the last one off the ledger index. Its only writer lives in the process that dies, so served raw
+it reads `running` forever after a kill; `run_phase` stays on the model `exclude=True` — wire-only,
+never on disk. The
 `running` → `detached` edge moves with the CLOCK, not with a write, so it is expressed once
 (`_detached_after`) and the conditional-GET validator reads it from there rather than restating
 it — a 304 computed off a second copy outlives the answer it stands for.
@@ -131,7 +131,7 @@ writes, and why — [`docs/operations/persistence-and-state.md`](../../docs/oper
 
 Shared I/O in `store/io.py`, and **format follows authorship**: `write_json`/`read_json*` for what code writes and only code reads, `write_yaml`/`read_yaml*` for the operator-authored config tier under `datasets/`. There is deliberately no `read_yaml_tolerant` — a corrupt config degrading to "not there" attributes a measurement to the wrong fingerprint.
 
-Path helpers live in `store/layout.py`, the per-tenant active-session pointer in `store/session_pointer.py`, and derived reads are free functions in query modules (`store/archive_queries.py` is the template). `measurements/` is cross-cycle and cross-campaign **within one tenant** — `build_stores` roots it and every `SHARED_CACHE_DIRS` peer at `shared_root / identity.tenant_id`, so content-addressing makes a row shareable across campaigns and into an L4 sandbox, never across accounts. `MeasurementArchive` is the DB core and `store/archive_queries.py` its single-writer facade — a write not going through that facade is the bug.
+Path helpers live in `store/layout.py`, the per-tenant active-session pointer in `store/session_pointer.py`, and derived reads are free functions in query modules (`store/archive_queries.py` is the template). `measurements/` is cross-cycle and cross-campaign **within one tenant** — `build_stores` roots it and every `SHARED_CACHE_DIRS` peer at `shared_root / identity.tenant_id`, so content-addressing makes a row shareable across campaigns and into an L4 sandbox, never across accounts. `MeasurementArchive` is the DB core — ONE instance per `base_dir` per process (`MeasurementArchive.at`), so readers share its index tail — and `store/archive_queries.py` its single-writer facade — a write not going through that facade is the bug.
 
 The `CycleDir` / `WorkspaceDir` write-target newtypes live in `domain/cycle_paths.py` — projections and stores accept these, not raw `str`/`Path` — as does `CycleHop`, which every per-cycle `CampaignStore` method takes in place of a `(campaign_id, cycle_id)` pair (both `str`, so a swapped call read as "no data" rather than raising). Build it from the carrier that owns both, never by re-pairing.
 

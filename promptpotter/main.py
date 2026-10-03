@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import logging
+import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -12,6 +13,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference
 from starlette.datastructures import MutableHeaders
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from promptpotter.application.initialization.wiring import complete_registries
@@ -236,6 +238,7 @@ class SecurityHeadersMiddleware:
             return
         is_api = scope.get("path", "").startswith("/api/v1/")
         is_https = scope.get("scheme") == "https"
+        began = time.perf_counter()
 
         async def send_with_headers(message: Message) -> None:
             if message["type"] == "http.response.start":
@@ -255,11 +258,18 @@ class SecurityHeadersMiddleware:
                 )
                 if is_api:
                     headers["cache-control"] = "no-store"
+                    # Time to the first response byte, so the browser's Network panel splits
+                    # what the server spent from what the request spent queued behind others.
+                    elapsed_ms = (time.perf_counter() - began) * 1000
+                    headers["server-timing"] = f"app;dur={elapsed_ms:.1f}"
             await send(message)
 
         await self.app(scope, receive, send_with_headers)
 
 
+# Inside the header seam, so a response is timed and headed once, compressed or not. Pure ASGI,
+# and it passes ``text/event-stream`` through untouched — the SSE feed is never buffered.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 app.add_middleware(SecurityHeadersMiddleware)
 
 

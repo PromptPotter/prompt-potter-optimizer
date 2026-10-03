@@ -16,14 +16,15 @@ during an admissibility check.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
+from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import ValidationError
 
 from promptpotter.domain.dashboard_rows import RunStanding
-from promptpotter.domain.phases import CampaignPhase, RunPhase
+from promptpotter.domain.phases import CONTROL_PHASE, CampaignPhase, RunPhase
 from promptpotter.domain.results import ArmOutcome
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler
 from promptpotter.domain.run_records import (
@@ -37,7 +38,7 @@ from promptpotter.domain.run_records import (
     WallClock,
 )
 from promptpotter.domain.spend import TOKEN_KIND_BUCKET, SpendRollup
-from promptpotter.infrastructure.store.read_model import iter_jsonl
+from promptpotter.infrastructure.store.read_model import LedgerFold, LedgerIndex, iter_jsonl
 from promptpotter.shared.clock import epoch_seconds
 
 # The `ScoredCandidate` keys the fold copies verbatim — `LedgerCandidate`'s own field list
@@ -54,34 +55,251 @@ _SCORED_INCLUDE = frozenset(LedgerCandidate.model_fields) - {
 }
 
 
+class _CycleSeed:
+    probes: ClassVar[frozenset[str]] = frozenset({"cycle_seed"})
+
+    def __init__(self) -> None:
+        self._found: CycleSeed | None = None
+
+    def feed(self, offset: int, rec: dict[str, Any]) -> None:
+        seed_data = rec.get("seed")
+        if rec.get("record_type") != "cycle_seed" or not isinstance(seed_data, dict):
+            return
+        with suppress(ValidationError):
+            self._found = CycleSeed.model_validate(seed_data)
+
+    def value(self) -> CycleSeed | None:
+        return self._found
+
+
+class _RunLimits:
+    probes: ClassVar[frozenset[str]] = frozenset({"run_limits"})
+
+    def __init__(self) -> None:
+        self._found = RunLimitsRecord()
+
+    def feed(self, offset: int, rec: dict[str, Any]) -> None:
+        if rec.get("record_type") != "run_limits":
+            return
+        with suppress(ValidationError):
+            self._found = RunLimitsRecord.model_validate(rec)
+
+    def value(self) -> RunLimitsRecord:
+        return self._found.model_copy()
+
+
+class _Candidates:
+    probes: ClassVar[frozenset[str]] = frozenset({"candidate_minted", "candidate_scored"})
+
+    def __init__(self) -> None:
+        self._found: dict[tuple[int, int], dict[str, object]] = {}
+        self._folded: list[LedgerCandidate] | None = None
+
+    def _merge(self, key: tuple[int, int], **fields: object) -> None:
+        acc = self._found.setdefault(key, {"round": key[0], "idx": key[1]})
+        acc.update({k: v for k, v in fields.items() if v is not None})
+        self._folded = None
+
+    def feed(self, offset: int, rec: dict[str, Any]) -> None:
+        kind = rec.get("record_type")
+        if kind == "candidate_minted":
+            try:
+                minted = CandidateMintedRecord.model_validate(rec)
+            except ValidationError:
+                return
+            self._merge(
+                (minted.round, minted.idx),
+                candidate_id=minted.candidate_id,
+                parent_ids=minted.parent_ids,
+                label=minted.label,
+                changes_description=minted.changes_description,
+                source=minted.source,
+            )
+        elif kind == "snapshot" and rec.get("event") == "candidate_scored":
+            rnd, idx = rec.get("round"), rec.get("candidate_idx")
+            scores = (rec.get("payload") or {}).get("scores")
+            if not isinstance(rnd, int) or not isinstance(idx, int):
+                return
+            if not isinstance(scores, dict):
+                return
+            # `(round, idx)` is the join, NOT the id — a re-run re-mints ids, position is
+            # stable. `scores` IS a `ScoredCandidate.model_dump()` from EVERY sender, C0
+            # included, so everything the candidate knows about itself is already here and
+            # is copied by name. Election and θ are not: they belong to the ROUND, and the
+            # round says so on its own close record (`scan_ledger_round_closes`).
+            fields = {key: scores.get(key) for key in _SCORED_INCLUDE}
+            if not int(scores.get("total") or 0):
+                # A report over ZERO rows carries no measurement — an INVALID candidate's
+                # synthetic 0.0 reads as getting every answer wrong. Identity and state survive;
+                # numbers nothing earned do not (``_merge`` skips ``None``).
+                fields["accuracy"] = None
+                fields["composite_fitness"] = None
+            self._merge(
+                (rnd, idx),
+                state="invalid" if scores.get("outcome") == ArmOutcome.INVALID else "measured",
+                **fields,
+            )
+
+    def value(self) -> list[LedgerCandidate]:
+        # An `id` + a `label` are what make a candidate a NODE. A fold that saw neither event
+        # in full (a torn line, a `candidate_started` with no id) yields nothing rather than a
+        # nameless row — an absent node is honest, a nameless one is not.
+        if self._folded is None:
+            self._folded = []
+            for key in sorted(self._found):
+                with suppress(ValidationError):
+                    self._folded.append(LedgerCandidate.model_validate(self._found[key]))
+        return list(self._folded)
+
+
+class _Decisions:
+    probes: ClassVar[frozenset[str]] = frozenset({"decision"})
+
+    def __init__(self) -> None:
+        self._by_round: dict[int, list[dict[str, object]]] = {}
+
+    def feed(self, offset: int, rec: dict[str, Any]) -> None:
+        rnd = rec.get("round")
+        if not isinstance(rnd, int):
+            return
+        self._by_round.setdefault(rnd, []).append(
+            {
+                "kind": rec.get("kind"),
+                "inputs_ref": rec.get("inputs_ref") or {},
+                "outcome": rec.get("outcome"),
+                "data": rec.get("data") or {},
+            }
+        )
+
+    def value(self) -> dict[int, list[dict[str, object]]]:
+        return {rnd: list(made) for rnd, made in self._by_round.items()}
+
+
+class _Elections:
+    probes: ClassVar[frozenset[str]] = frozenset({"election"})
+
+    def __init__(self) -> None:
+        self._by_round: dict[int, ElectionRecord] = {}
+
+    def feed(self, offset: int, rec: dict[str, Any]) -> None:
+        try:
+            election = ElectionRecord.model_validate(rec)
+        except ValidationError:
+            return
+        self._by_round[election.round] = election
+
+    def value(self) -> dict[int, ElectionRecord]:
+        return dict(self._by_round)
+
+
+class _RoundCloses:
+    probes: ClassVar[frozenset[str]] = frozenset({"phase"})
+
+    def __init__(self) -> None:
+        self._by_round: dict[int, LedgerRoundClose] = {}
+
+    def feed(self, offset: int, rec: dict[str, Any]) -> None:
+        if rec.get("phase") != "round" or rec.get("event") != "complete":
+            return
+        rnd = rec.get("round")
+        if not isinstance(rnd, int):
+            return
+        payload = rec.get("payload")
+        payload = payload if isinstance(payload, dict) else {}
+        ability = payload.get("ability")
+        with suppress(ValidationError):
+            self._by_round[rnd] = LedgerRoundClose(
+                round=rnd,
+                ability=AbilityReading.model_validate(ability)
+                if isinstance(ability, dict)
+                else None,
+                abilities=payload.get("abilities") or {},
+            )
+
+    def value(self) -> dict[int, LedgerRoundClose]:
+        return dict(self._by_round)
+
+
+class _RunStanding:
+    probes: ClassVar[frozenset[str]] = frozenset({"phase"})
+
+    def __init__(self) -> None:
+        self._displayed: dict[str, Any] | None = None
+
+    def feed(self, offset: int, rec: dict[str, Any]) -> None:
+        if rec.get("phase") == "round" and rec.get("event") == "display":
+            self._displayed = rec
+
+    def value(self) -> RunStanding | None:
+        if self._displayed is None:
+            return None
+        return RunStanding.model_validate(self._displayed["payload"]["run_standing"])
+
+
+class _ControlPhase:
+    probes: ClassVar[frozenset[str]] = frozenset({"phase"})
+
+    def __init__(self) -> None:
+        self._declared = ""
+
+    def feed(self, offset: int, rec: dict[str, Any]) -> None:
+        if rec.get("record_type") == "phase" and rec.get("phase") == CONTROL_PHASE:
+            self._declared = str(rec.get("event", ""))
+
+    def value(self) -> str:
+        return self._declared
+
+
+class _Spend:
+    probes: ClassVar[frozenset[str]] = frozenset({"token_usage"})
+
+    def __init__(self) -> None:
+        self._spend = SpendRollup()
+        self._calls = 0
+
+    def feed(self, offset: int, rec: dict[str, Any]) -> None:
+        if rec.get("record_type") != "token_usage":
+            return
+        try:
+            usage = TokenUsageRecord.model_validate(rec)
+        except ValidationError:
+            return
+        self._spend.bank(usage)
+        self._calls += not usage.cached
+
+    def value(self) -> tuple[SpendRollup, int]:
+        return self._spend.model_copy(deep=True), self._calls
+
+
+LEDGER_FOLDS = (
+    _CycleSeed,
+    _RunLimits,
+    _Candidates,
+    _Decisions,
+    _Elections,
+    _RoundCloses,
+    _RunStanding,
+    _ControlPhase,
+    _Spend,
+)
+"""What a polled read asks of a cycle's ledger: ONE pass feeds them all, then only the appended
+tail. A scan run once per launch, or one holding a record's bulk, stays a plain pass below."""
+
+
+def _view[V](ledger_path: Path, fold: Callable[[], LedgerFold[V]]) -> V:
+    return LedgerIndex.of(ledger_path, LEDGER_FOLDS).view(fold)
+
+
 def scan_ledger_cycle_seed(ledger_path: Path) -> CycleSeed | None:
     """The cycle's own seed, or ``None`` when it carries none (a diag). Written once at mint, but
     the LAST match wins so a re-seed supersedes."""
-    found: CycleSeed | None = None
-    for rec in iter_jsonl(ledger_path, record_types=frozenset({"cycle_seed"})):
-        if rec.get("record_type") != "cycle_seed":
-            continue
-        seed_data = rec.get("seed")
-        if isinstance(seed_data, dict):
-            try:
-                found = CycleSeed.model_validate(seed_data)
-            except ValidationError:
-                continue
-    return found
+    return _view(ledger_path, _CycleSeed)
 
 
 def scan_ledger_run_limits(ledger_path: Path) -> RunLimitsRecord:
     """The cycle's standing operator ceiling — the LAST ``RunLimitsRecord`` on its OWN ledger,
     so a fork never reads its parent's. Every arm ``None`` where the operator never set one."""
-    found = RunLimitsRecord()
-    for rec in iter_jsonl(ledger_path, record_types=frozenset({"run_limits"})):
-        if rec.get("record_type") != "run_limits":
-            continue
-        try:
-            found = RunLimitsRecord.model_validate(rec)
-        except ValidationError:
-            continue
-    return found
+    return _view(ledger_path, _RunLimits)
 
 
 def scan_ledger_rulers(ledger_path: Path) -> dict[str, DeltaRuler]:
@@ -104,64 +322,7 @@ def scan_ledger_rulers(ledger_path: Path) -> dict[str, DeltaRuler]:
 def scan_ledger_candidates(ledger_path: Path) -> list[LedgerCandidate]:
     """The candidate tier, folded from mint + score records — independent of round CLOSE, so a cycle whose
     producer died mid-round still names what it minted. Election and θ are round-close facts, not here."""
-    found: dict[tuple[int, int], dict[str, object]] = {}
-
-    def _merge(key: tuple[int, int], **fields: object) -> None:
-        acc = found.setdefault(key, {"round": key[0], "idx": key[1]})
-        acc.update({k: v for k, v in fields.items() if v is not None})
-
-    for rec in iter_jsonl(
-        ledger_path, record_types=frozenset({"candidate_minted", "candidate_scored"})
-    ):
-        kind = rec.get("record_type")
-        if kind == "candidate_minted":
-            try:
-                minted = CandidateMintedRecord.model_validate(rec)
-            except ValidationError:
-                continue
-            _merge(
-                (minted.round, minted.idx),
-                candidate_id=minted.candidate_id,
-                parent_ids=minted.parent_ids,
-                label=minted.label,
-                changes_description=minted.changes_description,
-                source=minted.source,
-            )
-        elif kind == "snapshot" and rec.get("event") == "candidate_scored":
-            rnd, idx = rec.get("round"), rec.get("candidate_idx")
-            scores = (rec.get("payload") or {}).get("scores")
-            if not isinstance(rnd, int) or not isinstance(idx, int):
-                continue
-            if not isinstance(scores, dict):
-                continue
-            # `(round, idx)` is the join, NOT the id — a re-run re-mints ids, position is
-            # stable. `scores` IS a `ScoredCandidate.model_dump()` from EVERY sender, C0
-            # included, so everything the candidate knows about itself is already here and
-            # is copied by name. Election and θ are not: they belong to the ROUND, and the
-            # round says so on its own close record (`scan_ledger_round_closes`).
-            fields = {key: scores.get(key) for key in _SCORED_INCLUDE}
-            if not int(scores.get("total") or 0):
-                # A report over ZERO rows carries no measurement — an INVALID candidate's
-                # synthetic 0.0 reads as getting every answer wrong. Identity and state survive;
-                # numbers nothing earned do not (``_merge`` skips ``None``).
-                fields["accuracy"] = None
-                fields["composite_fitness"] = None
-            _merge(
-                (rnd, idx),
-                state="invalid" if scores.get("outcome") == ArmOutcome.INVALID else "measured",
-                **fields,
-            )
-
-    # An `id` + a `label` are what make a candidate a NODE. A fold that saw neither event
-    # in full (a torn line, a `candidate_started` with no id) yields nothing rather than a
-    # nameless row — an absent node is honest, a nameless one is not.
-    out: list[LedgerCandidate] = []
-    for key in sorted(found):
-        try:
-            out.append(LedgerCandidate.model_validate(found[key]))
-        except ValidationError:
-            continue
-    return out
+    return _view(ledger_path, _Candidates)
 
 
 def scan_ledger_decisions(ledger_path: Path) -> dict[int, list[dict[str, object]]]:
@@ -171,21 +332,8 @@ def scan_ledger_decisions(ledger_path: Path) -> dict[int, list[dict[str, object]
     like the better signal — ``persist_round`` appends a drain immediately before its
     ``round:complete``, so the next close ought to name the flushing round — and it is wrong:
     round 0 closes TWICE, the second time when the ruler warms at round 1, so the next close
-    after a round-1 decision reads 0. Trusting that misfiled 118 replayed decisions."""
-    out: dict[int, list[dict[str, object]]] = {}
-    for rec in iter_jsonl(ledger_path, record_types=frozenset({"decision"})):
-        rnd = rec.get("round")
-        if not isinstance(rnd, int):
-            continue
-        out.setdefault(rnd, []).append(
-            {
-                "kind": rec.get("kind"),
-                "inputs_ref": rec.get("inputs_ref") or {},
-                "outcome": rec.get("outcome"),
-                "data": rec.get("data") or {},
-            }
-        )
-    return out
+    after a round-1 decision reads 0."""
+    return _view(ledger_path, _Decisions)
 
 
 def scan_ledger_elections(ledger_path: Path) -> dict[int, ElectionRecord]:
@@ -193,52 +341,26 @@ def scan_ledger_elections(ledger_path: Path) -> dict[int, ElectionRecord]:
     round with no entry never elected** — still scoring, or halted on a holed panel — which is a
     different fact from one that elected and crowned nobody (here, with an empty ``winner_label``).
     Only this scan separates them, so an absent crown is no evidence on its own."""
-    out: dict[int, ElectionRecord] = {}
-    for rec in iter_jsonl(ledger_path, record_types=frozenset({"election"})):
-        try:
-            election = ElectionRecord.model_validate(rec)
-        except ValidationError:
-            continue
-        out[election.round] = election
-    return out
+    return _view(ledger_path, _Elections)
 
 
 def scan_ledger_round_closes(ledger_path: Path) -> dict[int, LedgerRoundClose]:
     """``round -> LedgerRoundClose`` for every round that CLOSED; last write per round wins, so a rewind
     supersedes. **A round with no entry never closed, and that is the honest answer** — nothing invents one.
-    A close with no readable payload is still a close; requiring one made this answer a narrower
-    question than its name, so rewind admissibility grew a second full pass of its own."""
-    out: dict[int, LedgerRoundClose] = {}
-    for rec in iter_jsonl(ledger_path, record_types=frozenset({"phase"})):
-        if rec.get("phase") != "round" or rec.get("event") != "complete":
-            continue
-        rnd = rec.get("round")
-        if not isinstance(rnd, int):
-            continue
-        payload = rec.get("payload")
-        payload = payload if isinstance(payload, dict) else {}
-        ability = payload.get("ability")
-        try:
-            out[rnd] = LedgerRoundClose(
-                round=rnd,
-                ability=AbilityReading.model_validate(ability)
-                if isinstance(ability, dict)
-                else None,
-                abilities=payload.get("abilities") or {},
-            )
-        except ValidationError:
-            continue
-    return out
+    A close with no readable payload is still a close."""
+    return _view(ledger_path, _RoundCloses)
 
 
 def scan_ledger_run_standing(ledger_path: Path) -> RunStanding | None:
     """The optimizer's standing as the LAST displayed round left it, or ``None`` before round 0
     has closed — a finished run's answer as much as a live one's."""
-    standing: RunStanding | None = None
-    for rec in iter_jsonl(ledger_path, record_types=frozenset({"phase"})):
-        if rec.get("phase") == "round" and rec.get("event") == "display":
-            standing = RunStanding.model_validate(rec["payload"]["run_standing"])
-    return standing
+    return _view(ledger_path, _RunStanding)
+
+
+def scan_ledger_declared_phase(ledger_path: Path) -> str:
+    """The run phase the cycle's runner LAST declared (``run_phase_control``), ``""`` where it
+    declared none — one input to ``runtime_flags.derive_run_phase``, never the served answer."""
+    return _view(ledger_path, _ControlPhase)
 
 
 _Span = tuple[float, float]
@@ -281,7 +403,7 @@ def _gate_spans(rows: list[dict[str, Any]], *, until: float | None) -> list[_Spa
     out: list[_Span] = []
     opened: float | None = None
     for rec in rows:
-        if rec.get("record_type") != "phase" or rec.get("phase") != "control":
+        if rec.get("record_type") != "phase" or rec.get("phase") != CONTROL_PHASE:
             continue
         if (at := epoch_seconds(rec.get("timestamp"))) is None:
             continue
@@ -427,15 +549,9 @@ def scan_ledger_spend(ledger_paths: Iterable[Path]) -> tuple[SpendRollup, int]:
     spend = SpendRollup()
     calls = 0
     for ledger_path in ledger_paths:
-        for rec in iter_jsonl(ledger_path, record_types=frozenset({"token_usage"})):
-            if rec.get("record_type") != "token_usage":
-                continue
-            try:
-                usage = TokenUsageRecord.model_validate(rec)
-            except ValidationError:
-                continue
-            spend.bank(usage)
-            calls += not usage.cached
+        own, sent = _view(ledger_path, _Spend)
+        spend.absorb(own)
+        calls += sent
     return spend, calls
 
 
@@ -505,6 +621,7 @@ __all__ = [
     "scan_ledger_candidates",
     "scan_ledger_cycle_seed",
     "scan_ledger_decisions",
+    "scan_ledger_declared_phase",
     "scan_ledger_elections",
     "scan_ledger_round_closes",
     "scan_ledger_run_standing",

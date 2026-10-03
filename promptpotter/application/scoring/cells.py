@@ -16,6 +16,7 @@ dataset's CURRENT pipeline schema."""
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.datasets.authored import (
@@ -66,6 +67,7 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.io import read_json
 from promptpotter.infrastructure.store.layout import campaign_root_dir_for, cycle_dir_for
+from promptpotter.infrastructure.store.read_model import derived
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.shared.errors import BadRequestError, NotFoundError, PayloadInvalidError
 
@@ -288,13 +290,21 @@ def _resolve_scope_artifact(
     # one that dataset declares; there is no campaign in scope to ask.
 
     scorer, scorer_id = dataset_cell_scorer(readable_dataset_dir(stores, name))
-    return build_archive_hard_samples_artifact(
-        stores,
-        dataset_name=name,
-        scorer=scorer,
-        scorer_id=scorer_id,
-        top_k_samples=None,
-    )
+
+    def build() -> dict[str, Any]:
+        return build_archive_hard_samples_artifact(
+            stores,
+            dataset_name=name,
+            scorer=scorer,
+            scorer_id=scorer_id,
+            top_k_samples=None,
+        )
+
+    # The index moves on every banked run, so its signature stands for "the archive changed":
+    # the ruler is refit once per change, not once per request.
+    key = ("dataset_hard_samples", stores.archive.base_dir, name, scorer_id)
+    held = derived(key, sig=stores.archive.signature(), compute=build)
+    return build() if held is None else held
 
 
 def _trim_unmeasured(
@@ -434,30 +444,41 @@ def _page_cells(
 def _dataset_cells(stores: Stores, name: str, wanted: set[int]) -> ScopeCells:
     """Every archive run filed under *name*, oldest first, graded under the dataset's own scorer —
     the one the dataset-scope heatmap grades with. A ``sample_id`` names a sample in one dataset."""
-    scorer, _ = dataset_cell_scorer(readable_dataset_dir(stores, name))
-    runs: list[tuple[str, str, dict[str, Any]]] = []
-    for entry in list_runs(stores, dataset_name=name):
-        run_id = entry["run_id"]
+    scorer, scorer_id = dataset_cell_scorer(readable_dataset_dir(stores, name))
+    archive = stores.archive
+
+    def graded(run_id: str) -> tuple[CellCandidate, list[CellRow]] | None:
         detail = load_run(stores, run_id)
-        if detail is not None:
-            runs.append((str(detail.get("created_at", "")), run_id, detail))
-    runs.sort(key=lambda r: (r[0], r[1]))
-    candidates: list[CellCandidate] = []
-    cells: list[CellRow] = []
-    for created_at, run_id, detail in runs:
-        candidates.append(
-            CellCandidate(
-                key=run_id,
-                label=str(detail.get("name") or run_id[:12]),
-                run_id=run_id,
-                created_at=created_at or None,
+        if detail is None:
+            return None
+        candidate = CellCandidate(
+            key=run_id,
+            label=str(detail.get("name") or run_id[:12]),
+            run_id=run_id,
+            created_at=str(detail.get("created_at", "")) or None,
+        )
+        rows = rescore_results(list(detail["measurements"]), scorer)
+        cells = [row_cell(item, run_id=run_id, key=run_id) for item in rows]
+        return candidate, [c for c in cells if c is not None]
+
+    # Each run is graded once per write of its detail; a request then only picks its samples.
+    runs = [
+        held
+        for entry in list_runs(stores, dataset_name=name)
+        if (
+            held := derived(
+                ("dataset_run_cells", archive.base_dir, entry["run_id"], scorer_id),
+                sig=archive.signature(entry["run_id"]),
+                compute=partial(graded, entry["run_id"]),
             )
         )
-        kept = [r for r in detail["measurements"] if r.get("sample_id") in wanted]
-        for item in rescore_results(kept, scorer):
-            if (cell := row_cell(item, run_id=run_id, key=run_id)) is not None:
-                cells.append(cell)
-    return candidates, cells
+        is not None
+    ]
+    runs.sort(key=lambda r: (r[0].created_at or "", r[0].run_id or ""))
+    return (
+        [candidate for candidate, _ in runs],
+        [c for _, cells in runs for c in cells if c.sample_id in wanted],
+    )
 
 
 def _dataset_hard_sample_order(stores: Stores, name: str) -> HardSampleOrder:

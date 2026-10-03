@@ -150,7 +150,7 @@ def read_account_wallet(
     direction for a wallet the account cannot top up. A stopped run's unreported sends bind the
     headroom as well, at their bounds: nobody learned what they cost."""
     ceilings = lifetime_ceilings(user=user, spends_own_key=spends_the_hosts_own_key(stores))
-    spent = sum_user_spend(ledgers=account_ledgers(stores.campaigns), since=0.0, until=time.time())
+    spent = sum_user_spend(ledgers=account_ledgers(stores.campaigns))
     if ceilings.usd is None and ceilings.tokens is None:
         return AccountWallet(spent, ceilings, ceilings)
     held = _outstanding_reservations(
