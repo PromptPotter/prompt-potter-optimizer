@@ -593,3 +593,43 @@ def test_reopening_a_finished_cycle_opens_a_reap_window_until_its_producer_is_fr
     assert sweep_dead_cycles(built_stores.projects_root, dead_after_s=60.0) == 0
     still = built_stores.campaigns.load(_HOP)
     assert still is not None and "finished_at" not in still
+
+
+async def test_a_run_in_its_own_process_is_judged_by_its_own_lock(tmp_path: Path) -> None:
+    """A server-launched run executes in its own process and adopts its job; the server keeps only
+    a watcher on the process it spawned. That watcher ending is not the run ending — on Windows
+    the spawned process is the venv launcher — and read as the run's death it stamps a live
+    campaign ``producer_vanished`` and hands its machine slot to a second run, with nothing
+    raised. Once adopted, the job answers to its producer's own lock, and only to that."""
+    import asyncio
+
+    from filelock import FileLock
+
+    from promptpotter.application.jobs.interlock import _producer_path
+    from promptpotter.application.jobs.registry import JobRegistry
+
+    jobs_dir = tmp_path / "jobs"
+    registry = JobRegistry(jobs_dir, capacity=lambda _live: 1)
+    job = registry.request_slot(user_id="u", dataset_name="d", hop=_HOP)
+    watcher = asyncio.create_task(asyncio.sleep(0))
+    registry.attach_task(job.job_id, watcher)
+    await watcher
+
+    # Another process took the job over and holds its producer lock.
+    path = _producer_path(jobs_dir, "4242-feedface")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    held = FileLock(str(path), timeout=0)
+    held.acquire()
+    adopted = registry.get(job.job_id)
+    assert adopted is not None
+    adopted.producer_id = "4242-feedface"
+    adopted.status = "running"
+    registry._persist(adopted)
+
+    assert [j.job_id for j in registry.list_running()] == [job.job_id]
+
+    held.release()
+    assert registry.list_running() == []
+    reaped = registry.get(job.job_id)
+    assert reaped is not None
+    assert (reaped.status, reaped.stop_reason) == ("stopped", "producer_vanished")

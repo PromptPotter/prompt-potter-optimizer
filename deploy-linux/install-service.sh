@@ -110,6 +110,9 @@ ExecStart=$INSTALL_DIR/.venv/bin/python -m uvicorn $APP_MODULE \\
     --forwarded-allow-ips=127.0.0.1
 Restart=on-failure
 RestartSec=3s
+# A run is its own process (jobs/launcher/run_job.py), so a restart of the API signals the API
+# alone: a paid run in flight finishes and is judged by its own lock when the API returns.
+KillMode=process
 # --- hardening (kernel-enforced blast-radius floor) ---------------------
 # uvicorn needs no privileges: drop every capability, deny privilege gain,
 # and make the whole filesystem read-only except the ONE directory it writes.

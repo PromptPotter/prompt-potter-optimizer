@@ -3,7 +3,6 @@ active pointer, restart-survivable); Start commits it. The tails differ ONLY in 
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -29,13 +28,12 @@ from promptpotter.application.jobs.launcher.admission import (
 from promptpotter.application.jobs.launcher.mint_and_start import (
     LaunchError,
     _assert_origin_ready,
-    _record_launch_stop,
-    _run_in_background,
     build_cycle_config,
     dataset_campaign_config,
     materialize_and_write_origin,
     persist_origin_candidate_library,
 )
+from promptpotter.application.jobs.launcher.run_job import JobSpec, record_launch_stop, spawn_job
 from promptpotter.application.jobs.mint import resolve_cycle_plan
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.cycle_paths import CycleHop
@@ -221,8 +219,8 @@ async def start_checkin_campaign(
     limits: LaunchLimits,
     backend_url: str = DEFAULT_BACKEND_URL,
 ) -> dict[str, str]:
-    """Transition (b), web tail — take the machine slot (or a place in line), then spawn the runner
-    as a detached task. ``(hop, draft)`` come from :func:`load_checkin_for_start`: a slot requested
+    """Transition (b), web tail — take the machine slot (or a place in line), then start the run
+    in its own process. ``(hop, draft)`` come from :func:`load_checkin_for_start`: a slot requested
     before that gate queues an incomplete origin."""
     job = await launch(
         stores=stores,
@@ -285,7 +283,7 @@ async def _start_checkin_run(
         # there leaves an `active` campaign with no producer. The CYCLE needs stamping too, or
         # it derives `detached` and `load_checkin_for_start` can no longer re-start it.
         release_slot(job_registry, job.job_id, exc)
-        _record_launch_stop(
+        record_launch_stop(
             stores=stores,
             hop=hop,
             session_id="",
@@ -293,18 +291,18 @@ async def _start_checkin_run(
         )
         raise
 
-    task = asyncio.create_task(
-        _run_in_background(
-            session=prepared.session,
-            campaign_config=prepared.campaign_config,
-            train_data=prepared.train_data,
+    spawn_job(
+        job_registry,
+        JobSpec.of(
+            stores=stores,
             job_registry=job_registry,
             job_id=job.job_id,
+            hop=prepared.session.hop,
+            session_id=prepared.session.session_id,
             limits=held,
+            backend_url=backend_url,
         ),
-        name=f"job-{job.job_id}",
     )
-    job_registry.attach_task(job.job_id, task)
     logger.info("start-checkin: started %s/%s (job %s)", hop.campaign_id, hop.cycle_id, job.job_id)
 
 

@@ -33,6 +33,8 @@ export interface ReadOptions {
   auth?: boolean;
   // A rejected query is the operator's own input, so `kept` then carries the prior key's read.
   survive?: "invalid";
+  // A 404 is this read's ordinary empty answer, so it is no incident.
+  expects?: "gone";
   intervalMs?: number;
   revalidateOn?: number;
 }
@@ -65,7 +67,7 @@ function landed<T>(stamp: number, data: T): Held<T> {
 }
 
 export function useRead<T>(spec: ReadSpec<T> | null, opts: ReadOptions): ReadResult<T> {
-  const { surface, auth = false, survive, intervalMs, revalidateOn = 0 } = opts;
+  const { surface, auth = false, survive, expects, intervalMs, revalidateOn = 0 } = opts;
   const { authed, onAuthError } = useAuthGate();
   const activeKey = spec !== null && (!auth || authed) ? spec.key : null;
   const readId = activeKey === null ? null : `${surface}\x1f${activeKey}`;
@@ -101,15 +103,15 @@ export function useRead<T>(spec: ReadSpec<T> | null, opts: ReadOptions): ReadRes
       } catch (e) {
         if (signal.aborted || genRef.current !== stamp) return;
         if (auth) onAuthError(e);
-        reportIncident(e, { surface });
         const kind = failureKind(e);
+        if (kind !== expects) reportIncident(e, { surface });
         // A body for an address that no longer exists must not paint the next mount.
         if (kind === "gone") dropCachedRead(issue.id);
         const failure = { kind, message: operatorMessage(e, kind) };
         setHeld((prev) => ({ ...prev, outcome: { stamp, ok: false, failure } }));
       }
     },
-    [auth, onAuthError, surface],
+    [auth, onAuthError, surface, expects],
   );
 
   const active = activeKey !== null;

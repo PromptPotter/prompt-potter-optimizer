@@ -1,13 +1,11 @@
-"""Background-task launcher — mints + spawns a campaign run; the 202 returns the moment the
-campaign exists on disk. The ``_CYCLE_LEDGER`` ContextVar keeps concurrent campaigns apart."""
+"""The server's launcher — admits, mints, then hands the run to its own process
+(``run_job.py``); the 202 returns the moment the campaign exists on disk."""
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import time
-import traceback
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -35,33 +33,24 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_hold,
-    job_status_for,
-    launch_interrupted,
     release_slot,
 )
 from promptpotter.application.jobs.launcher.draft_build import (
     _build_default_campaign_json,
     _build_task_context,
 )
+from promptpotter.application.jobs.launcher.run_job import JobSpec, record_launch_stop, spawn_job
 from promptpotter.application.jobs.mint import fresh_campaign_id, mint_framed_cycle
 from promptpotter.application.jobs.quota import QuotaExceededError
 from promptpotter.application.jobs.registry import Job, JobRegistry
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import (
-    configure_and_apply_pipeline,
     resolve_campaign_config,
 )
-from promptpotter.application.run_observers import build_run_observers
-from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.campaign import ArmRequest
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.launch_limits import HeldLimits, LaunchLimits
-from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
-from promptpotter.infrastructure.llm.telemetry import set_cycle_ledger
-from promptpotter.infrastructure.projections.live_dashboard.projection import (
-    LiveDashboardProjection,
-)
+from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
     dataset_pipeline_path,
@@ -69,42 +58,9 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.io import read_yaml_optional
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import PayloadInvalidError
 
 logger = logging.getLogger(__name__)
-
-
-def _record_launch_stop(
-    *,
-    stores: Stores,
-    hop: CycleHop,
-    session_id: str,
-    exc: BaseException,
-) -> None:
-    """Stamp a launch that ended before its projection pipeline bound. A crash gets ``finished_at``,
-    an interrupt gets the paused declaration and none. Best-effort — must never mask *exc*."""
-
-    interrupted = launch_interrupted(exc)
-    try:
-        cycle_dir = CycleDir(stores.campaigns.cycle_dir(hop))
-        LiveDashboardProjection.write_launch_stop(
-            cycle_dir,
-            hop=hop,
-            session_id=session_id,
-            exc=exc,
-            interrupted=interrupted,
-        )
-        if not interrupted:
-            stores.campaigns.mark_finished(
-                hop,
-                status="failed",
-                stop_reason=f"{type(exc).__name__}: {exc}",
-                finished_at=utcnow_iso(),
-                crash_traceback=traceback.format_exc(),
-            )
-    except Exception:
-        logger.exception("failed to record launch stop for %s/%s", hop.campaign_id, hop.cycle_id)
 
 
 class LaunchError(PayloadInvalidError):
@@ -211,8 +167,8 @@ async def mint_campaign_command(
     pipeline_overlay: dict[str, Any] | None = None,
     backend_url: str = DEFAULT_BACKEND_URL,
 ) -> tuple[str, str, Job]:
-    """Mint a fresh campaign + cycle, then spawn the runner detached; the caller's 202 goes out the
-    moment this returns. ``pipeline_overlay`` is ``None`` for a fresh upload, which commits its own.
+    """Mint a fresh campaign + cycle, then start the run in its own process; the caller's 202 goes
+    out the moment this returns. ``pipeline_overlay`` is ``None`` for a fresh upload, which commits its own.
 
     *job* is the accepted launch (``launcher.admission::request_launch``) — already holding a slot,
     or queued for one, in which case the first ``await`` below is the wait."""
@@ -262,13 +218,12 @@ async def mint_campaign_command(
             session, dataset_root, optimization=optimization, pipeline_overlay=pipeline_overlay
         )
 
-        train_data = session.samples
         # The one shared mint prologue — the same seam CLI ``new`` runs inline; the web path
-        # adds only the gates + detached task.
+        # adds only the gates + the run's own process.
         minted = await mint_framed_cycle(
             session,
             campaign_config,
-            train_data,
+            session.samples,
             campaign_id=fresh_campaign_id(session, campaign_config),
             task_text=None,
             arm=arm,
@@ -276,7 +231,6 @@ async def mint_campaign_command(
             origin_override=origin_override,
         )
         campaign_id, cycle_id = minted.campaign_id, minted.cycle_id
-        campaign_config = minted.campaign_config
         # Resolve the reservation onto the cycle it now names. Every hop-keyed join reads this —
         # `running_job_for` (how `change-run-limits` reaches the held cap), `reap_cycle_by_id`,
         # the holder readout — and each answers nothing at all against `UNRESOLVED_HOP`.
@@ -287,7 +241,7 @@ async def mint_campaign_command(
     except BaseException as exc:
         release_slot(job_registry, job.job_id, exc)
         if campaign_id and cycle_id:
-            _record_launch_stop(
+            record_launch_stop(
                 stores=stores,
                 hop=CycleHop(campaign_id=campaign_id, cycle_id=cycle_id),
                 session_id="",
@@ -295,18 +249,18 @@ async def mint_campaign_command(
             )
         raise
 
-    task = asyncio.create_task(
-        _run_in_background(
-            session=session,
-            campaign_config=campaign_config,
-            train_data=train_data,
+    spawn_job(
+        job_registry,
+        JobSpec.of(
+            stores=stores,
             job_registry=job_registry,
             job_id=job.job_id,
+            hop=CycleHop(campaign_id=campaign_id, cycle_id=cycle_id),
+            session_id=session.session_id,
             limits=held,
+            backend_url=backend_url,
         ),
-        name=f"job-{job.job_id}",
     )
-    job_registry.attach_task(job.job_id, task)
 
     logger.info(
         "mint-campaign: minted %s/%s for user %s (job %s)",
@@ -367,7 +321,7 @@ async def start_run_command(
     stop_after_rounds: int | None = None,
     backend_url: str = DEFAULT_BACKEND_URL,
 ) -> Job:
-    """Spawn a runner against an existing cycle; ``kind`` ∈ ``{"new", "resume"}`` mirrors the two CLI
+    """Start a run of an existing cycle in its own process; ``kind`` ∈ ``{"new", "resume"}`` mirrors the two CLI
     verbs. ``stop_after_rounds`` bounds the run in place (``step-round``)."""
     if kind not in ("new", "resume"):
         raise LaunchError(f"start-run kind must be 'new' or 'resume', got {kind!r}")
@@ -399,129 +353,20 @@ async def start_run_command(
         hop=hop,
     )
 
-    try:
-        _t0 = time.perf_counter()
-        session = await init_services(
-            backend_url=backend_url,
-            dataset_name=dataset_name,
-            identity=stores.identity,
-        )
-        logger.info("start[%s]: init_services=%.2fs", dataset_name, time.perf_counter() - _t0)
-
-        campaign_config = resolve_campaign_config(stores, campaign, hop)
-
-        train_data = session.samples
-        configure_and_apply_pipeline(session, campaign_config, log=lambda *_a, **_k: None)
-        # Bind to the EXISTING campaign/cycle before launch, mirroring CLI `cmd_resume`.
-        # The embedded launch (`embedded_run.py::run_campaign`) mints on an empty
-        # `session.campaign_id`, so without this it mints a fresh campaign + root cycle and steals
-        # the active pointer, stranding an operator-steered fork in its real campaign.
-        session.campaign_id = hop.campaign_id
-        session.state.cycle_id = hop.cycle_id
-        index = stores.campaigns.load(hop) or {}
-        session_id = str(index.get("parent_session_id") or "")
-        if not session_id:
-            raise LaunchError(f"cycle {hop.cycle_id} in {hop.campaign_id} has no parent_session_id")
-        session.session_id = session_id
-    except BaseException as exc:
-        # No cycle stamp — everything above resolves services and builds config in memory, so the
-        # cycle is untouched, and a launch failure is recorded where it happened: the job.
-        release_slot(job_registry, job.job_id, exc)
-        raise
-
-    task = asyncio.create_task(
-        _run_in_background(
-            session=session,
-            campaign_config=campaign_config,
-            train_data=train_data,
+    spawn_job(
+        job_registry,
+        JobSpec.of(
+            stores=stores,
             job_registry=job_registry,
             job_id=job.job_id,
+            hop=hop,
+            session_id=None,
             limits=held,
+            backend_url=backend_url,
             stop_after_rounds=stop_after_rounds,
         ),
-        name=f"job-{job.job_id}",
     )
-    job_registry.attach_task(job.job_id, task)
     return job
-
-
-async def _run_in_background(
-    *,
-    session: Session,
-    campaign_config: CampaignConfig,
-    train_data: list[Any],
-    job_registry: JobRegistry,
-    job_id: str,
-    limits: HeldLimits,
-    stop_after_rounds: int | None = None,
-) -> None:
-
-    # create_task copies the CURRENT context, where the dispatcher has the command ledger
-    # bound to _CYCLE_LEDGER. Clear it so an emit before build_run_observers binds the real
-    # cycle ledger no-ops instead of misfiling onto the command/workspace ledger. No reset —
-    # this task's context is its own and dies with it.
-    set_cycle_ledger(None)
-
-    job_registry.mark_started(job_id)
-    try:
-        observers = build_run_observers(
-            session=session,
-            campaign_config=campaign_config,
-            resumed_from_round=None,
-            origin_accuracy=0.0,
-        )
-        result = await run_optimization(
-            train_data,
-            campaign_config,
-            session=session,
-            observers=observers,
-            mode=RunMode(stop_after_rounds=stop_after_rounds),
-            limits=limits,
-        )
-        stop_reason = result.stop_reason
-        # The SAME classification index.json / dashboard.json / the webapp read.
-        outcome = stop_reason_outcome(stop_reason)
-        status = job_status_for(stop_reason)
-        if outcome is StopOutcome.FAILED and result.error is not None:
-            persisted_reason: str | None = result.error.message
-        else:
-            persisted_reason = stop_reason
-        job_registry.mark_finished(
-            job_id,
-            status=status,
-            stop_reason=persisted_reason,
-        )
-    except asyncio.CancelledError:
-        # The runner re-raises a cancellation past its own finalize. Whoever cancelled this task
-        # awaits it, so this one must propagate.
-        job_registry.mark_finished(job_id, status="stopped", stop_reason="task_cancelled")
-        raise
-    except KeyboardInterrupt as exc:
-        # The pause flag's SYNTHETIC interrupt, raised by origin scoring to unwind (`scoring/
-        # search_point_scorer.py`) — round-0 origin runs inside `_prepare_run`, outside the round
-        # loop's own arm. It is fully handled here, and it must NOT propagate: asyncio hands a
-        # KeyboardInterrupt escaping a task to the event loop, which stops it — so re-raising took
-        # the whole web process down on every Pause. The CLI re-raises because there the process
-        # IS the run; here the run is one job inside a server serving everyone else.
-        job_registry.mark_finished(job_id, status="stopped", stop_reason=str(exc) or "paused")
-    except Exception as exc:
-        # Anything reaching here fired BEFORE / OUTSIDE the runner's own try/except (e.g.
-        # ``build_run_observers`` blew up), so no ``ErrorRecord`` was emitted and the
-        # exception's own ``ClassName: message`` is the most the audit trail can have.
-        logger.exception("job %s failed", job_id)
-        job_registry.mark_finished(
-            job_id,
-            status="failed",
-            stop_reason=f"{type(exc).__name__}: {exc}",
-        )
-        # Nothing wrote the cycle terminal either — stamp it so the fork does not sit frozen
-        # at `init` in the file tree and the webapp.
-        _record_launch_stop(
-            stores=session.store,
-            hop=session.hop,
-            session_id=session.session_id,
-            exc=exc,
-        )
 
 
 def _read_backend_type_from_dataset(dataset_root: Path, dataset_name: str) -> str:

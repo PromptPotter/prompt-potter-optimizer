@@ -177,10 +177,13 @@ cd "$INSTALL_DIR/deploy-linux" && ./update.sh   # deploy-linux lives inside the 
 
 It mirrors origin, refreshes deps, rebuilds the webapp and restarts the app — plus the backend when
 `BACKEND_DIR` is set. Re-runnable, and it never stalls on a diverged box: tracked files are
-force-matched to origin while `.env` and runtime survive. Four things worth knowing:
+force-matched to origin while `.env` and runtime survive. Five things worth knowing:
 
 - **The sync can replace the script mid-run**, so it re-execs the new copy once and says so — a fix
   to `update.sh` itself takes effect on the deploy that ships it.
+- **A restart signals the API alone** (`KillMode=process`): a run is its own process, so one in
+  flight finishes and the returning API reads it off its lock. The app's unit is rewritten only by
+  `./install-service.sh`.
 - **It restarts the admin bot but never rewrites its unit.** A change to that unit — its data root,
   its env file — needs `./install-admin-bot.sh`.
 - **The closing health line polls for up to 30s** (`health.sh::wait_healthy`) rather than probing

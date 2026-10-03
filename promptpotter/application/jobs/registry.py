@@ -296,6 +296,21 @@ class JobRegistry:
         job.cycle_id = hop.cycle_id
         self._persist(job)
 
+    @property
+    def jobs_dir(self) -> Path:
+        return self._dir
+
+    def adopt(self, job_id: str) -> bool:
+        """Make THIS process the job's producer, so the job's liveness is the run's own lock and a
+        server restart clears nothing. False when the job was cleared first."""
+        with self.admission_gate():
+            job = self.get(job_id)
+            if job is None or job.status not in UNFINISHED_JOB_STATUSES:
+                return False
+            job.producer_id = this_producer(self._dir)
+            self._persist(job)
+            return True
+
     def attach_task(self, job_id: str, task: asyncio.Task[None]) -> None:
         with self._lock:
             self._tasks[job_id] = task
@@ -365,10 +380,12 @@ class JobRegistry:
             return job
         with self._lock:
             task = self._tasks.get(job.job_id)
-        if task is not None:
-            if not task.done():
-                return job
-        elif producer_alive(self._dir, job.producer_id):
+        if task is not None and not task.done():
+            return job
+        # An adopted job's liveness is its producer's lock, never the watcher's end: on Windows
+        # the process the server spawned is the venv's launcher, not the interpreter it started.
+        adopted = task is not None and job.producer_id != this_producer(self._dir)
+        if (task is None or adopted) and producer_alive(self._dir, job.producer_id):
             return job
         logger.warning(
             "job %s claims %s but its producer is gone — reaping", job.job_id, job.status

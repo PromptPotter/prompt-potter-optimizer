@@ -1486,6 +1486,62 @@ def test_a_run_holds_the_budget_it_declared_and_admission_is_the_only_bound(
     ) == SpendCeilings(pytest.approx(5.0), 210_000)
 
 
+def test_a_run_in_its_own_process_spends_as_the_account_that_launched_it(
+    built_stores: Any, tmp_path: Path
+) -> None:
+    """A server-launched run executes in its own process, which rebuilds its stores from what the
+    server hands it. An identity rebuilt from the tenant alone carries no issuer, and no issuer IS
+    the box operator: the run of a metered signup would then spend the host's key unmetered, under
+    a ceiling nobody admitted, with every number on screen still rendering."""
+    from promptpotter.application.jobs.launcher.run_job import JobSpec
+    from promptpotter.application.jobs.quota import spends_the_hosts_own_key
+    from promptpotter.application.jobs.registry import JobRegistry
+    from promptpotter.domain.cycle_paths import CycleHop
+    from promptpotter.domain.launch_limits import HeldLimits
+    from promptpotter.domain.spend import BudgetChange, SpendCeilings
+    from promptpotter.infrastructure.store.stores import build_stores
+    from promptpotter.shared.identity import IdentityContext, Issuer, TenantId, UserId
+
+    signup = IdentityContext(
+        user_id=UserId("sub-9"),
+        tenant_id=TenantId("sub-9"),
+        issuer=Issuer("https://accounts.google.com"),
+        claims={"email": "a@example.com", "spend_ceiling_usd": 2.0},
+        capabilities=frozenset({"campaign.run"}),
+    )
+    stores = build_stores(
+        signup,
+        projects_root=built_stores.projects_root,
+        benchmarks_root=built_stores.benchmarks_root,
+    )
+    held = HeldLimits(
+        halt_at_accuracy=0.9,
+        ceiling=SpendCeilings(0.25, 40_000),
+        operator=BudgetChange(0.25, None),
+    )
+    wire = JobSpec.of(
+        stores=stores,
+        job_registry=JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1),
+        job_id="job-a",
+        hop=CycleHop(campaign_id="ds__000001", cycle_id="cycle_root"),
+        session_id=None,
+        limits=held,
+        backend_url="http://127.0.0.1:8000",
+    ).model_dump_json()
+
+    spec = JobSpec.model_validate_json(wire)
+    assert spec.identity == signup
+    assert spec.limits == held
+    rebuilt = build_stores(
+        spec.identity,
+        projects_root=Path(spec.projects_root),
+        benchmarks_root=Path(spec.benchmarks_root),
+        shared_root=Path(spec.shared_root),
+    )
+    assert spends_the_hosts_own_key(rebuilt) is spends_the_hosts_own_key(stores) is False
+    assert rebuilt.base_dir == stores.base_dir
+
+
 def test_host_wallet_ceilings_hold_in_both_units(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

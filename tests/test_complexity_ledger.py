@@ -186,7 +186,10 @@ LEDGER_BASELINE = {
     # -1: `presentation/terminal/live/__init__.py` — the package is gone. The readout projection
     # and its renderers moved to `application/views/` (`readout.py`, `render/`), module for module,
     # so a cycle launched with no terminal writes the same `readout.log`.
-    "modules": 388,
+    # +1: `application/jobs/launcher/run_job.py` — a server-launched run executes in its own
+    # process. It holds both halves of that hand-over (the spawn and the run), which the
+    # launcher held as a task on the server's event loop.
+    "modules": 389,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     # +2: `application/optimizers/__init__.py` (the member registry) and its `potter/`, empty.
@@ -725,7 +728,11 @@ LEDGER_BASELINE = {
     # bank, so the re-run escalates or stops on rounds it never ran (test_resume).
     # +1: a polled spend read folding only the appended tail misses an append, reads through a
     # compaction, or pairs a call count with another moment's total (test_integrity § 7).
-    "test_functions": 234,
+    # +1: a server-launched run rebuilt in its own process as the box operator spends a metered
+    # account's run unmetered (test_security).
+    # +1: a watcher ending read as the run's death reaps a live run that adopted its job
+    # (test_reaper).
+    "test_functions": 236,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

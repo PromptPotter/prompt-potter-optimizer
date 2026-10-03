@@ -37,7 +37,7 @@ Measured 2026-09-08/09 against the live endpoints with `probe-reasoning <model>`
 | `qwen/qwen3.8-flash` | 2853 | 0 | unmeasured | nothing to narrow, so it carries no row |
 | `inclusionai/ling-3.0-flash` | 818 | 0 | 2350 / 2497 / 1486 / 1262 | rungs INDISTINCT; `low` overran a 3000-token cap |
 | `deepseek/deepseek-v4-flash` | ~4k (tail 11.4k) | unmeasured | unmeasured | `min_max_tokens=8000` only |
-| `openai/gpt-6-luna` | ~400 (a 3-candidate JSON task, ~350 output beside it) | unmeasured | unmeasured | `min_max_tokens=8000` only — the peers' floor, which every node the manifests declare clears |
+| `openai/gpt-6-luna` | 278 | 0 | n/a / 101 / 402 / 111 (2026-10-03, one sample per rung) | `min_max_tokens=8000` only — the peers' floor, which every node the manifests declare clears. Rungs distinct, and `medium` — what every optimizer node ships at — is the costliest |
 
 The three flash models carry no `reasoning_effort` in the catalogue and honour `none` regardless, which is why the offered ladder cannot be derived from the parameter list. **An indistinct ladder is not narrowed** — every rung stays searchable and the finding is served as a caveat, so a round stops paying cells to separate two spellings of one call.
 

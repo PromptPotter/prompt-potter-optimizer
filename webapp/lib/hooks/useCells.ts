@@ -116,7 +116,7 @@ export function useCells(
             ),
         }
       : null,
-    { surface: "cells", intervalMs: live ? LIVE_REFRESH_MS : undefined },
+    { surface: "cells", expects: "gone", intervalMs: live ? LIVE_REFRESH_MS : undefined },
   );
 
   // A failed refresh leaves the measured rows on screen alone, hence `kept`.

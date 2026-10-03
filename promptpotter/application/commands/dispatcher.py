@@ -632,7 +632,7 @@ class CommandDispatcher:
                 except BaseException:
                     # ONE act, landing whole or not at all: a launch refused after the mint (full
                     # machine, empty wallet, dark backend) leaves no seeded fork that never starts.
-                    # `_apply_start_run` raises only from BEFORE its background task exists, so the
+                    # `_apply_start_run` raises only from BEFORE the run's process exists, so the
                     # stub is provably idle and the shared cleanup's own emptiness test is the
                     # backstop.
                     self._cleanup_failed_fork(hop, new_cycle_id)
