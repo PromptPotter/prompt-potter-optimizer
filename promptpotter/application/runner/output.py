@@ -7,17 +7,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.campaign_config import load_campaign_config
 from promptpotter.application.intelligence.exploration import build_observations
 from promptpotter.application.intelligence.hard_sample_sorter import (
     build_hard_samples_artifact,
     build_hard_samples_artifact_from_observations,
 )
+from promptpotter.application.runner.campaign_result import read_cycle_bench
 from promptpotter.application.runner.review_md import render_review_md
 from promptpotter.application.views.render.markdown import to_markdown
-from promptpotter.application.views.render.optimizer_prompt_text import (
-    format_l1_critique_for_prompt,
-)
 from promptpotter.application.views.view_models import (
     DigestStatusView,
     FinalWinnerView,
@@ -41,8 +38,9 @@ from promptpotter.infrastructure.store.read_model import iter_jsonl
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
+    from promptpotter.application.bench.cycle import Cycle
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 __all__ = [
@@ -78,11 +76,11 @@ def _filter_artifact_to_live_candidates(
     return out
 
 
-def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, Any] | None:
+def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> None:
     """Build + persist the heatmap artifacts at cycle and campaign scope. There is no DATASET-scope
     file: that scope is cross-campaign, so no campaign owns it and the route folds it per request."""
     if not session.state.cycle_id or session.store is None:
-        return None
+        return
 
     store = session.store.campaigns
     cycle_id = session.state.cycle_id
@@ -97,7 +95,7 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, An
     )
 
     live_obs = build_observations(cycle.rounds)
-    campaign_obs = list(cycle.archive_observations) + live_obs
+    campaign_obs = list(cycle.difficulty.observations) + live_obs
     campaign_artifact = build_hard_samples_artifact_from_observations(
         campaign_obs,
         cycle_id=cycle_id,
@@ -105,7 +103,6 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, An
         top_k_samples=None,
     )
 
-    opt_cfg = cycle.config.optimization
     # Archive candidates contribute to the joint Rasch fit but stay off the
     # heatmap Y-axis — it's filtered to this cycle's own cand_NNN.
     live_cids = {cid for rr in cycle.rounds for cid in rr.all_candidate_results}
@@ -117,19 +114,19 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, An
     with graceful("campaign hard_samples.json write failed"):
         write_json(campaign_dir / "hard_samples.json", campaign_artifact)
 
-    return campaign_artifact if opt_cfg.seed_heatmap_from_archive else cycle_artifact
-
 
 def _load_p_best_trajectory(
     streams_dir: Path | None, round_num: int
 ) -> tuple[dict[str, list[float]], dict[str, int]]:
-    """``{candidate_id: [P(best) per query]}``. One stream line is one candidate's reading, so fanning
+    """``{candidate_id: [P(best) per query]}`` off the round's racing stream — one file, since a
+    manifest walks at most one eliminator. One stream line is one candidate's reading, so fanning
     every key of its cid→prob map into a trajectory files the winner under its own defeat."""
     if streams_dir is None:
         return {}, {}
     trajectory: dict[str, list[float]] = {}
     last_seen: dict[str, int] = {}
-    for rec in iter_jsonl(streams_dir / f"round_{round_num:04d}_p_best.jsonl"):
+    streams = sorted(streams_dir.glob(f"round_{round_num:04d}_*.jsonl"))
+    for rec in (rec for stream in streams for rec in iter_jsonl(stream)):
         cid = str(rec.get("current_id") or "")
         if not cid:
             continue
@@ -170,6 +167,7 @@ def from_disk_log(
     status = DigestStatusView(
         campaign_id=str(index.get("cycle_id") or ""),
         parent_session_id=index.get("parent_session_id"),
+        optimizer=next((t.optimizer_state.manifest for t in rounds), None),
         status=str(index.get("status", "active")),
         stop_reason=str(final.get("stop_reason") or index.get("stop_reason") or "(running)"),
         origin_accuracy=origin_accuracy_of(index),
@@ -185,6 +183,7 @@ def from_disk_log(
     for t in rounds:
         traj, _ = _load_p_best_trajectory(streams_dir, t.round)
         lineage = t.opt_sp.lineage if t.opt_sp else None
+        selected = next(iter(t.selected_scores), None)
         round_views.append(
             RoundDigestView(
                 round=t.round,
@@ -194,27 +193,23 @@ def from_disk_log(
                 total=t.total,
                 composite_fitness=t.composite_fitness,
                 changes_description=(lineage.changes_description if lineage else "").strip(),
-                l1_critique_text=format_l1_critique_for_prompt(t.critique),
-                l1_yield=t.l1_yield,
-                l1_n_no_op=t.l1_n_no_op,
-                l1_n_duplicate=t.l1_n_duplicate,
-                l1_n_repeat=t.l1_n_repeat,
-                candidates_scored=t.candidates_scored,
+                facts=tuple(t.optimizer_facts),
+                stamps_theta=t.stamps_theta,
                 evaluators=dict(t.evaluators),
-                matched_parent_composite=t.matched_parent_composite,
+                reference_composite=selected.reference_composite if selected else None,
                 ability=t.ability,
                 verdict_reason=t.verdict_reason,
                 overlap=t.overlap,
                 p_best_trajectory=traj,
-                winner_id=t.winner_id or "",
+                winner_id=selected.candidate_id if selected else "",
                 spend=(spend_by_round or {}).get(str(t.round)),
             )
         )
 
     final_view = (
         FinalWinnerView(
-            winner_prompt_fields=dict(final.get("winner_prompt_fields") or {}),
-            winner_pipeline_params=dict(final.get("winner_pipeline_params") or {}),
+            result_prompt_fields=dict(final.get("result_prompt_fields") or {}),
+            result_pipeline_params=dict(final.get("result_pipeline_params") or {}),
         )
         if final
         else None
@@ -273,13 +268,16 @@ def _fork_summary_from_index(fork_index: dict[str, Any]) -> ForkSummaryView:
     )
 
 
-def write_log_md(session: Session, *, hard_samples_artifact: dict[str, Any] | None = None) -> None:
-    """Render the per-cycle log.md and refresh the campaign digest."""
+def write_log_md(session: Session, config: CampaignConfig) -> None:
+    """Render the per-cycle log.md and refresh the campaign digest — at every round's close, and
+    once more when the run is stamped finished: `mark_finished` writes the stop, the finish time
+    and the winner into `index.json` AFTER the last round rendered, so a digest left there reads
+    `active` for good."""
     if not session.state.cycle_id or session.store is None:
         return
     with graceful("log.md render failed"):
         store = session.store.campaigns
-        _render_cycle_log_md(store, session.hop, hard_samples_artifact)
+        _render_cycle_log_md(store, session.hop, config)
         _render_campaign_log_md(store, session.campaign_id)
 
 
@@ -301,32 +299,27 @@ def _spend_by_round(layout: CycleLayout) -> dict[str, SpendRollup]:
     return out
 
 
-def _render_cycle_log_md(
-    store: CampaignStore,
-    hop: CycleHop,
-    hard_samples_artifact: dict[str, Any] | None,
-) -> None:
+def _render_cycle_log_md(store: CampaignStore, hop: CycleHop, config: CampaignConfig) -> None:
     index = store.load(hop)
     if not index:
         return
     n_rounds = int(index.get("n_rounds", 0) or 0)
     rounds = store.load_rounds_range(hop, 0, n_rounds - 1) if n_rounds else []
     layout = CycleLayout(store.cycle_dir(hop))
-    campaign = store.load_campaign(hop.campaign_id)
+    # The heat map `write_hard_samples_artifacts` put on disk, at the scope the campaign reads it.
+    hard_samples = (
+        store.campaign_root_dir(hop.campaign_id) / "hard_samples.json"
+        if config.optimization.seed_heatmap_from_archive
+        else layout.hard_samples
+    )
     content = to_markdown(
         from_disk_log(
             index,
             rounds,
-            hard_samples_artifact=hard_samples_artifact,
+            hard_samples_artifact=read_json_tolerant(hard_samples),
             streams_dir=layout.streams,
             fork_indices=None,
-            # The typed knob, never a raw-dict key read: the manifest persists only the delta
-            # from defaults, so an unset `hard_sample_order` is absent rather than spelled out.
-            hard_sample_order=(
-                load_campaign_config(campaign.config).hard_sample_order
-                if campaign is not None
-                else "info_gain"
-            ),
+            hard_sample_order=config.hard_sample_order,
             spend_by_round=_spend_by_round(layout),
         )
     )
@@ -389,7 +382,7 @@ def write_review_md(session: Session, cycle: Cycle) -> None:
         rounds = store.load_rounds_range(session.hop, 0, n_rounds - 1) if n_rounds else []
         cycle_dir = store.cycle_dir(session.hop)
         round_audits = load_round_audits(cycle_dir, [r.round for r in rounds])
-        td = cycle.opt_sp.memory.task_context
+        td = cycle.framing
         context_object = [
             td.pipeline_purpose,
             td.optimization_goals,
@@ -401,6 +394,8 @@ def write_review_md(session: Session, cycle: Cycle) -> None:
             round_audits=round_audits,
             context_object=context_object,
             accuracy_ceiling=cycle.config.accuracy_ceiling,
-            l1_patience=cycle.config.optimization.l1_patience,
+            optimizer=cycle.optimizer,
+            # Read only once the cycle has ended: nothing renders the headline before then.
+            bench=read_cycle_bench(session.store, session.hop) if "final" in index else None,
         )
         write_text(CycleLayout(cycle_dir).review_md, content)

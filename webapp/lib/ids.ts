@@ -1,12 +1,5 @@
-// Cycle-id helpers shared across the webapp.
-//
-// The Python side has `store/layout.py::root_cycle_id` + `::sibling_kind` for the
-// same job, and the id is the ONE authority for both — neither side stores the kind.
-// We mirror the regex rather than round-trip per sidebar / lineage render, and the
-// short label needs the family TAIL as well, which only the id carries.
-//
-// The cycle-ADDRESS grammar below is not mirrored at all any more: its two separators
-// and two charset patterns are generated from `domain/cycle_paths.py`, which owns them.
+// Cycle-id helpers. The sibling regexes mirror `store/layout.py::root_cycle_id` — change both;
+// the address grammar is generated from `domain/cycle_paths.py`.
 
 import {
   ALL_DOTS_RE,
@@ -18,16 +11,11 @@ import {
 const SIBLING_LAST_SEP_RE = /_(fork|diag)_(?!.*_(?:fork|diag)_)([^/]*)$/;
 const SIBLING_FIRST_SEP_RE = /_(fork|diag)_/;
 
-// Family-root id for a sibling, or the id itself when already a root.
-// Mirrors `root_cycle_id()` in layout.py — uses the FIRST separator so
-// `cycle_X_fork_Y_diag_Z` still roots at `cycle_X`.
 export function rootCycleId(cycleId: string): string {
   const m = cycleId.match(SIBLING_FIRST_SEP_RE);
   return m && m.index !== undefined ? cycleId.slice(0, m.index) : cycleId;
 }
 
-// Short "kind·tail" label for sibling rows in dense lists. Falls back to
-// the full id when the parse fails (e.g. a root passed in by mistake).
 export function shortFamilyTail(cycleId: string): string {
   const m = cycleId.match(SIBLING_LAST_SEP_RE);
   const kind = m?.[1];
@@ -36,49 +24,25 @@ export function shortFamilyTail(cycleId: string): string {
   return cycleId;
 }
 
-// Composite unit key — a cycle_id is unique only within its campaign, so
-// pickers key/value/store the pair `{campaign}::{cycle}`. Split it back on
-// `UNIT_SEP`, re-exported from the generated grammar so a picker importing it
-// gets the server's separator and not a second spelling of it.
+// A cycle_id is unique only within its campaign, so pickers key on the pair.
 export const UNIT_SEP = CYCLE_PATH_UNIT_SEP;
 
 export function unitKey(campaignId: string, cycleId: string): string {
   return `${campaignId}${UNIT_SEP}${cycleId}`;
 }
 
-// A cycle PATH — the single address for any cycle the webapp can view, inner or
-// outer. An inner cycle (an L4 `promptpotter-self` fan-out campaign) is a normal
-// cycle whose files live in a sandbox rooted at its parent, so it is addressed by
-// the chain of `(campaign, cycle)` hops from the top-level root down to the leaf:
-//   top-level  → [{c, cy}]
-//   inner      → [{outerC, outerCy}, {innerC, innerCy}]
-//   L5+        → deeper still (the engine's `.inner/<cycle_id>` sandbox is
-//                re-entrant — this mirrors it, "never a depth-1 assumption").
-// The dashboard reads the LEAF hop; chat/selection/dataset read the ROOT hop.
-// Named `PathHop`, not `CycleHop`: the generated wire type of that name
-// (`lib/api/types.generated.ts`, the element of `LineageNode.path` / `RayItem.path`)
-// is snake_case and belongs to the server. This one is the BROWSER's address —
-// it is encoded into view-memory keys and into the location hash, so binding it to a
-// wire shape would let a server-side field rename invalidate persisted addresses.
+// Not the generated `CycleHop`: this address is persisted in view memory and the hash, so a
+// server-side field rename must not invalidate it.
 interface PathHop {
   campaignId: string;
   cycleId: string;
 }
-// Non-empty by construction — every real address has at least the root hop.
 export type CyclePath = PathHop[];
 
-// Hops are joined by `HOP_SEP`; each hop's ids by `UNIT_SEP`. Neither separator can occur
-// inside an id, which is what makes encode/decode round-trip exactly — and that precondition
-// is now ASSERTED at import on the Python side rather than promised in this comment.
 const HOP_SEP = CYCLE_PATH_HOP_SEP;
 
-// The server's own charset and its all-dots rejection: `.` / `..` / `...` match the
-// dot-allowing pattern but are traversal segments the server refuses, so without the second
-// test the browser hands back a path Python rejects. Both come from
-// `domain/cycle_paths.py` through the generated block — this file declared its own copies
-// until then, and nothing could have caught them drifting apart.
-// Exported for `lib/address.ts`, which parses the SAME ids out of a different syntax —
-// re-testing them there against a second regex is how the two would come to disagree.
+// All-dots ids match the charset but are traversal segments the server refuses.
+// `lib/address.ts` validates through this too; never a second regex there.
 export function validIdComponent(s: string): boolean {
   return ID_COMPONENT_RE.test(s) && !ALL_DOTS_RE.test(s);
 }
@@ -87,8 +51,6 @@ export function encodeCyclePath(path: CyclePath): string {
   return path.map((h) => unitKey(h.campaignId, h.cycleId)).join(HOP_SEP);
 }
 
-// Parse an encoded path back to hops, validating every component; null on any
-// malformed input so callers fall back to a safe default rather than crash.
 export function decodeCyclePath(s: string): CyclePath | null {
   if (!s) return null;
   const hops: CyclePath = [];
@@ -103,10 +65,8 @@ export function decodeCyclePath(s: string): CyclePath | null {
   return hops.length ? hops : null;
 }
 
-// A NODE's address in the sidebar tree: an encoded path, optionally suffixed with the id of
-// something INSIDE that course — a candidate. Both halves are optional, and the empty-path
-// form is real: an origin groups the runs of one declaration, which is a set of campaigns
-// rather than an address in any of them.
+// A sidebar node: an encoded path, optionally `|<candidate>`. The empty-path form is an origin,
+// which groups several campaigns rather than addressing one.
 const NODE_SEP = "|";
 
 export function nodeAddress(path: CyclePath, nodeId?: string): string {
@@ -114,15 +74,8 @@ export function nodeAddress(path: CyclePath, nodeId?: string): string {
   return nodeId ? `${encoded}${NODE_SEP}${nodeId}` : encoded;
 }
 
-// Who OWNS a node address — the key its view memory files under (`lib/view-memory.tsx`).
-// The root hop's campaign when the address names one, because that campaign's sidebar row
-// owns the whole subtree; otherwise the id itself, which is the origin case (`cycle_<hash>`
-// vs a campaign's `{dataset}__{rand6}` — the two key spaces cannot collide).
-//
-// This has to read the SUFFIX FORM, and that is the whole point of it existing: feeding a
-// candidate's address to `decodeCyclePath` puts `|<id>` inside the cycle_id, fails `ID_RE`,
-// and answers null — which read as "no campaign", so every candidate and origin twist went
-// inert and stuck at its default. Silent: the button renders, the click does nothing.
+// The view-memory key (`lib/view-memory.tsx`): the root campaign, else the origin id. Never feed
+// a suffixed address to `decodeCyclePath` — it answers null and the view memory goes inert.
 export function ownerOfNodeAddress(addr: string): string | null {
   const cut = addr.indexOf(NODE_SEP);
   const encoded = cut < 0 ? addr : addr.slice(0, cut);
@@ -133,21 +86,15 @@ export function ownerOfNodeAddress(addr: string): string | null {
   return decodeCyclePath(encoded)?.[0]?.campaignId ?? null;
 }
 
-// The root hop — what chat, dataset, and files bind to (the top-level cycle that
-// owns the operator conversation).
 export function pathRoot(path: CyclePath): PathHop {
   return path[0]!;
 }
 
-// The leaf hop — what the dashboard stream and the selection axes re-root to (the
-// inner cycle when drilled in, else the root).
 export function pathLeaf(path: CyclePath): PathHop {
   return path[path.length - 1]!;
 }
 
-// The hops BELOW the root, HOP_SEP-joined — the `?descend=` query the dashboard
-// route walks into `.inner/<previous cycle id>`. Empty string at depth 1, so a
-// top-level request stays byte-identical to a plain per-cycle fetch.
+// The `?descend=` query the dashboard route walks into `.inner/`; empty at depth 1.
 export function encodeDescend(path: CyclePath): string {
   return encodeCyclePath(path.slice(1));
 }

@@ -5,26 +5,34 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, ValidationError
 
+from promptpotter.domain.backend import BackpressureReading
+from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.dashboard_rows import DashboardCandidate, RoundSummary
+from promptpotter.domain.dashboard_rows import (
+    LiveCandidate,
+    OptimizerLimit,
+    RoundSummary,
+    RunStanding,
+)
 from promptpotter.domain.phases import DashboardState, RunPhase
-from promptpotter.domain.results import HeadlineMetric, OverlapReading
-from promptpotter.domain.spend import SpendRollup
+from promptpotter.domain.results import DisplayMetric, OverlapReading
+from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
 __all__ = [
     "BackendWarning",
-    "BackfillLogEntry",
+    "CatchUpLogEntry",
     "CurrentRound",
     "DashboardError",
     "LiveDashboardState",
     "LoopWarning",
-    "PobbBlock",
+    "RacingBlock",
     "RunLimits",
+    "overlay_spend_metered",
     "warming_payload",
 ]
 
@@ -46,10 +54,20 @@ def warming_payload(hop: CycleHop, *, run_phase: str) -> dict[str, Any]:
     }
 
 
-class BackfillLogEntry(StrictModel):
-    """One paired-PoBB backfill event appended by ``LiveDashboardProjection._append_backfill``.
-    The writer caps the list at 256 entries."""
+def overlay_spend_metered(body: dict[str, Any], meter: CeilingMeter) -> None:
+    """A ``spend`` block this build cannot parse serves none, rather than failing the poll."""
+    try:
+        spend = SpendRollup.model_validate(body["spend"])
+    except ValidationError:
+        return
+    body["spend_metered"] = MeteredSpend.of(spend, meter).model_dump()
 
+
+class CatchUpLogEntry(StrictModel):
+    """One race catch-up — the priors eliminator ``member`` re-measured on one sample.
+    Appended by ``LiveDashboardProjection._append_catch_up``, capped at 256 entries."""
+
+    member: str
     round: int
     candidate_idx: int
     candidate_total: int
@@ -58,7 +76,9 @@ class BackfillLogEntry(StrictModel):
 
 
 class BackendWarning(StrictModel):
-    """One entry in ``recent_backend_warnings`` — backend transport retry / 429 / 5xx surface."""
+    """One entry in ``recent_backend_warnings`` — a backend transport or 5xx retry, never a 429.
+
+    That one is the provider's pushback rather than a fault, and is served as ``backpressure``."""
 
     ts: str
     kind: str
@@ -69,11 +89,16 @@ class BackendWarning(StrictModel):
     status_code: int | None = None
     final: bool = False
     query: str | None = None
+    # The backend's OWN words about what went wrong. The kind says a cell could not be measured;
+    # only this says why — and why is the half that decides whether the operator restarts a daemon,
+    # clears a cache or changes nothing. Absent on a wire retry, which has a status code instead.
+    detail: str | None = None
 
 
 class LoopWarning(StrictModel):
     """One entry in ``recent_loop_warnings`` — an optimizer-loop degradation the
-    self-healing rails recovered from: zero-candidate round, L2 framing soft-reject, truncation."""
+    self-healing rails recovered from: a zero-candidate round, a layer's unparseable output, a blank
+    terminate, truncation."""
 
     ts: str
     kind: str
@@ -98,31 +123,29 @@ class RunLimits(StrictModel):
     ``INIT:enter`` and that record lands after the whole origin has scored, so the operator watched
     the longest phase of the run with no ceiling on screen at all.
 
-    **The two spend arms are the ARMED ceilings, not the declared ones**, re-read from
-    ``spend_cap.json`` at every persist (``projection.py::_persist``). They were static, and that is
-    precisely what made every surface reading them — the control's own prefill, the run strip —
-    report a number ``BudgetGate`` had stopped using the moment ``change-spend-budget`` landed."""
+    **The two spend arms and ``max_rounds`` are the ARMED ceilings, not the declared ones**,
+    re-read from ``run_limits.json``, the standing ceiling's polled mirror, at every persist
+    (``projection.py::_persist``). Held static, every surface reading them — the control's own
+    prefill, the run strip — reports a number the run stops using the moment
+    ``change-run-limits`` lands."""
 
     max_rounds: int | None = None
-    l1_patience: int
-    l2_patience: int | None = None
-    l3_patience: int | None = None
-    pobb_epsilon: float
     spend_budget_usd: float | None = None
     token_budget: int | None = None
-    # DENOMINATOR for the live ``hearts`` count — without it ``hearts: 3`` is scaleless, and
-    # in lives mode ``max_rounds`` is null. ``None`` when lives is off.
-    lives_cap: int | None = None
+    # The optimizer's own run-bounding knobs (`OptimizerPacing.limits`), in its own words.
+    optimizer: list[OptimizerLimit] = Field(default_factory=list)
 
 
-class PobbBlock(StrictModel):
-    """``current_round.pobb`` — round-wide elimination telemetry, rebuilt every persist."""
+class RacingBlock(StrictModel):
+    """``current_round.racing`` — the round's standing in its eliminator ``member``'s race.
+    Rebuilt every persist."""
 
-    current_id: str = ""
-    n_samples: int = 0
-    leader_prob: float = 0.0
-    posterior_width: float = 1.0
-    top: list[dict[str, Any]] = Field(default_factory=list)
+    member: str
+    current_id: str
+    n_samples: int
+    leader_prob: float
+    posterior_width: float
+    top: list[dict[str, Any]]
 
 
 class CurrentRound(StrictModel):
@@ -132,11 +155,16 @@ class CurrentRound(StrictModel):
 
     round: int = 0
     active_node: str | None = None
-    candidates: list[DashboardCandidate] = Field(default_factory=list)
-    # Free-form per-node LLM I/O (``build_node_block``), mirroring ``round_NNNN.json::nodes``.
+    # The node the ledger named at `measure:enter`, null before one has; `active_node` equals it
+    # while it measures.
+    measurement_node: str | None = None
+    candidates: list[LiveCandidate] = Field(default_factory=list)
+    # Free-form per-node optimizer LLM I/O (``build_node_block``), mirroring the audit twin's
+    # ``nodes``.
     nodes: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    pobb: PobbBlock = Field(default_factory=PobbBlock)
-    # The parent line on its shared cells, stamped at the ELECTION and null before it. Null here
+    # Null before the round's first standing, and on an optimizer that races nothing.
+    racing: RacingBlock | None = None
+    # The best-so-far line on its shared cells, stamped at the ELECTION and null before it; null
     # is "not measured yet", never "withheld". ONLY this one of the round's readings: the others
     # (`verdict_reason`, `electable_count`, `separable`, `ability`, `health`) reach no live
     # surface, and a served field nothing renders is a note nobody reads.
@@ -145,7 +173,7 @@ class CurrentRound(StrictModel):
 
 class LiveDashboardState(StrictModel):
     """``dashboard.json`` — operator-facing snapshot, polled by the webapp.
-    ``current_round`` wipes at ``L1_GENERATE:enter``; past deep audit lives in ``round_NNNN.json``."""
+    ``current_round`` wipes when the round number moves; past deep audit lives in ``round_NNNN.json``."""
 
     model_config = ConfigDict(validate_assignment=False)
 
@@ -165,14 +193,17 @@ class LiveDashboardState(StrictModel):
     langfuse_trace_url: str | None = None
 
     state: DashboardState = DashboardState.INIT
+    # The running optimizer step's own words (`OptimizerPhase.activity`) while `state` is
+    # `optimizer_step`; null in every other state.
+    optimizer_step: str | None = None
     state_since: str
 
     # The runner's DECLARATION of the coarse lifecycle+control axis, made via control
     # PhaseRecords — so a paused run stays readable as paused once this file goes stale.
     # ``state`` above stays the fine-grained activity. It is an INPUT to
     # ``derive_run_phase``, never the answer: its only writer is the runner's own process,
-    # so it cannot report "detached" (a dead producer can't write) and it went on saying
-    # "running" forever after a kill. It is NAMED for what it is, so that nobody reading
+    # so it cannot report "detached" (a dead producer can't write) and says "running" forever
+    # after a kill. It is NAMED for what it is, so that nobody reading
     # this file in an editor — the folder-UI contract's equal consumer — mistakes it for
     # the answer.
     declared_phase: RunPhase = RunPhase.RUNNING
@@ -188,11 +219,9 @@ class LiveDashboardState(StrictModel):
 
     round: int = 0
     candidate: str = ""
-    patience: str = ""
-    # Banked lives in improvement-banked-budget mode; ``None`` when lives is off (the UI
-    # then shows the round counter). A per-round marker, not a ceiling — hence not in
-    # ``run_limits``.
-    hearts: int | None = None
+    # The last closed round's; ``None`` until round 0 closes. A per-round marker, not a
+    # ceiling — hence not in ``run_limits``.
+    run_standing: RunStanding | None = None
 
     rounds: list[RoundSummary] = Field(default_factory=list)
 
@@ -200,27 +229,25 @@ class LiveDashboardState(StrictModel):
     # pass, which is a measurement nothing has taken (`_update_current_acc` refuses it mid-round).
     best: float | None = None
     current_acc: float | None = None
-    # Served headline lift, in LOGITS on the cycle's fixed δ ruler: the parent's ``ability``
-    # minus the origin's, ``None`` unless the two share a ruler. The ONE derivation — the chip
-    # and the L4 inner progress line read it, neither recomputes. ``None`` until round 0 has
-    # settled with an ability. Accuracy cannot answer this: under ``per_round_resubset`` each
-    # round draws a fresh subset, so a max over rounds selects the luckiest draw.
-    ability_delta: float | None = None
-    # That lift priced in what it cost — logits per dollar, the headline efficiency chip. Settled
-    # in ``compose`` rather than at either input's write, because the two move on different events
-    # (θ at a round close, spend on every call) and a browser dividing them is dividing two polls.
-    # ``None`` until both a lift and a non-zero spend exist; a run with no spend has no rate, and
-    # reporting one for it would put an infinity on the strip.
-    ability_delta_per_usd: float | None = None
+    # The headline for every optimizer: the selection and the origin graded on the held-out bench
+    # set. Null until the bench pass lands; a split holding nothing out says so in `missing_reason`.
+    bench_score: BenchScore | None = None
+    # That lift per dollar the SEARCH incurred (`BenchScore.lift_per_usd`, `evidence`'s rule too),
+    # settled in ``compose``: spend moves on every call, and a browser dividing the two divides
+    # two polls.
+    bench_lift_per_incurred_usd: float | None = None
     composite_fitness_formula: str | None = None
     # The same formula as ``{evaluator: coefficient}``, where it IS a weighted sum — what the mask
     # editor's per-evaluator weights seed from. ``None`` says the formula cannot carry them and the
     # control disables rather than guessing, which is the whole point of serving it: a browser
     # parsing coefficients out of the string substitutes a default for whatever its regex missed.
     composite_fitness_weights: dict[str, float] | None = None
-    # DISPLAY config — the gate is always θ; this seeds the webapp's client-overridable
-    # headline toggle. Stamped at construction (``for_run``), so a fork carries its own.
-    headline_metric: HeadlineMetric = "accuracy"
+    # DISPLAY config — the selector decides on its own objective; this seeds the webapp's
+    # client-overridable metric toggle. Stamped at construction (``for_run``), so a fork carries its own.
+    display_metric: DisplayMetric = "accuracy"
+    # Mirrors `RoundResult.stamps_theta` — campaign-wide, so the per-arm θ column reads ONE flag
+    # rather than a candidate's `None` theta, which a cold ruler leaves `None` too.
+    stamps_theta: bool = False
 
     degraded_count: int = 0
     error_count: int = 0
@@ -237,14 +264,13 @@ class LiveDashboardState(StrictModel):
     current_query_payload: str | None = None
     current_sample_id: int | None = None
     # EVERY sample in flight, oldest first — the membership test `current_sample_id` cannot
-    # answer. That one is the walk's CURSOR and is right to name a single position; asking it
-    # "is this row running?" lit one row of N under look-ahead, silently, since the arming is
-    # exactly when the operator is watching. Two questions, so two fields.
+    # answer. That one is the walk's CURSOR and names a single position; asked "is this row
+    # running?" it lights one row of N under look-ahead. Two questions, so two fields.
     open_sample_ids: list[int] = Field(default_factory=list)
     # The order the running candidate DECLARED it would walk. Served as well as streamed, because
     # the SSE event fires once per candidate and a reader that joins after it has no forward view
     # at all. Named `declared_` because the heatmap's `sample_order` is absolute difficulty and
-    # this one is relevance — and it is a PLAN: PoBB can stop a candidate before the tail is
+    # this one is relevance — and it is a PLAN: an eliminator can stop a candidate before the tail is
     # reached, so no reader may word it as "will".
     declared_sample_order: list[int] = Field(default_factory=list)
 
@@ -257,19 +283,29 @@ class LiveDashboardState(StrictModel):
     # Samples launched then discarded unabsorbed — the depth's whole running cost, cumulative.
     sample_lookahead_discards: int = 0
     # The scoring phase's calls in flight; how many its stop rules allow right now; and the most it
-    # could ever hold — all counted over every candidate walking and the PoBB catch-ups
+    # could ever hold — all counted over every candidate walking and the race catch-ups
     # (`scoring/query_loop.py::FlightGauge`). Between phases `lookahead_most` is the next round's
-    # (`n_variants` x `sp_budget_round`), so the operator can size a press before it starts.
+    # (`arms_per_round` x `sp_budget_round`), so the operator can size a press before it starts —
+    # ``None`` there under an optimizer that declares no `arms_per_round`.
     in_flight: int = 0
     lookahead_allowed: int = 0
-    lookahead_most: int = 0
+    lookahead_most: int | None = 0
+    # How many MORE cells the SPEND ceiling admits, and what one reserves — the fourth bound on the
+    # same depth, and the only one nothing else implies. A cell reserves its worst case, so a
+    # ceiling a few of those wide pins the walk at one call while the depth reads armed and the
+    # stop rules read generous. ``None`` where no book bounds the cells.
+    lookahead_affordable: int | None = None
+    cell_reserve_usd: float | None = None
     # The call the round's next decision waits on — calls are taken in walk order, so one slow cell
     # at a candidate's head holds every call behind it — and when it was launched (epoch seconds).
     waiting_on: str | None = None
     waiting_since: float | None = None
+    # The model provider holding calls out but unsent (`rate_limit.py::Backpressure`); None while
+    # it holds nothing.
+    backpressure: BackpressureReading | None = None
     # The connector's own declarations, stamped at INIT:exit. SERVED rather than inferred: the
     # browser's only available guess — "is this self-optimization?" — is not the question. `1`
-    # says the control does not apply, and went unserved before, so the button took dead presses.
+    # says the control does not apply.
     max_cells_in_flight: int = 1
     # The backend's own noun for a measured row, so the browser never picks one off a local flag.
     measured_unit: MeasuredUnit = "sample"
@@ -279,18 +315,21 @@ class LiveDashboardState(StrictModel):
     last_query_elapsed_s: float | None = None
     wallclock_serialized_at: str | None = None
 
-    n_variants: int
+    # The most arms one round races (`OptimizerPacing.arms_per_round`); ``None`` where undeclared.
+    arms_per_round: int | None
     sp_budget_round: int
 
     # None until INIT:exit.
     run_limits: RunLimits | None = None
 
     spend: SpendRollup = Field(default_factory=SpendRollup)
+    # WIRE-ONLY like `run_phase`: the dashboard route sets it off `spend` under the campaign's
+    # `ceiling_meter`, a manifest fact no ledger record carries, so a replay serves it too.
+    spend_metered: MeteredSpend | None = Field(default=None, exclude=True)
 
     # The SAME fold, keyed by the round each call stamped itself with — so "what did round 3 cost,
     # and how much of its input did providers serve off their own prefix cache" is answerable at
-    # all. `spend` above is one running total for the whole cycle, and `rounds[]` carried no cost,
-    # which left every round-axis surface showing a round with no price on it.
+    # all. `spend` above is one running total for the whole cycle, and `rounds[]` carries no cost.
     #
     # PER ROUND, not cumulative: the atom is what a bar needs and what a cumulative series is
     # summed FROM, and the reverse does not hold. `evidence/read.py::_spend_to_round` folds these
@@ -303,7 +342,7 @@ class LiveDashboardState(StrictModel):
     # reconciles against `spend`.
     spend_by_round: dict[str, SpendRollup] = Field(default_factory=dict)
 
-    backfill_log: list[BackfillLogEntry] = Field(default_factory=list)
+    catch_up_log: list[CatchUpLogEntry] = Field(default_factory=list)
 
     current_round: CurrentRound = Field(default_factory=CurrentRound)
 
@@ -315,9 +354,9 @@ class LiveDashboardState(StrictModel):
     # over a run and is folded.
     WIRING_FIELDS: ClassVar[tuple[str, ...]] = (
         "session_id",
-        "n_variants",
+        "arms_per_round",
         "sp_budget_round",
-        "headline_metric",
+        "display_metric",
         "langfuse_trace_url",
         "max_cells_in_flight",
         "measured_unit",
@@ -331,11 +370,10 @@ class LiveDashboardState(StrictModel):
         *,
         hop: CycleHop,
         session_id: str,
-        l1_patience: int,
-        n_variants: int,
+        arms_per_round: int | None,
         sp_budget_round: int,
         langfuse_trace_url: str | None,
-        headline_metric: HeadlineMetric,
+        display_metric: DisplayMetric,
     ) -> LiveDashboardState:
         """The state a starting run writes — ``prior`` carried forward WHOLESALE, this process's own facts
         stamped over it. This model IS the on-disk shape, so a hand-picked subset resets what it omits."""
@@ -345,15 +383,16 @@ class LiveDashboardState(StrictModel):
             "session_id": session_id,
             "langfuse_trace_url": langfuse_trace_url,
             "state_since": utcnow_iso(),
-            "n_variants": n_variants,
+            "arms_per_round": arms_per_round,
             "sp_budget_round": sp_budget_round,
-            "patience": f"0/{l1_patience}",
             # Not carried from `prior` and not deferred to INIT:exit — round 0 runs before any
             # INIT event reaches the ledger, so waiting mis-headlines the whole origin pass.
-            "headline_metric": headline_metric,
+            "display_metric": display_metric,
             "declared_phase": RunPhase.RUNNING,
             "stop_reason": None,
             "error": None,
+            # A resumed run grades its selection again; the prior pass graded a stale one.
+            "bench_score": None,
             "current_round": CurrentRound(),
             "current_query_payload": None,
             "current_sample_id": None,

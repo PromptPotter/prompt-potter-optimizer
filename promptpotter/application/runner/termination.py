@@ -8,12 +8,13 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from promptpotter.domain.phases import WALLET_STOPS, StopLoop, StopReason
-from promptpotter.shared.errors import WalletExhaustedError, is_repairable_hole
+from promptpotter.domain.phases import REFUSAL_STOPS, StopLoop, StopReason
+from promptpotter.shared.errors import SendRefusedError, is_repairable_hole
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.domain.results import DegradationHealth
     from promptpotter.infrastructure.llm.spend_book import SpendBook
 
@@ -23,13 +24,13 @@ OriginGateMode = Literal["strict", "critical_only", "off"]
 PanelGateMode = Literal["strict", "off"]
 
 # What ends a run on a named reason wherever it is raised — prep, init or the round loop.
-RUN_STOPS = (StopLoop, WalletExhaustedError)
+RUN_STOPS = (StopLoop, SendRefusedError)
 
 
-def run_stop_reason(stop: StopLoop | WalletExhaustedError) -> StopReason:
-    if isinstance(stop, WalletExhaustedError):
+def run_stop_reason(stop: StopLoop | SendRefusedError) -> StopReason:
+    if isinstance(stop, SendRefusedError):
         logger.warning("Run halted: %s", stop)
-        return WALLET_STOPS[stop.category]
+        return REFUSAL_STOPS[stop.category]
     return stop.reason
 
 
@@ -42,7 +43,7 @@ class BudgetGate:
 
     def tripped(self) -> StopReason | None:
         refused = self.book.exhausted()
-        return None if refused is None else WALLET_STOPS[refused]
+        return None if refused is None else REFUSAL_STOPS[refused]
 
 
 def origin_gate_tripped(
@@ -77,6 +78,16 @@ def panel_gate_tripped(
     return StopReason.PAUSED
 
 
+def target_tripped(cycle: Cycle, target: float | None) -> StopReason | None:
+    """``TARGET_HIT`` once the optimizer's declared pick read ``target`` on the round that picked it —
+    never a high-water across rounds, whose readings sat different rows and outrank the pick."""
+    if target is None:
+        return None
+    # An UNMEASURED pick never hits: its rounds failed to read the bar, not reached it.
+    accuracy = cycle.selection.accuracy
+    return StopReason.TARGET_HIT if accuracy is not None and accuracy >= target else None
+
+
 __all__ = [
     "RUN_STOPS",
     "BudgetGate",
@@ -84,4 +95,5 @@ __all__ = [
     "origin_gate_tripped",
     "panel_gate_tripped",
     "run_stop_reason",
+    "target_tripped",
 ]

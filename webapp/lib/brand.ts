@@ -1,18 +1,5 @@
-// Single source of brand identity for the embed / meta surfaces. Consumed by
-// the Web App Manifest (`app/manifest.ts`), the schema.org JSON-LD in the page
-// `<head>` (`app/layout.tsx`), and the Account → "About this unit" pane. A
-// whitelabel host overrides any field via `NEXT_PUBLIC_*` at build time.
-//
-//   publisher — the distributing brand (the host; overridable).
-//   provider  — who actually powers the unit (PromptPotter; FIXED — it is the
-//               provenance fact, not a label the host gets to repaint).
-//
-// The live app VERSION is deliberately NOT here. It is server-owned
-// (`APP_VERSION` in `config/settings.py`) and read at runtime from
-// `/api/v1/health` — one source of truth, no build-time copy to drift.
-//
-// NOTE: Next inlines `process.env.NEXT_PUBLIC_*` only on *literal* member
-// access, so each field reads its env var directly (no dynamic lookup helper).
+// Single source of brand identity, each field `NEXT_PUBLIC_*`-overridable. Next inlines those
+// only on LITERAL member access — never a dynamic lookup helper.
 
 export const BRAND = {
   name: process.env.NEXT_PUBLIC_BRAND_NAME || "PromptPotter Live Unit",
@@ -26,15 +13,13 @@ export const BRAND = {
     name: process.env.NEXT_PUBLIC_PUBLISHER_NAME || "PromptPotter",
     url: process.env.NEXT_PUBLIC_PUBLISHER_URL || "https://promptpotter.com",
   },
+  // Fixed: the provenance fact, never repainted by a whitelabel host.
   provider: {
     name: "PromptPotter",
     url: "https://promptpotter.com",
   },
-  // The origin marketing site this unit links home to. OUR hosted instance
-  // points back to promptpotter.com; a whitelabel distributor who resells /
-  // hosts for profit sets NEXT_PUBLIC_MARKETING_URL="" to drop the login
-  // "visit our website" card entirely — it must never funnel their paying
-  // users upstream. `??` (not `||`) so an explicit empty string opts out.
+  // `??`, not `||`: an explicit empty string drops the login "visit our website" card, so a
+  // whitelabel host never funnels its users upstream.
   marketing: {
     url: process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://promptpotter.com",
     title: process.env.NEXT_PUBLIC_MARKETING_TITLE || "PromptPotter",
@@ -42,16 +27,10 @@ export const BRAND = {
       process.env.NEXT_PUBLIC_MARKETING_TAGLINE ||
       "Give PromptPotter the prompt you're already using; it returns critiqued, improved versions with rich evaluation metadata — a significant, measured gain in about five minutes.",
   },
-  // Default to the repo issue tracker — the live beta support channel (the
-  // hosted /support page isn't up yet). Whitelabel distributors override via
-  // NEXT_PUBLIC_SUPPORT_URL so their users never land on our tracker.
   supportUrl:
     process.env.NEXT_PUBLIC_SUPPORT_URL ||
     "https://github.com/PromptPotter/prompt-potter-optimizer/issues",
-  // The three legal pages, each its own override. A whitelabel host answers for
-  // its own terms, so these are NOT derived from `marketing.url` — that field is
-  // clearable to drop the login showcase, which must not take the consent links
-  // with it. The onboarding consent gate and the lockout modal read them.
+  // Never derived from `marketing.url`: clearing that must not take the consent links with it.
   legal: {
     terms: process.env.NEXT_PUBLIC_TERMS_URL || "https://promptpotter.com/terms",
     privacy: process.env.NEXT_PUBLIC_PRIVACY_URL || "https://promptpotter.com/privacy",
@@ -60,20 +39,15 @@ export const BRAND = {
   license:
     process.env.NEXT_PUBLIC_LICENSE ||
     "https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/LICENSE",
-  // Mirrors the dark-theme body background in app/styles/foundation/themes.css + layout's
-  // themeColor — the install/splash chrome a browser paints from the manifest.
+  // Mirrors the dark-theme body background in `foundation/themes.css` and layout's themeColor.
   themeColor: "#0d0d0d",
   backgroundColor: "#0d0d0d",
-  // Provenance trust level. `self-declared` until a signed, origin-bound
-  // credential lands; the About pane must not show a "verified" affordance
-  // while this says otherwise.
+  // The About pane must never show a "verified" affordance while this says `self-declared`.
   verification: "self-declared" as "self-declared" | "verified",
 } as const;
 
-// schema.org SoftwareApplication — the provenance object. Emitted as JSON-LD
-// in the page <head> (where crawlers/agents read it) AND shown verbatim in the
-// About pane's "View provenance". One builder, so the two never diverge.
-// softwareVersion is intentionally absent — version is live from /health.
+// One builder for the <head> JSON-LD and the About pane's "View provenance". No softwareVersion:
+// the version is live from /health.
 interface SoftwareApplicationLd {
   "@context": "https://schema.org";
   "@type": "SoftwareApplication";

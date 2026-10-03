@@ -3,8 +3,8 @@ import { candidateSearchPoint } from "../candidateSearchPoint";
 import type { RoundResult } from "@/lib/types";
 import { roundDoc, scored } from "@/lib/test-fixtures";
 
-// A round file with two candidates, each carrying its own evolved prompt
-// + COMPLETE resolved config — the shape `build_score_report` now persists.
+// Each candidate carries its evolved prompt + COMPLETE resolved config, as `build_score_report`
+// persists them.
 const doc: RoundResult = roundDoc({
   round: 2,
   candidate_scores: [

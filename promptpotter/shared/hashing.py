@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Collection, Iterable
     from types import ModuleType
 
 # SHA256 truncated to 24 hex chars (96 bits) — sufficient for content-addressed
@@ -109,6 +109,10 @@ def _marked(tree: ast.Module) -> list[ast.AST]:
 PLUMBING_MODULES = frozenset(
     {
         "promptpotter.infrastructure.llm.telemetry",  # records what a fill did
+        "promptpotter.application.bench.llm_call",  # sends the messages it is handed
+        "promptpotter.application.bench.resume_and_fork.decisions",  # records what a node decided
+        "promptpotter.application.optimizers.nodes",  # the contract a manifest is walked through
+        "promptpotter.application.runner.measurement",  # measures cells; their rows are data
         "promptpotter.shared.hashing",  # the digest itself
         "promptpotter.infrastructure.store.io",  # reads files the identity hashes as data
         "promptpotter.config.paths",  # says where those files live
@@ -199,10 +203,11 @@ def _annotation_ids(unit: ast.AST) -> set[int]:
 
 
 class _Package:
-    """The package's modules, parsed on demand, for resolving a name to where it is DEFINED."""
+    """The package's modules, parsed on demand, for resolving a name to where it is DEFINED —
+    beside the *hashed* trees handed in, which may live outside it, as a plugin's do."""
 
-    def __init__(self) -> None:
-        self._scopes: dict[str, _Scope | None] = {}
+    def __init__(self, hashed: Iterable[tuple[str, ast.Module]]) -> None:
+        self._scopes: dict[str, _Scope | None] = {m: _scope(tree) for m, tree in hashed}
 
     def scope(self, module: str) -> _Scope | None:
         if module not in self._scopes:
@@ -260,27 +265,29 @@ class _Package:
 
 
 def optimizer_prompt_shapers(
-    hashed: Iterable[ModuleType], *, covered: Iterable[ModuleType] = ()
+    hashed: Iterable[ModuleType],
+    *,
+    covered: Iterable[ModuleType] = (),
+    foreign: Collection[str] = (),
 ) -> tuple[ast.AST, ...]:
-    """Every marked definition in the package, in path then source order — read off the source, so
-    the set cannot depend on which modules a process happened to import. RAISES where *hashed* or
-    marked code reads a package name that is not hashed, *covered*, marked, a class or plumbing: a
-    helper it calls would shape the prompt for free."""
+    """Every marked definition in the package outside the *foreign* packages, in path then source
+    order — read off the source, so the set cannot depend on which modules a process happened to
+    import. RAISES where *hashed* or marked code reads a package name that is not hashed, *covered*,
+    marked, a class or plumbing: a helper it calls would shape the prompt for free."""
     units: list[tuple[str, ast.AST]] = [
-        (_module_name(path), node)
+        (module, node)
         for path in sorted(_PACKAGE_ROOT.rglob("*.py"))
-        if shapes_optimizer_prompt.__name__ in (text := path.read_text(encoding="utf-8"))
+        if not (module := _module_name(path)).startswith(tuple(f"{f}." for f in foreign))
+        and shapes_optimizer_prompt.__name__ in (text := path.read_text(encoding="utf-8"))
         for node in _marked(ast.parse(text))
     ]
     whole = {m for m, unit in units if isinstance(unit, ast.Module)}
     scanned = [m for m in hashed if m.__name__ not in whole]
     covered_names = whole | {m.__name__ for m in (*scanned, *covered)} | PLUMBING_MODULES
     marked = {(m, name) for m, unit in units if (name := _unit_name(unit))}
-    package = _Package()
-    checked = [
-        *units,
-        *((m.__name__, ast.parse(Path(str(m.__file__)).read_text("utf-8"))) for m in scanned),
-    ]
+    trees = [(m.__name__, ast.parse(Path(str(m.__file__)).read_text("utf-8"))) for m in scanned]
+    package = _Package(trees)
+    checked = [*units, *trees]
     breaches = sorted(
         {
             f"{target[0]}.{target[1]} (read by {module})"

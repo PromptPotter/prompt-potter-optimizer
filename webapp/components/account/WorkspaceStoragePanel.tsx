@@ -6,9 +6,6 @@ import { cx } from "@/lib/cx";
 import { AccountEmpty, AccountFailure, AccountLoading, AccountSection } from "./AccountSection";
 import { ArchiveCompactionControl } from "./ArchiveCompactionControl";
 
-// Workspace-wide storage rollup — per-campaign on-disk totals, fattest first, plus
-// the shared caches and a residual "Other" line so the parts sum to the real total.
-// Answers "where did the bucket sizes go?". Self-fetches `GET /workspace/storage`.
 export function WorkspaceStoragePanel() {
   const read = useRead(
     { key: "workspace-storage", fetch: fetchWorkspaceStorage },

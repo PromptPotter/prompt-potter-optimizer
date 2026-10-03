@@ -1,15 +1,15 @@
-"""The per-round candidate buffer behind ``current_round.nodes.l1_score``. The view's snapshot fan-out routes each kind to
+"""The per-round candidate buffer behind ``current_round.candidates``. The view's snapshot fan-out routes each kind to
 one mutator here, and the render functions read these fields verbatim."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, cast
 
 from promptpotter.domain.results import OverlapReading
 from promptpotter.domain.run_records import LedgerFit
-from promptpotter.domain.scoring import QueryMeasurement, recorded_elapsed_s
+from promptpotter.domain.scoring import QueryMeasurement, recorded_cost_s, recorded_elapsed_s
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.projections.live_state import top_n_p_best
 
@@ -31,8 +31,8 @@ class RoundBuffer:
         self.overlap = None
 
     def stamp_overlap(self, overlap: OverlapReading | None) -> None:
-        """The parent line on its shared cells, off the ``RoundResult`` the election record carries
-        live. Measured just before that record fires (``l1/score/overlap.py``), and what answers
+        """The best-so-far line on its shared cells, off the ``RoundResult`` the election record carries
+        live. Measured just before that record fires (``runner/overlap.py``), and what answers
         "better than C0" when the δ scale underneath θ has collapsed."""
         self.overlap = overlap
 
@@ -78,16 +78,14 @@ class RoundBuffer:
     ) -> None:
         pd = result.get("pipeline_data") or {}
         query_time = recorded_elapsed_s(cast("QueryMeasurement", result))
-        # The row's whole token account, from the one place that carries it. This read used to
-        # prefer a top-level `input_tokens` twin and fall back to a `pipeline_data` one — neither
-        # of which any writer in this tree ever set, so every served row carried `null` and the
-        # tape's `io=` column, and then the cache share beside it, could not render at all.
-        # Measured before the fix: 385 served sample rows across 21 dashboards, none with a count.
+        # Both facts, never one picked here: a replay's elapsed is a true 0.0 and this is what the
+        # cell took when it was measured. Which one a column SHOWS is `DashboardSample.shown_s`.
+        work_time = recorded_cost_s(cast("QueryMeasurement", result))
+        # The row's whole token account, from the one place that carries it.
         account = TokenAccount.from_step_tokens(pd)
         # The scorer rides the candidate's running fitness (composite/accuracy/
         # hits/total over samples-so-far) out on the sample. Store it on the slot
-        # so the live l1_score block serves a moving fitness before the final
-        # ``scores`` land (folder-UI parity for no-browser readers).
+        # so the live row serves a moving fitness before the final ``scores`` land.
         running = result.get("_running")
         if isinstance(running, dict):
             self.slot(ci, ct)["running"] = running
@@ -99,6 +97,9 @@ class RoundBuffer:
                 "qi": qi,
                 "qt": qt,
                 "sample_id": result.get("sample_id"),
+                # The walk's archive run (`query_loop._with_running`) — the candidate row reads its
+                # cell address off it before the score report carries one.
+                "run_id": result.get("run_id"),
                 "fitness": result.get("fitness"),
                 "cached": bool(result.get("cached", False)),
                 "query": result.get("query") or "",
@@ -112,6 +113,7 @@ class RoundBuffer:
                 "prediction": result.get("predicted") or "",
                 "ground_truth": result.get("ground_truth") or "",
                 "time_s": None if query_time is None else round(query_time, 2),
+                "cost_s": None if work_time is None else round(work_time, 2),
                 # Two channels, deliberately: `error` is the human message the tape RENDERS,
                 # `error_category` the typed one `is_error_result` ASKS (`shared/errors.py`).
                 "error": result.get("error"),
@@ -151,21 +153,21 @@ class RoundBuffer:
             if stamped is not None:
                 scores.update(stamped.model_dump(exclude_none=True))
 
-    def mark_winner(self, winner_label: str) -> None:
-        """Crown the elected candidate from the ``ElectionRecord`` — the crown's OWN record, at its
-        own coordinate. Every other slot is re-stamped ``False`` in the same pass, so a re-fire
-        cannot leave a stale crown beside the new one.
+    def mark_selected(self, selected_labels: Sequence[str]) -> None:
+        """Mark the selection from the ``ElectionRecord`` — its OWN record, at its own coordinate.
+        Every other slot is re-stamped ``False`` in the same pass, so a re-fire cannot leave a
+        stale mark beside the new one.
 
         Matched on ``label``, which is what that record carries and why: a resume re-mints
         candidate ids, so the id is not stable across one. Within a round the label is the canonical
-        ``C{round}.{n}`` and unique, so this is an identity match, not the prose one
-        ``is_round_winner`` warns off — ``changes_description`` is the prose, and it can repeat.
+        ``C{round}.{n}`` and unique — never ``changes_description``, which is prose and can repeat.
 
-        A HELD round crowns nobody, and the record says so by carrying an EMPTY label rather than
-        the retained parent's, which belongs to no slot of this round."""
+        A HELD round selects nobody, and the record says so by carrying NO label rather than the
+        retained parent's, which belongs to no slot of this round."""
+        chosen = set(selected_labels)
         for entry in self.candidates.values():
             label = str((entry.get("scores") or {}).get("label") or "")
-            entry["is_winner"] = bool(winner_label) and label == winner_label
+            entry["is_selected"] = label in chosen
 
     def update_p_best(
         self,

@@ -1,5 +1,3 @@
-/* The root boundary's fallback — the one screen that draws when a render threw. */
-
 @layer ui {
 .panel {
   max-width: 560px;

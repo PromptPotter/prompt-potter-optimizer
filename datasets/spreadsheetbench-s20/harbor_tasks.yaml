@@ -1,0 +1,40 @@
+# The panel: twenty SpreadsheetBench tasks, run as containerized agent episodes through Harbor.
+# Why the roster is not copied here and why the version is the pin that matters:
+# `spreadsheetbench-s10/harbor_tasks.yaml`, which this cut widens.
+harbor_dataset: spreadsheetbench-verified
+harbor_dataset_version: "1.0"
+
+# The first twenty of the roster in published order — `spreadsheetbench-s10`'s ten, then the next
+# ten. The shared ten replay whatever s10 measured under the same configuration; the ten added
+# cells have never been measured on any model, and the origin is their screen.
+tasks_include:
+  - "10452"
+  - "105-24"
+  - "10747"
+  - "108-24"
+  - "109-21"
+  - "11276"
+  - "118-50"
+  - "11842"
+  - "120-24"
+  - "12307"
+  - "12864"
+  - "13-1"
+  - "130-9"
+  - "13284"
+  - "141-20"
+  - "142-12"
+  - "142-19"
+  - "14240"
+  - "146-49"
+  - "147-48"
+
+package_cache: verifier
+reward_key: reward
+
+agent:
+  name: terminus-2
+  environment: docker
+  kwargs:
+    max_turns: 20
+    temperature: 0.0

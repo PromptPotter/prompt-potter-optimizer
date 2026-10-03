@@ -7,22 +7,11 @@ import {
   roundCandidates,
 } from "../round-candidates";
 import { availableRounds } from "../round-axis";
+import { runSummary } from "../run-summary";
 import { liveCandidateId } from "@/lib/candidate-label";
 
 describe("roundCandidates — l2_terminal fixture", () => {
-  // Reproduces the operator's justlogic__ca6d4d/cycle_2451d3cf6ebc exit
-  // shape: origin (round 0) + 4 fully-scored rounds + a round-5 stub with
-  // empty candidates (closed mid-L2 without l1_score firing). Per the
-  // derivation contract:
-  //
-  //   - Origin is round 0 in `dash.rounds[]` — a single candidate labelled
-  //     "C0" that flows through the same history loop as every round.
-  //   - Historical rounds 1–4 each contribute their two candidates.
-  //   - Round 5 is in `dash.rounds[]` but has `candidates: []` and must
-  //     be skipped (no rows added AND no suppression of the in-flight
-  //     branch for round 5). The in-flight L1_SCORE is also empty here
-  //     because no scoring actually happened, so the final shape is
-  //     origin + 8 historical candidates = 9 rows total.
+  // Fixture: origin + 3 scored rounds of three + an empty round-4 stub (closed mid-L2).
   const dash = loadCycleFixture("l2_terminal");
   const rows = roundCandidates(dash);
 
@@ -35,15 +24,11 @@ describe("roundCandidates — l2_terminal fixture", () => {
 
   it("emits every non-empty post-origin round's candidates", () => {
     const historical = rows.filter((r) => r.round > 0);
-    // 4 closed rounds × 2 candidates each = 8 rows. Round 5's
-    // empty stub contributes nothing.
-    expect(historical).toHaveLength(8);
-    expect(new Set(historical.map((r) => r.round))).toEqual(
-      new Set([1, 2, 3, 4]),
-    );
+    expect(historical).toHaveLength(9);
+    expect(new Set(historical.map((r) => r.round))).toEqual(new Set([1, 2, 3]));
   });
 
-  it("does not emit any inflight row for the L2-terminal round 5", () => {
+  it("does not emit any inflight row for the L2-terminal round 4", () => {
     const inflight = rows.filter((r) => r.source === "inflight");
     expect(inflight).toHaveLength(0);
   });
@@ -54,62 +39,60 @@ describe("roundCandidates — l2_terminal fixture", () => {
       "R0.0",
       "R1.0",
       "R1.1",
+      "R1.2",
       "R2.0",
       "R2.1",
+      "R2.2",
       "R3.0",
       "R3.1",
-      "R4.0",
-      "R4.1",
+      "R3.2",
     ]);
   });
 
-  it("empty round 5 does not suppress the in-flight branch for round 5", () => {
-    // Direct exercise of the fix: an empty historical entry must not
-    // appear in `historicalRounds` (it has nothing to double-count
-    // against the in-flight branch). On this fixture the in-flight
-    // L1_SCORE is also empty, so no inflight rows render — but the
-    // gate must not block them on principle. Verified indirectly by
-    // confirming the rows count is exactly 1 origin + 8 historical
-    // with no spurious round-5 placeholder slot.
-    const round5 = rows.filter((r) => r.round === 5);
-    expect(round5).toHaveLength(0);
+  it("empty round 4 does not suppress the in-flight branch for round 4", () => {
+    const round4 = rows.filter((r) => r.round === 4);
+    expect(round4).toHaveLength(0);
   });
 
-  it("availableRounds excludes the empty L2-terminal round 5 from completed", () => {
-    // The other half of the fix: the empty round-5 stub must not be
-    // advertised as a completed round, or `useEffectiveRound` falls back
-    // to it as `lastCompleted` and the round-scoped surfaces blank/hang on
-    // a round with no fitness data. Terminal cycle ⇒ isLive false.
+  it("availableRounds excludes the empty L2-terminal round 4 from completed", () => {
     const axis = availableRounds(dash, false);
-    expect(axis.completed).toEqual([0, 1, 2, 3, 4]);
+    expect(axis.completed).toEqual([0, 1, 2, 3]);
     expect(axis.live).toBeNull();
   });
 
-  it("closedRoundNumbers is the shared 'closed with fitness data' set — excludes the empty round 5", () => {
-    // Single definition behind both `availableRounds.completed` and the
-    // candidate spine's in-flight suppression. An empty L2/L3-terminal round
-    // carries no fitness data, so it is NOT closed here (it must not mask the
-    // in-flight branch nor advertise as a selectable round). Distinct from
-    // `useRoundSource`'s on-disk presence check, which DOES include it.
-    expect(closedRoundNumbers(dash)).toEqual(new Set([0, 1, 2, 3, 4]));
+  it("closedRoundNumbers is the shared 'closed with fitness data' set — excludes the empty round 4", () => {
+    // Excludes the empty round, unlike `useRoundSource`'s on-disk presence check.
+    expect(closedRoundNumbers(dash)).toEqual(new Set([0, 1, 2, 3]));
   });
 
   it("groupByRound buckets the same spine rows without recomputing the merge", () => {
     const byRound = groupByRound(rows);
-    // Every emitted row lands under its round; the empty round 5 has no bucket.
-    expect([...byRound.keys()].sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4]);
+    expect([...byRound.keys()].sort((a, b) => a - b)).toEqual([0, 1, 2, 3]);
     expect(byRound.get(0)?.map((r) => r.key)).toEqual(["R0.0"]);
-    expect(byRound.get(1)?.map((r) => r.key)).toEqual(["R1.0", "R1.1"]);
-    expect(byRound.get(5)).toBeUndefined();
-    // Same total as the flat spine — pure regrouping, no rows added or dropped.
+    expect(byRound.get(1)?.map((r) => r.key)).toEqual(["R1.0", "R1.1", "R1.2"]);
+    expect(byRound.get(4)).toBeUndefined();
     const grouped = [...byRound.values()].reduce((n, b) => n + b.length, 0);
     expect(grouped).toBe(rows.length);
   });
+
+  // Rounds 2 and 3 HELD: the crown is only what each served `is_selected` says.
+  it("crowns exactly the rows the rounds served as selected", () => {
+    expect(rows.filter((r) => r.is_selected).map((r) => r.label)).toEqual(["C0", "C1.2"]);
+  });
+
+  it("carries θ on every row of a campaign whose optimizer stamps it", () => {
+    expect(rows.every((r) => r.theta !== null)).toBe(true);
+  });
+
+  it("reads the last closed round's optimizer facts, never the empty stub's", () => {
+    const last = runSummary(dash)?.lastRound;
+    expect(last?.round).toBe(3);
+    expect(last?.facts).toEqual(dash.rounds[3]?.optimizer_facts);
+    expect(last?.facts.length).toBeGreaterThan(0);
+  });
 });
 
-// The in-flight branch, which the fixture above has none of. A live row is the same served
-// shape as a closed one, so every field carries through — the arm used to hardcode `theta`,
-// `meanFitnessCi*` and `matchedParent*` to null as "stamped at round close", which the CI is not.
+// A live row is the same served shape as a closed one, so every field carries through.
 describe("roundCandidates — the in-flight round", () => {
   const live = dashboard({
     current_round: currentRound({
@@ -117,8 +100,7 @@ describe("roundCandidates — the in-flight round", () => {
       candidates: [
         liveRow({
           label: "C2.1",
-          // A FINISHED live row: scoring has landed, so the score report's lineage id is on it
-          // — the state in which the two live readers' positional join used to break.
+          // A FINISHED live row: the score report's lineage id has landed on it.
           candidate_id: "9f2c1b7e-4a80-4d55-9c31-0b6ad2f11e03",
           accuracy: 0.6,
           composite_fitness: 0.55,
@@ -138,16 +120,14 @@ describe("roundCandidates — the in-flight round", () => {
     expect(row?.meanFitnessCiHi).toBe(0.69);
   });
 
-  // An in-flight row has no lineage id, so its `candidate_id` is POSITIONAL and is a row KEY
-  // only. The LABEL is what a live reader joins back on — the one key a selection minted off the
-  // tree and a row that has not been scored yet both carry.
+  // An in-flight `candidate_id` is POSITIONAL, a row key only; a live reader joins on the LABEL.
   it("keys an in-flight row on the positional id and carries its label", () => {
     expect(row?.candidate_id).toBe(liveCandidateId(2, 0));
     expect(row?.label).toBeTruthy();
   });
 
   it("holds no crown — the election is a round-scoped fit that has not run", () => {
-    expect(row?.is_winner).toBe(false);
+    expect(row?.is_selected).toBe(false);
     expect(row?.theta).toBeNull();
   });
 
@@ -157,9 +137,8 @@ describe("roundCandidates — the in-flight round", () => {
   });
 });
 
-// A candidate REJECTED by validation never ran, and `INVALID_SCORES` gives it a synthetic 0.0 so
-// its row is not byte-identical to one that got everything wrong. The flag saying which it is was
-// dropped here for as long as this mapper existed, which is how `C4.3 · 0%` reached the strip.
+// A rejected candidate never ran; `INVALID_SCORES` gives it a synthetic 0.0, so the flag saying
+// which it is must carry through.
 describe("roundCandidates — a rejected candidate", () => {
   const live = dashboard({
     current_round: currentRound({
@@ -168,7 +147,7 @@ describe("roundCandidates — a rejected candidate", () => {
         liveRow({ label: "C4.1", accuracy: 0.65, composite_fitness: 0.65, scored_samples: 20 }),
         liveRow({
           label: "C4.3",
-          invalid: true,
+          outcome: "invalid",
           // What the producer actually serves for one: the synthetic score, over no rows at all.
           accuracy: 0,
           composite_fitness: 0,
@@ -179,9 +158,9 @@ describe("roundCandidates — a rejected candidate", () => {
   });
   const rows = roundCandidates(live).filter((r) => r.source === "inflight");
 
-  it("carries the flag through, so a renderer can tell the two apart", () => {
-    expect(rows.find((r) => r.label === "C4.1")?.invalid).toBe(false);
-    expect(rows.find((r) => r.label === "C4.3")?.invalid).toBe(true);
+  it("carries the outcome through, so a renderer can tell the two apart", () => {
+    expect(rows.find((r) => r.label === "C4.1")?.outcome).toBeNull();
+    expect(rows.find((r) => r.label === "C4.3")?.outcome).toBe("invalid");
   });
 
   it("leaves the served synthetic score untouched — it feeds selection, and only the RENDER changes", () => {

@@ -1,11 +1,6 @@
 "use client";
-// Config map (campaign.json::optimization knobs) — the operator-facing half of
-// the coupling registry: which knob moves which statistical estimand, what
-// overwrites what, and which knobs currently CLASH. Read-only: self-fetches the
-// in-view campaign's `GET /campaigns/{id}/config-map`, server-authored from the
-// one `application/knobs` registry (same source as the CLI diagnostic + the
-// pre-run preflight warning), so this panel never disagrees with the engine on
-// which knobs collide.
+// Config map: which knob moves which estimand and which CLASH, served from the one
+// `application/knobs` registry the CLI diagnostic and preflight also read.
 
 import { useRead } from "@/lib/hooks/useRead";
 import { fetchConfigMap, type ConfigCoupling } from "@/lib/api";
@@ -53,7 +48,6 @@ export function ConfigMapPanel() {
   if (read.status === "loading") return <p className="mech-empty">Loading config map…</p>;
   const map = read.data;
 
-  // Active clashes first, then by severity weight, so the collision (if any) leads.
   const order = ["collision", "inert", "info"];
   const couplings = [...map.couplings].sort((a, b) => {
     if (a.active !== b.active) return a.active ? -1 : 1;

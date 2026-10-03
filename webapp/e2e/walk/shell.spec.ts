@@ -1,9 +1,5 @@
 import { test, expect, open, ready, campaigns } from "../harness";
 
-// The chrome every view sits inside: the sidebar, the masthead controls, the account door.
-// It renders on every tab, so a break here is a break everywhere — and none of it is
-// reachable by a jsdom unit, which is why it is the first thing the walk covers.
-
 test.describe("app shell", () => {
   test("boots to the shell, not to a crash", async ({ page }) => {
     await open(page);
@@ -12,8 +8,7 @@ test.describe("app shell", () => {
       "href",
       "#main-content",
     );
-    // Not the brand LITERAL — `lib/brand.ts` is NEXT_PUBLIC_*-overridable for whitelabel, and a
-    // distributor's build is a supported configuration this suite must not fail.
+    // Never the brand literal: `lib/brand.ts` is NEXT_PUBLIC_*-overridable for whitelabel.
     await expect(page.locator("#main-content")).toBeVisible();
   });
 
@@ -21,8 +16,7 @@ test.describe("app shell", () => {
     const served = await campaigns(request);
     await open(page);
 
-    // Each row's ⋯ is one campaign, so the menus count the rows without reading a label —
-    // labels carry the dataset name and a stop reason, which move when the operator runs.
+    // Counted by their ⋯ menus: row labels move when the operator runs.
     const rows = page.getByRole("button", { name: "Campaign actions" });
     await expect(rows).toHaveCount(served.length);
   });
@@ -41,9 +35,7 @@ test.describe("app shell", () => {
   test("the campaign filter opens", async ({ page }) => {
     await open(page);
     await page.getByRole("button", { name: "Filter campaigns" }).click();
-    // The lifecycle filter set is a QUERY-param union with no response model behind it
-    // (`webapp/CLAUDE.md` § A wire shape is GENERATED), so the surface is asserted, not the
-    // member list — a member added in Python must not fail this.
+    // The surface, not the member list: the lifecycle set is owned server-side.
     await expect(page.getByRole("menu").or(page.getByRole("dialog")).first()).toBeVisible();
   });
 
@@ -78,8 +70,7 @@ test.describe("app shell", () => {
 
   test("the skip link reaches the main region", async ({ page }) => {
     await open(page);
-    // It is parked off-viewport until focused — which is the point of it — so it is reached
-    // the way a keyboard user reaches it, never by a synthetic click on a hidden element.
+    // Parked off-viewport until focused, so it is reached by keyboard, never a synthetic click.
     await page.keyboard.press("Tab");
     const skip = page.getByRole("link", { name: "Skip to content" });
     await expect(skip).toBeFocused();
@@ -88,7 +79,6 @@ test.describe("app shell", () => {
   });
 
   test("an unparseable address leaves the view alone rather than resetting it", async ({ page }) => {
-    // `parseAddress` returns null on malformed input and the writer must not act on it.
     await open(page, "#/c/not-a-campaign");
     await ready(page);
   });

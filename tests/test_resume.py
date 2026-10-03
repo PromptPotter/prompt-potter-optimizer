@@ -16,28 +16,30 @@ from typing import Any
 
 import pytest
 
+from promptpotter.application.bench.resume_and_fork.replayers import replay_decisions
 from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
     restore_measurement_archive,
 )
-from promptpotter.application.optimization.pobb.classification import scoreable_rows
-from promptpotter.application.optimization.resume_and_fork.replayers import replay_decisions
+from promptpotter.application.optimizers.potter.records import PotterCheckpointKind
+from promptpotter.application.scoring.classification import scoreable_rows
 from promptpotter.application.scoring.formula import (
     ScoringFormulaError,
     compile_scorer,
     rescore_results,
 )
 from promptpotter.application.scoring.search_point_scorer import (
+    archivable_priors,
     merge_with_unprocessed_priors,
-    rescored_prior_tail,
 )
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.domain.scoring import is_unscored
-from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive, ReplayFeed
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import error_category, is_error_result
+from tests.factories import optimizer_state
 
 # Every cycle lives inside a campaign; the foundation factory's default id.
 _CAMPAIGN = "testds__20260101-000000"
@@ -70,6 +72,8 @@ def _round(**kw: Any) -> RoundResult:
             "improved": False,
             "prompt_fields": {},
             "candidates_scored": 0,
+            "selected_labels": [],
+            "optimizer_state": optimizer_state().model_dump(),
             **kw,
         }
     )
@@ -95,8 +99,8 @@ def test_a_replayer_that_cannot_re_derive_is_not_reported_as_a_match() -> None:
     `parent_bias`/`parent_cells` anchor, `RulerCoverageError` on a cell the ruler never carried.
     The walker caught every exception and counted it as a match, so the rounds nothing could verify
     were exactly the rounds that reported clean: `--fork-on-divergence` never fired, and the resume
-    continued on a winner no rule had reproduced. Silent in the worst direction — a ledger that has
-    not been through `restamp --stamp-election-bias` replays green from end to end.
+    continued on a winner no rule had reproduced. Silent in the worst direction — a ledger missing
+    an anchor replays green from end to end.
     """
     round_data = _round(
         round=0,
@@ -168,10 +172,8 @@ def test_round_winner_replay_ranks_against_the_recorded_parent() -> None:
 
     # A decision carrying no parent is REFUSED, never answered against a reconstructed one —
     # guessing quietly is the whole defect, so the replayer must raise rather than pick a panel.
-    from promptpotter.application.optimization.resume_and_fork.replayers import (
-        ReplayContext,
-        _replay_round_winner,
-    )
+    from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext
+    from promptpotter.application.optimizers.potter.resume import _replay_round_winner
 
     with pytest.raises(ValueError, match="parent_cells"):
         _replay_round_winner(
@@ -241,6 +243,7 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
         try_inherit_fork_origin,
     )
     from promptpotter.domain.opt_search_point import OptSearchPoint
+    from promptpotter.domain.search_point import TaskDecomposition
 
     stores = built_stores
     parent = "cycle_inherit_parent"
@@ -260,10 +263,12 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
                 {
                     "candidate_id": "c1",
                     "label": "C1.1",
+                    "run_id": None,
                     "prompt_fields": prompt,
                     "accuracy": 0.2,
                     "composite_fitness": 0.2,
                     "total": 10,
+                    "outcome": "measured",
                 },
             ],
         ),
@@ -291,21 +296,21 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
 
     # Resolve the origin OSP exactly as ``establish_campaign_origin`` does (fork-seed wins).
     unmodified_seed = CycleSeed(origin_prompt_fields=dict(prompt), origin_source="fork_seed")
-    unmodified_osp = resolve_origin_opt_search_point(
-        {}, task_context=TaskDecomposition(), seed=unmodified_seed
-    )
+    unmodified_osp = resolve_origin_opt_search_point({}, seed=unmodified_seed)
     inherited = try_inherit_fork_origin(
         session,  # type: ignore[arg-type]
         unmodified_seed,
         resolved_origin=unmodified_osp,
+        framing=TaskDecomposition(),
     )
     assert inherited is not None
     # The branch point's OWN measurement, carried whole — not a re-rolled number, and not
     # an accuracy with the rest of the report re-derived around it.
     assert inherited.report.accuracy == 0.2
-    # C0 carries the OSP object, so the inherited origin keeps its fork_seed lineage.
+    # C0 carries the OSP object, so the inherited origin keeps the lineage the seed stamped.
     assert isinstance(inherited.resolved_origin, OptSearchPoint)
-    assert inherited.resolved_origin.lineage.source == "fork_seed"
+    assert inherited.resolved_origin.lineage.source == "origin"
+    assert inherited.resolved_origin.lineage.changes_description.startswith("Operator-steered")
 
     edited_seed = CycleSeed(
         origin_prompt_fields={**prompt, "instruction": "do it differently"},
@@ -314,9 +319,8 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
     edited = try_inherit_fork_origin(
         session,  # type: ignore[arg-type]
         edited_seed,
-        resolved_origin=resolve_origin_opt_search_point(
-            {}, task_context=TaskDecomposition(), seed=edited_seed
-        ),
+        resolved_origin=resolve_origin_opt_search_point({}, seed=edited_seed),
+        framing=TaskDecomposition(),
     )
     assert edited is None
 
@@ -327,15 +331,13 @@ def test_merge_with_unprocessed_priors_preserves_full_archive_on_partial_run() -
 
     Aborted runs must not shrink an already-fuller archive — without this a Ctrl+C would
     record the run as having measured only what the walk reached, and the run's derived
-    fields (scores, provenance, item_count) would be computed off that short set.
+    fields (provenance, item_count) would be computed off that short set.
     """
     dataset_sample_ids = set(range(20))
-    formula = "exact_match(predicted, ground_truth)"
-    prior_tail = rescored_prior_tail(
+    prior_tail = archivable_priors(
         cached_sample_results={i: _prior(i) for i in dataset_sample_ids},
         dataset_sample_ids=dataset_sample_ids,
         deprecated_samples={},
-        scorer=compile_scorer(formula, verifier_graded=False),
     )
     # Simulate a partial run: 6 cache hits + 1 fresh measurement.
     merged = merge_with_unprocessed_priors([_prior(i) for i in range(7)], prior_tail)
@@ -373,62 +375,16 @@ def test_merge_known_outcomes_preserves_prior_on_untouched_samples() -> None:
 _OPT = {"degradation_threshold": 0.0}
 
 
-def test_steered_fork_seed_narrowing_overrides_campaign_locks_per_node() -> None:
-    """A steered fork edits one node's locks; its seed `optimizer_narrowing`
-    overrides the campaign-wide narrowing for THAT node, leaving others inherited."""
-    from promptpotter.application.campaign_config import (
-        apply_inherited_overlay,
-        load_campaign_config,
-    )
-
-    frozen = {
-        "optimization": _OPT,
-        "optimizer_narrowing": {
-            "llm": {"param_keys": ["temperature"], "param_allowed_values": {}},
-            "retriever": {"param_keys": ["top_k"], "param_allowed_values": {}},
-        },
-    }
-    seed = CycleSeed(
-        optimizer_narrowing={"llm": {"param_keys": [], "param_allowed_values": {}}},
-        origin_source="fork_seed",
-    )
-    merged = apply_inherited_overlay(load_campaign_config({"optimization": _OPT}), frozen, seed)
-    # Edited node: the fork's empty-keys lock (everything held) wins.
-    assert merged.optimizer_narrowing["llm"].param_keys == []
-    # Untouched node: the campaign's mint-time narrowing is inherited unchanged.
-    assert merged.optimizer_narrowing["retriever"].param_keys == ["top_k"]
-
-
-def test_frozen_campaign_config_ceilings_survive_the_live_dataset_file() -> None:
-    """The campaign's own snapshot decides what it RUNS, not the dataset template beside it.
-
-    Carrying only `pipeline_overlay` + `optimizer_narrowing` off the snapshot is what let a
-    mint-time `--config` reach `campaign.json` and never the loop: `run_limits` armed the
-    file's ceilings while every surface reading the campaign showed the operator's. The
-    snapshot is the delta from defaults, so a knob it never named still comes off the file.
-    """
-    from promptpotter.application.campaign_config import (
-        apply_inherited_overlay,
-        load_campaign_config,
-    )
-
-    live = load_campaign_config({"optimization": {**_OPT, "max_rounds": 5, "n_variants": 7}})
-    frozen = {"optimization": {"max_rounds": 12, "spend_budget_usd": 0.3}}
-    merged = apply_inherited_overlay(live, frozen, None)
-
-    assert merged.optimization.max_rounds == 12
-    assert merged.optimization.spend_budget_usd == 0.3
-    # Named by neither: the sibling knob under the same block survives the merge.
-    assert merged.optimization.n_variants == 7
-
-
 def test_lives_resume_fold_matches_live_observe() -> None:
     """Resume-integrity: the banked-lives ("hearts") count rebuilt from the ledger's
     ``improved`` sequence (``EscalationFSM.fold``) must equal the live in-run count
     (``observe_round``). A mismatch is silent — a resumed run would grant a different
     round budget than the un-interrupted run, quietly changing how long it optimizes."""
-    from promptpotter.application.campaign_config import EscalationLadder, LivesConfig
-    from promptpotter.application.optimization.escalation.state import EscalationFSM, NextAction
+    from promptpotter.application.optimizers.potter.escalation.state import (
+        EscalationFSM,
+        NextAction,
+    )
+    from promptpotter.application.optimizers.potter.knobs import EscalationLadder, LivesConfig
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.run_records import PhaseRecord
 
@@ -458,17 +414,17 @@ def test_lives_resume_fold_matches_live_observe() -> None:
     replay = EscalationFSM()
     replay_trace: list[int | None] = []
     # Round 0 leads, TWICE — the shape a real ledger has. The origin closes once at its own
-    # `emit_origin_round` and again when the ruler warms at round 1 (`runner/loop.py`), because
-    # its θ cannot be fit before a second arm exists. The live side banks neither: the origin
-    # reaches `close_round` without going through `post_round`, so `observe_round` never sees
-    # it. Folding them advanced the stall counter by two per resume and escalated to L2 early.
+    # `emit_origin_round` and again when the ruler warms at round 1 (`round.py::close_round`),
+    # because its θ cannot be fit before a second arm exists. The live side banks neither: the
+    # origin reaches `close_round` without going through `post_round`, so `observe_round` never
+    # sees it. Folding them advanced the stall counter by two per resume and escalated to L2 early.
     for _ in range(2):
         replay.fold(
             PhaseRecord(
                 phase="round",
                 event="complete",
                 round=0,
-                payload={"improved": False, "electable_count": 0},
+                payload={"improved": False, "electable_count": 0, "separable": None},
             ),
             lives=cfg,
         )
@@ -480,7 +436,7 @@ def test_lives_resume_fold_matches_live_observe() -> None:
                 phase="round",
                 event="complete",
                 round=i,
-                payload={"improved": improved, "electable_count": electable},
+                payload={"improved": improved, "electable_count": electable, "separable": None},
             ),
             lives=cfg,
         )
@@ -522,8 +478,8 @@ def test_unresolved_round_stalls_and_replays_as_one() -> None:
     whole budget re-asking a question the panel could not answer, with no error anywhere. If the
     replay disagrees with the live run, a resumed cycle escalates on a different round than the
     one it interrupted, which silently changes what the campaign measured."""
-    from promptpotter.application.campaign_config import EscalationLadder
-    from promptpotter.application.optimization.escalation.state import EscalationFSM
+    from promptpotter.application.optimizers.potter.escalation.state import EscalationFSM
+    from promptpotter.application.optimizers.potter.knobs import EscalationLadder
     from promptpotter.domain.run_records import PhaseRecord
 
     # (improved, separable) — a resolved win, then two wins that told no arm from the parent.
@@ -560,15 +516,15 @@ def test_unresolved_round_stalls_and_replays_as_one() -> None:
         )
     assert replay.l1_stall_count == live.l1_stall_count
 
-    # A round whose arms carried no interval is UNREADABLE, not unresolved: it banks on
-    # `improved` alone, so an old record that names no verdict replays as it was decided.
+    # A round whose arms carried no interval is UNREADABLE, not unresolved: it records
+    # `separable: None` and banks on `improved` alone, as it was decided.
     unreadable = EscalationFSM()
     unreadable.fold(
         PhaseRecord(
             phase="round",
             event="complete",
             round=1,
-            payload={"improved": True, "electable_count": 2},
+            payload={"improved": True, "electable_count": 2, "separable": None},
         ),
         lives=None,
     )
@@ -578,19 +534,21 @@ def test_unresolved_round_stalls_and_replays_as_one() -> None:
 def test_l2_l3_escalation_state_survives_resume() -> None:
     """Resume-integrity: L2/L3 counters rebuilt from the ledger must equal the live in-run ones.
 
-    Builds the records the way the firing seam writes them — the same ``CampaignPhase``, and the
-    counters on the typed exit VIEW — so this pins reader-against-writer rather than
-    reader-against-itself. It has to, because the arm has been wrong in both halves at once:
-    ``fold`` compared ``record.phase`` to ``"l2_context"``/``"l3_plan"`` (the NODE names, which
-    no PhaseRecord carries) and read the counters from ``payload["data"]``, which is
-    in-memory-only and never reached disk. Either alone rebuilds L2/L3 as never-fired, handing
-    the resumed run a fresh escalation budget and re-firing layers it had already spent. Silent
-    in the resume sense: nothing raises, the counters just read zero.
+    Builds the records with the firing seam's own exit views, off the live FSM, so this pins
+    reader-against-writer rather than reader-against-itself: a fold keyed on the NODE names, which
+    no PhaseRecord carries, or reading the in-memory-only ``payload["data"]``, rebuilds L2/L3 as
+    never-fired and hands the resumed run a fresh escalation budget. A fire whose output never
+    parsed adopts nothing, so it must fold as nothing.
     """
-    from promptpotter.application.campaign_config import EscalationLadder
-    from promptpotter.application.optimization.escalation.state import EscalationFSM
-    from promptpotter.application.views.view_models import L2RefineExitView, PlanExitView
-    from promptpotter.domain.phases import CampaignPhase
+    from types import SimpleNamespace
+
+    from promptpotter.application.optimizers.potter.escalation.firing import L2, L3
+    from promptpotter.application.optimizers.potter.escalation.state import (
+        EscalationFSM,
+        PotterPhase,
+    )
+    from promptpotter.application.optimizers.potter.knobs import EscalationLadder
+    from promptpotter.application.views.view_models import OptimizerStepExitView
     from promptpotter.domain.run_records import PhaseRecord
 
     def snapshot(f: EscalationFSM) -> tuple[int, int, float, int, int, float, int]:
@@ -606,8 +564,22 @@ def test_l2_l3_escalation_state_survives_resume() -> None:
 
     live = EscalationFSM()
     live_trace = []
+    # What each exit record carries on disk: the view the seam composes off the live state.
+    banked: list[tuple[PotterPhase, OptimizerStepExitView]] = []
+    fired_state = SimpleNamespace(escalation=live, memory=SimpleNamespace(l1_overrides={}))
+    output = SimpleNamespace(
+        l1_layout=None,
+        axis_targeted="",
+        plan="",
+        opt_sp=SimpleNamespace(lineage=SimpleNamespace(changes_description="")),
+    )
+
+    def fired(layer) -> None:
+        live_trace.append(snapshot(live))
+        banked.append((layer.phase, layer.exit_view(fired_state, output)))
+
     live.record_l2_fired(best_composite_fitness=0.60)
-    live_trace.append(snapshot(live))
+    fired(L2)
     # A second request at an unimproved fitness bumps the L2 stall before the fire banks it.
     live.observe_l2_escalation(
         current_composite_fitness=0.60,
@@ -616,41 +588,16 @@ def test_l2_l3_escalation_state_survives_resume() -> None:
         l3_patience=2,
     )
     live.record_l2_fired(best_composite_fitness=0.60)
+    fired(L2)
+    # An unparseable fire closes its bracket and adopts nothing.
     live_trace.append(snapshot(live))
+    discarded = OptimizerStepExitView(headline="", details=(), audit=None, state=None)
+    banked.append((PotterPhase.REFINE_STRATEGY, discarded))
     # L3 firing wipes L2's progress — a new plan invalidates it. Checked BEFORE the wipe above,
     # or the L2 half of this test would assert zeros and pass against the bug it exists for.
     live.record_l3_fired(best_composite_fitness=0.75)
-    live_trace.append(snapshot(live))
+    fired(L3)
 
-    def l2_view(l2_round: int, stall: int, comp: float) -> L2RefineExitView:
-        return L2RefineExitView(
-            param_changes_count=0,
-            l1_layout_changed=False,
-            axis_targeted="",
-            changes_description="",
-            l2_round=l2_round,
-            l2_stall_count=stall,
-            l2_best_composite_fitness_at_entry=comp,
-            l2_best_theta_at_entry=None,
-        )
-
-    # What the exit records carry on disk: the post-fire state, on the persisted view. Real
-    # views, not dicts — a namespace here would let a renamed field pass with every gate green.
-    banked: list[tuple[CampaignPhase, object]] = [
-        (CampaignPhase.REFINE_STRATEGY, l2_view(1, 0, 0.60)),
-        (CampaignPhase.REFINE_STRATEGY, l2_view(2, 1, 0.60)),
-        (
-            CampaignPhase.MODIFY_PLAN,
-            PlanExitView(
-                new_plan_preview="",
-                changes_description="",
-                l3_round=1,
-                l3_stall_count=0,
-                l3_best_composite_fitness_at_entry=0.75,
-                l3_best_theta_at_entry=None,
-            ),
-        ),
-    ]
     replay = EscalationFSM()
     replay_trace = []
     for phase, view in banked:
@@ -666,6 +613,7 @@ def test_l2_l3_escalation_state_survives_resume() -> None:
     # Pinned literally too: an arm that never matches leaves every one of these at 0/0.0.
     assert replay_trace == [
         (1, 0, 0.60, 0, 0, 0.0, 0),
+        (2, 1, 0.60, 0, 0, 0.0, 0),
         (2, 1, 0.60, 0, 0, 0.0, 0),
         (0, 0, 0.75, 1, 0, 0.75, 0),
     ]
@@ -689,8 +637,7 @@ def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) ->
     """
     from types import SimpleNamespace
 
-    from promptpotter.application.optimization.resume_and_fork.decisions import (
-        ResumeCheckpointKind,
+    from promptpotter.application.bench.resume_and_fork.decisions import (
         record_decision,
     )
     from promptpotter.application.run_observers import RunCallbacks
@@ -708,31 +655,34 @@ def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) ->
     session = SimpleNamespace(
         state=SimpleNamespace(ledger=ledger, cycle_id=None, audit_projection=None)
     )
-    cycle = SimpleNamespace(pending_decisions=[], axes=None)
+    cycle = SimpleNamespace(pending_decisions=[], sample_index=None)
 
     # Round 1's own cut, then round 1's post-round escalation — recorded AFTER round 1
     # persisted, so it is still pending when round 2 closes.
     record_decision(
         cycle.pending_decisions,
-        ResumeCheckpointKind.ELIMINATION_CUT,
+        PotterCheckpointKind.ELIMINATION_CUT,
         {"round_num": 1},
         True,
+        node="pobb",
         round=1,
     )
     persist_round(cycle, round_result(1), session, cb)  # type: ignore[arg-type]
 
     record_decision(
         cycle.pending_decisions,
-        ResumeCheckpointKind.L2_ESCALATION_TRIGGER,
+        PotterCheckpointKind.L2_ESCALATION_TRIGGER,
         {"round_num": 1},
         True,
+        node="escalation",
         round=1,
     )
     record_decision(
         cycle.pending_decisions,
-        ResumeCheckpointKind.ROUND_WINNER,
+        PotterCheckpointKind.ROUND_WINNER,
         {"round_num": 2},
         "c2",
+        node="theta_election",
         round=2,
     )
     persist_round(cycle, round_result(2), session, cb)  # type: ignore[arg-type]
@@ -740,9 +690,10 @@ def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) ->
     # A fire with no round after it: the buffer is the only copy until teardown flushes it.
     record_decision(
         cycle.pending_decisions,
-        ResumeCheckpointKind.L2_ESCALATION_TRIGGER,
+        PotterCheckpointKind.L2_ESCALATION_TRIGGER,
         {"round_num": 2},
         True,
+        node="escalation",
         round=2,
     )
     assert flush_pending_decisions(cycle, session) == 1  # type: ignore[arg-type]
@@ -751,7 +702,7 @@ def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) ->
 
     # Every decision reached the ledger exactly once, each stamped with the round that made it.
     on_disk = [
-        (r.kind.value, r.round)
+        (r.kind, r.round)
         for _offset, r in CycleEventLog(ledger.path).iter()
         if isinstance(r, ResumeCheckpointRecord)
     ]
@@ -784,7 +735,6 @@ def _archive_run(
             "content_hash": content_hash,
             "prompt_fields_id": "pf",
             "item_count": len(items),
-            "scores": {"accuracy": 1.0, "total": len(items)},
             "node_configs": [("llm_only", {"model": "X"})],
             "created_at": f"2026-05-19T00:00:{run_id[-2:]}Z",
             "measurements": items,
@@ -805,7 +755,7 @@ def _compactable_cell(sample_id: int, **extra: object) -> dict[str, object]:
         "fitness": 1.0,
         "objective": 1.0,
         "hit": True,
-        "scored": {"auto": {"fitness": 1.0, "formula": "exact_match(predicted, ground_truth)"}},
+        "scored": {"auto": {"fitness": 1.0, "formula": "label_match(predicted, ground_truth)"}},
         "error_category": "",
         "ground_truth_rank": 0,
         "pipeline_data": {
@@ -864,21 +814,61 @@ def test_partial_walk_log_folds_to_the_full_record(built_stores: Stores) -> None
     archive.reset_run("r_a")
     assert archive.load_by_id("r_a") is None
 
+    # A reader in another process tails both logs from where it stopped, and a compaction swaps
+    # the file under it — onto a freed inode, on ext4. Resumed at the old offset, it skips every
+    # row banked since: never replayed, so bought again.
+    reader = MeasurementArchive(archive.base_dir)
+    feed = ReplayFeed(reader, [("llm_only", {"model": "X"})])
+
+    def _cell(sid: int) -> dict[str, object]:
+        return {"sample_id": sid, "sample_key": f"k{sid}", "predicted": "p"}
+
+    def _bank(run_id: str, sid: int, name: str = "r") -> None:
+        header = {
+            "run_id": run_id,
+            "name": name,
+            "content_hash": "h",
+            "prompt_fields_id": "pf",
+            "item_count": 1,
+            "node_configs": [("llm_only", {"model": "X"})],
+            "provenance": {"grade": "A", "deliberate_source": True},
+            "created_at": "2026-05-19T00:00:00Z",
+            "dataset_name": "reidx",
+        }
+        archive.append_run(run_id, header, [_cell(sid)])
+
+    for sid in (1, 2, 3):
+        _bank("r_t", sid)
+    assert set(feed.advance()) == {"k1", "k2", "k3"}
+    log = archive._detail_path("r_t")
+    read_to = log.stat().st_size
+    # Rewritten IN PLACE, as a swap onto a reused inode reads: the dead headers go, one row lands.
+    lines = archive.detail_lines("r_t")
+    log.write_text("".join(ln for ln in lines if '"k": "run"' not in ln) + lines[-1])
+    _bank("r_t", 4)
+    assert log.stat().st_size < read_to
+    assert set(feed.advance()) == {"k4"}, "a row banked after the compaction was skipped"
+
+    reader.list_all()
+    tailed = reader._index_path().stat().st_size
+    assert archive.maintain_index()
+    # One entry long enough to straddle the offset the reader stopped at in the old file.
+    _bank("r_long", 5, name="n" * tailed)
+    assert "r_long" in {e["run_id"] for e in reader.list_all()}, "an index entry was skipped"
+
 
 def test_two_readings_of_one_searchpoint_are_two_runs_and_reindex_destroys_neither(
     built_stores: Stores,
 ) -> None:
     """A run is identified by ``run_id``; ``content_hash`` is a property of what it MEASURED, and
     two runs legitimately share one. The label is not in the hash, so `origin_<h>` and
-    `round_parent_<h>` are the same searchpoint on the same rows read twice — the parent fold
-    scored `opt_sp=None, l1_diversity=1.0`, the origin with the round's real diversity.
+    `parent_<h>` are the same searchpoint on the same rows read twice.
 
-    Two silent harms, both of which keying the index on ``content_hash`` committed: (1) one entry
-    survived for the pair, so `scores`/`item_count`/`source`/`provenance` were whichever landed
-    last — and `_save_run` fires per sample, so an in-flight 3-of-30 could overwrite a complete
-    30-of-30 — while `AxisIndex` and `archive_top_runs` read exactly those fields into the
-    optimizer prompt; (2) ``reindex`` unlinked the loser's detail file as an orphan, destroying
-    paid LLM spend and reporting it as GC."""
+    Keyed on ``content_hash``, the index harms twice, silently: (1) one entry survives for the
+    pair, its `scores`/`item_count`/`source`/`provenance` whichever landed last — `_save_run` fires
+    per sample, so an in-flight 3-of-30 overwrites a complete 30-of-30 that `AxisIndex` and
+    `archive_top_runs` read into the optimizer prompt; (2) ``reindex`` unlinks the loser's detail
+    file as an orphan, destroying paid LLM spend and reporting it as GC."""
     archive = built_stores.archive
     _archive_run(archive, run_id="run_10", content_hash="h_a")
     _archive_run(archive, run_id="run_11", content_hash="h_b")
@@ -972,14 +962,14 @@ def test_compaction_round_trips_every_field_it_moved(built_stores: Stores) -> No
         archive,
         run_id="run_c0",
         content_hash="h_c0",
-        name="candidate_0",
+        name="panel",
         measurements=[_compactable_cell(1)],
     )
     _archive_run(
         archive,
         run_id="run_c0",
         content_hash="h_c0",
-        name="candidate_0",
+        name="panel",
         measurements=[_compactable_cell(2)],
     )
     before = archive.load_by_id("run_c0")
@@ -1015,9 +1005,9 @@ def test_compaction_round_trips_every_field_it_moved(built_stores: Stores) -> No
 
 
 def test_compaction_spares_the_runs_that_actually_serve_the_cache(built_stores: Stores) -> None:
-    """``origin`` and ``round_parent`` replay 78.6% and 84.5% of their cells from the archive
-    against 4.5% for a candidate — 82% of all cache value for a third of the bytes. Compacting one
-    of them would silently turn cache hits into re-measurements: no error, just spend.
+    """``origin`` and ``parent`` runs carry most of the archive's cache value — far more replays
+    per byte than a candidate's. Compacting one of them would silently turn cache hits into
+    re-measurements: no error, just spend.
 
     An unrecognized label is SKIPPED and counted, never compacted on a guess."""
     archive = built_stores.archive
@@ -1032,7 +1022,7 @@ def test_compaction_spares_the_runs_that_actually_serve_the_cache(built_stores: 
         archive,
         run_id="run_p1",
         content_hash="h_p",
-        name="round_parent",
+        name="parent",
         measurements=[_compactable_cell(1)],
     )
     _archive_run(
@@ -1064,8 +1054,7 @@ def test_a_fork_inherits_the_decisions_of_the_rounds_it_lifted(built_stores: Sto
     same copy for the same reason. Records at or after the cut are the parent's own future and
     must NOT come along, or the branch replays a decision it never made.
     """
-    from promptpotter.application.optimization.resume_and_fork.decisions import (
-        ResumeCheckpointKind,
+    from promptpotter.application.bench.resume_and_fork.decisions import (
         record_decision,
     )
     from promptpotter.domain.cycle_paths import CycleDir
@@ -1082,11 +1071,11 @@ def test_a_fork_inherits_the_decisions_of_the_rounds_it_lifted(built_stores: Sto
     store.create(parent, {})
     parent_ledger = CycleEventLog.open(CycleDir(store.cycle_dir(parent)))
     for rnd, kind in (
-        (0, ResumeCheckpointKind.ROUND_WINNER),
-        (1, ResumeCheckpointKind.ELIMINATION_CUT),
-        (2, ResumeCheckpointKind.ROUND_WINNER),
+        (0, PotterCheckpointKind.ROUND_WINNER),
+        (1, PotterCheckpointKind.ELIMINATION_CUT),
+        (2, PotterCheckpointKind.ROUND_WINNER),
     ):
-        record_decision(parent_ledger, kind, {"round_num": rnd}, "x", round=rnd)
+        record_decision(parent_ledger, kind, {"round_num": rnd}, "x", node=None, round=rnd)
 
     child = parent.model_copy(update={"cycle_id": "cycle_decisions_fork_a"})
     store.create(child, {})
@@ -1112,14 +1101,17 @@ def test_an_applied_scenario_forks_at_its_round_and_carries_the_criterion(
     change: every round it then produces is evidence for a formula that was never applied.
 
     `scoring` sits on `CampaignConfig` itself rather than under `optimization`, so it needs its own
-    bucket in `_apply_config_overrides` — folded into the nested copy beside the run limits it
+    bucket in `apply_config_overrides` — folded into the nested copy beside the run limits it
     would vanish with every gate green.
     """
-    from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
-    from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
+    from promptpotter.application.bench.resume_and_fork.fork_siblings import (
         mint_operator_fork,
     )
-    from promptpotter.application.runner.entry import _apply_config_overrides
+    from promptpotter.application.campaign_config import (
+        CampaignConfig,
+        OptimizationConfig,
+        apply_config_overrides,
+    )
     from promptpotter.domain.run_records import ConfigOverrides
     from promptpotter.shared.errors import PayloadInvalidError
 
@@ -1147,7 +1139,7 @@ def test_an_applied_scenario_forks_at_its_round_and_carries_the_criterion(
     seed = store.read_cycle_seed(child)
     assert seed is not None
     base = CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05))
-    applied = _apply_config_overrides(base, seed.config_overrides)
+    applied = apply_config_overrides(base, seed.config_overrides)
     assert applied.scoring == criterion
     assert base.scoring is None  # the parent's frozen config is never mutated
 
@@ -1163,6 +1155,39 @@ def test_an_applied_scenario_forks_at_its_round_and_carries_the_criterion(
             steered_by="tester",
             keep_rounds=True,
         )
+
+
+def test_a_deepened_inner_cell_continues_the_cycle_that_holds_its_line(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rebase retires an inner campaign's root under `superseded_by`, and what was banked since is
+    the successor's. Deepening the cell reopening the root measures a trajectory other than the one
+    banked, and the outer round scores that other run with no error anywhere."""
+    import types
+
+    from promptpotter.application.runner.inner import spawn
+
+    store = built_stores.campaigns
+    root = CycleHop(campaign_id=_CAMPAIGN, cycle_id="cycle_innerroot")
+    store.create(root, {"parent_session_id": "sess-inner", "rounds": [{"round": 0}]})
+    successor = root.model_copy(update={"cycle_id": "cycle_innerroot_fork_a"})
+    banked = [{"round": r} for r in range(3)]
+    store.create(successor, {"parent_session_id": "sess-inner", "rounds": banked})
+    store.mark_superseded(root, successor.cycle_id)
+    store.mark_finished(
+        successor, status="max_rounds", stop_reason="max_rounds", finished_at="2026-09-01T00:00:00Z"
+    )
+
+    plan = types.SimpleNamespace(cycle_id=root.cycle_id)
+    monkeypatch.setattr(spawn, "resolve_cycle_plan", lambda *_: plan)
+    session = types.SimpleNamespace(
+        store=built_stores, session_id="", campaign_id="", state=types.SimpleNamespace(cycle_id="")
+    )
+    open_campaign: Any = spawn._open_inner_campaign
+    continued = open_campaign(session, None, [], campaign_id=_CAMPAIGN)
+
+    assert session.state.cycle_id == successor.cycle_id, "the retired root was reopened"
+    assert continued == len(banked)
 
 
 def test_a_resumed_cycle_clocks_only_its_own_launch(tmp_path: Path) -> None:
@@ -1194,11 +1219,161 @@ def test_a_resumed_cycle_clocks_only_its_own_launch(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     clock = scan_ledger_wall_clock(
-        ledger, started_at="2026-09-02T09:59:00Z", finished_at="2026-09-02T10:30:00Z"
+        [ledger],
+        started_at="2026-09-02T09:59:00Z",
+        finished_at="2026-09-02T10:30:00Z",
+        # An optimizer's own phase brackets only where its runtime declares it.
+        optimizer_phases=frozenset({"l1_score"}),
     )
+    assert clock.phase_s["l1_score"] == pytest.approx(20 * 60)
     assert clock.elapsed_s is not None and sum(clock.phase_s.values()) <= clock.elapsed_s
     assert "1" not in clock.round_ended_s, "a round an earlier launch closed read as instant"
     assert clock.round_ended_s["2"] == pytest.approx(21 * 60 + 1)
+
+
+def test_a_resumed_campaign_clocks_every_launch_and_sends_its_origin_pass_once(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A campaign's clock and its reference are its LINE's. Clocked off the finishing launch alone,
+    a paused-and-resumed campaign read as fast as its tail, with the operator's wait at the origin
+    gate counted as work; and each launch re-sent the origin's bench pass, metering the reference
+    again as spend a head-to-head charges to the optimizer."""
+    import asyncio
+    import json
+    from types import SimpleNamespace
+
+    from promptpotter.application.runner import campaign_result
+    from promptpotter.domain.bench import BenchPass, DatasetSplit, partition_bank
+    from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.sample import Sample
+    from promptpotter.domain.search_point import JobSearchPoint
+    from promptpotter.domain.spend import SpendRollup
+    from promptpotter.infrastructure.store.layout import CycleLayout
+
+    stores = built_stores
+    root = CycleHop(campaign_id=_CAMPAIGN, cycle_id="cycle_r0")
+    stores.campaigns.create_campaign(
+        Campaign(campaign_id=_CAMPAIGN, dataset_name="ds", created_at="", root_cycle_id="cycle_r0")
+    )
+    stores.campaigns.create(root, {})
+    ledger = CycleLayout(stores.campaigns.cycle_dir(root)).ledger
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    bank = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(6)]
+    partition = partition_bank(bank, DatasetSplit(bench=2))
+    schema, origin_sp = PipelineSchema(name="s", nodes=[]), JobSearchPoint()
+    scoring = SimpleNamespace(require_partition=lambda: partition, scorer_id="grader")
+    session = SimpleNamespace(store=stores, hop=root, pipeline_schema=schema, scoring=scoring)
+    sent: list[str] = []
+
+    async def score_on_bench(*_: Any, **__: Any) -> BenchPass:
+        sent.append("origin")
+        ids = [s.id for s in partition.bench]
+        sp_hash = origin_sp.sp_hash(schema)
+        return BenchPass(
+            round=0, sp_hash=sp_hash, run_id="r", sample_ids=ids, stopped=None, scorer_id="grader"
+        )
+
+    monkeypatch.setattr(campaign_result, "score_on_bench", score_on_bench)
+
+    def launch(day: str, opened: str, running: str, closed: str) -> Any:
+        """One launch that held at the origin gate until `running`, then ran until `closed`."""
+        with ledger.open("a", encoding="utf-8") as fh:
+            for at, event in ((opened, "gate"), (running, "running")):
+                row = {"record_type": "phase", "phase": "control", "event": event}
+                fh.write(json.dumps({**row, "timestamp": f"2026-09-{day}T{at}Z"}) + "\n")
+        started = f"2026-09-{day}T{opened}Z"
+        banked = asyncio.run(
+            campaign_result.bench_origin(
+                session,  # type: ignore[arg-type]
+                origin_sp,
+                started_at=started,
+                optimizer_phases=frozenset(),
+                spend=SpendRollup(),
+                cb=None,  # type: ignore[arg-type]
+            )
+        )
+        campaign_result.bank_campaign_result(
+            stores,
+            root,
+            started_at=started,
+            finished_at=f"2026-09-{day}T{closed}Z",
+            optimizer_phases=frozenset(),
+            bench=None,
+        )
+        return banked
+
+    paused = launch("01", "10:00:00", "10:10:00", "11:00:00")
+    finished = launch("02", "12:00:00", "12:05:00", "12:30:00")
+    assert sent == ["origin"], "a resume re-sent the origin's bench pass"
+    assert finished == paused and finished.selected is None
+    result = stores.campaigns.load_result(_CAMPAIGN)
+    assert result is not None and result.bench == paused
+    assert len(result.cost.launches) == 2
+    assert result.cost.worked_s == pytest.approx((60 - 10) * 60 + (30 - 5) * 60)
+
+
+def test_a_resume_before_round_one_regates_the_origin_it_measured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A round-0 file a stopped run left has passed no gate. Keyed on that file's existence, a
+    resume of an origin that measured 4 of its 40 cells skipped the close AND the gate, and elected
+    round 1 against a floor its own verdict called unmeasured — silently, since nothing refused."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from promptpotter.application.campaign_config import load_campaign_config
+    from promptpotter.application.runner import loop
+    from promptpotter.domain.phases import StopReason
+    from promptpotter.domain.results_health import compute_degradation_health
+    from tests.factories import round_result
+
+    def origin(attempted: int, not_attempted: int) -> RoundResult:
+        verdict = compute_degradation_health(
+            attempted=attempted,
+            not_attempted=not_attempted,
+            structural_count=0,
+            transient_count=0,
+            prior_clean_rounds=0,
+            consecutive_degraded_rounds=0,
+            is_origin=True,
+        )
+        return round_result(0, health=verdict)
+
+    left_on_disk = origin(4, 36)
+    cycle = SimpleNamespace(origin_round=None)
+
+    async def close_round_zero(cyc: Any, *_: Any) -> None:
+        # This launch's re-measure, still cut short: the verdict the gate must read.
+        cyc.origin_round = origin(37, 3)
+
+    gated_on: list[int] = []
+
+    async def hold(cyc: Any, *_: Any) -> StopReason:
+        gated_on.append(cyc.origin_round.health.samples)
+        return StopReason.ORIGIN_GATE
+
+    monkeypatch.setattr(loop, "emit_origin_round", close_round_zero)
+    monkeypatch.setattr(loop, "run_origin_gate", hold)
+    session = SimpleNamespace(
+        state=SimpleNamespace(resumed_from_round=1, cycle_id="cycle_r0"),
+        store=SimpleNamespace(
+            campaigns=SimpleNamespace(load_round_file=lambda _hop, _n: left_on_disk)
+        ),
+        hop=CycleHop(campaign_id=_CAMPAIGN, cycle_id="cycle_r0"),
+    )
+    stop = asyncio.run(
+        loop.run_round_loop(
+            cycle,
+            [],
+            load_campaign_config({"optimization": _OPT}),
+            session,
+            None,
+            budget_gate=None,
+        )
+    ).stop_reason
+    assert stop is StopReason.ORIGIN_GATE, "a resume reached round 1 past an ungated origin"
+    assert gated_on == [37], "the gate read a verdict other than this launch's re-measure"
 
 
 def test_a_halted_cell_is_not_a_hole_a_resume_can_plug() -> None:
@@ -1206,7 +1381,7 @@ def test_a_halted_cell_is_not_a_hole_a_resume_can_plug() -> None:
     attempt at the same place. Counted as a hole, every resume branches the cycle, re-buys the cell
     at full price and lands the identical row, so the fork and the spend repeat without bound.
     """
-    from promptpotter.application.optimization.resume_and_fork.repair import repair_cut
+    from promptpotter.application.bench.resume_and_fork.repair import repair_cut
     from promptpotter.shared.errors import ErrorCategory
     from tests.factories import measurement, round_result
 

@@ -90,7 +90,7 @@ class PromptVersion:
     lineage_id: str
     rendered_prompt: str
     layer1_fields: dict[str, Any]
-    parent_id: str | None = None
+    parent_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +119,7 @@ class RoundEnd:
     candidate_scores: list[dict[str, Any]]
     next_action: str = ""
     model: str = ""
-    n_variants: int = 0
+    n_candidates: int = 0
     optimizer_templates: list[str] | None = None
     evaluators: dict[str, float] = field(default_factory=dict)
 
@@ -127,11 +127,11 @@ class RoundEnd:
 @dataclass(frozen=True, slots=True)
 class CampaignEnd:
     campaign_id: str
-    best_accuracy: float | None
-    # Completed L1 rounds, origin-EXCLUSIVE (mirrors CycleResult.n_l1_rounds).
-    n_l1_rounds: int
+    result_accuracy: float | None
+    # Completed L1 rounds, origin-EXCLUSIVE (mirrors CycleResult.n_rounds_after_origin).
+    n_rounds_after_origin: int
     stop_reason: str
-    best_round: int
+    result_round: int
 
 
 OptimizationEvent = Union[

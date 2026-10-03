@@ -7,24 +7,17 @@ import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import { readyData } from "@/lib/hooks/useRead";
 import type { StatusKind } from "@/lib/poll";
 
-// The loud, can't-miss failure surface — a full-width sticky bar at the top of
-// the main column, rendered on EVERY tab (Chat / Dashboard / Verify / Files), so
-// a server-unreachable, crashed, or gone-silent run reaches an operator who
-// has alt-tabbed away from the dashboard. The verdict (and its precedence) is
-// the pure `criticalAlert` derivation; this component is the presentation. It
-// returns null on a healthy run, so the bar simply isn't in the DOM then.
+// The sticky failure bar on every tab; the verdict and its precedence are the pure
+// `criticalAlert` derivation, and this is only its presentation.
 
 interface Props {
   bannerStatus: StatusKind;
   bannerText: string;
   bannerHint?: string;
-  // Reconciled by AppShell — the cycle list loaded and came back empty, with the
-  // server reachable. Silences the bar: a first run has nothing wrong with it.
+  // Silences the bar: an empty workspace on a reachable server has nothing wrong with it.
   emptyWorkspace?: boolean;
   onOpenFiles: () => void;
-  // Invoked by the one-click "Pause campaign" button the banner shows when the
-  // verdict is structurally-degraded (`alert.action === "pause"`). The run never
-  // auto-pauses — this is the operator pulling the trigger.
+  // The run never auto-pauses — this is the operator pulling the trigger.
   onPauseCampaign?: () => void;
 }
 
@@ -36,15 +29,9 @@ export function CriticalAlertBanner({
   onOpenFiles,
   onPauseCampaign,
 }: Props) {
-  // Live snapshot, self-sourced from the cycle stream (the banner shows on
-  // every tab, so it owns its own read).
   const { dash } = useDashboard();
-  // Same connector reachability the ConnectorInspector LED reads — one shared
-  // `useConnector()` probe, one shared `down` verdict (connector-state.ts).
   const { health, connector } = useConnector();
   const { down: connectorDown } = connectorReachability(health);
-  // Cross-user busy state — its own 5 s poll (useMachineStatus), surfaced in the
-  // same bar so "someone else is running" reaches an alt-tabbed operator.
   const machine = readyData(useMachineStatus());
   const alert = criticalAlert({
     bannerStatus,
@@ -59,9 +46,7 @@ export function CriticalAlertBanner({
     machineBusy: machine !== null && machine.busy,
     machineBusyHolder: machine?.holder?.user ?? null,
     machineBusySince: machine?.holder?.started_at ?? null,
-    // The served queue is already ordered and already scoped to this caller, so the
-    // first entry IS their nearest place in line — no client-side sort, and no second
-    // opinion about a position the drain owns.
+    // The served queue is ordered and scoped to this caller: the first entry IS their place.
     queuePosition: machine?.queue[0]?.position ?? null,
   });
   if (!alert) return null;
@@ -92,9 +77,7 @@ export function CriticalAlertBanner({
           Pause campaign
         </button>
       ) : null}
-      {/* No jump on an `info` verdict: it fires when the address stopped existing,
-          so there are no files to open — an operable-looking control that lands on
-          nothing is exactly what I3_affordance_honest forbids. */}
+      {/* No jump on `info`: the address stopped existing, so there are no files to open (I3). */}
       {info ? null : (
         <button
           type="button"

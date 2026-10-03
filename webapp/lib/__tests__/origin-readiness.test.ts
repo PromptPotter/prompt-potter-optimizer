@@ -9,21 +9,8 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
     sample_preview: [{ query: "Na", ground_truth: "Sodium" }],
     n_samples: 42,
     connector: "termnorm",
-    scoring_composite: "exact_match",
-    optimization_overrides: {
-      max_rounds: 5,
-      prompt_block_catalogue: "guidance",
-      escalation_ladder: "full",
-      mechanisms: {
-        selection: { per_round_resubset: true },
-        elimination: {
-          epsilon_elimination: true,
-          margin_elimination: true,
-          degradation_fatal_fastpath: true,
-          leader_lock_in: false,
-        },
-      },
-    },
+    scoring_composite: "label_match",
+    optimization_overrides: { max_rounds: 5, optimizer: "potter", nodes: {} },
     raw_task_description: "",
     schema_source: "backend",
     model_capabilities: {},
@@ -33,8 +20,6 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
     headers: ["input", "gt"],
     column_query: "",
     column_ground_truth: "",
-    // Only the gated fields carry provenance: the two columns + task framing.
-    // Config is not gated (no entry); it carries a default the operator edits.
     field_provenance: {
       "column.query": "unset",
       "column.ground_truth": "unset",
@@ -49,8 +34,6 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
     node_config_schema: {},
     node_output_schema: {},
     dependencies: [],
-    // Server-authoritative mint-gate verdict (the gate lives in
-    // `origin_readiness.py`; the client reads this, never re-derives it).
     readiness: { complete: false, gaps: [] },
     ...over,
   };
@@ -77,7 +60,6 @@ describe("questionPatch / questionOptions (resolver answer-back loop)", () => {
 
   it("grounds a column question's options in the uploaded headers", () => {
     expect(questionOptions("column.query", [], ["a", "b"])).toEqual(["a", "b"]);
-    // The resolver's own options win when supplied; non-column free-text → empty.
     expect(questionOptions("connector", ["termnorm"], ["a"])).toEqual(["termnorm"]);
     expect(questionOptions("task_description", [], ["a"])).toEqual([]);
   });

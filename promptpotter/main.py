@@ -17,10 +17,15 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.reaper import periodic_sweep, reap_cycle_by_id
-from promptpotter.application.jobs.registry import Job, JobRegistry, default_jobs_dir
+from promptpotter.application.jobs.registry import Job, JobRegistry
 from promptpotter.config.logging import setup_logging, silence_proactor_disconnect_noise
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, user_data_root, webapp_static_root
-from promptpotter.config.settings import APP_VERSION, settings
+from promptpotter.config.paths import (
+    DEFAULT_PROJECTS_ROOT,
+    default_jobs_dir,
+    user_data_root,
+    webapp_static_root,
+)
+from promptpotter.config.settings import APP_VERSION, non_utf8_encoding, settings
 from promptpotter.infrastructure.identity.bundle import build_identity_bundle
 from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.presentation.admin_bot import notify_operator
@@ -75,6 +80,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             data_root=user_data_root(),
             auth_open=auth_is_open(bundle),
             providers=bundle.config.configured,
+            # The one reading of it, shared with the probe that refuses a launch under it.
+            non_utf8=non_utf8_encoding(),
         ),
         flush=True,
     )

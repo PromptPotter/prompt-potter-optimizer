@@ -1,12 +1,14 @@
-# paper/ — the M13 manuscript
+# paper/ — the M14 manuscript
 
 Why this is not under `docs/`: that tree describes the system to someone working on it, and a page
 that argues about a *field* has no owner there. `docs/research/related-work.md` proves the point —
 it was folded into `methods/candidate-elimination.md`, which kept the bandit-family half and
 dropped the peer roster. This directory exists so that does not repeat.
 
-**What M13 is, and its rules — owned by the root [`CLAUDE.md`](../CLAUDE.md) § The closing
-directive.** Read it there.
+**What M14 is, and its rules — owned by the root [`CLAUDE.md`](../CLAUDE.md) § The closing
+directive.** Read it there. **The subject changed when M13 became the bench:** the contribution is
+that the stopping rule and the comparability guard are *executable* here and that every peer ran
+under them. Pricing a lift in wall clock and dollars is the evidence for that, no longer the claim.
 
 The three files under `related/` are recovered git blobs, and their provenance is the only fact
 this page owns:
@@ -41,7 +43,10 @@ it:
   baseline exists for the peers. `shared_config.py::export_results` has no origin field, so the
   criticism is not ours to make today.
 - **Pick one** — the fragmentation claim takes exactly one taxonomy anchor. Citing both surveys is
-  the tell that the frame is not settled.
+  the tell that the frame is not settled. **The anchor choice is now live rather than settled**:
+  with the bench as the contribution, the paper sits on the recursive-self-improvement axis as much
+  as the prompt-optimization one, and a taxonomy that indexes harness self-improvement may serve the
+  claim better than a prompt-optimization survey. Decide it at the outline, not after.
 - **Rides a section** — AutoDesign under the harness-evolution grouping, or as an exhibit in the
   hygiene argument on the strength of its single baseline; HybridFlow only if the
   harness-vs-weights dial becomes a section *and* is priced, which needs a run nobody has made.

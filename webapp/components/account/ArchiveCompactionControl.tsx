@@ -14,8 +14,6 @@ const MODES: readonly Segment<Mode>[] = [
   { value: "purge-cold", label: "Purge" },
 ];
 
-// What each mode does, in the operator's terms. `purge-cold` is the only one that destroys, and
-// it says so rather than relying on the word "purge" to carry it.
 const BLURB: Record<Mode, string> = {
   compact:
     "Moves the fields nothing reads out of candidate runs into a compressed store beside them. Origin and round-parent runs are never touched — they serve almost every cache replay.",
@@ -24,9 +22,7 @@ const BLURB: Record<Mode, string> = {
     "Deletes the compressed copy for good. The rows cost real money and hours to measure again, and nothing puts them back.",
 };
 
-// A dry run reaches nothing a poll reads, and an apply rewrites the tree — so the two are two
-// slots rather than one, `revalidate` being per-slot. They carry the same refusal and differ
-// only in what a failure leaves standing.
+// Two slots because `revalidate` is per-slot: a dry run reaches nothing a poll reads.
 const describeFailure =
   (apply: boolean) =>
   (f: CommandFailure): string =>
@@ -36,9 +32,8 @@ const describeFailure =
         ? "The archive did not finish. Some runs may already have been rewritten — preview again to see what stands."
         : "Could not reach the archive. Nothing was changed.";
 
-// Archive maintenance. PREVIEW FIRST is the whole design: `apply` is unreachable until a dry run
-// has returned, so the operator consents to a byte count they have actually seen rather than to a
-// verb. The report shape is identical for both, so one renderer serves them.
+// Archive maintenance, PREVIEW FIRST: `apply` is unreachable until a dry run has returned, so
+// consent is to a byte count seen rather than to a verb.
 export function ArchiveCompactionControl() {
   const [mode, setMode] = useState<Mode>("compact");
   const [preview, setPreview] = useState<ArchiveReport | null>(null);
@@ -51,8 +46,7 @@ export function ArchiveCompactionControl() {
   const busy = dry.pending !== null || commit.pending !== null;
   const error = commit.failure?.message ?? dry.failure?.message ?? null;
 
-  // A preview belongs to the mode that produced it; switching modes must not leave the old one
-  // standing as consent for the new one.
+  // A preview must not stand as consent for another mode.
   function pick(next: Mode) {
     setMode(next);
     setPreview(null);
@@ -65,8 +59,7 @@ export function ArchiveCompactionControl() {
     const slot = apply ? commit : dry;
     const r = await slot.run(mode, () => postCompactArchive({ mode, apply }));
     if (!r.ok) {
-      // Only a PREVIEW can promise nothing moved: each run swaps atomically, the batch does not,
-      // so a failed apply drops its preview too — that was consent for a state that may be gone.
+      // Each run swaps atomically but the batch does not, so a failed apply voids its preview.
       if (apply) setPreview(null);
       return;
     }
@@ -115,8 +108,7 @@ export function ArchiveCompactionControl() {
 
       {report && !blocked && (
         <dl className="wsmaint-report">
-          {/* Restore PUTS BACK, so its `bytes_freed` is negative by construction. Reporting that
-              under "Freed" reads as a bug in the number rather than as the cost it is. */}
+          {/* Restore's `bytes_freed` is negative by construction — a cost, not "Freed". */}
           <div>
             <dt>
               {report.bytes_freed < 0

@@ -1,35 +1,31 @@
-"""Builders that return REAL domain models, never duck-typed stand-ins.
-
-Not a test file — no ``test_`` prefix, collects nothing. It exists because a
-``SimpleNamespace`` stand-in for a strict model is the one construct in this suite that
-can carry silent harm past every gate: rename a field on ``RoundResult`` and ruff, mypy
-and pytest all stay green while the real read path breaks. That is exactly the class
-``test_numerics.py`` exists to catch, so the fakes were defeating the guard from inside.
-
-Worse than drift, a fake can assert a shape the model cannot produce. The pair these
-replace stamped ``l1_n_no_op`` / ``l1_n_duplicate`` directly onto the round — but those
-are ``@computed_field`` properties DERIVED from ``candidate_scores`` (a collapsed variant
-rides that list with ``invalid=True`` and an ``INVARIANT_REASONS`` failure), so a stamped
-value cannot win no matter what a fake asserts — ``@computed_field`` plus ``extra="ignore"``
-already refuse it. Building the real model is what carries that refusal into every test.
-
-Only what a test actually bends is a parameter; everything else is a plausible default.
+"""Builders that return REAL domain models, never duck-typed stand-ins — why is
+``tests/CLAUDE.md`` § Mock strategy. Only what a test actually bends is a parameter.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
-from promptpotter.domain.escalation_signals import ValidationFailure
+from promptpotter.application.optimizer_manifest import resolve_optimizer
+from promptpotter.application.optimizers.potter.dispatch.layout import default_l1_layout
+from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
+from promptpotter.application.optimizers.potter.records import (
+    POTTER_MANIFEST,
+    L2L3Memory,
+    PotterRoundState,
+)
+from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import (
+    ArmOutcome,
     CycleResult,
     DegradationHealth,
     RoundResult,
     ScoredCandidate,
 )
 from promptpotter.domain.spend import SpendBucket, SpendRollup
+from promptpotter.domain.wounds import ValidationFailure
 
 # Repeated as the ground truth of every row a factory-built round measures. Deliberately
 # only two labels: with as many distinct truths as rows the answer space reads as
@@ -53,10 +49,9 @@ def measurement(
     ``objective=fitness`` where a test MEANS them equal. Stamping both also keeps rows readable by
     ``graded_response``, which RAISES on a row carrying neither rather than reading 0.0.
 
-    ``fitness=None`` builds the other row shape: a real error row (``_error_result``) carries no
-    grade at all, and the coverage floor and the θ fit are both about that ABSENCE rather than
-    about a low score. Eight local copies of these two shapes drifted apart here once already —
-    adding ``objective`` to the loop had to find every one of them.
+    ``fitness=None`` builds the other row shape, one carrying no grade at all: a cell's facts as
+    the archive banks them, or with an ``error_category`` a real error row (``_error_result``) —
+    the coverage floor and the θ fit are both about that ABSENCE rather than about a low score.
     """
     if fitness is None:
         return {"sample_id": sample_id, **extra}
@@ -87,23 +82,35 @@ def scored_candidate(
     **overrides: Any,
 ) -> ScoredCandidate:
     """One candidate row. ``invalid_reason`` collapses it the way the validator does —
-    ``invalid=True`` plus a ``ValidationFailure``, which is where ``RoundResult`` reads
+    ``ArmOutcome.INVALID`` plus a ``ValidationFailure``, which is where ``RoundResult`` reads
     its collapse counts back from."""
     failures = (
         [ValidationFailure(axis="prompt_fields", value="", allowed=[], reason=invalid_reason)]
         if invalid_reason
         else []
     )
+    outcome = ArmOutcome.INVALID if invalid_reason else ArmOutcome.MEASURED
     return ScoredCandidate(
-        candidate_id=candidate_id,
-        label=candidate_id,
-        accuracy=accuracy,
-        composite_fitness=accuracy,
-        total=total,
-        invalid=invalid_reason is not None,
-        validation_failures=failures,
-        **overrides,
+        **(
+            {
+                "run_id": None,
+                "candidate_id": candidate_id,
+                "label": candidate_id,
+                "accuracy": accuracy,
+                "composite_fitness": accuracy,
+                "total": total,
+                "outcome": outcome,
+                "validation_failures": failures,
+            }
+            | overrides
+        )
     )
+
+
+def pobb_knobs(**bend: Any) -> PoBBKnobs:
+    """Potter's shipped ``pobb`` knobs, read off its manifest, with the ones a test bends."""
+    shipped = cast("PoBBKnobs", resolve_optimizer("potter", {}).knobs("pobb"))
+    return shipped.model_copy(update=bend)
 
 
 def degradation_health(
@@ -119,6 +126,18 @@ def degradation_health(
         degraded_rate=degraded_rate,
         consecutive_degraded_rounds=0,
         prior_clean_rounds=0,
+    )
+
+
+def optimizer_state(
+    memory: L2L3Memory | None = None, *, parse_failure: str | None = None
+) -> OptimizerState:
+    return OptimizerState(
+        manifest=POTTER_MANIFEST,
+        payload=PotterRoundState(
+            memory=memory or L2L3Memory(l1_layout=default_l1_layout()),
+            l1_parse_failure=parse_failure,
+        ),
     )
 
 
@@ -140,12 +159,13 @@ def round_result(
     """A closed round, shaped the way the loop actually writes one.
 
     ``parse_failure`` yields ZERO candidates by construction (``l1_generate`` returned
-    ``[]``), so it is modelled on the round — no ``ScoredCandidate`` can carry one.
+    ``[]``), so it is modelled on the round's optimizer state — no ``ScoredCandidate`` can carry
+    one.
 
     ``no_op`` / ``dup`` add COLLAPSED candidates: they ride ``candidate_scores`` beside the
     measured ones but are absent from ``candidates_scored`` and from
-    ``all_candidate_results``, so ``l1_n_no_op`` / ``l1_n_duplicate`` derive to them and
-    the mode-collapse denominator (collapsed + scored) comes out right.
+    ``all_candidate_results``, so ``invariant_collapses`` derives them and the mode-collapse
+    denominator (collapsed + scored) comes out right.
 
     ``collapsed`` makes that many measured candidates answer ONE label to every sample —
     the constant answerer built below. ``cut`` makes them *also* stop
@@ -186,7 +206,8 @@ def round_result(
         "health": degradation_health(
             samples=samples, degraded_rate=degraded_rate, no_result=no_result
         ),
-        "l1_parse_failure": parse_failure,
+        "selected_labels": [],
+        "optimizer_state": optimizer_state(parse_failure=parse_failure),
     }
     return RoundResult(**(base | overrides))
 
@@ -212,13 +233,13 @@ def cycle_result(
     """
     return CycleResult(
         rounds=rounds,
-        n_l1_rounds=len(rounds),
-        best_accuracy=0.5,
-        best_round=len(rounds),
+        n_rounds_after_origin=len(rounds),
+        result_accuracy=0.5,
+        result_round=len(rounds),
         origin_accuracy=origin or 0.0,
         origin_level=origin,
-        round_parent_levels=levels,
-        winner_prompt_fields={},
+        round_levels=levels,
+        result_prompt_fields={},
         stop_reason=stop_reason,
         started_at="2026-01-01T00:00:00Z",
         finished_at="2026-01-01T01:00:00Z",
@@ -231,7 +252,7 @@ def cycle_result(
     )
 
 
-def lost_round(
+def lost_history(
     round_num: int,
     field: str,
     value: str,
@@ -239,13 +260,15 @@ def lost_round(
     total: int = 20,
     acc: float = 0.3,
     elimination_context: dict[str, Any] | None = None,
-) -> RoundResult:
-    """A prior round holding one candidate that was MEASURED and LOST — the history the
-    repeat detector reads. ``matched_parent_accuracy`` is the bar ``acc`` is judged against.
+) -> list[RoundResult]:
+    """The history the repeat detector reads: the parent's round, then one holding a candidate
+    that was MEASURED and LOST against it — a candidate is read against the round BEFORE its own.
+    ``reference_accuracy`` is the bar ``acc`` is judged against.
 
     Pass ``elimination_context`` to make the loss a CUT instead: the gate inside it decides
-    whether the arm was measured at all, and an empty one is a degradation cut, which names none."""
-    return RoundResult(
+    whether the arm was measured at all, and an empty one is a BROKEN arm, which names none."""
+    lost = RoundResult(
+        optimizer_state=optimizer_state(),
         round=round_num,
         label=f"round_{round_num}",
         accuracy=acc,
@@ -253,15 +276,24 @@ def lost_round(
         improved=False,
         prompt_fields={},
         candidates_scored=1,
+        selected_labels=[],
         candidate_scores=[
             scored_candidate(
                 "c0",
                 accuracy=acc,
                 total=total,
-                matched_parent_accuracy=0.5,
+                reference_accuracy=0.5,
                 prompt_fields={field: value},
-                elimination_stopped=elimination_context is not None,
+                outcome=(
+                    ArmOutcome.MEASURED
+                    if elimination_context is None
+                    else ArmOutcome.ELIMINATED
+                    if elimination_context
+                    else ArmOutcome.BROKEN
+                ),
                 elimination_context=elimination_context or {},
             )
         ],
     )
+    parent = round_result(round_num - 1, prompt_fields={}, candidate_scores=[], candidates_scored=0)
+    return [parent, lost]

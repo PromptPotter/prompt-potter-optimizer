@@ -1,20 +1,7 @@
 "use client";
-// Shared auth entry — Google sign-in (the ONLY method, with the Google mark on
-// the button) and the Google-only / no-password explanation kept VISIBLE (an
-// earlier "Why Google only?" popover that hid it tested worse — operator call).
-// The single source of the sign-in controls + copy, rendered identically by the
-// standalone /login page and the WelcomeLockoutModal overlay. Each surface wraps
-// it with its own framing: the page adds a wordmark, the modal adds header
-// chrome + value headline + legal footer.
-//
-// There is no "request access" affordance and no invite framing: signing in IS
-// how you get an account. Whether that account may run anything is resolved
-// after sign-in and shown by AccessGate, so this surface no longer has a
-// rejection to explain.
+// The one sign-in control + copy, shared by /login and WelcomeLockoutModal. Signing in IS how an
+// account is made; whether it may run anything is AccessGate's, after sign-in.
 
-// Google's "G" mark — inline so the one sign-in method carries its provider's
-// logo (an unmistakable "use Google" signal). Decorative; the button text is
-// the accessible label.
 function GoogleMark() {
   return (
     <svg className="google-mark" viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
@@ -56,10 +43,7 @@ function authErrorMessage(code: string, email: string | null): string {
 }
 
 interface Props {
-  // OIDC callback bounce-back: the FastAPI /auth/callback/{provider} route
-  // 303-redirects with ?auth_error=<code>(&email=<addr>) on failure. The modal
-  // forwards those; we render a one-line .account-error banner above the
-  // Continue-with-Google button.
+  // `?auth_error=` from the /auth/callback/{provider} 303, forwarded by the modal.
   errorCode?: string | null;
   errorEmail?: string | null;
 }

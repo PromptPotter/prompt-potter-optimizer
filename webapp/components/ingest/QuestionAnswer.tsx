@@ -4,13 +4,7 @@ import { useState } from "react";
 import type { DraftCampaignWire, DraftPatch, OriginQuestion } from "@/lib/api";
 import { questionOptions, questionPatch } from "@/lib/origin-readiness";
 
-// One answerable resolver question. Renders the prompt plus a control keyed to
-// the field's answer set: a picker when the resolver gave `options` (or for a
-// column-mapping question, the uploaded headers), else a free-text input.
-// Submitting maps the answer to an `edit-draft-campaign` patch via
-// `questionPatch` (server flips the field CONFIRMED) — the answer-back half of
-// the resolver loop. A field that isn't string-applicable yields no patch and
-// the control is omitted (only its prompt shows).
+// One resolver question and its answer control; the server flips the answered field CONFIRMED.
 export function QuestionAnswer({
   question,
   draft,
@@ -22,8 +16,7 @@ export function QuestionAnswer({
 }) {
   const [text, setText] = useState("");
   const options = questionOptions(question.field, question.options, draft.headers);
-  // "1" is a valid probe across every mapped field (incl. max_rounds' numeric
-  // guard); only backend.node_config / unknown fields yield null → not answerable.
+  // "1" is a valid probe for every mapped field, max_rounds included; only unmapped ones yield null.
   const answerable = questionPatch(question.field, "1") !== null;
 
   const submit = (answer: string) => {

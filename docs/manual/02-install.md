@@ -27,7 +27,7 @@ OPENROUTER_API_KEY=your_key_here
 
 Installed from a wheel there is no repo root, so it goes in `$PROMPTPOTTER_HOME/.env` instead. `promptpotter new` offers to write it for you on first run if no key is set.
 
-The optimizer model defaults to `deepseek/deepseek-v4-flash:nitro` on OpenRouter. It's install-global, configured once in `promptpotter/assets/optimizer/pipeline.yaml` (per optimizer node's `config.model` / `config.provider`) — the same optimizer runs every campaign. To use a different model or provider, edit that file; set the corresponding `*_API_KEY` for Groq/Anthropic/OpenAI. There is no per-campaign or env-var override.
+The optimizer model defaults to `openai/gpt-6-luna` on OpenRouter; `deepseek/deepseek-v4-flash:nitro` stays on each manifest's menu. It is declared in `promptpotter/assets/optimizers/potter/pipeline.yaml` (per optimizer node's `config.model` / `config.provider`); edit that file to change it for every campaign, or set one campaign's `optimization.nodes.{node}.config.model`. Set the corresponding `*_API_KEY` for Groq/Anthropic/OpenAI. There is no env-var override.
 
 Installed from a wheel rather than a clone, that file sits under `site-packages` and an edit there dies at the next upgrade. Put your copy at `$PROMPTPOTTER_HOME/optimizer/pipeline.yaml` instead: present, it replaces the shipped manifest whole. Full resolution rules — **owned by** [`../developer/stable-api.md § 4b`](../developer/stable-api.md).
 
@@ -39,7 +39,7 @@ Connecting to a remote / auth-gated backend? See [`operations/backend-integratio
 pip install -e ".[all]"
 ```
 
-Not developing on it? `pip install "promptpotter[all]"` instead, and skip step 2. `[all]` bundles every optional feature (Jupyter, observability, Excel loaders, etc.) **except `[benchmarks]`**, which stays opt-in: the HuggingFace `datasets` loader carries a large third-party surface, and only fetching a public bank needs it. Add `,benchmarks` when you run one. For a minimal install or a specific extra, see [§ Optional dependency bundles](#optional-dependency-bundles) below.
+Not developing on it? `pip install "promptpotter[all]"` instead, and skip step 2. `[all]` bundles the operator extras but not every one — which stay out, and why, is [ADR-0006](../adr/0006-embeddable-core-and-extras.md) § Decision. Add `,benchmarks` when you fetch a public bank. For a minimal install or a specific extra, see [§ Optional dependency bundles](#optional-dependency-bundles) below.
 
 ## 5. Reload Claude Code
 
@@ -53,7 +53,7 @@ Next: [Your first campaign](03-first-campaign.md).
 
 ## Environment variables
 
-The `.env` file (see `.env.example`) carries API keys. The optimizer's provider + model are install-global in `promptpotter/assets/optimizer/pipeline.yaml` (per optimizer node) — no per-campaign or env-var default. (Target/scoring model is per-dataset in the pipeline overlay.)
+The `.env` file (see `.env.example`) carries API keys. The optimizer's provider + model are declared per node in its manifest, `promptpotter/assets/optimizers/potter/pipeline.yaml`, and a campaign may move one through `optimization.nodes` — no env-var default. (Target/scoring model is per-dataset in the pipeline overlay.)
 
 | Variable | When required | Purpose |
 |----------|---------------|---------|
@@ -82,7 +82,7 @@ pip install -e ".[benchmarks]"     # GSM8K, AIME 2025, BBEH (HuggingFace dataset
 pip install -e ".[observability]"  # Langfuse cloud tracing
 pip install -e ".[anthropic]"      # Anthropic Claude as optimizer LLM
 pip install -e ".[dev]"            # pytest, ruff, mypy, deptry
-pip install -e ".[all]"            # Every extra except [dev] and [benchmarks]
+pip install -e ".[all]"            # The operator extras (what it leaves out: ADR-0006)
 pip install -e ".[all,dev]"        # Recommended for contributors
 pip install -e ".[all,dev,benchmarks]"  # …plus the opt-in public-bank loader
 ```

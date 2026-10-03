@@ -1,15 +1,8 @@
 import { test, expect, ready } from "../harness";
 import { startFakeIssuer, type FakeIssuer } from "../fake_issuer";
 
-// `AccessGate` and `AllowanceSpent` render only for a signed-in, NON-host identity, and the
-// shared cold/walk servers can never produce one: `playwright.config.ts` passes
-// `PROMPTPOTTER_AUTH=off` to both, which makes `deps.py::resolve_identity` return the terminal
-// identity unconditionally — a session cookie is never even read. That is a structural absence,
-// not a missing fixture (`code-debt-cleanup.md`), so this file raises the SAME `serve.mjs` with
-// that one variable unset, and mints a session directly rather than completing an OIDC round trip.
-//
-// One assertion per surface — not a suite over the onboarding gates, just the two that were
-// unreachable.
+// `AccessGate` and `AllowanceSpent` need a signed-in NON-host identity, which the auth-off
+// cold/walk servers can never produce — hence `fake_issuer.ts`.
 
 let fake: FakeIssuer;
 
@@ -39,11 +32,8 @@ test("an account at its free-tier ceiling sees AllowanceSpent", async ({ page, c
   const sessionId = fake.mintSession({ tenantId, email: "allowance@example.com" });
   await context.addCookies([{ name: "promptpotter_session", value: sessionId, url: fake.baseURL }]);
 
-  // Pre-accept Terms: a fresh account also fails ConsentGate's version check, and that gate
-  // mounts ahead of AllowanceSpent in `app/page.tsx` — without this the assertion below would
-  // pass for the wrong reason, finding whichever overlay happened to paint on top. The `request`
-  // fixture carries no baseURL of its own here (it is bound to the `cold` project's), so every
-  // call below is a full URL with an explicit Cookie header rather than a second context.
+  // Pre-accept Terms, or ConsentGate paints over AllowanceSpent. `request` is bound to the cold
+  // project's baseURL, hence full URLs and an explicit Cookie header.
   const cookie = { Cookie: `promptpotter_session=${sessionId}` };
   const me = await (
     await request.get(`${fake.baseURL}/api/v1/auth/me`, { headers: cookie })

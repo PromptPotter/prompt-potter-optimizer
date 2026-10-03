@@ -5,10 +5,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.dashboard_rows import DashboardCandidate, DashboardSample, SampleStatus
+from promptpotter.domain.dashboard_rows import (
+    DashboardSample,
+    LiveCandidate,
+    SampleStatus,
+    sample_status,
+)
 from promptpotter.domain.results import candidate_label
-from promptpotter.domain.scoring import is_hit, is_unscored, is_verifier_graded
-from promptpotter.infrastructure.projections.live_dashboard.state import PobbBlock
+from promptpotter.domain.scoring import is_verifier_graded
+from promptpotter.infrastructure.projections.live_dashboard.state import RacingBlock
 from promptpotter.shared.composite import inline_short_formula_values
 
 if TYPE_CHECKING:
@@ -38,18 +43,8 @@ def sample_row(s: dict[str, Any]) -> DashboardSample:
     decided, and where the display trim happens."""
     sid = s.get("sample_id")
     time_s = s.get("time_s")
-    # `ERR` and `UNSC` are both asked BEFORE the grade: neither row was graded, so putting an
-    # absent fitness through `is_hit` reports a backend fault — or the FORMULA's own silence — as a
-    # candidate answering wrong. Same ladder and same precedence as the CLI tape
-    # (`terminal/live/sample.py`), because two readouts of one row may not disagree about whether
-    # it was ever scored.
-    status: SampleStatus = (
-        "ERR"
-        if s.get("error")
-        else "UNSC"
-        if is_unscored(s)
-        else ("HIT" if is_hit(s.get("fitness")) else "MISS")
-    )
+    cost_s = s.get("cost_s")
+    status: SampleStatus = sample_status(s)
     # A verifier-graded row has no label, so the answer/truth pair is both halves of a comparison
     # nobody made — and `prediction` there is the `NO_RESULT` sentinel a ranking mechanism that is
     # not in play left behind. Served EMPTY rather than sentinel-and-blank, so a client can still
@@ -67,6 +62,7 @@ def sample_row(s: dict[str, Any]) -> DashboardSample:
         terminal_node=str(s.get("terminal_node") or ""),
         cached=bool(s.get("cached", False)),
         time_s=float(time_s) if isinstance(time_s, int | float) else None,
+        cost_s=float(cost_s) if isinstance(cost_s, int | float) else None,
         predicted="" if graded_by_verifier else _trim(s.get("prediction") or "", 28),
         ground_truth=ground_truth,
         query=_trim(s.get("query") or "", 42),
@@ -97,9 +93,11 @@ def fmt_sample_line(row: DashboardSample) -> str:
     # this only chooses to stay silent at a real 0.
     if share := row.cache_share:
         tok_seg += f" c{share:.0%}"
-    # Blank rather than `0.0s` where the row recorded no time — a cached replay's real 0.0
-    # must stay distinguishable from a row that never reached the pipeline.
-    time_col = f"{row.time_s:4.1f}s" if row.time_s is not None else "     "
+    # Blank rather than `0.0s` where the row recorded no time — a row that never reached the
+    # pipeline must stay distinguishable from one that did. A replay shows what it cost when it
+    # was measured, never the 0.0 clock it occupied on replay (`DashboardSample.shown_s`).
+    shown = row.shown_s
+    time_col = f"{shown:4.1f}s" if shown is not None else "     "
     head = f"  {time_col} #{row.qi:03d}{sid_seg} {row.status:<4} [{badge}]{cache_icon}{tok_seg}"
     # Nothing to contrast on a verifier-graded row — the status IS the verdict there.
     if is_verifier_graded(row.ground_truth):
@@ -113,28 +111,35 @@ def _served(cand: dict[str, Any]) -> dict[str, Any]:
     return cand.get("scores") or cand.get("running") or {}
 
 
-def build_candidate_rows(buffer: RoundBuffer) -> list[DashboardCandidate]:
+def build_candidate_rows(
+    buffer: RoundBuffer, short_formula_template: str | None
+) -> list[LiveCandidate]:
     """This round's candidates in the SAME shape a closed round serves (``rounds[].candidates``), so a reader takes a
     whole row from one half instead of filling one in from the other per field.
 
     ``scores`` is the ``candidate_scored`` report, folded onto by the election; before it lands, ``running`` is the
-    gateway's own per-sample fold. Both carry the composite CI, so the whisker widens with the bar. The ``or`` between
-    them is a PRECEDENCE, not two spellings of one thing — only ``scores`` carries ``label``, ``candidate_id``,
-    ``invalid`` and ``partial_reason``. ``label`` is canonical — display sites read it verbatim, and no ``idx + 1``
+    gateway's own per-sample fold. Both carry accuracy's CI, so the whisker widens with its bar. The ``or`` between
+    them is a PRECEDENCE, not two spellings of one thing — only ``scores`` carries ``label``, ``candidate_id``
+    and ``outcome``. ``label`` is canonical — display sites read it verbatim, and no ``idx + 1``
     arithmetic exists."""
-    rows: list[DashboardCandidate] = []
+    rows: list[LiveCandidate] = []
     for idx in sorted(buffer.candidates.keys()):
         cand = buffer.candidates[idx]
         served = _served(cand)
         samples = cand.get("samples") or []
         cached = served.get("cached_samples")
+        tape = [sample_row(s) for s in samples]
         rows.append(
-            DashboardCandidate(
+            LiveCandidate(
                 label=candidate_label(buffer.round_num, idx),
                 candidate_id=served.get("candidate_id"),
+                # The report's once it lands, and until then off the samples, which carry it from
+                # the first one — the walk mints the run before it measures anything.
+                run_id=served.get("run_id")
+                or next((s["run_id"] for s in samples if s.get("run_id")), None),
                 accuracy=served.get("accuracy"),
                 composite_fitness=served.get("composite_fitness"),
-                invalid=bool(served.get("invalid", False)),
+                outcome=served.get("outcome"),
                 scored_samples=int(served.get("scored_samples") or len(samples)),
                 cached_samples=int(
                     cached if cached is not None else sum(1 for s in samples if s.get("cached"))
@@ -152,94 +157,45 @@ def build_candidate_rows(buffer: RoundBuffer) -> list[DashboardCandidate]:
                 changes_description=(
                     cand.get("changes_description") or served.get("changes_description") or ""
                 ),
-                partial_reason=served.get("partial_reason") or "",
                 mean_fitness_ci_lo=served.get("mean_fitness_ci_lo"),
                 mean_fitness_ci_hi=served.get("mean_fitness_ci_hi"),
-                # Everything below lands at `l1_score:exit`, folded in by `RoundBuffer.stamp_fit`
+                # Everything below lands at the election, folded in by `RoundBuffer.stamp_fit`
                 # and `mark_winner` off the one `ElectionRecord` — so the whole verdict is live
                 # from the election rather than from the round close, two LLM calls later. Absent
                 # before it: the fit needs two arms, and a cold ruler stamps no θ at all.
                 theta=served.get("theta"),
                 theta_se=served.get("theta_se"),
                 theta_caveat=served.get("theta_caveat"),
-                matched_parent_accuracy=served.get("matched_parent_accuracy"),
-                matched_parent_composite=served.get("matched_parent_composite"),
-                matched_parent_lift=served.get("matched_parent_lift"),
-                matched_parent_lift_ci_lo=served.get("matched_parent_lift_ci_lo"),
-                matched_parent_lift_ci_hi=served.get("matched_parent_lift_ci_hi"),
-                is_winner=bool(cand.get("is_winner")),
+                reference_accuracy=served.get("reference_accuracy"),
+                reference_composite=served.get("reference_composite"),
+                reference_lift=served.get("reference_lift"),
+                reference_lift_ci_lo=served.get("reference_lift_ci_lo"),
+                reference_lift_ci_hi=served.get("reference_lift_ci_hi"),
+                is_selected=bool(cand.get("is_selected")),
+                prompt_fields=cand.get("prompt_fields"),
+                resolved_pipeline_params=cand.get("resolved_pipeline_params"),
+                pipeline_overlay=cand.get("pipeline_overlay"),
+                samples=tape,
+                sample_lines=[fmt_sample_line(row) for row in tape],
+                validation_failures=served.get("validation_failures") or [],
+                composite_fitness_formula_short=inline_short_formula_values(
+                    short_formula_template, dict(served.get("evaluators") or {})
+                ),
             )
         )
     return rows
 
 
-def build_l1_score_block(
-    buffer: RoundBuffer,
-    short_formula_template: str | None,
-) -> dict[str, Any]:
-    """The l1_score NODE block — what the node was handed and what it emitted, nothing else.
-
-    The candidate VALUES left this block for ``current_round.candidates`` (:func:`build_candidate_rows`). What stays is
-    node I/O the webapp reads (the sample tape, the seed-able input half) plus two facts only the FOLDER-UI reader has —
-    the value-inlined formula and the self-healing state — which no closed round has a twin for."""
-    input_candidates: list[dict[str, Any]] = []
-    output_candidates: list[dict[str, Any]] = []
-    for idx in sorted(buffer.candidates.keys()):
-        cand = buffer.candidates[idx]
-        served = _served(cand)
-        label = candidate_label(buffer.round_num, idx)
-        input_candidates.append(
-            {
-                "idx": idx,
-                "label": label,
-                "changes_description": (
-                    cand.get("changes_description") or served.get("changes_description") or ""
-                ),
-                "pipeline_overlay": cand.get("pipeline_overlay"),
-                # The evolved prompt (OptSearchPoint.prompt_field_dict() shape).
-                # Live peer of round_NNNN.json::candidate_scores[].prompt_fields
-                # — `liveCandidateSearchPoint` reads it for steer-fork seeding.
-                "prompt_fields": cand.get("prompt_fields"),
-                # Config-only resolved config the OBSERVE view reads live — the
-                # in-flight peer of round_NNNN.json::candidate_scores[].resolved_pipeline_params.
-                "resolved_pipeline_params": cand.get("resolved_pipeline_params"),
-            }
-        )
-        rows = [sample_row(s) for s in cand.get("samples") or []]
-        output_candidates.append(
-            {
-                "idx": idx,
-                "label": label,
-                # Per-candidate value-inlined short formula; the short codes are
-                # the evaluator keys ``inline_short_formula_values`` substitutes.
-                "composite_fitness_formula_short": inline_short_formula_values(
-                    short_formula_template, dict(served.get("evaluators") or {})
-                ),
-                "invalid": served.get("invalid", False),
-                "validation_failures": served.get("validation_failures") or [],
-                "samples": [row.model_dump() for row in rows],
-                # The tape BESIDE the rows, never instead of them: the browser reads `samples`,
-                # the operator reads this in the file, and one producer builds both so they
-                # cannot disagree. Two branches of `samples` is what forced the browser to
-                # regex a rendering to recover what the other branch already had.
-                "sample_lines": [fmt_sample_line(row) for row in rows],
-            }
-        )
-    return {
-        "input": {"candidates": input_candidates},
-        "output": {"candidates": output_candidates},
-    }
-
-
-def build_pobb_block(core: LiveStateCore, p_best_top: list[dict[str, Any]]) -> PobbBlock:
-    """Round-wide PoBB telemetry. ``leader_prob`` is the best standing among CANDIDATES — never a max over one snapshot's
-    dict, whose other entries are that same candidate's odds against each prior."""
+def build_racing_block(core: LiveStateCore, p_best_top: list[dict[str, Any]]) -> RacingBlock | None:
+    """The round's race standing. ``leader_prob`` is the best standing among CANDIDATES — never a max over one
+    snapshot's dict, whose other entries are that same candidate's odds against each prior."""
     if not core.current_p_best_id:
-        return PobbBlock()
+        return None
     leader_prob = max(
         [float(row["p_best"]) for row in p_best_top] or list(core.round_p_best.values()) or [0.0]
     )
-    return PobbBlock(
+    return RacingBlock(
+        member=core.race_member,
         current_id=core.current_p_best_id,
         n_samples=core.current_p_best_n,
         leader_prob=float(leader_prob),
@@ -250,8 +206,7 @@ def build_pobb_block(core: LiveStateCore, p_best_top: list[dict[str, Any]]) -> P
 
 __all__ = [
     "build_candidate_rows",
-    "build_l1_score_block",
-    "build_pobb_block",
+    "build_racing_block",
     "fmt_sample_line",
     "sample_row",
 ]

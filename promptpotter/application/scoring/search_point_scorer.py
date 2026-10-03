@@ -4,20 +4,27 @@ search point scored alone: cache resolution, archival, observability. The sole s
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import logging
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.datasets.loaders import build_dataset_run_data
-from promptpotter.application.optimization.pobb.classification import is_deprecated
-from promptpotter.application.scoring.formula import rescore_results
+from promptpotter.application.run_phase_control import pause_requested
+from promptpotter.application.scoring.classification import is_deprecated
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.query_loop import QueryLoopState, Walk, run_walks
 from promptpotter.application.scoring.selection import mean_fitness_ci
-from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
-from promptpotter.domain.scoring import CellScorer, QueryMeasurement
-from promptpotter.domain.validators import StopRule
+from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE, grade_run, meets_grade
+from promptpotter.domain.results import ArmOutcome
+from promptpotter.domain.scoring import QueryMeasurement
+from promptpotter.domain.spend import ROLE_SPEND_KIND
+from promptpotter.domain.validators import StopRule, StopSignal
+from promptpotter.infrastructure.llm.heartbeat import heartbeat
+from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND, filed_as
 from promptpotter.infrastructure.store import archive_queries
 from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 from promptpotter.infrastructure.tracing.events import DatasetRun
@@ -31,21 +38,26 @@ from promptpotter.shared.instrument import MeasuredCandidate, measured_candidate
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.intelligence.indexes.axis import AxisIndex
+    from promptpotter.application.intelligence.indexes.sample import SampleIndex
     from promptpotter.application.scoring.query_loop import QueryLoopResult
-    from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
+    from promptpotter.infrastructure.store.measurement_archive import (
+        CellClaim,
+        ReplayableRow,
+        ReplayFeed,
+    )
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "SCORING_ERROR_ABORT",
     "ScoredWalk",
+    "archivable_priors",
     "close_walk",
     "merge_with_unprocessed_priors",
     "open_walk",
-    "rescored_prior_tail",
     "score_search_point",
 ]
 
@@ -53,33 +65,30 @@ __all__ = [
 @dataclass(frozen=True)
 class ScoredWalk:
     """A decided walk, recorded. ``stopped`` is why it ended before its last cell — ``"skip"``,
-    ``"escalation"`` or an abort reason — and ``None`` once it took every cell, whatever decided
+    ``"stop_rule"`` or an abort reason — and ``None`` once it took every cell, whatever decided
     it there. A partial walk means something different to each caller, so each one says what."""
 
     results: list[QueryMeasurement]
     scores: dict[str, Any]
-    signal: EscalationSignal | None
+    signal: StopSignal | None
     stopped: str | None
+    # The archive run the rows were filed under — what a score report carries so each of its cells
+    # is addressable as ``(run_id, sample_id)``.
+    run_id: str
 
 
-def rescored_prior_tail(
+def archivable_priors(
     *,
     cached_sample_results: dict[int, QueryMeasurement],
     dataset_sample_ids: set[int],
     deprecated_samples: dict[int, QueryMeasurement],
-    scorer: CellScorer | None,
 ) -> dict[int, QueryMeasurement]:
-    """The cache priors this run may archive without re-measuring, rescored ONCE. The active scorer
-    is fixed for one call, so rescoring per prior per sample was O(samples²) for the same answers."""
-    tail: dict[int, QueryMeasurement] = {}
-    for sid, prior in cached_sample_results.items():
-        if sid not in dataset_sample_ids or sid in deprecated_samples:
-            continue
-        entry = cast(QueryMeasurement, dict(prior))
-        if scorer is not None:
-            rescore_results([cast("dict[str, Any]", entry)], scorer)
-        tail[sid] = entry
-    return tail
+    """The cache priors this run may archive without re-measuring."""
+    return {
+        sid: cast(QueryMeasurement, dict(prior))
+        for sid, prior in cached_sample_results.items()
+        if sid in dataset_sample_ids and sid not in deprecated_samples
+    }
 
 
 def merge_with_unprocessed_priors(
@@ -94,12 +103,12 @@ def merge_with_unprocessed_priors(
     return results + [p for sid, p in prior_tail.items() if sid not in processed]
 
 
-def _build_scoring_error_signal(
-    *, results: list[QueryMeasurement], stop_reason: str
-) -> EscalationSignal:
-    # Every error row here is now a cell that was actually SENT. The abort used to pad the tail
-    # with synthetic markers to bring the list up to dataset length, and this had to strip them
-    # back out by matching the stop reason; the padding is gone, so the filter is too.
+# The gateway's own stop: the query loop gave up on this walk. One of the bench's two BROKEN rules.
+SCORING_ERROR_ABORT = "scoring_error_abort"
+
+
+def _build_scoring_error_signal(*, results: list[QueryMeasurement], stop_reason: str) -> StopSignal:
+    # Every error row here is a cell that was actually SENT: an abort pads no synthetic tail.
     real_errors = [r for r in results if is_error_result(r)]
     warning_types: dict[str, int] = {}
     for r in real_errors:
@@ -108,9 +117,9 @@ def _build_scoring_error_signal(
     # Every ``real_error`` is an error row, so ``error`` is present + non-empty.
     last_error = str(real_errors[-1]["error"]) if real_errors else ""
     dominant = last_error or stop_reason or "scoring_error"
-    return EscalationSignal(
-        check_name="scoring_error_abort",
-        target=EscalationTarget.ELIMINATE_CANDIDATE,
+    return StopSignal(
+        check_name=SCORING_ERROR_ABORT,
+        outcome=ArmOutcome.BROKEN,
         check_result={
             "stop_reason": stop_reason,
             "dominant_warning": dominant,
@@ -132,61 +141,49 @@ def _split_off_deprecated_samples(
     return kept, deprecated
 
 
-def _assert_measured_content_matches(
-    cached: dict[int, QueryMeasurement],
+def _replayable_on(
     dataset: list[Sample],
-    dataset_name: str,
-) -> None:
-    """The one gate on positional sample identity. Every stored row carries the content it was
-    measured against, so this needs nothing on disk that is not already there — and it catches a
-    single edited row, which a whole-dataset fingerprint would only catch in aggregate."""
-    for sample in dataset:
-        prior = cached.get(sample.id)
-        if prior is None:
+    reusable: dict[str, ReplayableRow],
+    dataset_name: str | None,
+) -> dict[int, QueryMeasurement]:
+    """The banked rows this dataset replays, each moved to the position its sample holds HERE.
+
+    Replay itself cannot go wrong on content — it matches ``sample_key``. What can is every reader
+    that stays positional (the δ ruler, the sample index, hard samples), which keys a sample by
+    ``(dataset_name, sample_id)``. So a row this dataset measured earlier must still find its own
+    sample at its own slot; one that does not means the rows were re-cut under a name already used."""
+    here = {s.id: s for s in dataset}
+    for prior in reusable.values():
+        if not dataset_name or prior.dataset_name != dataset_name:
             continue
-        stored = (prior.get("query", ""), prior.get("ground_truth", ""))
-        # A labelless cell stores `""`, so the live side normalizes the same way `measure_sample`
-        # did when it wrote the row — comparing `None` against `""` would fail every cached row
-        # on a verifier-graded backend and read a working cache as an edited dataset.
-        current = (sample.query, sample.ground_truth or "")
-        if stored != current:
+        slot = prior.row["sample_id"]
+        sample = here.get(slot)
+        if sample is not None and sample.key != prior.row["sample_key"]:
             raise DatasetIdentityError(
                 dataset_name=dataset_name,
-                sample_id=sample.id,
-                stored=stored,
-                current=current,
+                sample_id=slot,
+                stored=(prior.row["query"], prior.row["ground_truth"]),
+                current=(sample.query, sample.ground_truth or ""),
             )
+    return {
+        s.id: cast(QueryMeasurement, {**banked.row, "sample_id": s.id})
+        for s in dataset
+        if (banked := reusable.get(s.key)) is not None
+    }
 
 
 def _resolve_prior_cache(
-    search_point: JobSearchPoint,
     dataset: list[Sample],
     session: Session,
     *,
-    pipeline_schema: PipelineSchema,
-    force_fresh: bool,
+    feed: ReplayFeed | None,
     label: str,
 ) -> tuple[dict[int, QueryMeasurement], dict[int, QueryMeasurement], set[int]]:
     """Load-side cache resolution — reusable-archive lookup, deprecated-row split, preamble log.
-    ``force_fresh`` skips reuse, and so does a session with no dataset: ``sample_id`` needs one."""
-    store = session.store
-    backend_id = session.backend_id
-    dataset_name = session.dataset_name
+    No ``feed`` ⇒ no reuse."""
     cached_sample_results: dict[int, QueryMeasurement] = {}
-    if store and backend_id and dataset_name and not force_fresh:
-        node_configs = pipeline_schema.node_configs(search_point.pipeline_params)
-        cached_sample_results = cast(
-            "dict[int, QueryMeasurement]",
-            archive_queries.reusable_results(
-                store,
-                node_configs,
-                is_fatal=is_deprecated,
-                dataset_name=dataset_name,
-            ),
-        )
-
-    if cached_sample_results and dataset_name:
-        _assert_measured_content_matches(cached_sample_results, dataset, dataset_name)
+    if feed is not None:
+        cached_sample_results = _replayable_on(dataset, feed.advance(), session.dataset_name)
 
     cached_sample_results, deprecated_samples = _split_off_deprecated_samples(cached_sample_results)
     if deprecated_samples:
@@ -217,14 +214,65 @@ def _resolve_prior_cache(
     return cached_sample_results, deprecated_samples, dataset_sample_ids
 
 
-def _resolve_partial_escalation(batch: QueryLoopResult) -> EscalationSignal | None:
-    """The escalation signal a decided walk carries. A skip is the operator's early-abort of THIS
-    search point: its partial is on disk and scores like a PoBB cut, with no signal. Any other
-    unsignalled stop is a scoring-error abort (consecutive 5xx, client 4xx, pipeline ERROR), made a
-    candidate-scoped escalation so the caller can attach a RuntimeFailure and go on — never killing
-    the round."""
-    if batch.completed or batch.escalation_signal is not None or batch.stop_reason == "skip":
-        return batch.escalation_signal
+_CLAIM_POLL_S = 0.5
+
+
+async def _claim_cell(
+    sample: Sample,
+    *,
+    feed: ReplayFeed,
+    session: Session,
+    dataset: list[Sample],
+    cached: dict[int, QueryMeasurement],
+    shareable: Callable[[dict[str, Any]], bool],
+) -> tuple[QueryMeasurement | None, CellClaim | None]:
+    """The row a concurrent walk banked or is measuring for this cell, else this walk's hold on it:
+    a cell another process reached after this walk opened is never bought, or drawn, twice. The
+    wait sends nothing, so a pause breaks it at once, as it breaks a throttle wait."""
+    waiting: asyncio.Task[None] | None = None
+    try:
+        while True:
+            claim = feed.claim(sample.key, shareable=shareable)
+            if claim is not None:
+                try:
+                    banked = {k: b for k, b in feed.advance().items() if not is_deprecated(b.row)}
+                    cached.update(_replayable_on(dataset, banked, session.dataset_name))
+                except BaseException:
+                    claim.release()
+                    raise
+                if (row := cached.get(sample.id)) is None:
+                    return None, claim
+                claim.release()
+                return row, None
+            if (measured := feed.claimed_row(sample.key)) is not None:
+                return cast(QueryMeasurement, {**measured, "sample_id": sample.id}), None
+            if waiting is None:
+                waiting = asyncio.create_task(
+                    heartbeat(
+                        session.state.ledger,
+                        call_id=f"scoring:{sample.id}",
+                        node="backend_scoring",
+                        round_num=_CURRENT_ROUND.get(),
+                        start_monotonic=time.monotonic(),
+                        detail_fn=lambda: "another run is measuring this cell",
+                    )
+                )
+            if pause_requested(session):
+                raise asyncio.CancelledError("claim wait aborted by a pause")
+            await asyncio.sleep(_CLAIM_POLL_S)
+    finally:
+        if waiting is not None:
+            waiting.cancel()
+
+
+def _walk_stop_signal(batch: QueryLoopResult) -> StopSignal | None:
+    """The stop signal a decided walk carries. A skip is the operator's early-abort of THIS
+    search point: its partial is on disk and scores like an eliminator's cut, with no signal. Any
+    other unsignalled stop is a scoring-error abort (consecutive 5xx, client 4xx, pipeline ERROR),
+    made a candidate-scoped signal so the caller can attach a RuntimeFailure and go on — never
+    killing the round."""
+    if batch.completed or batch.stop_signal is not None or batch.stop_reason == "skip":
+        return batch.stop_signal
     return _build_scoring_error_signal(results=batch.results, stop_reason=batch.stop_reason or "")
 
 
@@ -266,29 +314,27 @@ async def score_search_point(
     label: str,
     on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None,
     on_sample_starting: Callable[[str, int, int, int, int, int | None], None] | None,
-    source: str = "",
-    axes: AxisIndex | None = None,
-    opt_sp: OptSearchPoint | None,
+    sample_index: SampleIndex | None = None,
     measured: MeasuredCandidate | None,
     force_fresh: bool = False,
 ) -> ScoredWalk:
-    """One search point scored on ``dataset``, alone in its phase. ``opt_sp``, ``measured`` and the
-    two per-sample callbacks are required keywords with NO default — each decides what the numbers
+    """One search point scored on ``dataset``, alone in its phase. ``measured`` and the two
+    per-sample callbacks are required keywords with NO default — each decides what the numbers
     MEAN, and the signature is the only enforcement."""
-    walk = open_walk(
-        search_point,
-        dataset,
-        session,
-        label=label,
-        on_sample_scored=on_sample_scored,
-        on_sample_starting=on_sample_starting,
-        source=source,
-        axes=axes,
-        opt_sp=opt_sp,
-        measured=measured,
-        force_fresh=force_fresh,
-    )
-    await run_walks([walk], session)
+    # Opened inside the filing too: the walk's cells run in a copy of the context taken here.
+    with filed_as(ROLE_SPEND_KIND.get(label)):
+        walk = open_walk(
+            search_point,
+            dataset,
+            session,
+            label=label,
+            on_sample_scored=on_sample_scored,
+            on_sample_starting=on_sample_starting,
+            sample_index=sample_index,
+            measured=measured,
+            force_fresh=force_fresh,
+        )
+        await run_walks([walk], session)
     return close_walk(walk)
 
 
@@ -300,45 +346,58 @@ def open_walk(
     label: str,
     on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None,
     on_sample_starting: Callable[[str, int, int, int, int, int | None], None] | None,
-    source: str = "",
     checks: Sequence[StopRule] = (),
-    axes: AxisIndex | None = None,
-    l1_diversity: float = 1.0,
-    opt_sp: OptSearchPoint | None,
+    sample_index: SampleIndex | None = None,
     measured: MeasuredCandidate | None,
     force_fresh: bool = False,
 ) -> Walk:
     """A walk ready to be driven by :func:`run_walks` and closed by :func:`close_walk`. Writes
     nothing: the run's log opens at its first row, so a walk that is never taken leaves no trace."""
-    assert session.scoring.scorer is not None, "session.scoring.scorer required for scoring"
+    source = session.source
+    assert session.scoring.scorer is not None and source is not None, (
+        "populate_session_scoring arms the scorer and the run source before any scoring"
+    )
     store = session.store
     backend_id = session.backend_id
     pipeline_schema = session.pipeline_schema
-    source = source or session.source
 
     content_hash = search_point.content_hash(dataset)
-    safe_label = label.lower().replace(" ", "_")
-    # The FULL hash, not a second cut of it. `label` is a round-local position (`c1.1`, `origin`)
-    # that every campaign re-mints, so the hash is the only thing telling two runs apart — and at
-    # 8 hex it was 32 bits carrying that alone. A collision does not raise: `append_run` folds
-    # last-wins per `m:{sample_id}`, so both searchpoints' measurements merge into one run file and
-    # the archive reports a configuration that did not produce them.
-    run_id = f"{safe_label}_{content_hash}"
+    run_label = str(label)
+    # The FULL hash, not a second cut of it. `label` names WHY the pass ran (`panel`, `origin`),
+    # which every campaign repeats, so the hash is the only thing telling two runs apart. A
+    # collision does not raise: `append_run` folds last-wins per `m:{sample_id}`, so both
+    # searchpoints' measurements merge into one run file and the archive reports a configuration
+    # that did not produce them.
+    run_id = f"{run_label}_{content_hash}"
 
-    cached_sample_results, deprecated_samples, dataset_sample_ids = _resolve_prior_cache(
-        search_point,
-        dataset,
-        session,
-        pipeline_schema=pipeline_schema,
-        force_fresh=force_fresh,
-        label=label,
+    replaying = bool(store and backend_id) and not force_fresh
+    node_configs = pipeline_schema.node_configs(search_point.pipeline_params) if replaying else []
+    # No node configs, no cell identity: every such searchpoint would share one claim per sample.
+    feed = (
+        archive_queries.replay_feed(store, node_configs, is_fatal=is_deprecated)
+        if store and node_configs
+        else None
     )
+    cached_sample_results, deprecated_samples, dataset_sample_ids = _resolve_prior_cache(
+        dataset, session, feed=feed, label=label
+    )
+    cell_keys = {} if feed is None else {s.id: feed.cell_key(s.key) for s in dataset}
+    counted = session.state.counted_cells
+    rereads = frozenset(s for s in cached_sample_results if cell_keys.get(s) in counted)
 
-    prior_tail = rescored_prior_tail(
+    def _shareable(row: dict[str, Any]) -> bool:
+        """What a waiting walk may replay — a row this walk's own run would serve back."""
+        if is_error_result(row) or is_deprecated(row):
+            return False
+        graded = grade_run(
+            source, [row], pipeline_schema, human_intervened=session.human_intervened
+        )
+        return meets_grade(graded.grade, REUSABLE_MIN_GRADE)
+
+    prior_tail = archivable_priors(
         cached_sample_results=cached_sample_results,
         dataset_sample_ids=dataset_sample_ids,
         deprecated_samples=deprecated_samples,
-        scorer=session.scoring.scorer,
     )
 
     # Whether the run's log is open, how many of ``results`` are already appended to it, and
@@ -348,24 +407,15 @@ def open_walk(
     priors_appended = not prior_tail
 
     def _composite(rows: list[QueryMeasurement]) -> dict[str, Any]:
-        """This candidate's fitness over *rows*, and the band over the same rows. Also the loop's
-        `running_scores`, so the number a live surface shows converging is the one the round banks
-        — never a second fold. `build_score_report` READS the band from here rather than
-        re-deriving it: one estimator, so the whisker converges with the bar it brackets."""
-        scores = compute_composite_fitness(
-            rows,
-            pipeline_schema,
-            opt_sp=opt_sp,
-            l1_diversity=l1_diversity,
-        )
-        ci_lo, ci_hi = mean_fitness_ci(rows)
+        """This candidate's fitness over *rows*, and accuracy's band over the same rows. Also the
+        loop's `running_scores`, so the number a live surface shows converging is the one the round
+        banks — never a second fold. `build_score_report` READS the band from here rather than
+        re-deriving it: one estimator, so the whisker converges with the accuracy bar it brackets."""
+        scores = compute_composite_fitness(rows, pipeline_schema)
+        ci_lo, ci_hi = mean_fitness_ci(rows, grade="fitness")
         return {**scores, "mean_fitness_ci_lo": ci_lo, "mean_fitness_ci_hi": ci_hi}
 
-    def _save_run(
-        results: list[QueryMeasurement],
-        scores: dict[str, Any],
-        banked: Sequence[QueryMeasurement] = (),
-    ) -> None:
+    def _save_run(results: list[QueryMeasurement], banked: Sequence[QueryMeasurement] = ()) -> None:
         nonlocal opened, appended, priors_appended
         if not (store and backend_id):
             return
@@ -381,10 +431,9 @@ def open_walk(
         merged = merge_with_unprocessed_priors(results, prior_tail)
         run_data = build_dataset_run_data(
             run_id,
-            safe_label,
+            run_label,
             content_hash,
             search_point,
-            scores,
             merged,
             dataset_name=session.dataset_name,
             source=source,
@@ -392,7 +441,7 @@ def open_walk(
             human_intervened=session.human_intervened,
         )
         # The cursor is over ``results``, not "the last row": a cache hit appends a
-        # MATERIALIZED row (rescored, recovered — which can cost real backend calls) without
+        # MATERIALIZED row (graded, recovered — which can cost real backend calls) without
         # persisting, so a save has to sweep up everything the walk has produced since the
         # last one. The priors go down once — ``merged[len(results):]`` is exactly the ones
         # the walk has not reached; a sample walked later supersedes its own prior by
@@ -412,14 +461,10 @@ def open_walk(
         )
 
     def _persist_fresh(results: list[QueryMeasurement]) -> dict[str, Any]:
-        """Persist the walk's new rows; return the candidate's running fitness. The ARCHIVED score is
-        the merged fold, the running one is over ``results`` alone — the candidate's own, what PoBB reads."""
-        running = _composite(results)
-        if not (store and backend_id):
-            return running
-        merged = merge_with_unprocessed_priors(results, prior_tail)
-        _save_run(results, running if merged is results else _composite(merged))
-        return running
+        """Persist the walk's new rows; return the candidate's running fitness over ``results``
+        alone — the candidate's own, what PoBB reads."""
+        _save_run(results)
+        return _composite(results)
 
     def _bank(results: list[QueryMeasurement], rows: list[QueryMeasurement]) -> None:
         """Rows back and not yet taken, kept as priors of this run: the walk resumed from a stop
@@ -428,10 +473,10 @@ def open_walk(
             return
         for row in rows:
             prior_tail[row["sample_id"]] = row
-        _save_run(results, _composite(merge_with_unprocessed_priors(results, prior_tail)), rows)
+        _save_run(results, rows)
 
     def _record_run(results: list[QueryMeasurement], scores: dict[str, Any]) -> None:
-        _save_run(results, scores)
+        _save_run(results)
         if store:
             archive_queries.compact_measurement_run(store, run_id)
         _emit_dataset_run(
@@ -446,15 +491,29 @@ def open_walk(
     ctx = QueryLoopState(
         search_point=search_point,
         session=session,
+        run_id=run_id,
         cached_sample_results=cached_sample_results,
         on_sample_scored=on_sample_scored,
-        axes=axes,
+        sample_index=sample_index,
         scorer=session.scoring.scorer,
         deprecated_samples=deprecated_samples,
         persist_fresh=_persist_fresh,
         running_scores=_composite,
         record_run=_record_run,
         bank=_bank,
+        claim_cell=None
+        if feed is None
+        else functools.partial(
+            _claim_cell,
+            feed=feed,
+            session=session,
+            dataset=dataset,
+            cached=cached_sample_results,
+            shareable=_shareable,
+        ),
+        cell_keys=cell_keys,
+        counted=counted,
+        rereads=rereads,
     )
     return Walk(
         dataset=dataset,
@@ -473,9 +532,9 @@ def close_walk(walk: Walk) -> ScoredWalk:
     results = outcome.results
     scores = walk.ctx.running_scores(results)
     if outcome.stop_reason == "skip":
-        # Mark the partial as an operator early-abort so the candidate report and
-        # measurement record carry the provenance (the cycle is babysat).
+        # Mark the partial as an operator early-abort so the candidate report carries the
+        # provenance (the cycle is babysat).
         scores["partial_reason"] = "skip"
     walk.ctx.record_run(results, scores)
     stopped = None if len(results) == walk.n else outcome.stop_reason
-    return ScoredWalk(results, scores, _resolve_partial_escalation(outcome), stopped)
+    return ScoredWalk(results, scores, _walk_stop_signal(outcome), stopped, walk.ctx.run_id)

@@ -168,7 +168,9 @@ def build_stores(
         benchmarks_root=bench_root,
         identity=identity,
         backends=BackendStore(tenant_dir),
-        tenant_datasets=TenantDatasetStore(tenant_dir),
+        # Rooted with the caches: a sandbox isolates campaign STATE, and a dataset is not state, so
+        # an inner cell resolves its benchmark to the dir the outer fingerprinted and grades on.
+        tenant_datasets=TenantDatasetStore(tenant_workspace(shared, identity.tenant_id)),
         sessions=SessionStore(tenant_dir),
         campaigns=CampaignStore(tenant_dir),
         checkin=CheckinDraftStore(tenant_dir),

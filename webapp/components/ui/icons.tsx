@@ -1,8 +1,6 @@
 import type { ReactNode } from "react";
 
-// Stroke glyphs on `currentColor`, so a host's on/hover/disabled ink colours them for free.
-// Decorative by construction: an icon-only control carries its own `aria-label`. `size`
-// absent leaves the box to the host's CSS.
+// Decorative by construction: an icon-only control carries its own `aria-label`.
 export function Icon({
   size,
   viewBox = "0 0 24 24",
@@ -35,7 +33,6 @@ interface GlyphProps {
   size?: number;
 }
 
-// A branching tree — the forest view.
 export const IconTree = ({ size = 15 }: GlyphProps) => (
   <Icon size={size} strokeWidth={1.7}>
     <circle cx="5" cy="12" r="2" />
@@ -45,7 +42,6 @@ export const IconTree = ({ size = 15 }: GlyphProps) => (
   </Icon>
 );
 
-// The overflow menu.
 export const IconMore = ({ size = 15 }: GlyphProps) => (
   <Icon size={size} strokeWidth={1.7}>
     <circle cx="5" cy="12" r="1" />
@@ -54,14 +50,12 @@ export const IconMore = ({ size = 15 }: GlyphProps) => (
   </Icon>
 );
 
-// Dismissal — the one close mark, on every dialog and detail panel.
 export const IconClose = ({ size = 16 }: GlyphProps) => (
   <Icon size={size} strokeWidth={1.7}>
     <path d="M6 6l12 12M18 6 6 18" />
   </Icon>
 );
 
-// Sweep away — cleaning up empty-stub forks.
 export const IconBroom = ({ size = 15 }: GlyphProps) => (
   <Icon size={size} strokeWidth={1.7}>
     <path d="M15 4l5 5" />
@@ -69,7 +63,6 @@ export const IconBroom = ({ size = 15 }: GlyphProps) => (
   </Icon>
 );
 
-// Mixer sliders — tunable mechanisms.
 export const IconSliders = ({ size = 14 }: GlyphProps) => (
   <Icon size={size} strokeWidth={2}>
     <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3" />

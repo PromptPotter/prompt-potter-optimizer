@@ -8,8 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from promptpotter.domain.escalation_signals import EscalationSignal
-    from promptpotter.domain.opt_search_point import OptSearchPoint
+    from promptpotter.domain.results import ArmOutcome
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
 
@@ -35,14 +34,24 @@ class LLMOutputValidator:
 def run_validators(
     validators: tuple[LLMOutputValidator, ...],
     source_output: Mapping[str, Any],
-    opt_sp: OptSearchPoint,
+    **context: Any,
 ) -> list[ValidatorOutcome]:
     outcomes: list[ValidatorOutcome] = []
     for validator in validators:
-        outcome = validator.run(source_output, opt_sp=opt_sp)
+        outcome = validator.run(source_output, **context)
         if outcome is not None:
             outcomes.append(outcome)
     return outcomes
+
+
+@dataclass(frozen=True)
+class StopSignal:
+    """Why a stop rule ended a walk: ``outcome`` is the arm's, ``check_result`` the rule's own
+    reading of it, named by the rule that fired."""
+
+    check_name: str
+    outcome: ArmOutcome
+    check_result: dict[str, Any]
 
 
 @runtime_checkable
@@ -52,7 +61,7 @@ class StopRule(Protocol):
 
     name: str
 
-    def check(self, results: list[QueryMeasurement]) -> EscalationSignal | None: ...
+    def check(self, results: list[QueryMeasurement]) -> StopSignal | None: ...
 
     def earliest_stop(
         self,
@@ -70,6 +79,7 @@ class StopRule(Protocol):
 __all__ = [
     "LLMOutputValidator",
     "StopRule",
+    "StopSignal",
     "ValidatorOutcome",
     "run_validators",
 ]

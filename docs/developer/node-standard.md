@@ -6,13 +6,13 @@ Three reasons nodes-not-monoliths, mirroring prompt decomposition: measurable ax
 
 Built-in nodes cover fixed-config deterministic steps (lookup, fuzzy matching), LLM nodes, and multi-step agent nodes. PromptPotter ships a basic database-backed candidate-assignment pipe. In practice most pipelines reduce to one or more LLM nodes.
 
-This page is both the node model and the **strict wire shape** PromptPotter parses from `GET /pipeline` (or from a local `datasets/{name}/pipeline.yaml`). Every connector publishes this shape, and the **same parser** consumes `promptpotter/assets/optimizer/pipeline.yaml` unchanged. Writing a connector or extending the optimizer manifest — this is the contract you implement against.
+This page is both the node model and the **strict wire shape** PromptPotter parses from `GET /pipeline` (or from a local `datasets/{name}/pipeline.yaml`). Every connector publishes this shape, and the **same parser** consumes `promptpotter/assets/optimizers/potter/pipeline.yaml` unchanged. Writing a connector or extending the optimizer manifest — this is the contract you implement against.
 
 The silent-harm part is tested — content-hash sensitivity, by [`tests/test_integrity.py`](../../tests/test_integrity.py) (`test_content_hash_distinguishes_pipeline_params`). Flat-format rejection is a `JobSearchPoint` model validator, so Pydantic raises on a malformed authored config; that and the rest fail loud, so no standing test — see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md). Operator walk-through for wiring a new node into self-healing: [`../operations/backend-integration.md`](../operations/backend-integration.md) § Self-healing a node.
 
 ## Pipeline declaration format
 
-Both backends and the optimizer loop declare pipelines as JSON. The optimizer's lives at `promptpotter/assets/optimizer/pipeline.yaml`; a backend's is served by `GET /pipeline`.
+Both backends and every optimizer declare pipelines as JSON. An optimizer's lives in its runtime's `manifest_dir` (a built-in's is `promptpotter/assets/optimizers/{name}/pipeline.yaml`); a backend's is served by `GET /pipeline`.
 
 ```json
 {
@@ -48,7 +48,7 @@ Both backends and the optimizer loop declare pipelines as JSON. The optimizer's 
 }
 ```
 
-The `pipelines` dict composes named sequences from the node pool; the same node can appear in several. Prompts and structured-output schemas are referenced by `(family, version)` from each node's `config` and resolved against the top-level `resolved_prompts` / `resolved_schemas` registries — the same shape `parse_pipeline_response` (`domain/pipeline_parsing.py`) consumes for backends. The optimizer manifest carries the registries inline; a backend serves them via `GET /pipeline`.
+The `pipelines` dict composes named sequences from the node pool; the same node can appear in several. Prompts and structured-output schemas are referenced by `(family, version)` from each node's `config` and resolved against the top-level `resolved_prompts` / `resolved_schemas` registries — the same shape `parse_pipeline_response` (`domain/pipeline_parsing.py`) consumes for backends. An optimizer manifest carries `resolved_prompts` inline and takes `resolved_schemas` from its generated sibling `resolved_schemas.json` (`scripts/build_optimizer_schemas.py`), merged at load; a backend serves both via `GET /pipeline`.
 
 ## The shape, and what PromptPotter reads of it
 
@@ -59,7 +59,9 @@ types and the defaults off those models** — a table here is a second declarati
 **PromptPotter parses a SUBSET of this file, and that is by design, not rot — do not re-file the
 remainder as dead keys.** `PipelineNode` is built from `type`, `node_role`, `config` and the
 `optimizer` sub-object, nothing else; `description`, `runtime`, `short_circuit` and `input_schema`
-are the **backend's self-description**, stating its own topology for a human reader. The mirror
+are the **backend's self-description**, stating its own topology for a human reader — which is why
+`description` rides the served `view` as the node's explainer, and no surface keeps a second copy
+keyed by node id. The mirror
 rule: a key PP does not *use* gets no model field, but the key still belongs in the file — and
 "required" on a connector's side means *a connector must publish it*, not *PP reads it*.
 
@@ -72,8 +74,10 @@ The decisions the models cannot state:
 - **`pipelines` must contain `default`** — the active step order unless a campaign overrides it,
   and the same node may appear in several sequences. **The other names are read too, and this is
   what decides whether a node is drawn at all:** a sequence sharing steps with `default` is an
-  ESCALATION, and the nodes it introduces tier above the chain in the served `view`; one sharing
-  none is a separate PHASE, running on its own occasion; and **a node named by no pipeline is not
+  ALTERNATIVE — a controller picks it at the round boundary — and the nodes it introduces tier
+  above the chain in the served `view`, reached by an `alternative` edge; one sharing
+  none is a separate PHASE, running on the occasion the member that opens it chooses, drawn ahead
+  of an optimizer's `loop` rather than inside it; and **a node named by no pipeline is not
   in the flow, so nothing draws it** — being declared is not the same as running, which is why the
   optimizer publishes its check-in node as a one-step pipeline of its own. `derive_pipeline_view`
   reads exactly this, and no manifest declares a `view` of its own.
@@ -81,7 +85,7 @@ The decisions the models cannot state:
   `PipelineSchema.config_nodes` covers every node under `nodes:`, whether or not a pipeline names
   it — a node absent from the surface is not a locked node the operator can open, it is nothing at
   all, with no row and no lock. Identity follows the declaration too, but only where a point
-  CONFIGURES an off-chain node (`node_configs` → `sp_hash`) — an escalation node reached on a stall
+  CONFIGURES an off-chain node (`node_configs` → `sp_hash`) — a node only an alternative reaches
   still changes the measurement, while merely declaring a step re-keys no banked cell.
 - **`runtime` is orthogonal to `Connector.execution`.** It says where a node runs inside the
   *backend's* topology (`backend` / `frontend` / `in_process`); `Connector.execution` says how
@@ -112,14 +116,13 @@ Capabilities are opt-in. A deterministic node declares none; an LLM node in the 
 ### All nodes
 
 - **Exit-point declaration** — a node producing candidates declares where its output lives. Enables step-sequence cache reuse and partial run replay.
-- **Escalation signals** — return `EscalationSignal` to eliminate a candidate or abort the round, rather than failing silently.
+- **Stop signals** — return a `StopSignal` naming the arm's `ArmOutcome` to stop a candidate, rather than failing silently.
 
 ### LLM nodes additionally
 
 - **Prompt exposure** — expose the prompt as a `PromptTemplate`. PromptPotter reads, displays, and optimises it. See [`README.md`](README.md) § 1. Prompt structure.
 - **Optimizer-discoverable parameters** — declare accepted parameters and valid values. PromptPotter picks these up automatically as optimisation axes, with no hardcoding on either side.
-- **Self-healing Wound 1** — `ValidationFailure` caught at L1 parse time by `L1_SCHEMA_COMPLIANCE`; L2 teaches L1 not to repeat. See [`self-healing-internals.md`](self-healing-internals.md).
-- **Self-healing Wound 2** — `RuntimeFailure` attached to the candidate mid-eval; L2 adjusts; L3 replans on persistence.
+- **Self-healing Wounds 1 and 2** — a `ValidationFailure` caught at L1 parse time, a `RuntimeFailure` attached to the candidate mid-run. **Who heals each** — owned by [`self-healing-internals.md`](self-healing-internals.md) § The wounds, mapped to the two axes.
 - **Warnings → optimizer context** — per-sample warnings surface to the optimizer through the round's `evidence_health` / `diagnostics` panels. They do **not** select samples: the cumulative warned-query subset that once fed probe-round selection is gone, along with the probe lever it served.
 - **Warnings → escalation counter** — sustained degradation increments a patience counter.
 - **Warnings → search-point attachment** — failures pin to the exact configuration that caused them, not the round.
@@ -127,9 +130,47 @@ Capabilities are opt-in. A deterministic node declares none; an LLM node in the 
 - **Abort** — a candidate can signal the round should stop.
 - **Fatal fast-path** — fatal codes derived by `classify_result()` (`domain/results_health.py`) eliminate a candidate on the first query, with no rate threshold.
 
+### Optimizer node types
+
+An optimizer manifest uses `llm` and `measurement` nodes plus five types no backend declares,
+serving the contract in [`../architecture.md`](../architecture.md) § Bench and optimizer. **Each
+of the five — and every `llm` node the bench walks — is backed by an implementation registered
+under the node's NAME** through the one entry-point registry (`promptpotter.optimizer_nodes`), so
+`paired_t:` in a manifest resolves to the `paired_t` member; the node's `config` is that member's
+typed knobs, and a paper's configuration is a set of those values. No member sees the bench set.
+The target is that none is handed `Cycle`, a store or a live client either — only frozen `domain/`
+inputs; potter's members still read the bench's `Cycle`, their own state riding apart on
+`RoundContext.state`.
+
+| Type | Reads | Returns | Binds it |
+|---|---|---|---|
+| `llm` | its prompt, filled through the dispatch hub | its parsed response — for a proposing node, individuals, each with its `parent_ids` and `source` | proposals are validated like any candidate: forbidden keys, `validate_overrides`, the node's permitted model set |
+| `measurement` | the round's candidates, the sampler's panel, the eliminator's checks | the round's rows | the bench's scoring gateway, walked unchanged; `config` stays empty |
+| `sampler` | the search pool, the bench's per-sample difficulty, prior rows | the round's panel: ordered sample ids, cut into the blocks an eliminator decides between | draws from the search pool alone; deterministic given its inputs and seed, so resume and fork replay it |
+| `eliminator` | the panel, the candidates, rows as they land | a continue or cut per arm per block, each cut a ledger decision stamped with this node | cuts on evidence about the arm, never on a technical failure — that is the bench's `DegradationCheck`, which runs whatever the eliminator; the `none` member walks every arm to the end |
+| `selector` | the round's rows, lineage, the population or archive in `optimizer_state` | `selected: list[label]` and the next `optimizer_state` | its choice is what the optimizer keeps, never a score the bench serves |
+| `algorithm` | individuals, and the demo pool when it edits shots | new individuals with `parent_ids`, no model call and no measurement | deterministic given its inputs and seed |
+| `controller` | the round's envelope and the optimizer's own state | stop or continue, and which of the manifest's other `pipelines:` entries runs at the round boundary | the bench walks `default` alone; the entries a controller picks are the optimizer's, and a manifest without one runs `default` every round |
+
+An `llm` node's role is its position: before the measurement it PROPOSES, after the selector it
+ADAPTS (potter's critique). The round's phases follow the walk — PROPOSE, MEASURE, SELECT, ADAPT.
+
+**Three rules reject a manifest at parse** — in `parse_pipeline_response`, the same parser a
+backend's file goes through, so a special case cannot reach one side only:
+
+- **A manifest declaring any `sampler`, `eliminator`, `selector`, `algorithm` or `controller`
+  node must name exactly one `measurement` node in its `default` pipeline.** With none the round
+  has no rows; with two it has two sets and nothing says which one a selector reads.
+- **An `eliminator` needs a `sampler` before it in the same pipeline.** A cut decides between
+  blocks, and only a sampler cuts the panel into blocks.
+- **`default` names at most one `controller`.** A round has one boundary decision.
+
+All three are structural — the parser asks what the file declares, never how it was loaded — so a
+backend pipeline, which declares none of the five types, passes them untouched.
+
 ## How the prediction is read
 
-The per-sample `predicted` value is the **head of the terminal ranker's output** — not a fixed key. `terminal_ranking(result, schema)` (`promptpotter/application/optimization/pobb/classification.py`) walks the schema **in reverse** for the last node with `node_role ∈ {ranker, candidate_source}` that wrote its `pipeline_key`, and `sample_measurement.py` takes the head of that list (shape-agnostic via `extract_item_label`). So:
+The per-sample `predicted` value is the **head of the terminal ranker's output** — not a fixed key. `terminal_ranking(result, schema)` (`promptpotter/application/scoring/classification.py`) walks the schema **in reverse** for the last node with `node_role ∈ {ranker, candidate_source}` that wrote its `pipeline_key`, and `sample_measurement.py` takes the head of that list (shape-agnostic via `extract_item_label`). So:
 
 - a pipeline ending at `token_matching` (a `candidate_source`) yields its `candidate_ranking`;
 - a pipeline ending at `llm_ranking` / `llm_only` (a `ranker`) yields its `final_ranking`.
@@ -141,7 +182,7 @@ The per-sample `predicted` value is the **head of the terminal ranker's output**
 `parse_pipeline_response()` in `promptpotter/domain/pipeline_parsing.py` is the single ingress for every `pipeline.yaml`. **Two non-negotiables:**
 
 1. **No silent-default forgiveness.** Either a field is required and the connector supplies it, or it is optional and PromptPotter ignores it absent. The "TermNorm doesn't supply X so PromptPotter assumes Y" pattern is what makes a second connector painful.
-2. **Same parser, same shape, every time.** A backend's `pipeline.yaml` and PromptPotter's own `promptpotter/assets/optimizer/pipeline.yaml` MUST round-trip through `parse_pipeline_response()` identically. The parity test pins this — add a special-case field to one and the test fails until both agree.
+2. **Same parser, same shape, every time.** A backend's `pipeline.yaml` and every optimizer manifest under `promptpotter/assets/optimizers/` MUST round-trip through `parse_pipeline_response()` identically. No test pins this; the shared parser does — add a special-case field to one and it is rejected at load (§ Optimizer-manifest parity).
 
 ## Worked examples
 
@@ -151,9 +192,7 @@ the full multi-node shape.
 
 ## Optimizer-manifest parity
 
-PromptPotter's own optimizer prompt pipeline uses the **same shape** as a backend's: the same `nodes` dict keyed by node name, the same `config` + `optimizer` per-node sub-objects, the same `pipelines` dict over those names, and the same `resolved_prompts` + `resolved_schemas` registries, carried inline where a backend serves them via `GET /pipeline`. It publishes escalation sequences beside `default`, which no backend needs; the shape is identical either way.
-
-It once declared a `view` block beside those two — a second node roster, hand-kept in sync with the one the engine runs. The graph is derived from `nodes` + `pipelines` now (§ The shape), so the parity is whole rather than one key short of it.
+PromptPotter's own optimizer prompt pipeline uses the **same shape** as a backend's: the same `nodes` dict keyed by node name, the same `config` + `optimizer` per-node sub-objects, the same `pipelines` dict over those names, and the same `resolved_prompts` + `resolved_schemas` registries — prompts inline, schemas from the generated `resolved_schemas.json` merged at load — where a backend serves them via `GET /pipeline`. It publishes its controller's alternative sequences beside `default`, which no backend needs; the shape is identical either way.
 
 So the same parser, scoring gateway, projection, tracing and observability pathway PromptPotter applies to a target pipeline applies to the optimizer itself — that is the foundation the PromptPotter-as-backend connector and the L4 self-optimization closure are built on ([`../specs/roadmap.md`](../specs/roadmap.md)).
 

@@ -14,7 +14,7 @@ from the dataset NAME by `_load_justlogic` / `justlogic_depths`
 
 **Each cut is a separate dataset name, never a re-cut of another** — owned by
 [`../CLAUDE.md`](../CLAUDE.md) § Re-cutting a dataset needs a NEW name; here that means a
-cross-cut comparison reads the keying difference, not the capability.
+cross-cut comparison reads a difference of δ scales, not of capability.
 
 Two things no other file carries:
 
@@ -31,8 +31,7 @@ the pin rationale in
 `provider` is operator-locked engine-wide (a cost lever, never any dataset's to open). `model`
 COULD be an axis now — the engine searches it wherever a node lists it — and this dataset
 deliberately does not: its menu is one model under two ROUTES (`:nitro` and plain), so opening it
-would let L1 flip the host while reporting a prompt. `reasoning_effort` is pinned by
-`param_allowed_values` rather than by exclusion.
+would let L1 flip the host while reporting a prompt.
 
 **The `:nitro` suffix is a deliberate speed trade.** Nitro routes each call to the fastest upstream,
 so a `seed` buys nothing across stacks and is not set — inner-run noise is drawn fresh per arm

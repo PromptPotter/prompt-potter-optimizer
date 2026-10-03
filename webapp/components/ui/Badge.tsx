@@ -4,8 +4,7 @@ import s from "./Badge.module.css";
 
 export type BadgeTone = "default" | "accent" | "success" | "danger";
 
-// Small pill label. `tone` maps to a scoped modifier; `default` is the neutral
-// pill. Presentational — pair a tone with text that carries the meaning.
+// Pair a tone with text that carries the meaning — never colour alone.
 export function Badge({
   tone = "default",
   title,
@@ -14,8 +13,6 @@ export function Badge({
 }: {
   tone?: BadgeTone;
   title?: string;
-  // A host's own geometry for this one badge. Unlayered, so it beats the primitive's
-  // defaults whatever order the chunks load in (`webapp/CLAUDE.md` § Stylesheet organization).
   className?: string;
   children: ReactNode;
 }) {

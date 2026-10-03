@@ -1,13 +1,7 @@
-// Round-axis types. The round number is the spine that ties Lineage,
-// Fitness, Samples, and Inspector together; this file freezes the
-// shapes that travel along it.
+// The shapes that travel the round axis.
 
 import type { ElectedRow } from "./candidate";
 
-// The round document and its rows are GENERATED from the Pydantic models
-// (`RoundResult.model_dump()` IS `rounds/round_NNNN.json`). They were hand-mirrored
-// here three times over, and one copy spelled `composite_fitness` as `composite` — a
-// field the server has never sent.
 export type {
   RoundResult,
   RoundSummary,
@@ -16,9 +10,7 @@ export type {
   ScoredCandidate,
 } from "@/lib/api/types";
 
-// `round_NNNN.json::results[]` entry. The pre-bucketing per-sample
-// row consumed by FreqChart (in the round-mode path) and the
-// historical samples view.
+// `round_NNNN.json::results[]` entry.
 export interface RawResultRow {
   sample_id?: number;
   error?: unknown;
@@ -28,10 +20,8 @@ export interface RawResultRow {
   fitness?: number;
 }
 
-// The AUDIT TWIN of a round — `.runtime/cache/rounds/round_NNNN.json`, written by
-// `AuditTrailProjection`. Same basename as the round document, different tree, different
-// shape: this one carries the per-node LLM I/O, which the round document does NOT.
-// Not generated — the audit trail is written as a plain dict, with no Pydantic model.
+// `.runtime/cache/rounds/round_NNNN.json`: the only home of per-node LLM I/O. Hand-written because
+// `AuditTrailProjection` writes a plain dict with no Pydantic model.
 export interface RoundAuditDoc {
   round?: number;
   nodes?: Record<string, NodeBlock>;
@@ -39,33 +29,22 @@ export interface RoundAuditDoc {
   interrupted?: boolean;
 }
 
-// `dashboard.json::current_round.nodes[id]` / the audit twin's `nodes[id]`.
-// Both surfaces share this shape — written by AuditTrailProjection
-// (`promptpotter/infrastructure/projections/audit_trail.py`).
-// `input`/`output` are loose dicts whose contents vary by node.
-// `output.reasoning` (when present) is the model's own thinking channel — prose for a
-// human, rendered in its own pane by `OptimizerNodeDetail`. It is ANALYTICAL ONLY:
-// never derive, score, sort or gate on it (see Python `LLMResponse.reasoning`).
+// `output.reasoning` is the model's thinking channel, ANALYTICAL ONLY: never derive, score, sort
+// or gate on it (`LLMResponse.reasoning`).
 export interface NodeBlock {
   input?: Record<string, unknown>;
   output?: Record<string, unknown>;
-  // The node's resolved call config — what was ASKED FOR, and the only place a routing suffix
-  // survives (`:nitro` picks which provider serves the call, at that provider's own price).
+  // What was ASKED FOR: the only place a routing suffix (`:nitro`) survives.
   config?: Record<string, unknown>;
-  // The provider's ECHO of the model it served, which OpenRouter returns without the suffix.
+  // The provider's echo, which OpenRouter returns without the suffix.
   model?: string;
   duration_s?: number;
   timestamp?: string;
   round?: number;
-  // Our own reuse cache answered and no provider was reached — so `usage` below is the BANKED
-  // call's, re-served. Present only when true (`dispatch/llm_call/call.py` omits it otherwise).
+  // Our own reuse cache answered, so `usage` is the BANKED call's. Absent means false.
   cached?: boolean;
-  // Straight off `LLMResponse.usage` as the ledger payload carries it — one `TokenAccount`
-  // (`domain/spend.py`), the same vocabulary a row's `step_tokens` entry uses, so the browser
-  // reads one shape wherever tokens come from. `cache_read` is the PROVIDER's prefix-cache
-  // discount and a SUBSET of `input` — not the sibling `cached` flag above, which is the
-  // opposite fact and excludes this one; `null` there means no breakdown was reported at all.
-  // There is no total: it is `input + output`, and storing it let one producer omit it.
+  // A `TokenAccount`. `cache_read` is the PROVIDER's prefix-cache discount, a SUBSET of `input`
+  // (unrelated to `cached`); `null` = no breakdown reported.
   usage?: {
     input?: number;
     output?: number;
@@ -75,19 +54,10 @@ export interface NodeBlock {
   };
 }
 
-// Map keyed by round number → that round's candidate rows in display
-// order. Round 0 holds the single origin row. The dashboard's current
-// round may carry in-flight candidates that haven't closed into
-// `dash.rounds[]` yet; the derivation merges them in once, here.
 export type RoundCandidates = Map<number, ElectedRow[]>;
 
-// What a round-picker surface needs to render its axis.
 export interface RoundAxis {
-  // Round numbers with a closed summary on `dash.rounds[]`, ascending.
   completed: number[];
-  // The in-flight round to advertise as live — set only when the optimizer
-  // is running (`isLive`) AND `dash.current_round` carries a round not yet
-  // in `completed`. null = no live round to show (never started, already
-  // closed, or the run stopped).
+  // Set only while the optimizer runs AND `current_round` is not yet in `completed`.
   live: number | null;
 }

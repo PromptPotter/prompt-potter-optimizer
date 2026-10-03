@@ -3,35 +3,44 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.initialization.session import Session, open_cycle_ledger
-from promptpotter.application.intelligence.indexes.axis import AxisIndex
-from promptpotter.application.optimization.cycle import Cycle
-from promptpotter.application.optimization.dispatch.llm_call.prompts import get_optimizer_schema
-from promptpotter.application.optimization.escalation.state import EscalationFSM
-from promptpotter.application.optimization.pobb.checks import build_degradation_checks
-from promptpotter.application.optimization.resume_and_fork.resume import (
+from promptpotter.application.bench.cycle import Cycle
+from promptpotter.application.bench.resume_and_fork.resume import (
     resume_with_divergence_check,
 )
+from promptpotter.application.initialization.session import Session, open_cycle_ledger
+from promptpotter.application.intelligence.indexes.sample import SampleIndex
+from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.preflight import check_model_reasoning_floors, run_preflight_checks
 from promptpotter.application.runner.campaign_ids import cycle_config_identity
 from promptpotter.application.runner.inner.spawn_context import retarget_inner_spawn
+from promptpotter.application.scoring.classification import build_degradation_checks
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.scoring.formula import compile_scorer, split_scoring_block
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.bench import partition_bank
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopLoop, emit_phase
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.scoring import all_verifier_graded
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import (
     bind_spend_book,
     bound_spend_book,
     unbounded_spend_book,
 )
+from promptpotter.infrastructure.llm.telemetry import (
+    active_cycle_ledger,
+    filed_as,
+    reset_cycle_ledger,
+    set_cycle_ledger,
+)
 from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
-from promptpotter.judges import build_evaluators
+from promptpotter.judges import build_evaluators, judge_instrument
 from promptpotter.shared.errors import graceful
 from promptpotter.shared.statistics import warm_stats_backend
 
@@ -39,13 +48,13 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from promptpotter.application.campaign_config import CampaignConfig
-    from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.origin import CampaignOrigin
     from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.application.scoring.search_point_scorer import ScoredWalk
-    from promptpotter.domain.results import HeadlineMetric
+    from promptpotter.domain.results import DisplayMetric
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
+    from promptpotter.infrastructure.store.stores import Stores
     from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
     from promptpotter.judges.protocol import JudgeSpec
 
@@ -84,6 +93,7 @@ def init_cycle(
     # connector only NAMES (a Harbor dataset version) can move under its name, and every read of
     # this campaign after today must see what it measured rather than what the registry now says.
     store.write_resolved_experiment(hop, session.backend_client.workload.experiment)
+    store.write_bank_partition(hop, session.scoring.require_partition())
     # Beside the declaration and on the same cadence: the declaration says which keys exist, this
     # says which the optimizer MOVES and whether the model can even see them. The connector owns
     # the channel, so it is read off the client rather than assumed.
@@ -126,9 +136,9 @@ def populate_session_scoring(
     scoring_formula: str | None,
     scoring_cell_formula: str | None = None,
     scorer_id: str,
-    headline_metric: HeadlineMetric = "accuracy",
+    display_metric: DisplayMetric = "accuracy",
     judge_specs: Mapping[str, JudgeSpec],
-    source: str = "optimization_loop",
+    source: RunSource,
 ) -> None:
     """Attach scoring + obs to *session* in place (step 2 of run init).
     Requires ``init_services`` already ran; ``scoring_formula`` and ``scorer_id`` both resolved from
@@ -147,7 +157,7 @@ def populate_session_scoring(
     )
     session.scoring.scorer_id = scorer_id
     session.scoring.scorer_cell_formula = scoring_cell_formula
-    session.scoring.headline_metric = headline_metric
+    session.scoring.display_metric = display_metric
     # The sole judge builder, serving the runner and the four verbs that score outside it
     # (`arm_diagnostic_scoring`) — so one line arms grading reuse on every entry point, and a
     # bad spec fails here rather than on the first cell. Required and assigned unconditionally:
@@ -160,7 +170,7 @@ def arm_diagnostic_scoring(
     session: Session,
     campaign_config: CampaignConfig,
     *,
-    source: str,
+    source: RunSource,
     log: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Resolve the pipeline and arm the scorer for a verb that scores OUTSIDE the runner —
@@ -168,10 +178,6 @@ def arm_diagnostic_scoring(
 
     ``obs=None`` is what makes these one thing rather than four copies of three calls: the runner
     arms its own scoring with a live ``ObservabilityBridge``, and a diagnostic has none to give.
-
-    ``source`` is required here though :func:`populate_session_scoring` defaults it. ``ab`` was the
-    one caller that omitted it, so its replays stamped the session ``optimization_loop`` — the
-    provenance of the run being replayed rather than of the replay.
 
     A verb run inside a campaign — the saturation ``verify`` — spends under that run's book; one
     run on its own gets a book for its task, which no ceiling binds yet."""
@@ -181,17 +187,20 @@ def arm_diagnostic_scoring(
     pipeline_params = configure_and_apply_pipeline(
         session, campaign_config, log=log or (lambda *_a, **_k: None)
     )
-    spec = split_scoring_block(campaign_config.scoring)
+    spec = split_scoring_block(
+        campaign_config.scoring, judge_instrument=judge_instrument(campaign_config.judges)
+    )
     populate_session_scoring(
         session,
         obs=None,
         scoring_formula=spec.per_sample,
         scoring_cell_formula=spec.per_cell,
         scorer_id=spec.scorer_id,
-        headline_metric=campaign_config.headline_metric,
+        display_metric=campaign_config.display_metric,
         judge_specs=campaign_config.judges,
         source=source,
     )
+    session.scoring.partition = partition_bank(session.samples, campaign_config.dataset_split)
     return pipeline_params
 
 
@@ -216,6 +225,40 @@ async def diagnostic_pass(
     return scored
 
 
+@contextmanager
+def diagnostic_trace(stores: Stores, hop: CycleHop | None) -> Iterator[None]:
+    """A diagnostic verb's bills join a ledger, in the ``diagnostic`` bucket: the campaign's own
+    where the verb re-scores one, the workspace's where it answers for none (``seed-screen``). A
+    bill that reaches no ledger is money no account, campaign or ceiling ever sees.
+
+    Inside every ceiling, always: the bucket is folded into ``SpendRollup``'s totals like any other
+    (``TOKEN_KIND_BUCKET``), so the budget gate sees this money. It is banked APART because it
+    answers a question about the search rather than advancing it — folded into ``backend``, an
+    operator reads re-measuring a candidate as the cost of finding one.
+
+    The ledger is opened only when none is bound. In the loop and behind the API one already is
+    (the round's, and the dispatcher's), and a second handle on one file is a second appender."""
+    if active_cycle_ledger() is not None:
+        with filed_as("diagnostic"):
+            yield
+        return
+    ledger = (
+        CycleEventLog.open_workspace(stores.campaigns.workspace)
+        if hop is None
+        else CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
+    )
+    # The verb's own book files here too, so what an L4 cell spends beneath it lands on this
+    # ledger rather than only on the sandbox's.
+    if (book := bound_spend_book()) is not None and book.ledger is None:
+        book.ledger = ledger
+    token = set_cycle_ledger(ledger)
+    try:
+        with filed_as("diagnostic"):
+            yield
+    finally:
+        reset_cycle_ledger(token)
+
+
 async def _emit_preflight_and_init_session(
     config: CampaignConfig,
     dataset: list[Sample],
@@ -229,12 +272,13 @@ async def _emit_preflight_and_init_session(
 
     # HARD block before any spend: a reasoning model pinned below its token floor (e.g. the
     # inner optimizer's l1_critique) burns its whole budget reasoning and emits zero content,
-    # stalling the loop silently. Both surfaces carry model+max_tokens: the dataset/target
-    # nodes (session.pipeline_params) and the optimizer nodes (promptpotter/assets/optimizer/pipeline.yaml).
-    # `config_nodes`, never `nodes`: l2_context, l3_plan and checkin sit off the default chain,
-    # and a floor check that walked the chain would stop covering them without an error.
+    # stalling the loop silently. Three surfaces carry model+max_tokens: the dataset/target nodes,
+    # every llm node the selected optimizer DECLARES (off its `default` chain too, or an escalation
+    # node escapes the check) and the bench's check-in node.
+    selected = select_optimizer(config.optimization)
     optimizer_node_configs = [
-        (n.name, n.current_config) for n in get_optimizer_schema().config_nodes
+        *((n, selected.node_config(n)) for n in selected.llm_nodes),
+        *((n.name, n.current_config) for n in checkin_manifest().schema.config_nodes),
     ]
     if floor_violations := check_model_reasoning_floors(
         target_node_configs + optimizer_node_configs
@@ -244,12 +288,11 @@ async def _emit_preflight_and_init_session(
             "floor and would emit zero content:\n  - " + "\n  - ".join(floor_violations)
         )
 
-    resolved = origin.resolved_origin
     preflight_warnings = run_preflight_checks(
         config,
         dataset,
         target_models,
-        task_context=resolved.memory.task_context.to_dict() if resolved else None,
+        task_context=origin.framing.to_dict(),
     )
     for w in preflight_warnings:
         logger.warning("preflight[%s]: %s — %s", w.code, w.title, w.detail)
@@ -279,13 +322,14 @@ def _build_and_start_cycle(
 
     if origin.resolved_origin is None:
         raise ValueError("origin.resolved_origin is required; run origin scoring first.")
-    # resolved_origin is the resolved origin OptSearchPoint (lineage + memory intact) — use it
-    # directly; no re-roundtrip through from_prompt_fields, which would drop the lineage.
+    # resolved_origin is the resolved origin OptSearchPoint (lineage intact) — use it directly; no
+    # re-roundtrip through from_prompt_fields, which would drop the lineage.
     resolved_origin = origin.resolved_origin
     cycle = Cycle.start(
         resolved_origin,
         origin.report,
         schema=session.pipeline_schema,
+        framing=origin.framing,
         origin_results=origin.origin_results,
         session=session,
         config=config,
@@ -294,7 +338,10 @@ def _build_and_start_cycle(
     # session.pipeline_params (overlay-merged) makes origin JSP + cycle-id sensitive to overlay edits.
     base_pp = session.pipeline_params or session.pipeline_schema.to_pipeline_params()
     origin_jsp = resolved_origin.to_job_search_point(
-        base_pipeline_params=base_pp, schema=session.pipeline_schema
+        base_pipeline_params=base_pp,
+        schema=session.pipeline_schema,
+        framing=origin.framing,
+        demo=session.scoring.require_partition().demo,
     )
     resolved_cycle_id, resumed_from_round = init_cycle(
         session,
@@ -338,8 +385,9 @@ def _start_observability_and_scoring(
         scoring_formula=scoring_formula,
         scoring_cell_formula=scoring_cell_formula,
         scorer_id=scorer_id,
-        headline_metric=config.headline_metric,
+        display_metric=config.display_metric,
         judge_specs=config.judges,
+        source=RunSource.OPTIMIZATION_LOOP,
     )
     return tracing_campaign_id, obs
 
@@ -370,13 +418,10 @@ async def _apply_resume_fork(
         if fork_result is not None:
             resolved_cycle_id = fork_result.new_cycle_id
             resumed_from_round = fork_result.new_resumed_from_round
-        # The FSM is rebuilt from the ledger whichever way that went — halt, fork, or carry
-        # on — because every one of them replays priors and `replay_priors` deliberately does
-        # not touch escalation. It was written at each of the four exits inside; a
-        # postcondition of the call belongs at the call.
-        cycle.escalation = EscalationFSM.from_ledger(
-            session.state.ledger, lives=cycle.config.optimization.lives
-        )
+        # Rebuilt from the ledger whichever way that went — halt, fork, or carry on — because
+        # every one of them replays priors, and what the round documents do not bank is the
+        # ledger's to answer. A postcondition of the call belongs at the call.
+        cycle.working_state.resume(session.state.ledger, cycle.optimizer)
     return resolved_cycle_id, resumed_from_round
 
 
@@ -392,11 +437,12 @@ def _finalize_loop_state(
     resumed_from_round: int,
 ) -> None:
 
-    cycle.axes = AxisIndex.ensure_for(
+    cycle.sample_index = SampleIndex.ensure_for(
         session.store,
-        scorer=session.scoring.scorer,
+        scorer=session.scoring.require_scorer(),
         scorer_id=session.scoring.scorer_id,
         dataset_name=session.dataset_name,
+        sample_ids=session.scoring.require_partition().admitted_ids,
     )
 
     if resolved_cycle_id:
@@ -406,10 +452,8 @@ def _finalize_loop_state(
             session.state.ledger = open_cycle_ledger(session, resolved_cycle_id)
         # First moment the lock from `Cycle.start` has an id to be written under, and round 0 is
         # already stamped with it.
-        cycle.persist_ruler()
+        cycle.difficulty.persist(round_num=len(cycle.rounds) - 1)
     session.state.tracing_campaign_id = tracing_campaign_id
-    # Full train split = bank; per-round adaptive queue mechanism narrows to ``sp_budget_round``.
-    session.scoring.scoring_set = list(dataset)
     session.scoring.degradation_checks = build_degradation_checks(config)
     session.state.resumed_from_round = resumed_from_round
 
@@ -492,9 +536,7 @@ async def init_optimization_loop(
         fork_on_divergence=fork_on_divergence,
     )
     # The cycle id is FINAL here — a resume fork retargets it above, and the spawn context was
-    # published before any of that resolved (a child may recurse before this point). Local
-    # import: `runner.inner.spawn` reaches back into this package for `Session`.
-
+    # published before any of that resolved (a child may recurse before this point).
     retarget_inner_spawn(session)
 
     _finalize_loop_state(

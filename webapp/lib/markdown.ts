@@ -8,26 +8,8 @@ function escapeHtml(raw: string): string {
     .replace(/"/g, "&quot;");
 }
 
-/**
- * Markdown → HTML for artifacts we did not write.
- *
- * The viewer renders campaign artifacts — `log.md`, `review.md` — and those quote LLM output,
- * which in turn quotes sample transcripts, i.e. rows from a dataset any signed-up tenant can
- * upload. Markdown passes raw HTML through by default and `marked` has had no sanitize option
- * since v5, so `marked.parse` + `dangerouslySetInnerHTML` executed whatever a row contained, in
- * the session of whoever opened the file. That reader is usually the host admin.
- *
- * Raw HTML is neutralised by rendering it as the literal text it is in the file. Both HTML token
- * kinds route through `renderer.html` — `Tokens.HTML` is the block form (`<div>…`) and
- * `Tokens.Tag` the inline one (`a <b> word`) — so one override covers both; overriding only the
- * block half leaves every inline `<img onerror>` live.
- *
- * A private `Marked` instance, not `marked.use(...)`: the latter mutates the module-global
- * singleton, so any other caller in this app would silently inherit the escaping (or, worse,
- * lose it if load order changed). Escaping is done at the RENDERER rather than by pre-escaping
- * the source, because pre-escaping reaches inside fenced code blocks — which marked already
- * escapes — and surfaces `&amp;lt;` where the file plainly says `<`.
- */
+// Artifacts quote tenant-uploaded rows, so raw HTML (block and inline) renders as literal text.
+// A private `Marked` — `marked.use` mutates the global; escape at the renderer, never the source.
 const safeMarked = new Marked({
   renderer: {
     html(token) {

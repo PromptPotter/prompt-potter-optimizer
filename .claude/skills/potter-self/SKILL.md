@@ -1,6 +1,6 @@
 ---
 name: potter-self
-description: PromptPotter L4 self-optimization — Claude + operator reading a round's artifacts, diagnosing why candidates underperformed, and deciding what evidence to buy next before spending another round. Use whenever the operator pauses at the round-1 gate, halts the loop to review, mentions L4, `promptpotter-self`, L1 stall, mode collapse, weak candidate stratification, identical / near-duplicate candidates, candidates ignoring the critique or task_context, parse failures on the l1_generate JSON, or wants to tune `l1_generate/1` in `promptpotter/assets/optimizer/pipeline.yaml`. Also use when the operator opens a `round_NNNN.json`, asks "why did L1 do that?", says "let's improve the optimizer prompt", or is weighing what experiment to run next — panel width, seed count, how many cells, whether a result is real, or why past runs never accumulated — even if "L4" is not named explicitly. Each searchpoint costs real LLM spend, so this collaborative review is the substitute for an L4 LLM-driven layer; do not skip it just because the operator did not utter the letter L4.
+description: PromptPotter L4 self-optimization — Claude + operator reading a round's artifacts, diagnosing why candidates underperformed, and deciding what evidence to buy next before spending another round. Use whenever the operator pauses at the round-1 gate, halts the loop to review, mentions L4, `promptpotter-self`, L1 stall, mode collapse, weak candidate stratification, identical / near-duplicate candidates, candidates ignoring the critique or task_context, parse failures on the l1_generate JSON, or wants to tune `l1_generate/1` in `promptpotter/assets/optimizers/potter/pipeline.yaml`. Also use when the operator opens a `round_NNNN.json`, asks "why did L1 do that?", says "let's improve the optimizer prompt", or is weighing what experiment to run next — panel width, seed count, how many cells, whether a result is real, or why past runs never accumulated — even if "L4" is not named explicitly. Each searchpoint costs real LLM spend, so this collaborative review is the substitute for an L4 LLM-driven layer; do not skip it just because the operator did not utter the letter L4.
 ---
 
 # L4: collaborative review of L1-generate
@@ -21,15 +21,15 @@ Every figure below carries its corpus size and date. **Recompute before citing**
 
 ## Mental model
 
-The optimizer is three nested generation loops (`promptpotter/CLAUDE.md`):
+The optimizer is three nested generation loops (`promptpotter/application/optimizers/potter/CLAUDE.md`):
 
-- **L1** (`l1_generate`) generates candidate prompts with cause from its evidence surface — the panels its live layout renders (`NODE_LAYOUTS["l1_generate"].floor`, `domain/l1_layout.py` — read the membership there) — under `plan` from L3 and the operator's frozen `task_context`.
-- **L2** (`l2_context`) fires on L1 stall and moves L1's surface — `l1_layout` (which panels L1 sees) and `l1_overrides` (how hard it explores). **It cannot write `task_context`**: `L2ContextOutput` has no such field and `TaskDecomposition.merge` raises on it, so a fire that changed neither lever bought nothing.
-- **L3** (`l3_plan`) replans on L2 stall, writing `OptSearchPoint.plan`.
+- **L1** (`l1_generate`) generates candidate prompts with cause from its evidence surface — the panels its live layout renders (`NODE_LAYOUTS["l1_generate"].floor`, `optimizers/potter/dispatch/layout.py` — read the membership there) — under `plan` from L3 and the operator's frozen `task_context`.
+- **L2** (`l2_context`) fires on L1 stall and moves L1's surface — `l1_layout` (which panels L1 sees) and `l1_overrides` (how hard it explores). **It cannot write `task_context`**: `L2ContextOutput` has no such field, so a fire that changed neither lever bought nothing.
+- **L3** (`l3_plan`) replans on L2 stall, writing `PotterState.memory.plan`.
 
 **Never name a panel from memory.** The citable set is *derived* — `@signal(..., citable=True)` intersected with the node's live layout by `citable_fields` (`dispatch/injections/registry.py`). A panel that does not render invites a fabricated citation, which is exactly how `sibling_yield` — a name this skill carried for weeks — went on being cited after it was deleted from the code.
 
-L4 is the human-in-the-loop review that happens **between rounds**, especially at the round-1 gate. The L1 optimizer prompt template at `promptpotter/assets/optimizer/pipeline.yaml → resolved_prompts["l1_generate/1"]` is what L4 edits — *not* L2's or L3's surfaces, *not* `pipeline_params`, *not* the `task_description.md`.
+L4 is the human-in-the-loop review that happens **between rounds**, especially at the round-1 gate. The L1 optimizer prompt template at `promptpotter/assets/optimizers/potter/pipeline.yaml → resolved_prompts["l1_generate/1"]` is what L4 edits — *not* L2's or L3's surfaces, *not* `pipeline_params`, *not* the `task_description.md`.
 
 ## Artifact map (what to read, in order)
 
@@ -37,9 +37,9 @@ Cycle root: `.promptpotter/projects/{tenant}/campaigns/{campaign_id}/cycles/{cyc
 
 | Step | File | What you extract |
 |---|---|---|
-| 1 | `promptpotter/assets/optimizer/pipeline.yaml` → `resolved_prompts["l1_generate/1"]` (outer set: `assets/optimizer/sets/self_optimizing.yaml`) | The current L1 optimizer prompt template — the thing you will edit |
+| 1 | `promptpotter/assets/optimizers/potter/pipeline.yaml` → `resolved_prompts["l1_generate/1"]` (outer: the `*_self_optimizing/1` families beside it, picked by `promptpotter-self`'s `optimization.nodes`) | The current L1 optimizer prompt template — the thing you will edit |
 | 2 | `{cycle_dir}/rounds/round_NNNN.json` | Per-round audit: parsed candidates, per-candidate scores, `overlap`, `separable`, critique text. **No rendered prompt** — see row 4 |
-| 3 | `{cycle_dir}/.runtime/streams/round_NNNN_p_best.jsonl` | PoBB elimination stream — did variants stratify or collapse? Which got eliminated first? |
+| 3 | `{cycle_dir}/.runtime/streams/round_NNNN_pobb.jsonl` | PoBB elimination stream — did variants stratify or collapse? Which got eliminated first? |
 | 4 | `{cycle_dir}/.runtime/ledger.jsonl` | The cycle event log — escalation firings, decisions, spend. There is no `signals.jsonl`. **The ONLY place the rendered optimizer prompt survives**: each `payload_kind: "llm_call"` record carries `template_fields` + `variables` (render one against the other), and the `llm_call_start` beside it carries `prompt_chars`, `injection_chars`, `injection_dropped` and `injection_silent` — the panel-by-panel breakdown of what the node was actually handed. |
 | 5 | `{cycle_dir}/dashboard.json` | Round-by-round composite trajectory + recent rules |
 | 6 | `{cycle_dir}/prompts/{node}.yaml` | Current `PromptTemplate` for each pipeline node — the *target* of L1's mutations (read-only here) |
@@ -54,7 +54,7 @@ Reads happen by opening files; `evidence` is the one read VERB, because a compar
 
 **The cadence is SELF-FIRING, and the interval is WORK rather than a wait.** Schedule your own wake-ups the moment a run starts, and each wake IS a full pass over the reading list below. Between ticks keep investigating — fan out over the fresh dashboards and measurement files, chase the newest anomaly. An idle wait is the wasted-run failure mode this guards against: the bugs show themselves *while it runs*, and catching one early buys a kill-fix-restart before the whole spend drains. **A passive log Monitor does NOT count as supervision** — it fires only on patterns you predicted, and every real bug so far (estimator inconsistency, evidence starvation, proxy annihilation) came from reading the run's own measurement files, not from a grep hit. Role split: the operator is the developer/user; you own everything else.
 
-**Default the fix to the prompts** (`promptpotter/assets/optimizer/` — `pipeline.yaml::resolved_prompts` for the inner set, `sets/self_optimizing.yaml` for the outer one). Reach past prompts to a code fix ONLY when the data shows a structural cause — broken information flow, a missing analysis, a wiring gap. Name that cause before touching code; do not add infrastructure to paper over a prompt problem.
+**Default the fix to the prompts** (`promptpotter/assets/optimizers/potter/pipeline.yaml::resolved_prompts` — the base families for the inner loop, the `*_self_optimizing/1` families for the outer one). Reach past prompts to a code fix ONLY when the data shows a structural cause — broken information flow, a missing analysis, a wiring gap. Name that cause before touching code; do not add infrastructure to paper over a prompt problem.
 
 ### The per-checkup reading list — every tick reads ALL of these, not just the log tail
 
@@ -63,10 +63,10 @@ Reads happen by opening files; `evidence` is the one read VERB, because a compar
 1. **`l1_generate`** — rendered input: are the panels populated or empty? `injection_dropped` on the `llm_call_start` record answers that directly, and **a name in it that is also `L1_MANDATORY` is a stop-and-diagnose** — `rendered_prompt` refused whole is how the generator ends up rewriting prompts it was never shown. For the OUTER generator, is `inner_narratives` present with a story per seed rather than bare stat lines — the primary evidence an optimizer-prompt edit must ground on, not the scalar per-seed delta? Then raw output, parsed variants: `evidence_grounding.field` in the real enum? citations quoting text that EXISTS in the rendered input — and quoting the panel they NAME, not another one? hypotheses distinct, not one idea relocated? `changes_description` actually REPORTING the override emitted beside it? any hallucinated node/param?
 2. **`l1_critique`** — the input carries the evidence, and WHICH panel is the evidence depends on the level: inner reads SAMPLE TRANSCRIPTS + MODEL REASONING, outer reads INNER RUN NARRATIVES. The two are a matched pair, each silent where the other fires (`panels.py::_inner_narrated`), because transcripts are selected by a MISS and one level up a miss is a placeholder artifact. Output `priority_fix` / `failure_highlights` must quote CONCRETE evidence — a reasoning step, a premise — not recycled labels, and `priority_fix` must name a steer the generator is ALLOWED to make: an edit to the inner optimizer's own job, never one naming the benchmark's vocabulary or answer labels.
 3. **Scoring** — per-candidate `candidate_scores` (accuracy, θ, θ_se, `mean_fitness_ci_lo`), the **matched-parent** comparison (never the cross-subset round-0 origin — subset drift reads as lift), the PoBB stream (`p_best` moving off 0.5?), `decisions` (cuts firing, on the right arm?).
-4. **`l2_context` / `l3_plan` when fired** — validator failures (`paraphrase_repeat`, `dangling_trigger`), whether the `task_context` delta is evidence-anchored, plan text sane and within its render cap.
+4. **`l2_context` / `l3_plan` when fired** — their behaviour checks (`validators/l2_behavior.py`, `l3_output.py` — read the registry there), whether the `l1_layout` / `l1_overrides` move is evidence-anchored, plan text sane and within its render cap.
 5. **Spot-check ≥1 inner campaign per outer sample batch** — the same four reads one level down, under `.inner/<key>/…/campaigns/`.
 
-**STOP-AND-DIAGNOSE, not keep-watching:** `raw_chars: 0` / an empty candidate list · an outer sample returning in ~0.0s (stale-cache reuse) · off-enum grounding fields · any optimizer call > 2 min · a headline Δ that disagrees with `matched_parent_*` / `improved`.
+**STOP-AND-DIAGNOSE, not keep-watching:** `raw_chars: 0` / an empty candidate list · an outer sample returning in ~0.0s (stale-cache reuse) · off-enum grounding fields · any optimizer call > 2 min · a headline Δ that disagrees with `reference_*` / `improved`.
 
 A quiet outer round is normal — it is awaiting a multi-minute inner campaign, and the cycle heartbeats its own ledger ("inner rX/Y · best Z%") while it waits. General hang triage: [`docs/operations/persistence-and-state.md`](../../../docs/operations/persistence-and-state.md) § Diagnosing a live or stuck run.
 
@@ -76,14 +76,14 @@ Read this before proposing any new run. It is the reason a year of panels produc
 
 - **The baseline moved with the treatment.** `_identity_config` hashed the whole optimizer manifest, so the optimizer prompt — the thing under study — sat inside the *origin* fingerprint. Editing it voided every banked outer cell. Each run therefore started from zero **by construction**, and no amount of care in running them could have changed that.
 - **The panel could not measure its own precision.** On 73 cells (2026-08-15), split-half reliability of the arm-level mean is ~0.18 over 11 arms while the parametric decomposition implies ~0.7 — at this corpus size neither is resolvable. So the honest statement was never "the panel is bad"; it was "we cannot say how good the panel is", which is worse, because it makes every leader unfalsifiable.
-- **FIXED 2026-08-15 — the fingerprint was narrowed, not removed.** It now reads what the inner optimizer nodes *resolve to* (prompt body, resolved schema, config) plus the estimator's own source, instead of the whole manifest plus `APP_VERSION`. Still voids: an inner node's prompt body or config, `NODE_LAYOUTS`, panel prose, estimator source, `inner_tasks.yaml`, the benchmark's `pipeline.yaml` + `campaign.yaml`. No longer voids: `checkin`, node descriptions, `available_models`, a release. Editing `sets/self_optimizing.yaml` never did.
+- **FIXED 2026-08-15 — the fingerprint was narrowed, not removed.** It now reads what the inner optimizer nodes *resolve to* (prompt body, resolved schema, config) plus the estimator's own source, instead of the whole manifest plus `APP_VERSION`. Still voids: an inner node's prompt body or config, `NODE_LAYOUTS`, panel prose, estimator source, the benchmark's `pipeline.yaml` + `campaign.yaml`. No longer voids: `checkin`, node descriptions, `available_models`, a release, the `inner_tasks.yaml` roster (each seat is its own sample's `source_pin`, so an edited seat voids only itself). Editing potter's `*_self_optimizing` prompt families never did.
 - **Narrowing it was not enough, and the ratchet is what finishes the job.** Count the fingerprints before trusting any cross-campaign number: every `promptpotter-self` campaign on disk carries a *different* `inner_origin`, so not one has ever replayed another's cells. Each re-measured its origin under whatever revision the engine happened to be at, which is also the honest reading of the run-order confound `evidence` reports and of any "replicate" spread — an arm held constant while the instrument moved is not a noise measurement. The MINT now says so before the spend (`jobs/mint.py::_warn_on_novel_instrument`): a novel instrument names how many prior campaigns on the dataset it matches, so "nothing accumulates" arrives as a number you are handed rather than a discovery weeks later. Pinning the fingerprint in a test was tried twice and removed twice — its VALUE moved on a third of all commits, and the roster of hashed modules was a name census that reddened on every rename. The prompt half is WALKED (`registry.py::renderer_modules`, with an orphan check at init), so only the estimator roster (`connectors/promptpotter.py::measurement_modules`) can lose a member quietly, and the mint counts what that costs before the spend.
-- **So the loop is: FREEZE the inside, iterate the outside.** Inside the fingerprint — dispatch and panel prose, `NODE_LAYOUTS`, the estimator source, inner optimizer prompts, `inner_tasks.yaml` (the seed roster included), the inner benchmark's config — is a corpus reset; batch those and re-measure once, deliberately. Outside it, `assets/optimizer/sets/self_optimizing.yaml` is the whole L4 edit surface and costs nothing banked, so refine it as often as you like. It still trips the RESUME divergence gate, which is a different mechanism: an outer-prompt edit costs you the cycle (`new`, never `resume`) and keeps the archive.
+- **So the loop is: FREEZE the inside, iterate the outside.** Inside the fingerprint — dispatch and panel prose, `NODE_LAYOUTS`, the estimator source, inner optimizer prompts, the inner benchmark's config — is a corpus reset; batch those and re-measure once, deliberately. Outside it, the `*_self_optimizing` prompt families in potter's manifest (`promptpotter/assets/optimizers/potter/pipeline.yaml`) are the whole L4 edit surface and costs nothing banked, so refine it as often as you like. It still trips the RESUME divergence gate, which is a different mechanism: an outer-prompt edit costs you the cycle (`new`, never `resume`) and keeps the archive.
 - Found in passing and closed: the inner benchmark's `campaign.yaml` was **completely unhashed**, so editing its `scoring` formula or `pobb_epsilon` would have silently pooled measurements taken under different rules.
 
 ## What the outer panel can and cannot tell you (73 cells / 17 arms / 6 seeds, 2026-08-15)
 
-> **`promptpotter evidence --campaign <id>` answers the variance and power half of this on demand — run it rather than reading a figure here.** The split is `variance.{cell_effect_sd,arm_effect_sd,residual_sd}`, the resolving power `power.{paired_se,min_detectable_effect,cells_for_largest_gap}`, and the replicate and run-order reasoning `replicates` / `order_confound`. What stays below is what the verb does not answer.
+> **`promptpotter evidence --subject campaign:<id>` answers the variance and power half of this on demand — run it rather than reading a figure here.** The split is `variance.{cell_effect_sd,subject_effect_sd,residual_sd}`, the resolving power `power.{paired_se,min_detectable_effect,cells_for_largest_gap}`, and the replicate and run-order reasoning `replicates` / `order_confound`. What stays below is what the verb does not answer.
 
 - **Pairing is what makes the comparison possible at all**, because seed variance runs several times arm variance. On the 2026-08-15 corpus a typical two-arm gap resolved at ~10 paired cells against 22.9 un-paired, and the panel runs 6 — so **6 → 10 cells is the cheapest move on the board**. The arm effect roughly doubled as the corpus grew from 39 to 73 cells, so the panel is closer to working than an older read suggested; re-read it with the verb before quoting either number.
 - **Read the SHAPE as well as the scalar — it is legible at n=6 where the scalar is not.** Every cell records a per-round `improved` verdict, a *within-round* paired comparison against the matched parent on the same samples, so it touches neither the θ anchor nor the re-drawn subset. A 6-cell panel carries ~24 of those against 6 scalars (`application/runner/inner/spawn.py::_lift_shape`).
@@ -135,7 +135,7 @@ Whether to cut the panel from 6 seeds to 1 turns entirely on the **arm×seed int
 
 ### 1. Read the current L1 optimizer prompt
 
-Open `promptpotter/assets/optimizer/pipeline.yaml` and locate the `l1_generate/1` body under `resolved_prompts`. Note which `{{slots}}` it references. Cross-check against `application/optimization/dispatch/injections/registry.py::injection_table` so you can name what data each slot delivers. A slot the template never references is wasted load; a slot the template references but `injection_table()` does not register raises at load time (already caught by `validate_template`).
+Open `promptpotter/assets/optimizers/potter/pipeline.yaml` and locate the `l1_generate/1` body under `resolved_prompts`. Note which `{{slots}}` it references. Cross-check against `application/optimizers/potter/dispatch/injections/registry.py::injection_table` so you can name what data each slot delivers. A slot the template never references is wasted load; a slot the template references but `injection_table()` does not register raises at load time (already caught by `validate_template`).
 
 ### 2. Read the round's audit trail
 
@@ -143,7 +143,7 @@ Capture the **rendered prompt** (what the LLM actually saw, not the template) fr
 
 ### 3. Read PoBB stream + ledger
 
-`{cycle_dir}/.runtime/streams/round_NNNN_p_best.jsonl` shows the elimination order. If all candidates lasted to `n_min` with near-identical posterior intervals, you have **flat stratification** — L1 didn't generate meaningfully different proposals. If one ran away early, look at *why* it differed. `.runtime/ledger.jsonl` records every escalation rule fire.
+`{cycle_dir}/.runtime/streams/round_NNNN_pobb.jsonl` shows the elimination order. If all candidates lasted to `n_min` with near-identical posterior intervals, you have **flat stratification** — L1 didn't generate meaningfully different proposals. If one ran away early, look at *why* it differed. `.runtime/ledger.jsonl` records every escalation rule fire.
 
 ### 4. Read the critique
 
@@ -165,7 +165,7 @@ Edit: must ride `changes_description` (no new fields — see Edit etiquette). Re
 
 #### Off-task — candidates ignore `task_context`
 
-Symptom: candidates contradict the framing L2 set. Root cause: the slot renders but the template never cites it as a constraint. Edit: require the rationale to quote one phrase from `task_context`. Keep the injection through `DispatchHub` — do not summarize it at the prompt site.
+Symptom: candidates contradict the operator's frozen framing. Root cause: the slot renders but the template never cites it as a constraint. Edit: require the rationale to quote one phrase from `task_context`. Keep the injection through `DispatchHub` — do not summarize it at the prompt site.
 
 #### Ignoring critique — candidates repeat last round's mistakes
 
@@ -177,7 +177,7 @@ Symptom: identical `pipeline_overlay`; only prompt text varies cosmetically; com
 
 #### Pipeline-params overreach — touching locked axes
 
-Symptom: `validators/l1_strict.py` flags a mutation outside `escalation_panel.params_unlocked`. Edit: render `params_unlocked` as a fenced list and state the consequence — "mutations on locked axes are dropped before scoring".
+Symptom: `param_scope_discipline` (`validators/l1_behavior.py`) scores a param-scope mutation made while a prompt field sat unmutated for two rounds. Edit: require `changes_description` to name the prompt-field evidence exhausted first. `validate_overrides`' rejections are mechanical — do not restate them in the prompt.
 
 #### Critique-score divergence (out of scope from L1)
 
@@ -191,11 +191,11 @@ Parse failure, no-ops and verbatim duplicates: **zero** over 6 inner campaigns /
 
 Skipping these has historically let evidence-free or rule-violating proposals through unflagged. None
 is blanket-rejected by code; **for the unenforced ones your analysis IS the gate.** The enforced set is
-the registry itself (`optimization/validators/l1_strict.py`) plus `validate_overrides()`, which locks
-`model` / `provider` unconditionally — read the registry before assuming a check is unenforced.
+the registry itself (`optimizers/potter/validators/l1_strict.py`) plus `validate_overrides()`, which rejects
+`PARAM_FORBIDDEN_KEYS` unconditionally — read the registry before assuming a check is unenforced.
 
 - **Evidence availability.** For round 1 (especially a fresh fork), does the rendered input actually
-  carry the signals a candidate claims to consult? `axis_memory` is present iff `AxisIndex.ensure_for`
+  carry the signals a candidate claims to consult? `axis_memory` is present iff `SampleIndex.ensure_for`
   found ≥1 prior archive measurement (empty on a backend's first cycle). `runtime_failures` is present
   iff this cycle produced one OR `Cycle.start` inherited from sibling forks — **empty in round 1 while
   siblings DID produce failures means the inheritance path is broken** (`sibling_wounds.py`,
@@ -242,15 +242,15 @@ Write the edit as a unified diff against `resolved_prompts["l1_generate/1"]`. St
 - **You may not add a field to the response contract from the prompt side.** `L1Variant` is `extra="forbid"` and its field set is `dispatch/schemas.py::L1Variant` — read it there. Note `targets_cluster`, which binds a variant to one `l1_critique` root cause: it is the STRUCTURAL answer to semantic restatement, already shipped, so do not re-prescribe a prompt clause for it. A prompt demanding anything else fails **every** variant at validation. Adding one for real means the Pydantic model, both `answer_format`s and `resolved_schemas` move in **one commit**, or the loop stops parsing. Prefer riding `changes_description`.
 - **No backward compatibility.** Zero released versions. Change a slot name everywhere — no fallback chains, no defaults. See the STOP section in root `CLAUDE.md`.
 - **Slots flow through `DispatchHub`.** A new `{{slot}}` is an `@signal` renderer under `dispatch/injections/`; `validate_template` raises at template load on typos. Never summarize a field at the prompt site.
-- **L1 owns `pipeline_params`.** If the diagnosis points at the framing surface, write down "→ L2 should refine task_context to X" and stop. That is L2's contract, not yours.
-- **Cycle hash awareness.** An optimizer prompt edit changes `JobSearchPoint.content_hash` for the next round but **not** the target cycle's origin hash. At L4 an edit to an **inner** optimizer node's prompt body or config moves `_identity_config`'s `inner_origin` fingerprint and voids banked outer cells; the outer set (`sets/self_optimizing.yaml`), `checkin`, node descriptions and a release do not. See § Why experiments did not accumulate. To keep prior runs comparable, suggest `--fork-on-divergence` after the edit.
+- **L1 owns `pipeline_params`.** If the diagnosis points at the framing, write down "→ operator should revise task_context to X" and stop — it is operator-authored and frozen for the run; no layer writes it.
+- **Cycle hash awareness.** An optimizer prompt edit changes `JobSearchPoint.content_hash` for the next round but **not** the target cycle's origin hash. At L4 an edit to an **inner** optimizer node's prompt body or config moves `_identity_config`'s `inner_origin` fingerprint and voids banked outer cells; the outer families (potter's `*_self_optimizing`), `checkin`, node descriptions and a release do not. See § Why experiments did not accumulate. To keep prior runs comparable, suggest `--fork-on-divergence` after the edit.
 - **No hidden defaults.** Render the empty case explicitly rather than "if `axis_memory` is empty, do X".
 - **Trim to invariants, not history.** When you remove a line, remove it. No `# was: …` breadcrumbs.
 
 ## What L4 does *not* do
 
 - Does not generate new candidates itself. That is L1's job.
-- Does not refine `task_context` (L2's) or replan strategy (L3's). L3 firing means the plan-space was wrong, not that the L1 prompt needs tweaking.
+- Does not refine `task_context` (operator-authored, frozen) or replan strategy (L3's). L3 firing means the plan-space was wrong, not that the L1 prompt needs tweaking.
 - Does not modify `task_description.md` or the per-dataset configs — those change cycle identity and the scoring contract.
 - Does not re-score past rounds. If the scoring formula changes, swap it in `campaign.yaml::scoring` and let the next round-end recompile.
 
@@ -258,7 +258,7 @@ Write the edit as a unified diff against `resolved_prompts["l1_generate/1"]`. St
 
 Paths below are repo-relative; this file sits at `.claude/skills/potter-self/`.
 
-- **L1/L2/L3 agent contracts** — `promptpotter/application/optimization/CLAUDE.md` (what each layer reads, writes and decides).
+- **L1/L2/L3 agent contracts** — `promptpotter/application/optimizers/potter/CLAUDE.md` (what each layer reads, writes and decides).
 - **Dispatch hub + info flow** — `docs/developer/dispatch-hub.md`. How slots reach optimizer prompts.
 - **The measurand, the invariants, what a panel may claim** — `docs/specs/l4-outer-loop.md`. Read it before trusting any outer number, and before touching a file mid-run.
 - **Persistence + the identity fingerprint** — `docs/operations/persistence-and-state.md` (fact 4 owns what `_identity_config` reads).

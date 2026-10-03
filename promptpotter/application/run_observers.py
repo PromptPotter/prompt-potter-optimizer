@@ -1,18 +1,21 @@
 """Run observers + callbacks — the single ingress for CLI/notebook/webapp. ``build_run_observers``
-wires audit + dashboard + PoBB stream + optional ``LiveDisplay`` to one ledger, re-anchoring a fork."""
+wires audit + dashboard + racing stream + optional ``LiveDisplay`` to one ledger, re-anchoring a
+fork."""
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextvars import Token
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.views.ingress import from_phase_event
 from promptpotter.application.views.view_models import ViewContext
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.results import RoundResult, is_round_winner
+from promptpotter.domain.dashboard_rows import RunStanding
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import (
     CycleRecord,
     ElectionRecord,
@@ -27,8 +30,8 @@ from promptpotter.infrastructure.llm.rate_limit import set_rate_tenant
 from promptpotter.infrastructure.llm.spend_book import (
     SpendBook,
     bind_spend_book,
-    charge_open_holds,
     reset_spend_book,
+    unreported_on,
 )
 from promptpotter.infrastructure.llm.telemetry import (
     reset_current_round,
@@ -41,7 +44,7 @@ from promptpotter.infrastructure.projections.live_dashboard.projection import (
     LiveDashboardProjection,
 )
 from promptpotter.infrastructure.projections.live_dashboard.state import RunLimits
-from promptpotter.infrastructure.projections.pobb_stream import PoBBStreamProjection
+from promptpotter.infrastructure.projections.racing_stream import RacingStreamProjection
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 from promptpotter.shared.errors import graceful
 from promptpotter.shared.instrument import NO_ROUND_SLOT, instrument_depth
@@ -49,17 +52,15 @@ from promptpotter.shared.instrument import NO_ROUND_SLOT, instrument_depth
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.optimization.pobb.checks import PoBBSnapshot
+    from promptpotter.application.optimizers.nodes import RaceSnapshot
     from promptpotter.application.scoring.query_loop import Flight
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.phases import PhaseEvent
-    from promptpotter.domain.sample import Sample
     from promptpotter.presentation.terminal.live.display import LiveDisplay
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "QUERY_PREVIEW_CHARS",
     "ForkInfo",
     "RunCallbacks",
     "RunObservers",
@@ -80,48 +81,42 @@ def build_campaign_emitter(
     *,
     origin_accuracy: float | None,
     resumed_from_round: int | None = None,
-    recorder: AuditTrailProjection | None = None,
     seed_from_cycle_id: str | None = None,
     langfuse_trace_url: str | None = None,
 ) -> LiveDashboardProjection | None:
     """Live dashboard projection from session + config. ``seed_from_cycle_id`` names the parent
     cycle to seed prior trajectory from; ``None`` seeds from the cycle's own dir. ``None`` back
     when the session carries no cycle to write into, which the return type states."""
-    opt = campaign_config.optimization
+    selected = select_optimizer(campaign_config.optimization)
     return LiveDashboardProjection.for_session(
         session.hop,
         tenant_root=session.tenant_root,
         session_id=session.session_id,
-        l1_patience=opt.l1_patience,
-        n_variants=opt.n_variants,
-        sp_budget_round=campaign_config.sp_budget_round,
-        headline_metric=campaign_config.headline_metric,
+        arms_per_round=selected.pacing.arms_per_round,
+        sp_budget_round=selected.round_cells(len(session.samples)),
+        display_metric=campaign_config.display_metric,
         langfuse_trace_url=langfuse_trace_url,
         resumed_from_round=resumed_from_round,
-        recorder=recorder,
         seed_from_cycle_id=seed_from_cycle_id,
         # The connector's own declarations, read at wiring — origin scoring runs before any
         # phase event, so anything that waits for one is absent exactly when round 0 needs it.
         max_cells_in_flight=session.backend_client.max_cells_in_flight,
         measured_unit=session.backend_client.measured_unit,
+        stamps_theta=selected.stamps_theta,
     )
 
 
 def run_limits_from(config: CampaignConfig) -> RunLimits:
     """The declared ceilings, read off ONE config — the same object ``_build_budget_gate`` takes
-    its arms from, so the number on screen is the number that halts. Stamped by the run at
-    ``_compose_run_ceilings``: earlier is the pre-wallet config, and the ledger's own INIT record
-    lands after the entire origin has scored."""
+    its arms from, so the number on screen is the number that halts. Stamped by ``_prepare_run``
+    once the held ceiling is set on it: earlier is the unadmitted config, and the ledger's own
+    INIT record lands after the entire origin has scored."""
     opt = config.optimization
     return RunLimits(
         max_rounds=opt.max_rounds or None,
-        l1_patience=opt.l1_patience,
-        l2_patience=opt.l2_patience,
-        l3_patience=opt.l3_patience,
-        pobb_epsilon=opt.pobb_epsilon,
         spend_budget_usd=opt.spend_budget_usd,
         token_budget=opt.token_budget,
-        lives_cap=opt.lives.cap if opt.lives is not None else None,
+        optimizer=list(select_optimizer(opt).pacing.limits),
     )
 
 
@@ -147,18 +142,18 @@ def _round_fit(round_result: RoundResult) -> dict[str, LedgerFit]:
     An untouched arm is dropped rather than served as a row of nulls: on a cold ruler no candidate
     carries θ at all, and an arm below the coverage floor never reaches the fit."""
     return {
-        cs.label: fit
+        cs.label: fit.model_copy(update={"reference_id": cs.reference_id})
         for cs in round_result.candidate_scores
         if (
             fit := LedgerFit(
                 theta=cs.theta,
                 theta_se=cs.theta_se,
                 theta_caveat=cs.theta_caveat,
-                matched_parent_accuracy=cs.matched_parent_accuracy,
-                matched_parent_composite=cs.matched_parent_composite,
-                matched_parent_lift=cs.matched_parent_lift,
-                matched_parent_lift_ci_lo=cs.matched_parent_lift_ci_lo,
-                matched_parent_lift_ci_hi=cs.matched_parent_lift_ci_hi,
+                reference_accuracy=cs.reference_accuracy,
+                reference_composite=cs.reference_composite,
+                reference_lift=cs.reference_lift,
+                reference_lift_ci_lo=cs.reference_lift_ci_lo,
+                reference_lift_ci_hi=cs.reference_lift_ci_hi,
             )
         )
         != LedgerFit()
@@ -205,33 +200,24 @@ class RunCallbacks:
         the panel gate has let the round stand, and from ``emit_origin_round`` for round 0, which
         adopts ``C0``. Round 0 differs in the VALUE it carries, never in the record it writes.
 
-        The crown and the per-arm fit travel together because they are stamped together, two LLM
-        calls before the close that used to be their only carrier."""
+        The crown and the per-arm fit travel together because they are stamped together, before
+        the round closes."""
         self._emit(
             ElectionRecord(
                 round=round_result.round,
                 fit=_round_fit(round_result),
                 live_round_result=round_result,
-                # `winner_id` is non-empty on a HELD round too — it names the retained
-                # parent, which is no candidate of THIS round, so the match fails and the
-                # crown is empty. The emptiness is in the match, never in the id.
-                winner_label=next(
-                    (
-                        cs.label
-                        for cs in round_result.candidate_scores
-                        if is_round_winner(cs.candidate_id, round_result.winner_id)
-                    ),
-                    "",
-                ),
+                selected_labels=list(round_result.selected_labels),
+                stamps_theta=round_result.stamps_theta,
             )
         )
 
     def on_round_close(self, round_result: RoundResult) -> int | None:
         """The CLOSE — what the round knows and no candidate could: the frontier it advanced and
         the ability fit behind it. Every term here is RE-READ on each close, which is what lets
-        round 0's second one (``runner/loop.py``, once the ruler warms) deliver a θ its own close
-        could not have had. The crown is deliberately absent: it never moves, so it lands once, at
-        ``on_election``.
+        round 0's second one (``round.py::close_round``, once the ruler warms) deliver a θ its own
+        close could not have had. The crown is deliberately absent: it never moves, so it lands
+        once, at ``on_election``.
 
         Returns the offset this close landed at — the round document's address on the ledger."""
         return self._emit(
@@ -265,17 +251,13 @@ class RunCallbacks:
             )
         )
 
-    def on_round_complete(
-        self, round_result: RoundResult, l1_stall_count: int, hearts: int | None = None
-    ) -> None:
+    def on_round_complete(self, round_result: RoundResult, standing: RunStanding) -> None:
         # ``event="display"`` keeps ``EscalationFSM.fold`` reading only the lean ``event="complete"`` audit emit.
         # The full ``RoundResult`` rides ``live_round_result`` (in-memory-only) for
         # the live subscribers; disk persists only the three scalars the SSE→webapp
         # chat reads — the fat arrays are already in round_NNNN.json + dashboard.json.
-        # ``hearts`` = the banked-lives count (``None`` when lives mode is off) — the
-        # high-level ♥ readout, a peer of the stall counter on the same channel.
-        self._phase_ctx.l1_stall_count = l1_stall_count
-        self._phase_ctx.hearts = hearts
+        # The standing persists here, the one record the lineage tree reads it back from.
+        self._phase_ctx.run_standing = standing
         self._emit(
             PhaseRecord(
                 phase="round",
@@ -288,8 +270,7 @@ class RunCallbacks:
                         "accuracy": round_result.accuracy,
                         "composite_fitness": float(round_result.composite_fitness),
                     },
-                    "l1_stall_count": l1_stall_count,
-                    "hearts": hearts,
+                    "run_standing": standing.model_dump(),
                     "phase_ctx": self._phase_ctx.ledger_anchors(),
                 },
             )
@@ -326,6 +307,7 @@ class RunCallbacks:
         pipeline_overlay: dict[str, Any] | None,
         prompt_fields: dict[str, Any],
         resolved_pipeline_params: dict[str, Any] | None,
+        block: Mapping[str, int] | None = None,
     ) -> None:
         # `prompt_fields` + `pipeline_overlay` are the candidate's evolved searchpoint
         # (the seed-able half), surfaced live so the steer panel can fork from a
@@ -342,6 +324,7 @@ class RunCallbacks:
                 "pipeline_overlay": pipeline_overlay,
                 "prompt_fields": prompt_fields,
                 "resolved_pipeline_params": resolved_pipeline_params,
+                "block": None if block is None else dict(block),
             },
         )
 
@@ -356,6 +339,7 @@ class RunCallbacks:
         sample_order: Sequence[int],
         n_priors: int = 0,
         pipeline_overlay: dict[str, Any] | None = None,
+        block: Mapping[str, int] | None = None,
     ) -> None:
         """Everything a reader needs BEFORE an arm walks: WHAT it is, and WHICH cells it will walk.
 
@@ -363,6 +347,9 @@ class RunCallbacks:
         Composed by hand per site, a caller emits one of the two and its round silently loses its
         walk axis or its searchpoint; a third site that scores an arm calls this or goes dark the
         same way.
+
+        ``block`` is the turn's place in a block race — block ``n`` of ``of``, ``size`` cells,
+        ``racing`` arms live — so an arm announces once per block it walks.
 
         `rescore_parent` is deliberately NOT one: the parent occupies no slot in the round's
         population (`NO_ROUND_SLOT`), so it announces no candidate while still ticking samples."""
@@ -373,6 +360,7 @@ class RunCallbacks:
             pipeline_overlay,
             opt_sp.prompt_field_dict(),
             resolved_pipeline_params,
+            block,
         )
         self.on_sample_order_preview(
             round_num, idx, total, n_priors=n_priors, sample_order=list(sample_order)
@@ -418,9 +406,9 @@ class RunCallbacks:
         )
 
     def on_flight(self, flight: Flight) -> None:
-        """The scoring phase's calls in flight, what its stop rules allow, the most it could hold, and
-        the call a decision waits on — the whole round's, so it names no candidate
-        (``scoring/query_loop.py::FlightGauge``)."""
+        """The scoring phase's calls in flight, what its stop rules allow, what the spend ceiling
+        affords, the most it could hold, and the call a decision waits on — the whole round's, so
+        it names no candidate (``scoring/query_loop.py::FlightGauge``)."""
         waiting = (
             None
             if flight.waiting is None
@@ -434,7 +422,13 @@ class RunCallbacks:
                 "out": int(flight.out),
                 "allowed": int(flight.allowed),
                 "most": int(flight.most),
+                # What the SPEND ceiling admits beside them, which no other reading here implies.
+                "affordable": None if flight.affordable is None else int(flight.affordable),
+                "cell_usd": None if flight.cell_usd is None else float(flight.cell_usd),
                 "waiting": waiting,
+                "backpressure": (
+                    None if flight.backpressure is None else flight.backpressure.model_dump()
+                ),
             },
         )
 
@@ -448,18 +442,23 @@ class RunCallbacks:
             sample_total=qt,
         )
 
-    def on_p_best_update(self, round_num: int, ci: int, ct: int, snapshot: PoBBSnapshot) -> None:
-        """Per-sample PoBB snapshot — archive-only, not divergence-gated. ``snapshot`` stays TYPED: an
-        ``Any`` on a seam that only destructures breaks silently on the next field removal."""
+    def on_race_standing(
+        self, member: str, round_num: int, ci: int, ct: int, snapshot: RaceSnapshot
+    ) -> None:
+        """Per-sample race standing from the eliminator ``member`` — archive-only, not
+        divergence-gated. ``snapshot`` stays TYPED: an ``Any`` on a seam that only destructures
+        breaks silently on the next field removal."""
         self._snapshot(
-            "p_best_update",
+            "race_standing",
             ci,
             ct,
             {
+                "member": member,
                 "current_id": str(snapshot.current_id),
                 "n_samples": int(snapshot.n_samples),
                 "p_best": float(snapshot.p_best),
                 "paired_breakdown": dict(snapshot.paired_breakdown),
+                "decision_grade": snapshot.decision_grade,
             },
             round_num=round_num,
             sample_idx=int(snapshot.n_samples) - 1,
@@ -487,22 +486,27 @@ class RunCallbacks:
             round_num=round_num,
         )
 
-    def on_pobb_backfill(
+    def on_race_catch_up(
         self,
+        member: str,
         round_num: int,
         ci: int,
         ct: int,
         sample_id: int,
         prior_ids: list[str],
     ) -> None:
-        """Paired-PoBB priors caught up on the just-measured sample; absence ⇒ cache covered it."""
+        """The race's priors caught up on the just-measured sample; absence ⇒ cache covered it."""
         if not prior_ids:
             return
         self._snapshot(
-            "pobb_backfill",
+            "race_catch_up",
             ci,
             ct,
-            {"sample_id": int(sample_id), "prior_ids": [str(p) for p in prior_ids]},
+            {
+                "member": member,
+                "sample_id": int(sample_id),
+                "prior_ids": [str(p) for p in prior_ids],
+            },
             round_num=round_num,
         )
 
@@ -523,7 +527,7 @@ class RunObservers:
     callbacks: RunCallbacks
     audit: AuditTrailProjection
     dashboard: LiveDashboardProjection
-    pobb: PoBBStreamProjection
+    racing: RacingStreamProjection
     display: LiveDisplay | None
     _ledger_token: Token[CycleEventLog | None] | None = None
     # The armed spend book's binding, one at a time — see `arm_spend_book`.
@@ -531,8 +535,9 @@ class RunObservers:
 
     def arm_spend_book(self, book: SpendBook) -> None:
         """Count this run's ledger into ``book`` and admit every send the run makes against it,
-        replacing a book armed before — the ceilings are re-armed once the origin is scored. A
-        call a killed run left out is charged here, before this run sends anything.
+        replacing a book armed before — the ceilings are re-armed once the origin is scored. Every
+        send the ledger left unreported — a killed run's calls out included — is held from here,
+        before this run sends anything, and never counted as spent.
 
         A run nested inside another (an L4 inner cell) admits nothing against its own book: its
         sends stay on the ROOT's, the one ceiling every level of the recursion spends under, and
@@ -545,11 +550,14 @@ class RunObservers:
             if self._book_tokens:
                 reset_spend_book(self._book_tokens.pop())
             self._book_tokens.append(bind_spend_book(book))
-        if charged := charge_open_holds(ledger):
+        unreported = unreported_on(ledger)
+        book.usd_unreported, book.tokens_unreported = unreported.usd, unreported.tokens
+        if unreported.sends:
             logger.warning(
-                "A stopped run left %d paid call(s) unreported; each is charged the most it "
-                "could have cost.",
-                charged,
+                "%d paid send(s) on this run ended without a bill; the ceiling holds up to $%.4f "
+                "for them, and no surface counts it as spent.",
+                unreported.sends,
+                unreported.usd,
             )
 
     def drain_all(self) -> None:
@@ -557,7 +565,7 @@ class RunObservers:
         the audit cache reflects the ledger even on interrupt."""
         self.audit.drain()
         self.dashboard.drain()
-        self.pobb.drain()
+        self.racing.drain()
         # The SSE stream isn't a subscriber — it tails the on-disk ledger
         # (``CycleLedgerTail``), so there's nothing to drain/deregister here;
         # open HTTP tails idle on heartbeats once the run stops appending.
@@ -581,7 +589,6 @@ def build_run_observers(
     *,
     session: Session,
     campaign_config: CampaignConfig,
-    dataset: list[Sample],
     display: LiveDisplay | None = None,
     resumed_from_round: int | None = None,
     origin_accuracy: float | None = None,
@@ -598,7 +605,7 @@ def build_run_observers(
     cycle_dir = CycleDir(session.store.campaigns.cycle_dir(session.hop))
     audit = AuditTrailProjection.from_cycle_dir(cycle_dir)
     session.state.audit_projection = audit
-    pobb = PoBBStreamProjection.from_cycle_dir(cycle_dir)
+    racing = RacingStreamProjection.from_cycle_dir(cycle_dir)
 
     ledger = CycleEventLog.open(cycle_dir)
     # A set-once identity stamp (like session_id), not a tracing-stream read — fan-out-only
@@ -617,7 +624,6 @@ def build_run_observers(
             campaign_config,
             origin_accuracy=origin_accuracy,
             resumed_from_round=resumed_from_round,
-            recorder=audit,
             langfuse_trace_url=trace_url,
         )
     else:
@@ -626,7 +632,6 @@ def build_run_observers(
             campaign_config,
             origin_accuracy=origin_accuracy,
             resumed_from_round=resumed_from_round,
-            recorder=audit,
             seed_from_cycle_id=fork.parent_cycle_id,
             langfuse_trace_url=trace_url,
         )
@@ -660,8 +665,9 @@ def build_run_observers(
     ledger.bind(dashboard)
     ledger.bind(audit)
     if display is not None:
+        display.open_readout(cycle_dir)
         ledger.bind(display)
-    ledger.bind(pobb)
+    ledger.bind(racing)
     session.state.ledger = ledger
 
     callbacks = RunCallbacks(ledger=ledger)
@@ -679,7 +685,7 @@ def build_run_observers(
         callbacks=callbacks,
         audit=audit,
         dashboard=dashboard,
-        pobb=pobb,
+        racing=racing,
         display=display,
         _ledger_token=ledger_token,
     )

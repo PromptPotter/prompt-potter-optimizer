@@ -1,11 +1,5 @@
-/* Sidebar stays mounted across tab switches so toggling Chat ↔ Dashboard
-   doesn't reflow the entire page width. If you want chat to feel
-   immersive, collapse the sidebar — don't unmount it. */
+/* The sidebar stays mounted across tab switches, so a tab toggle never reflows the page width. */
 
-/* Lineage tree — paper-cladogram aesthetic: horizontal child stubs and
-   slanted parent-to-child branches, sharp corners, no dots. Winner gets
-   slightly heavier stroke. Stroke color uses --color-text-primary so the
-   tree reads black on light theme, white on dark. */
 .lineage-stub{stroke:var(--color-text-primary);stroke-width:1;fill:none}
 .lineage-stub.winner{stroke-width:1.6}
 .lineage-label{fill:var(--color-text-secondary);font-size:var(--text-xs);letter-spacing:.02em}
@@ -14,30 +8,14 @@
 .lineage-inherit-link{background:transparent;border:0;color:var(--color-accent);cursor:pointer;font:inherit;font-style:italic;text-decoration:underline;padding:0}
 .lineage-inherit-link:hover{color:var(--color-text-primary)}
 
-/* Family lineage cladogram — REAL search-point graph across the whole
-   family. One lane per cycle, one column per round, fork stems drawn
-   from parent.r{fork_from_round} to child.r1. No bottom border/margin: the
-   viewport must sit flush to the card edge so its resize grip lands in the
-   card's corner (not floating above a divider + gap). */
+/* No bottom border/margin: the viewport sits flush so its resize grip lands in the card's corner. */
 .family-cladogram{margin-top:8px}
 .family-cladogram-head{display:flex;align-items:center;justify-content:space-between;padding:0 2px var(--space-4);font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-tertiary)}
-/* One viewport for all session forests. Auto-fits its content height so the
-   whole tree shows by default ("all fits") — no fixed crop. Capped at 60vh,
-   beyond which it scrolls (overflow:auto), so a deep forest can't push the rest
-   of the dashboard off-screen. The operator can still drag the native grip
-   (resize:vertical, house style — see .hs-block) to pin a height; a campaign
-   switch remounts the box (the card keys it on campaignId) so a dragged
-   height + scroll reset instead of leaking into the next campaign. Each <svg>
-   renders at its intrinsic px size; a tree wider than the box scrolls
-   horizontally. resize is a no-op on touch Safari, which degrades to the
-   scroller. */
+/* Capped at 60vh, then scrolls. A campaign switch remounts the box (keyed on campaignId), so a
+   dragged height does not leak into the next campaign. */
 .family-cladogram-viewport{max-height:60vh;overflow:auto;resize:vertical}
-/* A campaign is a forest — one cladogram per root cycle, each its own <svg>. */
 .family-cladogram-forest{margin-top:6px}
 .family-cladogram-forest:first-of-type{margin-top:0}
-/* Natural size — the tree renders at its intrinsic px dimensions. The box
-   grows to fit it (and drops to its own full-width row when wide); horizontal
-   scroll is only a last resort when even a full-width row can't hold it. */
 .family-cladogram-svg{display:block;font-family:var(--font-mono)}
 .family-cladogram-branch{stroke:var(--color-text-tertiary);stroke-width:1;opacity:0.55}
 .family-cladogram-branch.fork{stroke:var(--color-text-secondary);stroke-width:1;opacity:0.8;stroke-dasharray:2 2}
@@ -45,8 +23,7 @@
 .family-cladogram-gridline{stroke:var(--color-border);stroke-width:1;opacity:0.4;stroke-dasharray:1 3}
 .family-cladogram-roundlabel{fill:var(--color-text-tertiary);font-size:var(--text-xs);font-variant-numeric:tabular-nums}
 .family-cladogram-cyclelabel{fill:var(--color-text-secondary);font-size:var(--text-xs);letter-spacing:.02em}
-/* The lane's ♥ bank, drawn as text glyphs (the cladogram is an <svg>, so the shared
-   <Hearts> component can't mount here). Same danger hue the TopStrip pips use. */
+/* Text glyphs: the shared <Hearts> component cannot mount inside the cladogram's <svg>. */
 .family-cladogram-hearts{fill:var(--color-danger);font-size:var(--text-xs);letter-spacing:-.04em}
 .family-cladogram-glyph{font-weight:600;fill:var(--color-text-tertiary)}
 .family-cladogram-dot{fill:var(--color-text-secondary);stroke:var(--color-background-primary);stroke-width:1}
@@ -54,22 +31,14 @@
 .family-cladogram-dot.kind-fork{fill:var(--color-accent)}
 .family-cladogram-dot.kind-diag{fill:var(--color-success)}
 .family-cladogram-lane-selected{fill:var(--color-background-tint-active);opacity:0.45}
-/* COMPARISON CHANNELS — a searchpoint some card on the Compare tab is anchored on, marked in
-   that channel's own series ink. The hue itself is inline (`CladogramCtx.inkOf`, a `var()` so it
-   flips with the theme); everything that is the same for every channel is here. The stroke ring
-   is what keeps it legible on both themes and against the divergence red — the ink alone on a
-   3.5px dot is a smudge. Colour is never the only carrier: the node's `<title>` and its
-   aria-label say it is a channel in words. */
+/* The hue is inline (`CladogramCtx.inkOf`); the stroke ring keeps a 3.5px dot legible on both
+   themes and against the divergence red. */
 .lineage-channel-mark{stroke:var(--color-background-primary);stroke-width:1}
-/* WHICH searchpoint is highlighted — a ring, because the two things that would otherwise carry it
-   cannot here: at DENSE there is no label, and a channel node's stub colour is an inline style. It
-   sits outside `.lineage-channel-mark`, so a node that is both a channel and the pick reads as
-   both rather than one hiding the other. */
+/* A ring: at DENSE there is no label, and a channel stub's colour is inline. Outside
+   `.lineage-channel-mark`, so a node that is both reads as both. */
 .lineage-pick-mark{fill:none;stroke:var(--color-selection);stroke-width:1.5}
-/* UNKNOWN — a setting was changed at or above this point, so nothing measured here describes it
-   any more. Dashed, because it is neither a counterfactual (`mask-divergent`, which the server
-   computed) nor a record (`retired`): there is no reading at all, and the node says `?` where its
-   value would be. The dash + the glyph carry it; the aria-label and `<title>` say it in words. */
+/* UNKNOWN: a setting changed at or above this point. Neither a counterfactual (`mask-divergent`)
+   nor a record (`retired`) — there is no reading at all, so dashed. */
 .lineage-node.unknown .lineage-stub,
 .family-cladogram-node.unknown .family-cladogram-dot{stroke-dasharray:2 2;opacity:0.6}
 .lineage-node.unknown .lineage-label{fill:var(--color-text-tertiary);font-style:italic}
@@ -79,28 +48,19 @@
 .family-cladogram-node.selected .family-cladogram-cyclelabel{fill:var(--color-accent);font-weight:600}
 .family-cladogram-node:hover .family-cladogram-dot{r:5}
 .family-cladogram-node:hover .family-cladogram-cyclelabel{fill:var(--color-text-primary)}
-/* Lane-hit overlay: invisible until hover, then a faint tint highlights
-   the whole row. Sits in front of branches but behind the node groups
-   so dot clicks still win. */
+/* In front of branches but behind the node groups, so dot clicks still win. */
 .family-cladogram-lane-hit{fill:transparent}
 .family-cladogram-lane-hit:hover{fill:var(--color-background-hover);opacity:0.5}
 .family-cladogram-lane-hit:focus{outline:none}
 .family-cladogram-lane-hit:focus-visible{fill:var(--color-background-hover);opacity:0.5}
-/* Scoring-mask (lens) overlay — divergence marker + dimmed counterfactual
-   subtree, rendered from the served overlay (never recomputed). The dim always
-   pairs with an aria-label + tooltip, never colour alone. */
+/* Rendered from the served overlay, never recomputed; the dim always pairs with an aria-label. */
 .family-cladogram-node.mask-divergent,
 .lineage-node.mask-divergent{opacity:0.38}
-/* RETIRED — the left-behind side of a supersede cut. Recedes like a counterfactual but
-   is a different fact (what the run did, not what a mask would have done), so it holds a
-   lighter dim and says so in its tooltip + aria-label rather than borrowing the lens
-   copy. Still selectable: it is the record of what ran. */
+/* RETIRED: what the run did, not what a mask would have done — a lighter dim and its own
+   tooltip. Still selectable. */
 .lineage-node.retired{opacity:0.55}
-/* Divergence = RED throughout. No glyphs — the marking IS the colour: the
-   alternative candidate's own branch line glows red ("this is the configuration
-   the mask would have elected, this is where it forks"), and the collapsed
-   round-level node carries a red ring. The dim is the quiet signal; the red glow
-   is the loud one. Honours prefers-reduced-motion (glow stays, pulse drops). */
+/* Divergence = RED, no glyphs: the alternative's branch glows, the collapsed round node wears a
+   ring. Reduced motion keeps the glow and drops the pulse. */
 .family-cladogram-divergence-ring{
   fill:none;
   stroke:var(--color-danger);
@@ -118,11 +78,8 @@
   0%,100%{opacity:0.65;stroke-width:2}
   50%{opacity:1;stroke-width:2.75}
 }
-/* The divergence config line glows red — both the recorded winner AT the
-   divergence round (the last agreed-upon point, `mask-divergence`) and the
-   candidate the lens would have elected instead (`mask-alt`). The line IS the
-   marker; it breathes. The winner always glows even when the lens names no
-   alternative, so a divergence is never invisible in the expanded tree. */
+/* The winner AT the divergence round glows even when the lens names no alternative, so a
+   divergence is never invisible in the expanded tree. */
 .lineage-node.mask-alt .lineage-stub,
 .lineage-node.mask-divergence .lineage-stub{
   stroke:var(--color-danger);
@@ -138,8 +95,6 @@
   .lineage-node.mask-alt .lineage-stub,
   .lineage-node.mask-divergence .lineage-stub{animation:none;opacity:1}
 }
-/* Cleanup-dialog body + error text. The dialog chrome (backdrop, card) comes
-   from the Dialog primitive (components/ui/Dialog.module.css). */
 .family-tree-modal-body{font-size:var(--text-base);color:var(--color-text-secondary);margin:0 0 var(--space-12);line-height:1.4}
 .family-tree-modal-body code{font-family:var(--font-mono);background:var(--color-background-hover);padding:1px var(--space-4);border-radius:3px;font-size:var(--text-sm)}
 .family-tree-modal-error{font-size:var(--text-sm);color:var(--color-danger);margin:0 0 var(--space-12)}

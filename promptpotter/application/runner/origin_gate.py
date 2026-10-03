@@ -13,21 +13,21 @@ import time
 from typing import TYPE_CHECKING, Literal, get_args
 
 from promptpotter.application.datasets.loaders import sample_dataset
-from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
 from promptpotter.application.origin import rescore_parent
 from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
 from promptpotter.application.runner.round import emit_origin_round
 from promptpotter.application.runner.termination import OriginGateMode, origin_gate_tripped
 from promptpotter.domain.phases import RunPhase, StopReason
+from promptpotter.infrastructure.llm.heartbeat import heartbeat
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
 from promptpotter.infrastructure.store.layout import CycleLayout
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.domain.sample import Sample
 
@@ -64,9 +64,10 @@ async def run_origin_gate(
         grade = cycle.origin_round.health.grade if cycle.origin_round.health else "unknown"
         logger.warning(
             "Origin gate (%s): round-0 verdict is %s — holding before L1. Decide via "
-            "the webapp modal, the CLI prompt, or the origin-gate-decision command.",
+            "the webapp modal, the TTY prompt, or `python -m promptpotter origin-gate %s`.",
             mode,
             grade,
+            "{" + ",".join(_DECISIONS) + "}",
         )
         if stdin_q is not None:
             # Operator-facing gate prompt; the gate state is also on disk
@@ -166,7 +167,7 @@ async def _rescore_and_reemit(
     """Re-score the origin force-fresh, then re-emit round 0 through the standard ``close_round`` seam so
     every round-0 surface updates in one shape."""
 
-    scoring_set = sample_dataset(dataset, config.origin_budget())
+    scoring_set = sample_dataset(dataset, config.sp_budget_origin)
     origin = await rescore_parent(cycle, scoring_set, callbacks=cb, force_fresh=True)
     # A fresh round replaces round 0 outright, so it is re-graded as a fresh floor
     # (no prior track record) exactly as the first origin emit was.

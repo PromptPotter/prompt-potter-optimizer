@@ -1,17 +1,6 @@
 "use client";
-// Which install you are looking at, painted into the browser tab.
-//
-// The local preview and the deployed unit are the SAME static export served
-// from two places, so the answer cannot be baked at build time — a deploy build
-// previewed on localhost would wear the unit's colours and lie. It is read off
-// the hostname on mount instead: loopback is the operator's own machine, and
-// everything else is the unit (the box answers on a LAN address as well as on
-// app.promptpotter.com; both are the same install).
-//
-// Local is a gold disc, the unit a near-black rounded square, and the mark
-// flips ink/gold to sit on each. Shape carries as much of the difference as
-// colour, so the two stay apart at 16px and in a colour-blind tab strip. The
-// marketing site keeps the untinted mark, which makes it the third icon.
+// Which install you are looking at, painted into the browser tab. Read off the hostname at mount,
+// never baked at build: local and deployed serve the SAME static export.
 
 import { useEffect } from "react";
 
@@ -23,16 +12,10 @@ const SURFACES = {
   unit: { ground: INK, mark: GOLD, shape: "square" },
 } as const;
 
-// Painted at 32px, the size the two static cuts are authored at.
 const SIZE = 32;
-// The mark is drawn from the 128px alpha master (the one `PotterMark` masks
-// with), not from a tab cut: it is recoloured per surface, and only the master
-// downscales cleanly. Its ink box within that 128px square:
+// Drawn from the 128px alpha master, not a tab cut: only the master recolours and downscales cleanly.
 const MARK_SRC = "/brand/mark-pot.png";
 const INK_BOX = { x: 28, y: 5, w: 72, h: 118, of: 128 };
-// Ink height as a fraction of the tile. ABOVE the static cuts' 0.84 on purpose
-// — the mark breaks out of the shape behind it rather than being inset into
-// it, and a tab icon this small can never afford to lose height to a ground.
 const INK_HEIGHT = 0.92;
 const DISC_RADIUS = 0.4 * SIZE;
 const SQUARE_INSET = 0.5;
@@ -67,9 +50,7 @@ export function SurfaceFavicon() {
       }
       ctx.fill();
 
-      // The master carries the silhouette in its alpha channel, so the mark is
-      // recoloured the way the CSS mask does it: draw it, then flood the pixels
-      // it covered. Off-screen, because `source-in` would eat the ground.
+      // Off-screen, because `source-in` would eat the ground.
       const scale = (INK_HEIGHT * SIZE) / INK_BOX.h;
       const side = INK_BOX.of * scale;
       const tinted = document.createElement("canvas");
@@ -90,8 +71,7 @@ export function SurfaceFavicon() {
       tctx.fillRect(0, 0, SIZE, SIZE);
       ctx.drawImage(tinted, 0, 0);
 
-      // Both declared cuts get the same href: the ground is opaque, so the
-      // light/dark chrome split the two cuts exist for no longer applies.
+      // Both declared cuts get the same href: the ground is opaque, so the light/dark split is moot.
       const href = canvas.toDataURL("image/png");
       document
         .querySelectorAll<HTMLLinkElement>('link[rel="icon"]')

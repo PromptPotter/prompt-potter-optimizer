@@ -11,25 +11,27 @@ Your work lives in `.promptpotter/`, in two trees:
 
 - **Workspace** — `projects/{tenant}/`. Every directory is named for what it holds, and the root partitions by lifecycle, which is how "what survives a delete?" is answered by looking.
 - **Dataset** — resolved tenant-first: a tenant upload (`projects/{tenant}/datasets/{slug}/`, the `new <file>` ingest path) wins over a repo benchmark (`datasets/{name}/`). An ingested slug is first-class to both `new <slug>` and `resume`, not just the mint that made it.
-- **Campaign** — `campaign_id = {dataset}__{rand6_hex}`, minted fresh per `new`. `campaign.json` carries `root_content_hash` (resume's config-drift check) and `optimizer_prompt_hash`; neither is the id.
+- **Campaign** — `campaign_id = {dataset}__{rand6_hex}`, minted fresh per `new`. `campaign.json` carries `root_content_hash` (resume's config-drift check), `treatment` (the optimizer it runs — [`../architecture.md`](../architecture.md) § Three identities) and, for a controlled arm, `arm` (the head-to-head it runs under — § The controlled comparison there); none is the id.
 - **Cycle** — `cycle_{content_hash[:12]}` (+ `_fork_`/`_diag_` on branches). Path resolution is always `(campaign_id, cycle_id)`.
 
 **There is no Session tier** — owned by [`../architecture.md`](../architecture.md) § A campaign has one root cycle — there is no Session tier. What `sessions/{session_id}/` and `active_session.json` hold is the operator's workspace and pointer, never a container for cycles.
 
 ## Active session pointer
 
-`projects/{tenant_id}/.workspace/active_session.json` (`{session_id, campaign_id, cycle_id}`) is your active tab — the workspace root selects the file, so the tenant is the path, not a payload field (`store/session_pointer.py::_active_pointer_path`).
+`projects/{tenant_id}/.workspace/active_session.json` (`{session_id, campaign_id, cycle_id}`) is your latest launch — the workspace root selects the file, so the tenant is the path, not a payload field (`store/session_pointer.py::_active_pointer_path`).
+
+**It names ONE cycle and runs can be many.** A CLI `new`, a browser Start and a fork each overwrite it, so it is the terminal's default target and what an unpinned webapp follows — never "what is running". That is each cycle's own `run_phase` on `GET /cycles`, which the webapp's jobs dock and sidebar marks read; a view the operator pinned moves only when the pointer lands on a new cycle of that same campaign.
 
 - **`new`** mints a fresh campaign + session + root cycle and overwrites the pointer. Re-running `new` on an unchanged declaration reuses the content-addressed root-cycle id and origin score (cache-served), then diverges from round 1.
 - **`resume`** reads the pointer and picks up that cycle. No re-`new` needed.
 - **fork** mints a new cycle in the same session and retargets the pointer.
 - **`--campaign <id>` / `--cycle <id>`** override the pointer for one command, on `resume` as on every run-control verb; the session is the one the named cycle was minted under (`index.json::parent_session_id`), never picked separately. **`--tenant <id>`** (default `"default"`) selects the partition under `projects/`.
 
-Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [options]`. **Loop-mint:** `new`, `resume`. **Lifecycle:** `archive`, `delete`, `unarchive`, `reset`. **Manifest-edit:** `rename` (display name only; `campaign_id` still addresses it), `replace-dataset`. **Run-control:** `pause` (stops a running cycle at its next checkpoint, resumable), `set-budget` (raises or lowers a live cycle's ceiling — how a budget-halted cycle is continued), `cancel-queued` (withdraws a launch still waiting for a machine slot; `pause` cannot serve one, since a queued mint has no cycle to write a flag into), `skip-searchpoint`, `step-cycle`. **Diagnostic:** `verify`, `ab`, `noise-floor`, `seed-screen`, `evidence`. **Maintenance** — the three that REWRITE stored artifacts rather than reading them, all dry-run by default and all refusing while a producer could still be appending: `reindex`, `restamp`, `compact-archive`.
+Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [options]`. **Loop-mint:** `new`, `resume`. **Lifecycle:** `archive`, `delete`, `unarchive`, `reset`. **Manifest-edit:** `rename` (display name only; `campaign_id` still addresses it), `replace-dataset`. **Run-control:** `pause` (stops a running cycle at its next checkpoint, resumable), `set-limits` (raises or lowers a live or paused cycle's `--max-usd` / `--max-tokens` / `--max-rounds` ceiling, `--max-rounds none` lifting the round cap — how a budget- or round-halted cycle is continued), `cancel-queued` (withdraws a launch still waiting for a machine slot; `pause` cannot serve one, since a queued mint has no cycle to write a flag into), `skip-searchpoint`, `step-cycle`, `origin-gate` (answers a cycle holding at the round-0 gate — the only answer a run launched without a TTY has in the terminal). **Diagnostic:** `verify`, `ab`, `noise-floor`, `seed-screen`, `probe-reasoning`, `evidence`. **Maintenance** — the three that REWRITE stored artifacts rather than reading them, all dry-run by default and all refusing while a producer could still be appending: `reindex`, `restamp`, `compact-archive`.
 
-Reads happen by opening the on-disk artifact tree. `evidence` is the one read VERB, because a comparison ACROSS subjects — a campaign, one branch or one searchpoint, repeated `--subject` and at any L4 depth — is in no single file.
+Reads happen by opening the on-disk artifact tree. `evidence` is the one read VERB, because a comparison ACROSS subjects — a campaign, one branch or one searchpoint, repeated `--subject` and at any L4 depth, and the campaigns' bench headlines side by side — is in no single file.
 
-**`compact-archive` is the only verb that can destroy a measurement.** `compact` moves the fields nothing reads — `hit`, `scored`, `objective`, and `pipeline_data`'s `reasoning_trace` / `result_ranking` / `final_ranking` / `total_time` — out of `candidate_*` runs into `measurements/cold/{run_id}.jsonl.gz`, stamping the run's header row with what left so a compacted row is never mistaken for one that never carried the field. `restore` puts them back; `purge-cold` deletes the cold store, and only that step is irreversible. `origin` and `round_parent` runs are never eligible — they serve the overwhelming majority of cache replays — and a row carrying `pipeline_data.mean_round_delta` keeps its trace, because the L4 narrative panel needs both.
+**`compact-archive` is the only verb that can destroy a measurement.** `compact` moves the fields nothing reads — `hit`, `scored`, `objective`, and `pipeline_data`'s `reasoning_trace` / `result_ranking` / `final_ranking` / `total_time` — out of `panel` runs (a candidate's own walk) into `measurements/cold/{run_id}.jsonl.gz`, stamping the run's header row with what left so a compacted row is never mistaken for one that never carried the field. `restore` puts them back; `purge-cold` deletes the cold store, and only that step is irreversible. `origin` and `parent` runs are never eligible — they serve the overwhelming majority of cache replays — and a row carrying `pipeline_data.mean_round_delta` keeps its trace, because the L4 narrative panel needs both.
 
 **The diagnostics are fenced — nothing the loop decides reads one, and nothing may.** The loop does fire one: a round reading 100% runs `verify` on its winner (`application/diagnostics/verify.py::verify_on_saturation`) and discards the verdict.
 
@@ -47,8 +49,10 @@ Reads happen by opening the on-disk artifact tree. `evidence` is the one read VE
       active_session.json              # { session_id, campaign_id, cycle_id }
       events.jsonl                     # workspace ledger — commands with no cycle to address
     sessions/{session_id}/session.json
+    head_to_heads/{id}.json             # a declared head-to-head: instrument + per-arm budget
     campaigns/{campaign_id}/            # {dataset}__{rand6_hex}, fresh per `new`
       campaign.json                    # manifest (dataset, config snapshot, declaration hashes — no run state)
+      result.json                      # the campaign's result as facts: its bench passes, its line's cost
       log.md                           # campaign digest — session + forks + rounds + heatmap
       hard_samples.json                # campaign-scope hard-sample artifact
       cycles/{cycle_id}/               # session root + forks + diags, ALL FLAT
@@ -59,20 +63,23 @@ Reads happen by opening the on-disk artifact tree. `evidence` is the one read VE
         experiment.resolved.yaml       # the CELLS it measures — the connector's panel, every name it
                                        #   only pointed at resolved. Write-once where the line above
                                        #   is rewritten each resume
+        bank_partition.json            # which bank rows the search draws and which it holds out
         optimized.md                   # which of those values the optimizer MOVES, and whether the
                                        #   model can see each one (`PipelineSchema.value_tree`)
         log.md  review.md              # per-cycle digests (derived — safe to recompute)
-        rounds/round_NNNN.json         # serialized RoundResult; its opt_search_point is the resume SoT
+        readout.log                    # the terminal readout, ANSI-stripped, every launch appended
+        rounds/round_NNNN.json         # serialized RoundResult; its opt_sp is the resume SoT
         langfuse/  prompts/            # trace shadow; rendered optimizer prompts
         .runtime/
           ledger.jsonl                 # append-only Decision/Phase/Snapshot/LLMCall/TokenUsage spine
-          streams/round_NNNN_p_best.jsonl   # PoBB telemetry (sparkline in log.md)
+          streams/round_NNNN_{member}.jsonl  # the eliminator's race telemetry (sparkline in log.md)
           cache/rounds|candidates/     # per-round node I/O + pre-scoring checkpoint
     measurements/                       # PAID — measurements. Cross-cycle/session/campaign and into an
                                         #   L4 sandbox, but WITHIN this tenant: `build_stores` roots it at
                                         #   `shared_root / tenant_id`. Peer of campaigns/
       index.jsonl                  # append-only, last-wins by run_id; `reindex` rebuilds it from runs/
       runs/{run_id}.jsonl          # one append-only log per run: a `k:"run"` header row + a `k:"m:{sample_id}"` row each
+      claims/{cell}.lock|.json     # a cell some walk is measuring now, and its row until taken (transient)
       derived/                     # read models folded FROM the runs (regenerable)
     optimizer_reuse/{hash}.json         # PAID — optimizer-LLM answers, replayed instead of re-sampled
     judge_reuse/{hash}.json             # PAID — LLM-as-judge grading replies, same shape, own tree:
@@ -98,22 +105,24 @@ Reads happen by opening the on-disk artifact tree. `evidence` is the one read VE
 | `campaign.json` | campaign dir | Manifest: dataset, label, `root_cycle_id`, declaration hashes, backend, lifecycle intent, and the frozen `CampaignConfig` snapshot (single owner — no per-cycle copies). Run state is per-cycle (`index.json::status`), derived on read for campaign surfaces. |
 | `dashboard.json` | the cycle's dir | Live per-cycle scalars: round, origin, best, candidates, counters. One stream per cycle. Post-mortem `stop_reason` is in `index.json`, not here. |
 | `log.md` / `hard_samples.json` (campaign) | campaign dir | Campaign digest + campaign-scope hard-sample artifact (across all its cycles). |
-| `index.json` | per cycle | `pipeline_params`, `cycle_id`, `parent_cycle_id` (branches), `rounds[]`, `final` block (winner + stop_reason). A branch's KIND is not stored — `layout.py::sibling_kind` parses it from the id. |
-| `export.json` | per cycle | The winning prompt by field name, the node config it ran under, and the provenance a consumer needs to trust the number (fitness under its named formula, n, lift + CI, θ, the rows' hash, the optimizer manifest). Written from the same call that stamps `index.json::final`; absent when no round ever closed. Contract: `domain/export.py`. |
+| `head_to_heads/{id}.json` | workspace | One declared head-to-head (`domain/campaign.py::HeadToHeadRecord`): the instrument every arm is graded under and the budget each may spend. Written once, by its first arm's mint (`new … --arm {id}:{key}`, or `mint-campaign`'s `arm`), which declares it off its own; a later arm adopts its split and budget and, on any other instrument, is refused before anything is minted. Its arms are the campaigns whose `campaign.json::arm` names it — the record lists none, so a mint never rewrites it. |
+| `result.json` | campaign dir | The campaign's result as FACTS (`domain/campaign.py::CampaignResult`): the cycle holding its line, the bench passes the headline is read off (`domain/bench.py::BenchPasses` — the origin's pass, sent once per line and reused by every later launch, and the selection's once graded), and the line's cost — every ledger on it folded, one clock per launch. Rewritten at each launch end by the cycle holding the line — the root, or where supersede cuts handed it on — so a rebase that ends the run on a fork keeps the headline; an offshoot runs beside the line and grades nothing. No reading is stored: the head-to-head, the campaign list and the export read the passes through `runner/bench.py::read_bench`. Its own file, not a key of `campaign.json`, because the manifest is frozen and this is rewritten. |
+| `index.json` | per cycle | `pipeline_params`, `cycle_id`, `parent_cycle_id` (branches), `rounds[]`, `final` block (winner + stop_reason + the cycle's own `wall_clock`). A branch's KIND is not stored — `layout.py::sibling_kind` parses it from the id. |
+| `export.json` | per cycle | The winning prompt by field name, the node config it ran under, and the provenance a consumer needs to trust the number (fitness under its named formula, n, lift + CI, θ, the rows' hash, the optimizer manifest) — all the optimizer's own reading, beside `bench`, the deployment estimate on rows it never read, stamped with the `scorer_id` it was read under. Written from the same call that stamps `index.json::final`; absent when no round ever closed. Contract: `domain/export.py`. |
 | `pipeline.resolved.yaml` | per cycle | The declaration this cycle RUNS — the live backend's, under the dataset overlay, as `wiring::_resolve_pipeline_schema` merged it. Written at `init_cycle` and REWRITTEN on every resume, because what the operator is owed is the space the next round will search. It exists because a campaign's committed dataset file deliberately snapshots values and not the backend's `param_keys` (`draft_campaign::merge_pipeline_overlay`), so the served read had every node's settings and none of its axes. Absent until a cycle starts, and the dataset file answers then — which is honest, since no backend has spoken to that campaign yet. |
 | `experiment.resolved.yaml` | per cycle | The panel this cycle MEASURED — the connector's `experiment_file` with everything it only NAMES resolved to what it named, so a Harbor campaign carries the task roster its rounds actually ran rather than a pointer into a registry that can be re-pinned under the same version. Beside the declaration because the two answer one question about different halves: that file is the search SPACE, this is the set of CELLS. **Write-once, the opposite cadence to its neighbour** — a declaration owes the operator what the next round will search, a roster owes what every round already measured, and re-pinning it mid-campaign would change what was measured without changing the campaign's name. A later resolution that disagrees is logged, never written. Read in preference to a live re-resolve wherever a campaign's identity is recomputed (`pipeline_resolve.py::resolve_pipeline_for_campaign`). Absent for a connector that owns no panel. |
+| `bank_partition.json` | per cycle | The partition `CampaignConfig.dataset_split` declares, as ids: the search pool every optimizer draw reads, the bench set the headline is scored on, the demo pool. Rewritten at every run init, since it is a pure function of the bank and the frozen declaration — ids that move between two runs mean the bank changed. `split: null` holds nothing out. Contract: `domain/bench.py`. |
 | `optimized.md` | per cycle | Which of the resolved values the optimizer MOVES, and the channel each reaches the model by — the reading of the declaration beside it that the declaration cannot give, since it names a key and never whether the model will ever see the value. Markdown: its only reader is a person. Same cadence as the declaration. |
 | `log.md` / `review.md` (cycle) | per cycle | Per-cycle digests. Derived views — safe to delete and recompute. |
-| `rounds/round_NNNN.json` | per cycle | Serialized `RoundResult` — the model IS the document (`save_round_file` persists `model_dump()`, `load_round_file` validates it back). Its `opt_search_point` field is the resume source of truth. |
-| `.runtime/ledger.jsonl` | per cycle | Append-only fact stream. Escalation firings ride a `PhaseRecord(phase="escalation", event="rule_fired")` — no separate signals stream. **It is also the only surface that says which optimizer node actually RAN, and what each dispatch panel cost it**: the `llm_call` record carries `prompt_chars` plus `injection_chars` / `injection_dropped` / `injection_silent` (`dispatch/facade.py`). The round document cannot answer either — its `optimizer_prompt_hashes` names every node on every round by construction. |
-| `.runtime/streams/…_p_best.jsonl` | per cycle | Per-sample PoBB snapshots. |
-| `.runtime/cache/rounds\|candidates/` | per cycle | Per-node I/O (l1_generate/critique/score, l2/l3) + pre-scoring candidate checkpoint. |
-
-The most-recent run's live readout (per-sample HIT/MISS, round summaries, SP tables), ANSI-stripped, also mirrors to the repo-root gitignored **`logs/latest.log`** — the headless tail when you're not watching `dashboard.json::current_round`.
+| `readout.log` | per cycle | The live terminal readout (per-sample HIT/MISS, round summaries, SP tables), ANSI-stripped — the headless tail when you're not watching `dashboard.json::current_round`. **One file per cycle, appended per launch**: each launch opens with a `Readout:` line, so why the last one stopped sits directly above it. A fork mid-run moves the mirror to the fork, and the parent's file ends on the line naming it. The repo-root gitignored `logs/latest-readout-path.txt` holds only the newest launch's readout PATH. |
+| `rounds/round_NNNN.json` | per cycle | Serialized `RoundResult` — the model IS the document (`save_round_file` persists `model_dump()`, `load_round_file` validates it back). Its `opt_sp` field is the resume source of truth. |
+| `.runtime/ledger.jsonl` | per cycle | Append-only fact stream. Every decision a node takes rides a `ResumeCheckpointRecord` stamped with that node and a `CheckpointKind` — potter's escalation firings are its `l2_escalation_trigger` / `l3_escalation_trigger` — and no separate signals stream exists. **It is also the only surface that says which optimizer node actually RAN**: every `llm_call` record carries `prompt_chars`, and potter's, which alone composes through dispatch panels, adds what each cost it — `injection_chars` / `injection_dropped` / `injection_silent` (`optimizers/potter/dispatch/facade.py`). The round document cannot answer either — its `optimizer_state.prompt_hashes` names every node on every round by construction. |
+| `.runtime/streams/round_NNNN_{member}.jsonl` | per cycle | Per-sample race standings, one file per eliminator `member`. |
+| `.runtime/cache/rounds\|candidates/` | per cycle | Per-node optimizer I/O + pre-scoring candidate checkpoint. |
 
 Material facts land on disk in human-readable form. Entry points never write campaign artifacts directly — every write rides the per-cycle ledger through two projections (live telemetry + audit). The allowlist is a structural invariant that fails loud; no standing test, see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md).
 
-**Editing optimizer state by hand.** Open `cycles/{cycle_id}/rounds/round_{N:04d}.json` before `resume --from N` and edit; keep the `opt_search_point` block round-trippable through `OptSearchPoint.model_validate`. On resume the cycle replays every prior `round_NNNN.json` in order to rebuild its state — there is no separate write-ahead log.
+**Editing optimizer state by hand.** Open `cycles/{cycle_id}/rounds/round_{N:04d}.json` before `resume --from N` and edit; keep the `opt_sp` block round-trippable through `OptSearchPoint.model_validate`. On resume the cycle replays every prior `round_NNNN.json` in order to rebuild its state — there is no separate write-ahead log.
 
 ## Diagnosing a live or stuck run
 
@@ -154,7 +163,7 @@ Two different facts, and conflating them is the costliest mistake here. **`decla
 
 A live cycle heartbeats its ledger through to `dashboard.json`. If that file goes untouched longer than `RUN_FRESH_S` (`infrastructure/runtime_flags.py`), an active cycle's producer is treated as vanished and the liveness reaper (`application/jobs/reaper.py`) stamps it `terminal` with `producer_vanished`.
 
-**So an await that can outlast `RUN_FRESH_S` and writes nothing MUST heartbeat** (`optimization/dispatch/llm_call/heartbeat.py`) — this obligates every long await, not just LLM calls. The L4 outer cycle heartbeats its own ledger while awaiting each inner run for exactly this reason. The reaper never reaps a paused, check-in or origin-gated cycle.
+**So an await that can outlast `RUN_FRESH_S` and writes nothing MUST heartbeat** (`infrastructure/llm/heartbeat.py`) — this obligates every long await, not just LLM calls. The L4 outer cycle heartbeats its own ledger while awaiting each inner run for exactly this reason. The reaper never reaps a paused, check-in or origin-gated cycle.
 
 ### The `.runtime/` flags
 
@@ -166,13 +175,15 @@ Polled per checkpoint and consumed at the next **sample** boundary — transient
 | `checkin.flag` | The campaign is still authoring its origin. Dropped at skeleton creation, cleared when Start flips `checkin` → `active`. |
 | `sample_lookahead.json` | The operator's *request* that the round hold several calls in flight, for one round — or, with `auto`, until a later press replaces it. What the loop actually ran at is `dashboard.json::sample_lookahead` — never serve the flag as that. |
 | `skip.flag` | Skip the current unit at the next checkpoint. |
-| `spend_cap` | Live `(usd, tokens)` ceilings. |
+| `run_limits` | The polled mirror of the cycle's standing operator `(usd, tokens, rounds)` ceiling, whose record is the ledger's last `RunLimitsRecord`. Swept and re-landed by every launch; `max_rounds: null` is a lifted round cap, an absent key an unmoved one. |
 
 A fresh launch clears every polled run-control flag: a flag surviving the gesture it answered would re-answer the next one. An `auto` look-ahead answered no gesture — it is a mode — so it stays.
 
 ### Where the error text is
 
-A failed cell's typed `error_category` (`shared/errors.py::ErrorCategory`) and its message land in the latest `rounds/round_NNNN.json`, alongside the mirrored `logs/latest.log`. The optimizer-call path carries a hard wall-clock (`_chat_under_deadline` → `OPTIMIZER_TIMEOUT`), so a hung optimizer call terminates itself. **An overnight death with no terminal record is machine-sleep or session-end class, not a code fault** — do not go looking for a bug in the loop.
+A failed cell's typed `error_category` (`shared/errors.py::ErrorCategory`) and its message land in the latest `rounds/round_NNNN.json`, alongside the cycle's `readout.log`. The optimizer-call path carries a hard wall-clock (`_chat_under_deadline` → `OPTIMIZER_TIMEOUT`), so a hung optimizer call terminates itself. **An overnight death with no terminal record is machine-sleep or session-end class, not a code fault** — do not go looking for a bug in the loop.
+
+**A killed run outlives itself in its containers.** A containerized cell is torn down by the process that started it — on cancellation and on failure alike — so only a hard kill leaves one idle container per in-flight cell, holding a trial nobody will collect. The next run on that backend sweeps them, and its trial scratch, off the lock each carries (`connectors/harbor.py::_reap_dead_producers`); what the sweep keeps is the task images and the package cache, which are what make the resume cheap.
 
 ## Recovery: resume, rewind, fork
 
@@ -183,6 +194,8 @@ Three workflows over one fork primitive.
 | **Resume** | `resume` | Pick up from the latest completed round of the active cycle. |
 | **Rewind** | `resume --from N` | Same `cycle_id`; archive rounds after N; resume at N+1. |
 | **Fork on divergence** | `resume --fork-on-divergence` | On divergence — a round produced by a different optimizer, a package that no longer reproduces, or a decision that re-derives differently — mint a sibling cycle rooted at that round and continue. |
+
+**Until an L1 round closes, a resume re-enters round 0.** Every launch re-measures the origin — cached cells replay free, cells never sent or errored are sent — then closes round 0 from that measurement and holds at the origin gate on its verdict. A round-0 file a stopped run left has passed no gate, so no resume reaches round 1 past a partial origin. **One live run per cycle:** a launch targeting a cycle that already has an unfinished job is refused `409 cycle_busy`, naming that job.
 
 ### The primitive
 
@@ -212,7 +225,7 @@ Use when a **data-affecting** edit (scoring formula, `pipeline_overlay`, `exclud
 
 **A supersede retires the parent, on disk, at the cut** — `_mint_fork` stamps it terminal with `StopReason.REBASED` (`campaigns.mark_superseded`, idempotent). The parent stops writing *by design*, and an unstamped deliberate silence is indistinguishable from a crash: cold dashboard ⇒ `detached` ⇒ the reaper stamps `producer_vanished` fifteen minutes later. Resumability is untouched — `finished_at` is a latch and `reopen_for_continuation` clears it. An **`equivalent`** cut moves the pointer the same way and retires nothing.
 
-**After a REPAIR both sides carry the same `candidate_id`** — a repair re-measures, it does not re-mint, so one individual holds two measurements: the corrected one and the one it withdrew, which is what the round was actually steered by. A retired candidate wears **no crown**: it was elected over rows the cut replaced, so `is_winner` is withdrawn until the branch re-elects.
+**After a REPAIR both sides carry the same `candidate_id`** — a repair re-measures, it does not re-mint, so one individual holds two measurements: the corrected one and the one it withdrew, which is what the round was actually steered by. A retired candidate wears **no crown**: it was elected over rows the cut replaced, so `is_selected` is withdrawn until the branch re-elects.
 
 **Policy-only edits** (PoBB knobs, patience, thresholds, `n_variants`, `exploration.*`) can't have changed the data trace, so resume continues in-place and `--fork-on-divergence` is a no-op. Past decisions stay as the audit record of the policy that made them.
 
@@ -228,7 +241,7 @@ Use when a **data-affecting** edit (scoring formula, `pipeline_overlay`, `exclud
 
 **A cached generation records what it read.** Candidates are persisted with `consumed`, the `round_document_digest` of the round they were composed from; on resume that digest is recomputed from disk and compared. Both sides are persisted JSON, so unlike the package differential this reproduces across processes — which is what catches a critique re-distilled by an *earlier* resume, the common case. A cache with no recorded digest is **unvouched**, and unvouched branches too.
 
-A hole is plugged with a **real measurement, never an archive row** — a cached row for that `(node_configs, sample_id)` may have been produced as a PoBB *backfill*, measured out of the round's shared order to fill someone else's paired comparison, and adopting it as this candidate's own panel cell is what makes a repaired round unreproducible. The re-measure bypasses only the outer archive, so the inner spawn still resolves content-addressed and **continues the furthest-along campaign banked for that cell** instead of restarting it.
+A hole is plugged with a **real measurement, never an archive row** — a cached row for that `(node_configs, sample_key)` may have been produced as a PoBB *backfill*, measured out of the round's shared order to fill someone else's paired comparison, and adopting it as this candidate's own panel cell is what makes a repaired round unreproducible. The re-measure bypasses only the outer archive, so the inner spawn still resolves content-addressed and **continues the furthest-along campaign banked for that cell** instead of restarting it.
 
 ### Human in the loop — steer & fork, pause
 
@@ -240,7 +253,7 @@ A hole is plugged with a **real measurement, never an archive row** — a cached
 
 **An inner cycle stops when its owner does.** An L4 inner campaign runs in a child task under its own sandbox, whose pause flag nobody writes; it inherits the outer's pause predicate at the run-control binding seam (`runner/entry.py::_bind_run_controls`) rather than overwriting it. Without that a pause on the outer waited out the whole inner campaign, because one outer *sample* is an entire inner run.
 
-**Make a slow round finish sooner — the look-ahead control.** The remote's **⇉** control runs the round with several calls in flight instead of one — its candidates walk together and decide in turn — cutting its scoring wall clock roughly in proportion. Suggest it whenever someone asks why a round is taking so long; it is the only speed lever needing no config change and no restart. **Every clause of it** — who may press, what one press buys, why the overshot sample is discarded — is owned by [`access-model.md`](access-model.md) § host-admin ↔ user. What this layer must hold is the on-disk half: the operator's *request* is `.runtime/sample_lookahead.json` and what the loop actually ran at is `dashboard.json::sample_lookahead`, never the flag served as that.
+**Make a slow round finish sooner — the look-ahead control.** The remote's **⇉** control runs the round with several calls in flight instead of one — its candidates walk together and decide where a serial round would — cutting its scoring wall clock roughly in proportion. Suggest it whenever someone asks why a round is taking so long; it is the only speed lever needing no config change and no restart. **Every clause of it** — who may press, what one press buys, why the overshot sample is discarded — is owned by [`access-model.md`](access-model.md) § host-admin ↔ user. What this layer must hold is the on-disk half: the operator's *request* is `.runtime/sample_lookahead.json` and what the loop actually ran at is `dashboard.json::sample_lookahead`, never the flag served as that.
 
 ## CLI flags — `new` and `resume`
 
@@ -250,16 +263,16 @@ A hole is plugged with a **real measurement, never an archive row** — a cached
 
 ### Interrupt handling
 
-- **First Ctrl+C** — cancels the in-flight call, banks completed work, declares the cycle `paused` (resumable), exits **130**.
+- **First Ctrl+C** — banks completed work, declares the cycle `paused` (resumable), exits **130**. A sent call is cancelled only where cancelling stops its bill (`Connector.cancel_stops_billing`); elsewhere it lands.
 - **Second Ctrl+C** — force-quits immediately.
 
-After an interrupted run, check for orphan processes. An interrupt mid-round leaves ledger events but no closing `round:complete` — see **Partial rounds** under Rewind for which `--from N` offsets are then admissible.
+An interrupt mid-round leaves ledger events but no closing `round:complete` — see **Partial rounds** under Rewind for which `--from N` offsets are then admissible. Nothing is left running to hunt for: a cancelled cell is torn down by the process it belongs to, and only a hard kill leaves anything, which § Where the error text is covers.
 
 ## Will a config change re-score? — the measurement cache
 
 The single most-asked operating question: *"I edited a connector tunable — will the next run actually re-measure, or replay the old score?"* Four facts answer it. (`configure_and_apply_pipeline` applies `exclude_nodes` + `pipeline_overlay` and returns the `pipeline_params` that flow unchanged through both `new` and `resume`; a `None` result means the backend runs its full pipeline.)
 
-1. **The measurement key includes the connector config, model included.** Per-sample results pool in `measurements/` keyed by `node_configs` — the effective per-node config derived from the overlay-merged `session.pipeline_params`. On a config change at node *N*, the prefix match breaks at *N*: **every sample whose pipeline ran past *N* is re-measured**; only samples that short-circuited upstream replay. So changing `entity_profiling.model` from `120b` to `20b` genuinely re-scores the LLM-path samples.
+1. **The measurement key includes the connector config, model included.** Per-sample results pool in `measurements/` keyed by `node_configs` — the effective per-node config derived from the overlay-merged `session.pipeline_params` — and by the sample's content (`Sample.key`), never its dataset or its position: a sample two datasets share is measured once. On a config change at node *N*, the prefix match breaks at *N*: **every sample whose pipeline ran past *N* is re-measured**; only samples that short-circuited upstream replay. So changing `entity_profiling.model` from `120b` to `20b` genuinely re-scores the LLM-path samples.
 
 2. **A running/resumed campaign uses its FROZEN `CampaignConfig` snapshot.** `campaign.json` owns the config; editing `datasets/{name}/campaign.yaml` or `pipeline.yaml` does **not** change an existing campaign. To apply a connector-config change, mint a fresh `new` — it reads the edited dataset configs, gets a fresh `campaign_id`, and re-scores a new origin. For an *in-place* re-explore after a data-affecting edit, that is `--fork-on-divergence`.
 
@@ -267,9 +280,21 @@ The single most-asked operating question: *"I edited a connector tunable — wil
 
    **Invariant — always key a surface by `(campaign_id, cycle_id)`, never `cycle_id` alone.** A direct consequence of the content-addressed id: two campaigns on the same dataset+config share the **same** root `cycle_id` and differ only in their random `campaign_id`. Every persistence path already resolves as the pair, and the webapp keys its unit map by it, so two same-dataset campaigns render distinctly. Any **new** read/write surface MUST carry the campaign id too; a lookup by bare `cycle_id` would cross-wire siblings.
 
-4. **On L4 the identity inputs are NOT frozen — editing one mid-campaign re-measures the origin.** `connectors/promptpotter.py::_identity_config` fingerprints what the inner optimizer nodes RESOLVE TO (`_inner_optimizer_revision` — each node's prompt body, its resolved response schema, which is prompt text riding every call as `response_format`, and its config), plus the per-node information-flow layouts, **the source deciding what each node is handed** (`injection_source_digest`), **the estimator's own source** (`_measurement_source_digest`), the dataset's whole `inner_tasks.yaml`, and the inner benchmark's `pipeline.yaml` node configs *and* `campaign.yaml` — the worker model and the scoring formula included, since either changes what every cell measures. Both source digests are normalized through the AST, so a comment costs nothing while an expression voids the origin. Fact 2 does not cover these — they are read live, not snapshotted — so an edit lands on the *running* campaign: the banked outer origin stops joining and the next round pays to score it again. **Land config fixes before an origin is measured, never between its rounds.**
+4. **On L4 the identity inputs are NOT frozen — editing one mid-campaign re-measures the origin.** `connectors/promptpotter.py::_identity_config` fingerprints the inner cells' **treatment** (`SelectedOptimizer.treatment()` — each node's prompt body, its resolved response schema, which is prompt text riding every call as `response_format`, and its config; every member's knobs; and **the source deciding what each node is handed**, the runtime's `source_digest` — potter's is `injection_source_digest`, whose hashed set carries its per-node layouts), **the estimator's own source** (`_measurement_source_digest`), and the inner benchmark's `pipeline.yaml` node configs *and* `campaign.yaml` — the worker model and the scoring formula included, since either changes what every cell measures. Both source digests are normalized through the AST, so a comment costs nothing while an expression voids the origin. Fact 2 does not cover these — they are read live, not snapshotted — so an edit lands on the *running* campaign: the banked outer origin stops joining and the next round pays to score it again. **Land config fixes before an origin is measured, never between its rounds.**
 
-   **Deliberately NOT in it, because a corpus that cannot survive them cannot accumulate:** the manifest's non-inner nodes (`checkin`, descriptions, `available_models`) and `APP_VERSION`. The version constant voided every banked cell on every release while saying nothing about whether the measurement had changed.
+   **Deliberately NOT in it, because a corpus that cannot survive them cannot accumulate:** the manifest's non-inner nodes (`checkin`, descriptions, `available_models`), `APP_VERSION`, and the `inner_tasks.yaml` roster — each seat is its own sample's `source_pin`, so adding or editing one re-measures that seat alone. The version constant voided every banked cell on every release while saying nothing about whether the measurement had changed.
+
+### Concurrent walks buy a cell once
+
+Walks in separate processes often score one configuration on one panel at once — several campaigns measuring the same origin, a fork beside its parent. The cell is the replay key, `(node_configs, sample_key)`, and a cell measured once is the row every walk reads; a second measurement is money spent to make headlines disagree, since the backend is not deterministic and a run log keeps the last row per sample. The protocol is `measurement_archive.py::ReplayFeed`, driven by `search_point_scorer.py::_claim_cell`:
+
+1. **Replay rows are read forward.** Before measuring a cell, a walk reads the index entries and run-log bytes banked since its last read (`ReplayFeed.advance`), so a cell another process banked after this walk opened is replayed, not bought.
+2. **A cell is claimed before it is measured** — an OS file lock at `measurements/claims/{cell}.lock` (`ReplayFeed.claim`). A cell another walk holds is waited for, polled, and the wait heartbeats so it never reads as a vanished producer. The wait has sent nothing, so a pause breaks it and every stop cancels it, never waiting out another process's call.
+3. **The row is shared the moment it returns**, as `{cell}.json` beside the lock, and every waiter replays it then. No waiter depends on the holder's walk order, so two walks can never hold each other's cells. Only a row a replay could serve is shared — no error, not deprecated, graded at least `REUSABLE_MIN_GRADE`; otherwise the claim drops and the waiter measures.
+4. **The holder releases once the row is on disk or discarded** — after `Walk.take` persists it, or when `Walk.end` drops it (a look-ahead cell past a cut, a pause, a cell still landing after its walk ended, a catch-up no walk took). The shared row is unlinked before the lock, so a row found under a free lock outlived its holder and the next claimer deletes it — including one a concurrent reader held open, which a release leaves behind rather than fail its walk.
+5. **A crash needs no expiry.** The kernel drops the lock with its process, and the next poll takes the cell over; a live holder is never timed out, however long its cell runs.
+
+A waiter that replayed a row its holder later discarded keeps it: it is a measurement of that cell, and the holder's own run still never records it. **`force_fresh` claims nothing** — repair, `noise-floor` and the origin gate's re-measure measure on purpose — and neither does a configuration with no node configs, which has no cell identity.
 
 ## Changing the composite formula — fork, never swap
 
@@ -281,11 +306,13 @@ Swapping it between rounds would make the composite **incomparable to its own pa
 
 ### Available names
 
-**A `per_cell` formula reads `scoring/formula/compiler.py::objective_namespace`** — the declared channels (`fitness`, `latency`, `cost`, `tokens`, `ground_truth_rank`, the L4 lift family), the three row-health facts (`errored`, `degraded`, `cached`), and whatever else that dataset's own trace carries. **A MASK reads `evaluators.py::_REGISTRY`** plus the per-cell channel means `metrics.py::_MEANED_CHANNELS` folds in, which is what lets one formula be written once and read in both places. Read both there: a table here goes stale in the one direction that costs the operator a name they never learn exists, and this page listed eleven of sixteen for long enough to hide five. Registry entries are gated by `applies(schema)`, so each is present only when the matching node is active.
+**A `per_cell` formula reads `scoring/formula/compiler.py::objective_namespace`** — the declared channels (`fitness`, `latency`, `cost`, `tokens`, `ground_truth_rank`, `target_prompt_chars`, the L4 lift family), the three row-health facts (`errored`, `degraded`, `cached`), and whatever else that dataset's own trace carries. **A MASK reads `evaluators.py::_REGISTRY`** plus the per-cell channel means `metrics.py::_MEANED_CHANNELS` folds in, which is what lets one formula be written once and read in both places. Read both there: a table here goes stale in the one direction that costs the operator a name they never learn exists, and this page listed eleven of sixteen for long enough to hide five. Registry entries are gated by `applies(schema)`, so each is present only when the matching node is active.
 
 Helpers are `scoring/formula/compiler.py::SAFE_BUILTINS`. Output clamped to `[0, 1]`; undefined names raise `NameError` — fail loud is the contract, which is why the name list must come from the registry rather than from prose.
 
-The default composite renders in operator surfaces as `composite=0.6042 (Δ+0.1030 vs parent 0.5012)` per candidate — anchored on the row's matched parent, the same floor the accuracy Δ beside it uses — with the full formula text always in `log.md`.
+**`target_prompt_chars` is a fact about the CANDIDATE, stamped on every one of its cells** — the characters of its prompt template on the node it renders onto, before the sample is interpolated, few-shot block included. A length penalty's normaliser is therefore a **constant written into the formula**, e.g. `fitness - 0.05 * target_prompt_chars / <origin chars>`, the literal being the origin's own reading on its round-0 rows (`evidence --metric 'expr:target_prompt_chars'` on the campaign subject serves it). Never a campaign-bound name: the scorer id hashes the formula text alone, so a reference that varies by campaign would pool two scales under one id on the δ ruler.
+
+The default composite renders in operator surfaces as `composite_fitness=0.6042  (Δ+0.1030 vs reference 0.5012)` per candidate — anchored on the row's matched reference, the same floor the accuracy Δ beside it uses — with the full formula text always in `log.md`.
 
 ## Beta hosting state
 
@@ -294,7 +321,7 @@ Single-operator (auth-off) and hosted-beta (OIDC) share the same on-disk shape. 
 **Per-user quotas (`user.json`)** — one tenant per user, missing file ⇒ defaults, hand-editable, checked on every `mint-campaign` and `start-run`:
 
 ```json
-{ "spend_budget_usd_total": null, "max_concurrent_cycles": 2, "max_campaigns_per_day": 10 }
+{ "spend_budget_usd_total": null, "token_budget_total": null, "max_concurrent_cycles": 2, "max_campaigns_per_day": 1000 }
 ```
 
 **What each knob bounds, and what bounds resource use generally** — owned by [`access-model.md`](access-model.md) § What bounds resource use.

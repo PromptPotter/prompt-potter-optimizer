@@ -1,8 +1,9 @@
 """Ask ONE model which reasoning rungs it honours, and print the `_MODEL_PROFILES` row it supports.
 
-A fenced debug diagnostic like `noise-floor` — no config field, no L1 injection, no ledger event.
-It spends a handful of cheap calls and writes nothing: the profile it prints is committed by a
-human, because that table is evidence and evidence with no author is a cache.
+A fenced debug diagnostic like `noise-floor` — no config field, no L1 injection. It spends a
+handful of cheap calls, billed on the workspace's ledger, and writes nothing else: the profile it
+prints is committed by a human, because that table is evidence and evidence with no author is a
+cache.
 """
 
 from __future__ import annotations
@@ -14,14 +15,21 @@ from promptpotter.application.diagnostics.probe_reasoning import (
     profile_suggestion,
 )
 from promptpotter.config.logging import setup_logging
-from promptpotter.presentation.cli.commands._shared import CommandResult, get_verbose
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.infrastructure.store.stores import build_stores
+from promptpotter.presentation.cli.commands._shared import (
+    CommandResult,
+    get_verbose,
+    identity_from_args,
+)
 
 
 async def cmd_probe_reasoning(args: argparse.Namespace) -> CommandResult:
 
     setup_logging(style="full" if get_verbose() else "cli")
+    stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
 
-    readings = await probe_reasoning(args.model, provider=args.provider)
+    readings = await probe_reasoning(args.model, stores=stores, provider=args.provider)
 
     lines = [
         f"{args.model}  via {args.provider}",

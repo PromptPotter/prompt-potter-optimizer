@@ -29,6 +29,11 @@ from promptpotter.application.evidence.grid import (
     grid_reading,
     levels_by_subject,
 )
+from promptpotter.application.evidence.head_to_head import (
+    HeadToHead,
+    HeadToHeadEntry,
+    head_to_head,
+)
 from promptpotter.application.evidence.metric_catalogue import (
     MEASURAND,
     available_channels,
@@ -47,7 +52,6 @@ from promptpotter.application.evidence.subjects import (
 )
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.scenario import scenario_spine
-from promptpotter.application.scoring.formula import compile_round_scorer
 from promptpotter.application.scoring.formula.compiler import ScoringFormulaError
 from promptpotter.domain.candidate_diff import build_candidate_flat, flatten_sp_summary
 from promptpotter.domain.cycle_paths import CycleHop
@@ -146,6 +150,9 @@ class Evidence(StrictModel):
     # row, so nothing downstream joins two lists on `key`.
     subjects: list[SubjectReading]
     comparability: Comparability
+    # The HEADLINE, read off the result of each campaign an unmasked campaign or course subject
+    # stands for — the held-out bench set, not the search rows everything below pools.
+    head_to_head: HeadToHead | None = None
     # WHICH number everything below is about — the picker's vocabulary, the merged per-subject
     # intervals and every pairwise test, all under one selection. Non-optional: the default always
     # resolves, so there is no state where a chart is drawn under no named metric.
@@ -266,6 +273,7 @@ def subject_evidence(
     """
     wanted: dict[str, SubjectSpec] = {s.key: s for s in specs}
     heads: dict[str, _Head] = {}
+    leaves: dict[str, Stores] = {}
     channels_by_subject: dict[str, dict[str, dict[str, float]]] = {}
     for key, spec in wanted.items():
         resolved = _at(stores, spec)
@@ -279,6 +287,7 @@ def subject_evidence(
         if not channels:
             continue
         heads[key] = head
+        leaves[key] = leaf_stores
         channels_by_subject[key] = channels
 
     # An unmeasured selection is not a metric problem, so it may not be answered as one: two
@@ -351,6 +360,9 @@ def subject_evidence(
         generated_at=utcnow_iso(),
         subjects=rows,
         comparability=comparability(rows),
+        head_to_head=head_to_head(
+            [HeadToHeadEntry(r, leaves[r.key]) for r in _campaign_channels(rows)]
+        ),
         metric=reading,
         unread_subjects=sorted(set(wanted) - set(heads)),
         factors=factors(rows, levels, spec_metric),
@@ -363,6 +375,20 @@ def subject_evidence(
         edits=edits,
         spread=_edit_spread(edits),
     )
+
+
+def _campaign_channels(rows: list[SubjectReading]) -> list[SubjectReading]:
+    """One unmasked row per campaign, oldest first: its campaign subject, else its first course.
+    Either reads the campaign's result, so a second would pair the campaign with itself."""
+    chosen: dict[tuple[str, ...], SubjectReading] = {}
+    for r in rows:
+        if r.kind == "candidate" or r.mask is not None:
+            continue
+        ident = (*(f"{h.campaign_id}/{h.cycle_id}" for h in r.inside), r.campaign_id)
+        if ident not in chosen or (r.kind == "campaign" and chosen[ident].kind != "campaign"):
+            chosen[ident] = r
+    picked = {r.key for r in chosen.values()}
+    return [r for r in rows if r.key in picked]
 
 
 # --- resolving a subject to the rows it stands for ---------------------------------------------
@@ -486,12 +512,16 @@ def _scenario(
     none — so a channel plotted from it plots measurements, under a criterion that would have
     carried a different one of them forward.
     """
-    criterion = compile_round_scorer(spec.lens.removeprefix(LENS_SCORE_PREFIX))
-    record = load_mask_record(stores, spec.campaign_id, spec.samples)
+    try:
+        record = load_mask_record(
+            stores, spec.campaign_id, spec.samples, lens=spec.lens.removeprefix(LENS_SCORE_PREFIX)
+        )
+    except ScoringFormulaError as exc:
+        raise ValueError(f"The lens {spec.lens!r} cannot grade this branch: {exc}") from exc
     cycle = next((c for c in record.cycles if c.cycle_id == spec.cycle_id), None)
     if cycle is None:
         return None
-    steps = scenario_spine(cycle, criterion)
+    steps = scenario_spine(cycle)
     points = [p for s in steps if (p := _point_at(cycle_dir, s.round, candidate_id=s.candidate_id))]
     if not points:
         return None
@@ -533,9 +563,9 @@ def _crowns(cycle_dir: Path) -> dict[int, str]:
     elected at all is absent: neither moved the branch's head, and only the ledger separates
     them from a round that crowned somebody."""
     return {
-        rnd: election.winner_label
+        rnd: election.selected_labels[0]
         for rnd, election in scan_ledger_elections(CycleLayout(cycle_dir).ledger).items()
-        if election.winner_label
+        if election.selected_labels
     }
 
 
@@ -631,7 +661,7 @@ def _winner_chain(
 
 
 def _config_of(point: _ChainPoint) -> dict[str, str]:
-    """One searchpoint as a flat ``key -> rendered value`` map, over the three disjoint keyspaces
+    """One searchpoint as a flat ``key -> rendered value`` map, over the two disjoint keyspaces
     `build_candidate_flat` already owns: ``node.param`` from the RESOLVED config, then the bare
     prompt fields on top.
 
@@ -639,9 +669,9 @@ def _config_of(point: _ChainPoint) -> dict[str, str]:
     two searchpoints from different campaigns share none — lined up on their deltas, a panel
     would show two lists with nothing in common and call it a comparison.
 
-    ``lineage`` is dropped for the reason `results.py::_identity_config` drops it: it is IDENTITY,
-    not configuration, and it differs between any two candidates by construction — carried, it
-    would report a difference on every pair no matter what they were configured with.
+    ``lineage`` is dropped for the reason `connectors/promptpotter.py::_identity_config` drops it:
+    it is IDENTITY, not configuration, and it differs between any two candidates by construction —
+    carried, it would report a difference on every pair no matter what they were configured with.
     """
     entry = point.scores
     fields = {k: v for k, v in (entry.get("prompt_fields") or {}).items() if k != "lineage" and v}
@@ -742,7 +772,7 @@ def _reading_row(
     spend = dash.get("spend")
     # The configuration the cycle ran under IS the arm — its hashes are stamped on round 0
     # precisely so a campaign paused before round 1 still names what it measured.
-    hashes = doc.get("optimizer_prompt_hashes")
+    hashes = (doc.get("optimizer_state") or {}).get("prompt_hashes")
     # `None` on any backend declaring no measurement identity — every campaign shares that absence,
     # so the arm alone is the whole grouping there.
     instrument = instrument_of(doc.get("pipeline_params"))

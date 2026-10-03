@@ -15,10 +15,7 @@ function ProvenanceBadge({ tag }: { tag: ProvenanceTag }) {
   );
 }
 
-// The required tier: pick which uploaded header is the input and which is the
-// target. Selecting a column confirms it (rides `edit-draft-campaign` with
-// `column_query` / `column_ground_truth`) — no separate Apply click, since
-// the pick *is* the confirmation.
+// Picks the input and target headers. The pick IS the confirmation — there is no Apply.
 export function ColumnMappingPicker({
   draft,
   onApply,

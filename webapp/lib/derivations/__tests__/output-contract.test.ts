@@ -2,9 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { NodeOutputSchema } from "@/lib/api";
 import { outputContract } from "../output-contract";
 
-// The fixture is `l1_generate`'s served schema, trimmed to the shapes that decide the walk:
-// a `$ref` behind an array, a Pydantic `anyOf … null` optional, a map-valued object, a
-// `maxLength`, and a `required` list that names one of six.
+// `l1_generate`'s served schema, trimmed to the shapes that decide the walk.
 const L1_GENERATE: NodeOutputSchema = {
   fields: ["variants"],
   field_descriptions: {},

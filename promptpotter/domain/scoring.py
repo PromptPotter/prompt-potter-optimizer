@@ -6,10 +6,10 @@ from __future__ import annotations
 import ast
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import Annotated, Any, NamedTuple, NotRequired, TypedDict, cast
+from typing import Annotated, Any, Literal, NamedTuple, NotRequired, TypedDict, cast
 
 from promptpotter.config.settings import ANSWER_SPACE_CAP, NO_RESULT
-from promptpotter.shared.errors import ErrorCategory, is_error_result
+from promptpotter.shared.errors import ErrorCategory, is_charged_error, is_error_result
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
@@ -105,8 +105,8 @@ class LedgerPipelineData(TypedDict, total=False):
 
 class PipelineData(LedgerPipelineData, total=False):
     """What the backend returned BESIDE the ledger half. It is on disk twice already, from the
-    same objects and never from a ledger record: the ``MeasurementArchive`` row keyed
-    ``(dataset_name, node_configs, sample_id)``, and ``rounds/round_NNNN.json::results[]`` +
+    same objects and never from a ledger record: the ``MeasurementArchive`` row addressed by
+    ``(node_configs, sample_key)``, and ``rounds/round_NNNN.json::results[]`` +
     ``::all_candidate_results{}``. The reasoning trace and the resolved params are the bulk of it,
     and the panels that cite them (``dispatch/injections/panels.py``) read the in-memory
     ``InjectionBundle.trajectory_results``, never a ledger record."""
@@ -119,13 +119,18 @@ class PipelineData(LedgerPipelineData, total=False):
     # ``result_ranking`` was derived from; both may be absent for non-ranking pipelines.
     final_ranking: list[dict[str, Any]]
     pipeline_params: dict[str, Any]
-    # The task model's chain-of-thought, head-capped at the backend. The critique tier reads
-    # it to diagnose WHERE a deduction broke, off the in-memory trajectory.
+    # Everything the target produced BESIDES its answer — hidden reasoning, a structured
+    # response's other slots, an agent's decisions — whatever the shape (pipeline, loop, LLM,
+    # agent, skill). The critique tier reads it to diagnose WHERE a deduction broke; a connector
+    # that forwards less leaves the critique quoting the input instead.
     reasoning_trace: str
     # The cell's conversation, beside `reasoning_trace` rather than instead of it: the trace is one
     # prose blob every backend composes, this is the record a judge segments by step. Absent means
     # "this backend has no turn concept"; `[]` would mean "it had none", and only one is ever true.
     turns: list[TurnRecord]
+    # A verifier-graded cell's one-line account of its grade in the environment's own words — the
+    # failed check. Absent where it gave none.
+    outcome_note: str
     # Where a cell's WALL CLOCK went, inside the one node that produced it. ``step_timings`` keys
     # by node and is what ``recorded_cost_s`` sums, so it cannot also carry sub-node structure
     # without double-counting the cell against itself; this is that structure, and it is summed by
@@ -134,6 +139,9 @@ class PipelineData(LedgerPipelineData, total=False):
     # grades the machine. Absent means the backend reports no phases; ``{}`` would mean it
     # reported none, and only one of those is ever true.
     step_phases: dict[str, float]
+    # Characters of the candidate's prompt template, stamped at `measure_sample` BEFORE a sample
+    # is interpolated: one number per candidate, which the archive key covers, so a replay is right.
+    target_prompt_chars: int
     # The SE beside ``mean_round_delta`` is this arm's OWN half of a paired cell difference — the
     # shared origin level is excluded because it cancels in that difference (`domain/l4/proxies.py`).
     mean_parent_level_se: float
@@ -153,10 +161,12 @@ class PipelineData(LedgerPipelineData, total=False):
 
 class QueryMeasurement(TypedDict):
     """``fitness`` and ``objective`` are the active-scorer projections written only by
-    ``rescore_results`` — a fresh trace has neither. ``sample_id`` is a foreign key to
-    ``Sample.id``, stable across campaigns."""
+    ``rescore_results`` — a fresh trace has neither. ``sample_id`` is the cell's POSITION in the
+    dataset that measured it; ``sample_key`` is what the cell IS (``Sample.key``), and the only one
+    of the two that replay matches on."""
 
     sample_id: int
+    sample_key: str
     query: str
     ground_truth: str
     predicted: str
@@ -175,9 +185,8 @@ class QueryMeasurement(TypedDict):
     error_category: NotRequired[ErrorCategory | None]
     # The measurement LANDED and the active formula cannot grade it — a third state beside scored
     # and errored, carrying the missing term's own message. Presence IS the state; ``fitness`` and
-    # ``objective`` are then absent, which is what keeps a stale archived verdict from reading as
-    # this formula's. Never an error: the backend answered and the row is worth keeping, so it must
-    # not reach the walk's abort classifier (`query_loop.py::Walk._abort_reason`).
+    # ``objective`` are then absent. Never an error: the backend answered and the row is worth
+    # keeping, so it must not reach the walk's abort classifier (`query_loop.py::Walk._abort_reason`).
     unscored: NotRequired[str]
     pipeline_data: PipelineData | None
     # ---- Stamped after measurement, by the scorer and the walk -------------------
@@ -189,13 +198,18 @@ class QueryMeasurement(TypedDict):
     # The candidate's composite over samples-so-far, attached for the ledger path only
     # (``query_loop._with_running``) so a file-tree or chat reader watches it converge.
     _running: NotRequired[dict[str, Any]]
+    # The archive run the row lands in, attached beside ``_running`` on the ledger copy only — the
+    # archived row is filed under its run already, so it never carries its own address.
+    run_id: NotRequired[str]
+    # The cell it measured (``ReplayFeed.cell_key``), on the ledger copy only: the spend meter
+    # prices a cell once per campaign, and a launch reads which ones off these.
+    cell_key: NotRequired[str]
     # The stale-data ladder's per-sample verdicts. Each renders one annotation under the
     # HIT/MISS line (``terminal/live/sample.py``) and nothing else reads them, so they are the
     # ladder's only report: a dropped flag makes a re-measurement look like a plain score.
     retry_of_deprecated_cache: NotRequired[bool]
     retry_of_degraded: NotRequired[bool]
     rerun_comparison: NotRequired[dict[str, Any]]
-    samplescan_resolved: NotRequired[bool]
     switched_out: NotRequired[bool]
     config_fundamental_skip: NotRequired[bool]
     persistently_degraded: NotRequired[bool]
@@ -221,6 +235,16 @@ _PIPELINE_KEYS: frozenset[str] = frozenset(
 )
 
 
+GRADE_KEYS: frozenset[str] = frozenset({"fitness", "objective", "unscored"})
+"""What ``rescore_results`` stamps: one formula's reading of a row, never a fact about it. An
+in-memory row carries them for the round's own use; ``MeasurementArchive`` persists none."""
+
+
+def measured_facts(row: Mapping[str, object]) -> dict[str, object]:
+    """*row* without its grades — the only shape the archive writes."""
+    return {k: v for k, v in row.items() if k not in GRADE_KEYS}
+
+
 # -- what an archive row may lose ---------------------------------------------
 #
 # `application/maintenance/archive_maintenance.py` moves these into the cold store; they live HERE
@@ -236,12 +260,6 @@ _PIPELINE_KEYS: frozenset[str] = frozenset(
 # "this backend does not say" about a fact the row is carrying one level down. `input_tokens` /
 # `output_tokens` sat here exactly that way, read by four surfaces. A row's counts come from
 # `domain/spend.py::TokenAccount.from_step_tokens`; declare no twin beside `step_tokens`.
-
-UNREAD_ROW_KEYS: frozenset[str] = frozenset({"objective"})
-"""Declared, written, and read by nothing.
-
-Archive rows are RE-GRADED by the reading campaign's scorer (`intelligence/hard_sample_archive.py`
-builds its observations through `CellScorer.objective`), so a STORED verdict is never consulted."""
 
 ABANDONED_ROW_KEYS: frozenset[str] = frozenset({"hit", "scored"})
 """On disk in quantity, declared by nothing, and written by no code path in this tree.
@@ -267,11 +285,10 @@ a total after the fact, and re-measuring an agent episode to get one costs what 
 
 **A ranking may not be moved.** The `candidate_recall` / `source_recall` evaluators walk
 `final_ranking` / `candidate_ranking` for GT membership, and a row cannot tell a MOVED key from a
-ranker that legitimately returned nothing — so a compacted row scores a real miss, the denominator
-(`terminal_node` / `step_timings`) survives compaction intact, and the fabricated rate is banked as
-`index.jsonl::scores` and re-read by any `score:` lens."""
+ranker that legitimately returned nothing — so a compacted row grades as a real miss on every
+read, while the denominator (`terminal_node` / `step_timings`) survives compaction intact."""
 
-assert UNREAD_ROW_KEYS <= _ROW_KEYS, "an unread key must be one QueryMeasurement declares"
+assert GRADE_KEYS <= _ROW_KEYS, "a grade key must be one QueryMeasurement declares"
 assert not (ABANDONED_ROW_KEYS & _ROW_KEYS), "an abandoned key that got declared is no longer one"
 assert UNREAD_PIPELINE_KEYS <= _PIPELINE_KEYS, "an unread key must be one PipelineData declares"
 
@@ -306,9 +323,9 @@ class CellScorer(NamedTuple):
     objective: Callable[[dict[str, Any]], float]
 
 
-# The MASK's evaluator, over a round's stored per-round evaluator map. A read-side counterfactual,
-# so it stays per-round: the record it reads may no longer have the rows.
-RoundScorer = Callable[[dict[str, float]], float]
+# Which of a row's two :class:`CellScorer` numbers a per-cell fold reads.
+CellGrade = Literal["fitness", "objective"]
+
 
 DEFAULT_SCORER_ID = "default_hit"
 
@@ -336,12 +353,23 @@ def is_unscored(result: Mapping[str, object]) -> bool:
     """Whether the active formula could not grade a measurement that LANDED — the sibling of
     :func:`~promptpotter.shared.errors.is_error_result`, where the backend never answered.
 
-    **The one place that fact is asked**, on the ``unscored`` channel that
-    ``rescore_results`` owns. Ask this, never ``"fitness" not in row``: a row arrives at the
-    scorer carrying an archived verdict from whatever formula was active when it was banked
-    (``query_loop.py::_materialize_cached`` copies the row whole), so the key's presence answers
-    a question about some earlier campaign."""
+    **The one place that fact is asked**, on the ``unscored`` channel that ``rescore_results``
+    owns. Ask this, never ``"fitness" not in row``: an ungraded row lacks the key too."""
     return bool(result.get("unscored"))
+
+
+@shapes_optimizer_prompt
+def is_graded(result: Mapping[str, object]) -> bool:
+    """Whether a row carries a verdict — every reading's ONE population, optimizer and bench alike.
+    A refusal or a truncation is a miss the formula graded, and an error the configuration caused
+    is a miss at ``rescore_results``' 0.0 wherever a label defines one; the rest carry none."""
+    if is_unscored(result):
+        return False
+    if not is_error_result(result):
+        return True
+    return is_charged_error(result) and not is_verifier_graded(
+        str(result.get("ground_truth") or "")
+    )
 
 
 def recorded_elapsed_s(result: QueryMeasurement) -> float | None:
@@ -355,6 +383,17 @@ def recorded_elapsed_s(result: QueryMeasurement) -> float | None:
     pd = result.get("pipeline_data") or {}
     total = pd.get("total_time")
     return float(total) if isinstance(total, int | float) else None
+
+
+def shown_seconds(result: QueryMeasurement, *, cached: bool) -> float | None:
+    """The seconds a per-row CLOCK COLUMN shows — one rule, so no two readouts of a row disagree.
+
+    A replay occupied no clock, so its elapsed reading is a true ``0.0`` and the number the
+    operator needs is what the cell took when it was MEASURED, which ``step_timings`` carries
+    through the cache stamp. ``DashboardSample.shown_s`` mirrors this on the served shape and
+    ``webapp/lib/derivations/sample-clock.ts`` holds the browser's peer spelling — one per
+    runtime, never one per renderer."""
+    return recorded_cost_s(result) if cached else recorded_elapsed_s(result)
 
 
 def recorded_cost_s(result: QueryMeasurement) -> float | None:
@@ -538,21 +577,23 @@ def is_answer_collapsed(rows: Sequence[Mapping[str, Any]]) -> bool:
 __all__ = [
     "ABANDONED_ROW_KEYS",
     "DEFAULT_SCORER_ID",
+    "GRADE_KEYS",
     "HIT_THRESHOLD",
     "UNREAD_PIPELINE_KEYS",
-    "UNREAD_ROW_KEYS",
+    "CellGrade",
     "CellScorer",
     "PipelineData",
     "QueryMeasurement",
-    "RoundScorer",
     "ScoringSpec",
     "TurnRecord",
     "all_verifier_graded",
     "enumerable_truth_labels",
     "is_answer_collapsed",
+    "is_graded",
     "is_hit",
     "is_unscored",
     "is_verifier_graded",
     "ledger_sample_view",
+    "measured_facts",
     "modal_answer_share",
 ]

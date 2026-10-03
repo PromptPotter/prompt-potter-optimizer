@@ -7,27 +7,8 @@ import { useCandidatesState } from "@/components/candidates/candidates-store";
 import { ScoringInspector } from "@/components/dashboard/scoring/ScoringInspector";
 import { useSelection } from "@/lib/SelectionContext";
 
-// The Now lane: the Optimizer card (round axis + pipeline canvas) and the
-// Candidates card (bars + genealogy) share one row, optimizer first — you read
-// what the loop is DOING, then what it PRODUCED. Both size to their content, so
-// the row wraps on its own: the moment Candidates needs the full band (Forest
-// view, or the scoring mask opening its second column), it drops to the next line instead
-// of squeezing the optimizer. No breakpoint decides that; the content does.
-//
-// The drill-downs then stack full-width below: the Scoring inspector when a
-// candidate is selected, the node panel when a node is — EITHER canvas's, since
-// `NodeDetail` is one panel for both scopes and the tab a node was clicked on no
-// longer decides whether it opens. The per-round samples view is not a standalone
-// card either — it is the RUN half of a measurement node's panel (`MeasurementRun`),
-// which is why it draws no frame and no round heading of its own.
-//
-// Every region reads its own state from context (`useDashboard`,
-// `useWorkspace`, `useSelection`); the only thing threaded is `pipeline` (a
-// one-shot topology read with no context home). A click in any one surface
-// re-anchors the others through `useSelection`: picking a candidate moves the
-// round axis, so the Optimizer card follows to the round that PRODUCED it. The
-// lineage fetch + its mask/lens divergence overlay are owned by
-// `LineageProvider` at the shell root.
+// The Now lane: Optimizer then Candidates card on one wrapping row, drill-downs full-width below.
+// Regions read their own context; only `pipeline` is threaded (it has no context home).
 
 interface Props {
   pipeline: PipelineDoc | null;
@@ -43,10 +24,7 @@ export function NowTriad({ pipeline }: Props) {
         <OptimizerCard pipeline={pipeline} />
         <CandidatesCard />
       </div>
-      {/* The lineage forest is its OWN card, opened by the toggle beside the
-          dendrogram. It shares no axis with the bars — it is a cladogram of
-          CYCLES on its own round-column grid — so it gets its own box and its
-          own width rather than being bound to the chart's geometry. */}
+      {/* Its own card: the forest shares no axis with the bars. */}
       {showForest && <ForestCard />}
       {candidate && (
         <div className="card inspector-card">
@@ -56,8 +34,7 @@ export function NowTriad({ pipeline }: Props) {
           />
         </div>
       )}
-      {/* Either scope: the panel is the node's, not the tab's. A target node picked
-          on the chat hero stays open when the operator crosses to Dashboard. */}
+      {/* Either scope: the panel is the node's, not the tab's. */}
       {node && (
         <NodeDetail node={node} onClose={() => setSelectionForNode(null)} />
       )}

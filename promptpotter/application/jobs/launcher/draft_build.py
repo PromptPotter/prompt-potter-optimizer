@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter import connectors
-from promptpotter.application.campaign_config import CampaignConfig, freeze_campaign_config
+from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     default_campaign_config,
@@ -76,10 +76,7 @@ def _draft_pipeline_render(draft: DraftCampaign, workspace: Path | None) -> dict
 
     It COMPUTES nothing: ``resolve_pipeline_for_draft`` is the same function
     ``GET /campaigns/{id}/pipeline`` serves for a check-in, so the ingest surface and the campaign
-    route cannot answer differently about the draft between them. It used to parse and narrow the
-    manifest itself, which meant every ingest row came back ``source: "unset"`` with no merge
-    behind it, and the operator's own narrowing reached the editor only through a browser-side
-    derivation."""
+    route cannot answer differently about the draft between them."""
     resolution = resolve_pipeline_for_draft(
         draft,
         campaign_id=draft.draft_id,
@@ -135,9 +132,10 @@ def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
     rename cannot make the file unreadable — which matters because ``CampaignConfig`` forbids extras.
 
     The node overlay is deliberately NOT folded in here: the mint splits it onto the per-campaign
-    snapshot at launch (``_campaign_config_for_launch``), which is what leaves a REUSED dataset's
+    snapshot at launch (``build_cycle_config``), which is what leaves a REUSED dataset's
     shared file untouched."""
-    return {"campaign_config": freeze_campaign_config(default_campaign_config(draft))}
+    config = default_campaign_config(draft)
+    return {"campaign_config": config.model_dump(mode="json", exclude_defaults=True)}
 
 
 def _build_task_context(draft: DraftCampaign) -> dict[str, Any]:

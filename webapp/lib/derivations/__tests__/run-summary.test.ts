@@ -6,7 +6,16 @@ describe("runSummary", () => {
   const finished = dash({
     cycle_id: "cycle_9",
     stop_reason: "lives_exhausted",
-    ability_delta: 0.41,
+    bench_score: {
+      bench_size: 10,
+      scorer_id: "default_hit",
+      origin: null,
+      selected: null,
+      missing_reason: null,
+      lift: 0.12,
+      lift_ci_lo: 0.02,
+      lift_ci_hi: 0.22,
+    },
     rounds: [
       summaryRound({
         round: 0,
@@ -15,7 +24,7 @@ describe("runSummary", () => {
             candidate_id: "c0",
             label: servedLabel(0, 0),
             accuracy: 0.62,
-            is_winner: true,
+            is_selected: true,
           }),
         ],
       }),
@@ -29,9 +38,9 @@ describe("runSummary", () => {
             candidate_id: "b",
             label: servedLabel(2, 1),
             accuracy: 0.74,
-            matched_parent_accuracy: 0.6,
+            reference_accuracy: 0.6,
             changes_description: "step-by-step thinking style",
-            is_winner: true,
+            is_selected: true,
           }),
         ],
       }),
@@ -51,9 +60,9 @@ describe("runSummary", () => {
     expect(runSummary(finished)?.rounds).toBe(2);
   });
 
-  it("carries the SERVED lift and stop reason verbatim", () => {
+  it("carries the SERVED bench lift and stop reason verbatim", () => {
     const s = runSummary(finished);
-    expect(s?.abilityDelta).toBe(0.41);
+    expect(s?.benchLift).toBe(0.12);
     expect(s?.stopReason).toBe("lives_exhausted");
     expect(s?.cycleId).toBe("cycle_9");
   });
@@ -64,7 +73,7 @@ describe("runSummary", () => {
         rounds: [
           summaryRound({
             round: 1,
-            candidates: [summaryCandidate({ candidate_id: "x", accuracy: 0.5, is_winner: true })],
+            candidates: [summaryCandidate({ candidate_id: "x", accuracy: 0.5, is_selected: true })],
           }),
         ],
       }),
@@ -81,6 +90,7 @@ describe("runSummary", () => {
       candidates: 2,
       improved: null,
       verdictReason: null,
+      facts: [],
     });
     const lost = runSummary(
       dash({
@@ -88,7 +98,7 @@ describe("runSummary", () => {
           summaryRound({
             round: 0,
             candidates: [
-              summaryCandidate({ candidate_id: "c0", label: servedLabel(0, 0), is_winner: true }),
+              summaryCandidate({ candidate_id: "c0", label: servedLabel(0, 0), is_selected: true }),
             ],
           }),
           summaryRound({
@@ -107,6 +117,7 @@ describe("runSummary", () => {
       candidates: 2,
       improved: false,
       verdictReason: null,
+      facts: [],
     });
     // …and the champion correctly walks back to the origin, which is the pairing the
     // surface has to render as one sentence.

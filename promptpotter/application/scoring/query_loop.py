@@ -1,17 +1,16 @@
 """The scoring walk — one search point's pass over its panel — and :func:`run_walks`, the one loop
 that drives every walk of a scoring phase: prior-cache reuse, stale-data recovery, error
 classification into an abort reason, look-ahead within the armed depth, and decisions in walk
-order. The gateway turns a decided walk into the archived run."""
+order or at a block race's closes. The gateway turns a decided walk into the archived run."""
 
 from __future__ import annotations
 
 import asyncio
 import contextvars
 import logging
-import re
 import sys
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
@@ -22,48 +21,52 @@ from promptpotter.application.scoring.sample_measurement import (
     cell_bound,
     emit_replayed_step_tokens,
     measure_sample,
+    needs_rerun,
 )
 from promptpotter.application.scoring.sample_measurement import (
     execute_stale_data_protocol as _execute_stale_data_protocol,
 )
-from promptpotter.domain.escalation_signals import EscalationSignal
+from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.phases import (
+    REFUSAL_STOPS,
     STOP_REASON_INFO,
-    WALLET_STOPS,
     RunPhase,
     StopLoop,
     StopReason,
 )
-from promptpotter.domain.scoring import CellScorer, QueryMeasurement, is_hit
+from promptpotter.domain.scoring import CellScorer, QueryMeasurement
 from promptpotter.domain.spend import StepTokenUsage
-from promptpotter.domain.validators import StopRule
-from promptpotter.infrastructure.llm.spend_book import SendBound, bound_spend_book
+from promptpotter.domain.validators import StopRule, StopSignal
+from promptpotter.infrastructure.llm.spend_book import (
+    CallLabel,
+    SendBound,
+    bound_spend_book,
+    filed,
+)
 from promptpotter.infrastructure.runtime_flags import effective_lookahead
 from promptpotter.shared.errors import (
     ErrorCategory,
-    WalletExhaustedError,
+    SendRefusedError,
     error_category,
     graceful,
     is_error_result,
 )
-from promptpotter.shared.errors import (
-    has_pipeline_warnings as _has_pipeline_warnings,
-)
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.intelligence.indexes.axis import AxisIndex
+    from promptpotter.application.intelligence.indexes.sample import SampleIndex
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
+    from promptpotter.infrastructure.store.measurement_archive import CellClaim
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CatchUps", "Flight", "FlightGauge", "QueryLoopResult", "Walk", "run_walks"]
+__all__ = ["BlockRace", "CatchUps", "Flight", "FlightGauge", "QueryLoopResult", "Walk", "run_walks"]
 
 
 # The stops that still wait out the calls already sent — see :func:`run_walks`.
 _BUDGET_STOPS = frozenset({StopReason.SPEND_BUDGET, StopReason.TOKEN_BUDGET})
-_CEILINGS = frozenset(category for category, stop in WALLET_STOPS.items() if stop in _BUDGET_STOPS)
+_CEILINGS = frozenset(category for category, stop in REFUSAL_STOPS.items() if stop in _BUDGET_STOPS)
 
 
 def _dearest(bounds: Sequence[SendBound | None]) -> SendBound | None:
@@ -88,7 +91,7 @@ runaway backend shouldn't burn the round's compute budget."""
 # The cell categories whose cause every later cell shares, so one halts the walk.
 _WALK_STOPS: dict[ErrorCategory, StopReason] = {
     ErrorCategory.CONNECTION: StopReason.BACKEND_UNREACHABLE,
-    **WALLET_STOPS,
+    **REFUSAL_STOPS,
 }
 
 # How many calls a round may hold in flight is the BACKEND's to declare
@@ -115,16 +118,35 @@ class CatchUps(Protocol):
     def discard_backfills(self) -> None: ...
 
 
+class BlockRace(Protocol):
+    """A race that decides its walks together: every live walk takes a block of ``block_size``
+    cells, then ``close`` reads all their rows and names the walks it stops, by walk index."""
+
+    @property
+    def block_size(self) -> int: ...
+
+    def close(self, rows: Mapping[int, list[QueryMeasurement]]) -> Mapping[int, StopSignal]: ...
+
+
 @dataclass(frozen=True)
 class Flight:
     """Calls out, calls the stop rules allow out now, and the most that could ever be out.
     ``waiting`` is the call a DECISION is held on — ``(sample_id, launched_at)`` — because in-order
-    absorption lets one slow call stall a round whose other calls are all back."""
+    absorption lets one slow call stall a round whose other calls are all back. ``backpressure`` is
+    the provider holding calls that are out but not yet sent."""
 
     out: int = 0
     allowed: int = 0
     most: int = 0
     waiting: tuple[int, float] | None = None
+    backpressure: BackpressureReading | None = None
+    # How many MORE cells the spend ceiling admits beside those out, and what one cell reserves.
+    # ``None`` where no book bounds the cells. The depth can be armed, the stop rules can allow a
+    # dozen, and this can still be 0: a cell reserves its WORST case, so a ceiling only a few of
+    # those wide holds the walk at one call with every other reading saying otherwise — which is
+    # what it did, unreported, for a whole campaign.
+    affordable: int | None = None
+    cell_usd: float | None = None
 
 
 class FlightGauge:
@@ -168,47 +190,40 @@ class FlightGauge:
 class QueryLoopResult:
     results: list[QueryMeasurement]
     completed: bool = True
-    # "skip" (operator early-abort: accept partial, cycle continues) | "escalation" | abort reason.
+    # "skip" (operator early-abort: accept partial, cycle continues) | "stop_rule" | abort reason.
     # A pause or a budget stop is raised, never returned.
     stop_reason: str | None = None
-    escalation_signal: EscalationSignal | None = None
+    stop_signal: StopSignal | None = None
 
 
-_BOLD_MARKER_RE = re.compile(r"\*\*[^*]+\*\*")
-
-
-def _with_running(result: QueryMeasurement, running: dict[str, Any]) -> QueryMeasurement:
-    """A shallow copy carrying the candidate's running fitness — a transient projection hint for the live dashboard. The
-    persisted results keep the clean result, not this copy."""
+def _with_running(
+    result: QueryMeasurement, running: dict[str, Any], run_id: str, cell: str | None
+) -> QueryMeasurement:
+    """A shallow copy carrying the candidate's running fitness, the archive run the row lands in and
+    the cell it measured — the ledger's copy. The persisted results keep the clean result, not this
+    copy: an archived row is already filed under its run."""
     out = dict(result)
     out["_running"] = running
+    out["run_id"] = run_id
+    if cell is not None:
+        out["cell_key"] = cell
     return cast(QueryMeasurement, out)
 
 
-def _materialize_cached(item: QueryMeasurement, scorer: CellScorer) -> QueryMeasurement:
-    """Mark prior as cached + rescored; warn on hit/no-hit drift unless explained by bold-strip."""
-    # Deliberately BINARY, on the archived vs rescored verdict rather than the graded fitness:
-    # a float comparison fires per sample on every formula tweak, and this warning is calibrated
-    # for one known-benign cause. ``fitness is None`` is never-scored, distinct from a 0.0.
-    archived_fitness = item.get("fitness")
+def _materialize_cached(item: QueryMeasurement) -> QueryMeasurement:
+    """A banked row as a replay: flagged cached, and its elapsed clock zeroed — nothing was spent."""
     r: dict[str, Any] = {**item, "cached": True}
     pd = r.get("pipeline_data")
     if isinstance(pd, dict):
         r["pipeline_data"] = {**pd, "total_time": 0.0}
-    rescore_results([r], scorer)
-    archived_hit = is_hit(archived_fitness)
-    rescored_hit = is_hit(r.get("fitness"))
-    if archived_fitness is not None and archived_hit != rescored_hit:
-        predicted = r.get("predicted") or ""
-        if not _BOLD_MARKER_RE.search(predicted):
-            logger.warning(
-                "Cache rescore drift on %r: archived hit=%s → rescored hit=%s. "
-                "Policy divergence — not explained by bold-wrapper strip.",
-                (r.get("query") or "")[:60],
-                archived_hit,
-                rescored_hit,
-            )
     return cast(QueryMeasurement, r)
+
+
+def _graded(row: QueryMeasurement, scorer: CellScorer) -> QueryMeasurement:
+    """Every row the walk holds, fresh or replayed, is graded HERE under the run's own scorer. A
+    ``ScoringFormulaError`` is a formula contract bug and halts the run; it never becomes a row."""
+    rescore_results([cast("dict[str, Any]", row)], scorer)
+    return row
 
 
 def _emit_cached_step_tokens(row: QueryMeasurement) -> None:
@@ -234,9 +249,12 @@ class QueryLoopState:
 
     search_point: JobSearchPoint
     session: Session
+    # The archive run this walk's rows land in — half of every cell's address ``(run_id,
+    # sample_id)``, stamped onto the live copy so a surface can open the cell before the round closes.
+    run_id: str
     cached_sample_results: dict[int, QueryMeasurement]
     on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None
-    axes: AxisIndex | None
+    sample_index: SampleIndex | None
     scorer: CellScorer  # narrowed from session.scoring.scorer (asserted non-None on construction)
     # The cached entry itself, so display can show the original DEPR row before the retry row.
     deprecated_samples: dict[int, QueryMeasurement]
@@ -252,6 +270,19 @@ class QueryLoopState:
     record_run: Callable[[list[QueryMeasurement], dict[str, Any]], None]
     # Keeps rows the walk has back and has not taken, beside the rows it has, for a resumption.
     bank: Callable[[list[QueryMeasurement], list[QueryMeasurement]], None]
+    # A cell no prior covers: the row another walk banked or is measuring, else this walk's hold on
+    # it. ``None`` where nothing is archived or the walk re-measures on purpose.
+    claim_cell: (
+        Callable[[Sample], Awaitable[tuple[QueryMeasurement | None, CellClaim | None]]] | None
+    )
+    # Each sample's cell (`ReplayFeed.cell_key`); empty where nothing is archived to replay.
+    cell_keys: Mapping[int, str]
+    # The campaign's priced cells (`SessionState.counted_cells`), shared by every walk and grown
+    # as each takes one, so a replay is metered the first time the campaign reads that cell only.
+    counted: set[str]
+    # The replays already priced when the walk opened: none waits on the ceiling and no spend stop
+    # lands on one.
+    rereads: frozenset[int]
 
 
 def _armed_cells(session: Session) -> int:
@@ -280,7 +311,7 @@ async def _maybe_recover_degraded(
     ctx: QueryLoopState,
 ) -> QueryMeasurement:
 
-    if not _has_pipeline_warnings(result):
+    if not needs_rerun(result):
         return result
     recovered, _step = await _execute_stale_data_protocol(
         list(STALE_DATA_LOAD_PROTOCOL),
@@ -288,7 +319,7 @@ async def _maybe_recover_degraded(
         cast(dict[str, Any], result),
         ctx.session,
         pipeline_params=ctx.search_point.pipeline_params,
-        axes=ctx.axes,
+        sample_index=ctx.sample_index,
     )
     return cast(QueryMeasurement, recovered)
 
@@ -303,6 +334,8 @@ class _Acquired:
     result: QueryMeasurement
     fresh: bool  # False ⇒ replayed from the prior cache (no ``persist_fresh``)
     deprecated_display: QueryMeasurement | None = None
+    # Held until the row is on disk or discarded, so no other walk measures the cell meanwhile.
+    claim: CellClaim | None = None
 
 
 def _returned_row(cell: asyncio.Task[_Acquired]) -> QueryMeasurement | None:
@@ -311,41 +344,60 @@ def _returned_row(cell: asyncio.Task[_Acquired]) -> QueryMeasurement | None:
     return cell.result().result
 
 
+def _release_claim(cell: asyncio.Task[_Acquired]) -> None:
+    returned = cell.done() and not cell.cancelled() and cell.exception() is None
+    if returned and (claim := cell.result().claim) is not None:
+        claim.release()
+
+
 def _quiet(call: asyncio.Future[Any]) -> None:
     # Retrieved, so a discarded call's own failure is not reported as unhandled.
     if not call.cancelled():
         call.exception()
 
 
-async def _acquire(sample: Sample, idx: int, ctx: QueryLoopState) -> _Acquired:
+async def _acquire(sample: Sample, idx: int, ctx: QueryLoopState, claiming: set[int]) -> _Acquired:
     cached = ctx.cached_sample_results.get(sample.id)
+    claim: CellClaim | None = None
+    if cached is None and ctx.claim_cell is not None:
+        claiming.add(idx)
+        try:
+            cached, claim = await ctx.claim_cell(sample)
+        finally:
+            claiming.discard(idx)
     if cached is not None:
-        cached_r = _materialize_cached(cached, ctx.scorer)
         # Can re-measure for real, so a hit gets a slot like anything else.
-        cached_r = await _maybe_recover_degraded(cached_r, sample, ctx)
-        # Overlay current-run sample_id — archived traces may predate the field.
-        cached_r["sample_id"] = sample.id
-        return _Acquired(sample=sample, idx=idx, result=cached_r, fresh=False)
+        cached_r = await _maybe_recover_degraded(_materialize_cached(cached), sample, ctx)
+        return _Acquired(sample=sample, idx=idx, result=_graded(cached_r, ctx.scorer), fresh=False)
 
     deprecated_display: QueryMeasurement | None = None
     if (cached_deprecated := ctx.deprecated_samples.get(sample.id)) is not None:
-        # Rescored here, rendered at the take: a display call from a cell prints out of walk order.
-        deprecated_display = _materialize_cached(cached_deprecated, ctx.scorer)
+        # Graded here, rendered at the take: a display call from a cell prints out of walk order.
+        deprecated_display = _graded(_materialize_cached(cached_deprecated), ctx.scorer)
 
-    result = await measure_sample(
-        sample,
-        ctx.session,
-        pipeline_params=ctx.search_point.pipeline_params,
-    )
-    result = await _maybe_recover_degraded(result, sample, ctx)
-    if sample.id in ctx.deprecated_samples:
-        cast(dict[str, Any], result)["retry_of_deprecated_cache"] = True
+    try:
+        result = await measure_sample(
+            sample,
+            ctx.session,
+            pipeline_params=ctx.search_point.pipeline_params,
+        )
+        result = await _maybe_recover_degraded(result, sample, ctx)
+        if sample.id in ctx.deprecated_samples:
+            cast(dict[str, Any], result)["retry_of_deprecated_cache"] = True
+        if claim is not None:
+            claim.publish(cast(dict[str, Any], result))
+        result = _graded(result, ctx.scorer)
+    except BaseException:
+        if claim is not None:
+            claim.release()
+        raise
     return _Acquired(
         sample=sample,
         idx=idx,
         result=result,
         fresh=True,
         deprecated_display=deprecated_display,
+        claim=claim,
     )
 
 
@@ -354,8 +406,8 @@ LaunchEvent = tuple[str, int, int, int, int, int | None]
 
 @dataclass
 class Walk:
-    """One search point's pass over its panel, in the order GIVEN — ``score_population`` reorders
-    the round's panel once, so walking it as-given IS the round order. Passive: :func:`run_walks`
+    """One search point's pass over its panel, in the order GIVEN — the sampler orders the
+    round's panel once, so walking it as-given IS the round order. Passive: :func:`run_walks`
     launches its cells, takes them in walk order and decides it, so every walk of a phase answers
     to one loop and no walk reads another's state across an await.
 
@@ -374,6 +426,9 @@ class Walk:
     consecutive_errors: int = 0
     submitted: int = 0
     running: dict[int, asyncio.Task[_Acquired]] = field(default_factory=dict)
+    # The running cells still waiting on another process's claim: nothing sent, so every stop and
+    # end cancels them. Each keeps its slot, which its send takes if the holder drops the cell.
+    claiming: set[int] = field(default_factory=set)
     finished: dict[int, asyncio.Task[_Acquired]] = field(default_factory=dict)
     launched_at: dict[int, float] = field(default_factory=dict)
     # Launch events of a walk measuring ahead of its turn, released at it, so each candidate's
@@ -385,6 +440,8 @@ class Walk:
     # How many rows an operator's skip already let this walk take before a stop interrupted the
     # phase — replayed on resumption, so the skip outlives the pause that followed it.
     skip_at: int | None = None
+    # The rows at which a block race next closes, where it may stop this walk. ``None`` outside one.
+    boundary: int | None = None
 
     @property
     def n(self) -> int:
@@ -402,7 +459,7 @@ class Walk:
         elif self.on_sample_starting is not None:
             self.on_sample_starting(*event)
         cell = asyncio.create_task(
-            _acquire(sample, idx, self.ctx),
+            _acquire(sample, idx, self.ctx, self.claiming),
             name=f"scoring:{sample.id}",
             context=self.context.copy(),
         )
@@ -431,16 +488,23 @@ class Walk:
         acq = cell.result()
         del self.finished[acq.idx]
         ctx, n = self.ctx, self.n
+        cell_key = ctx.cell_keys.get(acq.sample.id)
         if not acq.fresh:
             # Only if it STAYED a replay: the stale-data protocol may have re-measured for real,
             # and that path already emitted its own fresh records.
-            if acq.result.get("cached"):
+            if acq.result.get("cached") and (cell_key is None or cell_key not in ctx.counted):
                 _emit_cached_step_tokens(acq.result)
         elif acq.deprecated_display is not None and ctx.on_sample_scored is not None:
             ctx.on_sample_scored(acq.deprecated_display, acq.idx, n)
 
         self.results.append(acq.result)
-        running = ctx.persist_fresh(self.results) if acq.fresh else ctx.running_scores(self.results)
+        try:
+            running = (
+                ctx.persist_fresh(self.results) if acq.fresh else ctx.running_scores(self.results)
+            )
+        finally:
+            if acq.claim is not None:
+                acq.claim.release()
 
         # Asked of every row, not only fresh ones: a replay never carries an error, but the
         # stale-data protocol re-measures a replayed cell. The backend already spent its own
@@ -472,7 +536,11 @@ class Walk:
                 self.consecutive_errors = 0
 
         if ctx.on_sample_scored is not None:
-            ctx.on_sample_scored(_with_running(acq.result, running), acq.idx, n)
+            ctx.on_sample_scored(
+                _with_running(acq.result, running, ctx.run_id, cell_key), acq.idx, n
+            )
+        if cell_key is not None:
+            ctx.counted.add(cell_key)
         return None
 
     def _abort_reason(self, result: QueryMeasurement) -> str:
@@ -486,16 +554,19 @@ class Walk:
 
     def judge(self) -> QueryLoopResult | None:
         """The stop rules over the rows taken — cached rows too, or a candidate whose priors already
-        dominate it runs one extra real query — else complete once every cell is taken."""
+        dominate it runs one extra real query — else complete once every cell is taken, unless a
+        block race's last close still decides it."""
         for check in self.checks:
             if (signal := check.check(self.results)) is not None:
                 return QueryLoopResult(
                     self.results,
                     completed=False,
-                    stop_reason="escalation",
-                    escalation_signal=signal,
+                    stop_reason="stop_rule",
+                    stop_signal=signal,
                 )
-        return QueryLoopResult(self.results) if len(self.results) == self.n else None
+        if len(self.results) == self.n and self.boundary is None:
+            return QueryLoopResult(self.results)
+        return None
 
     def horizon(self, last: int) -> int | None:
         """The fewest taken rows at which a stop rule could cut, looking no further than walk index
@@ -508,8 +579,16 @@ class Walk:
             (self.dataset[i], _returned_row(cell) if (cell := self.finished.get(i)) else None)
             for i in range(head, last + 1)
         ]
-        stops = (check.earliest_stop(self.results, upcoming) for check in self.checks)
+        stops = [check.earliest_stop(self.results, upcoming) for check in self.checks]
+        if self.boundary is not None and self.boundary <= last + 1:
+            stops.append(self.boundary)
         return min((m for m in stops if m is not None), default=None)
+
+    def rereads_ahead(self, start: int) -> int:
+        end = start
+        while end < self.n and self.dataset[end].id in self.ctx.rereads:
+            end += 1
+        return end - start
 
     def rows(self) -> list[QueryMeasurement]:
         """Every row the walk has, taken or only returned."""
@@ -559,8 +638,8 @@ class Walk:
         self.outcome = outcome
         if self.running or self.finished:
             cause = "the phase ended" if outcome is None else (outcome.stop_reason or "complete")
-            if outcome is not None and outcome.escalation_signal is not None:
-                cause = f"{cause}: {outcome.escalation_signal.check_name}"
+            if outcome is not None and outcome.stop_signal is not None:
+                cause = f"{cause}: {outcome.stop_signal.check_name}"
             logger.info(
                 "Discarding %d look-ahead acquisition(s) after query %d/%d (%s).",
                 len(self.running) + len(self.finished),
@@ -570,13 +649,21 @@ class Walk:
             )
         for cell in self.finished.values():
             _quiet(cell)
+            _release_claim(cell)
+        self.drop_claim_waits()
         draining = list(self.running.values())
         for cell in draining:
             if cancel:
                 cell.cancel()
             cell.add_done_callback(_quiet)
+            cell.add_done_callback(_release_claim)
         self.running, self.finished = {}, {}
         return draining
+
+    def drop_claim_waits(self) -> None:
+        for idx, cell in self.running.items():
+            if idx in self.claiming:
+                cell.cancel()
 
 
 async def run_walks(
@@ -584,23 +671,28 @@ async def run_walks(
     session: Session,
     *,
     backfills: CatchUps | None = None,
-    on_turn: Callable[[int], None] | None = None,
-    on_decided: Callable[[int], bool] | None = None,
+    blocks: BlockRace | None = None,
+    on_turn: Callable[[int, int | None], None] | None = None,
+    on_decided: Callable[[int], None] | None = None,
 ) -> None:
     """Drive a scoring phase: every walk measures at once, and they are taken and decided one at a
     time, in order, so every row, cut, prior and event lands where a serial phase lands it.
 
-    Only the walk whose TURN it is takes cells, answers a skip and is decided. ``on_turn(i)`` opens
-    its turn before its held launches are released; ``on_decided(i)`` runs once it is decided, before
-    the next turn opens, and returning ``True`` ends the phase. A ``None`` walk has nothing to measure
-    and is decided on its turn.
+    Only the walk whose TURN it is takes cells, answers a skip and is decided. ``on_turn(i, block)``
+    opens its turn before its held launches are released — ``block`` the 0-based block it walks under
+    a block race, else ``None``; ``on_decided(i)`` runs once it is decided, before the next turn
+    opens. A ``None`` walk has nothing to measure and is decided on its turn.
+
+    **Under a block race the turns cycle per block.** Each live walk in index order takes the block
+    and hands the turn on; once all have, ``blocks.close`` decides them together on the rows they
+    share, and the survivors start the next block — so a cut never waits on an arm's place in line.
 
     **The depth bounds every call the phase has out** — its cells, the PoBB catch-ups that pair
     them, and discarded calls still winding down — which a whole inner campaign per call makes a
     memory bound. Slots go in one order: the catch-ups the walk on turn waits on, then its own
-    cells, then the walks ahead in index order, which leave one slot free; and no call starts that
-    the spend book cannot hold beside every call out (:func:`_dearest`). A pause or a budget stop is
-    raised; a pause that already cancelled a call is the same pause.
+    cells, then the other live walks in index order, which leave one slot free; and no call starts
+    that the spend book cannot hold beside every call out (:func:`_dearest`). A pause or a budget
+    stop is raised; a pause that already cancelled a call is the same pause.
 
     **A sent call is cancelled only where that stops what it bills**
     (``Connector.cancel_stops_billing``). Elsewhere the backend finishes it and the provider bills
@@ -609,8 +701,13 @@ async def run_walks(
     gauge = session.flight
     draining: set[asyncio.Future[Any]] = set()
     turn = -1
+    block = 0
     cancels = session.backend_client.cancel_stops_billing
     book = bound_spend_book()
+    label = filed(CallLabel("the next cell", "backend"))
+    # A pass the book's ceilings do not meter — a bench pass on a controlled arm — is neither
+    # admitted against them nor stopped by them.
+    unbounded = book is not None and not book.binds(label.kind)
     cell = _dearest(
         [
             await cell_bound(session, walk.ctx.search_point.pipeline_params or {})
@@ -622,44 +719,91 @@ async def run_walks(
     def affordable() -> int:
         # Every call out is counted at the dearest cell, here rather than read back off the book: a
         # cell launched this step has not placed its own hold yet.
-        if book is None or cell is None:
+        if book is None or cell is None or unbounded:
             return sys.maxsize
-        return book.fits(cell, beside="backend") - out()
+        return book.fits(cell, beside=label.kind) - out()
 
     def live() -> list[Walk]:
-        return [walk for walk in walks[max(turn, 0) :] if walk is not None and walk.outcome is None]
+        return [walk for walk in walks if walk is not None and walk.outcome is None]
 
     def out() -> int:
         cells = sum(len(walk.running) for walk in live())
         catching = len(backfills.backfills_in_flight()) if backfills is not None else 0
         return cells + len(draining) + catching
 
+    def reach(walk: Walk) -> None:
+        if blocks is not None:
+            walk.boundary = min(walk.n, (block + 1) * blocks.block_size)
+
+    def close() -> bool:
+        """Every live walk took the block: the race decides them together, and a walk through its
+        whole panel completes. False once no walk is left."""
+        nonlocal block
+        assert blocks is not None
+        racing = {
+            i: walk for i, walk in enumerate(walks) if walk is not None and walk.outcome is None
+        }
+        stops = blocks.close({i: walk.results for i, walk in racing.items()}) if racing else {}
+        for i, walk in racing.items():
+            if (signal := stops.get(i)) is not None:
+                verdict = QueryLoopResult(
+                    walk.results, completed=False, stop_reason="stop_rule", stop_signal=signal
+                )
+            elif len(walk.results) == walk.n:
+                verdict = QueryLoopResult(walk.results)
+            else:
+                continue
+            draining.update(walk.end(verdict, cancel=cancels))
+            if on_decided is not None:
+                on_decided(i)
+        block += 1
+        for walk in live():
+            reach(walk)
+        return bool(live())
+
     def advance() -> bool:
         nonlocal turn
         while True:
             turn += 1
             if turn >= len(walks):
-                return False
-            if on_turn is not None:
-                on_turn(turn)
+                if blocks is None or not close():
+                    return False
+                turn = 0
             walk = walks[turn]
+            # A block race turns every live walk once per block; a decided one had its last turn.
+            if (walk is None and block > 0) or (walk is not None and walk.outcome is not None):
+                continue
+            if on_turn is not None:
+                on_turn(turn, None if blocks is None else block)
             if walk is not None:
                 walk.release()
                 if walk.dataset:
                     return True
                 walk.end(QueryLoopResult([]), cancel=cancels)
-            if on_decided is not None and on_decided(turn):
-                return False
+            if on_decided is not None:
+                on_decided(turn)
 
     def decide(walk: Walk, verdict: QueryLoopResult) -> bool:
         draining.update(walk.end(verdict, cancel=cancels))
-        if on_decided is not None and on_decided(turn):
-            return False
+        if on_decided is not None:
+            on_decided(turn)
         return advance()
 
+    def judged(walk: Walk) -> bool:
+        """Decide the walk on turn where its rules say so, or hand the turn on at a block's end.
+        False once no walk is left."""
+        if (verdict := walk.judge()) is not None:
+            return decide(walk, verdict)
+        if walk.boundary is not None and len(walk.results) == walk.boundary:
+            return advance()
+        return True
+
     def fill(walk: Walk, cap: int, armed: int) -> None:
-        room = min(cap - out(), affordable())
+        room = min(cap - out(), max(affordable(), walk.rereads_ahead(walk.submitted)))
         last = min(walk.n if walk.skip_at is None else walk.skip_at, walk.submitted + room) - 1
+        if walk.boundary is not None:
+            # One cell past a pending close at most, whatever the rules allow.
+            last = min(last, walk.boundary)
         if last < walk.submitted:
             return
         horizon = walk.horizon(last - 2)
@@ -669,7 +813,7 @@ async def run_walks(
             sample, _cell = walk.launch(armed, horizon)
             room -= 1
             if backfills is not None:
-                room -= len(backfills.start_backfill(sample, room))
+                room -= len(backfills.start_backfill(sample, min(room, affordable())))
 
     def reading() -> Flight:
         walking = live()
@@ -693,7 +837,15 @@ async def run_walks(
                 waiting = (holder.settling.id, holder.launched_at[taken])
             elif (head := len(holder.results)) in holder.running:
                 waiting = (holder.dataset[head].id, holder.launched_at[head])
-        return Flight(out_now, allowed, most, waiting)
+        return Flight(
+            out_now,
+            allowed,
+            most,
+            waiting,
+            session.backend_client.backpressure.reading(),
+            affordable=None if book is None or cell is None or unbounded else max(0, affordable()),
+            cell_usd=None if cell is None else cell.usd,
+        )
 
     def outstanding() -> set[asyncio.Future[Any]]:
         calls = {call for call in draining if not call.done()}
@@ -705,6 +857,8 @@ async def run_walks(
 
     async def land() -> None:
         """Wait out every call already sent, starting none, so each one's cost is on the record."""
+        for walking in live():
+            walking.drop_claim_waits()
         if calls := outstanding():
             if gauge is not None:
                 gauge.touch()
@@ -716,6 +870,8 @@ async def run_walks(
     if gauge is not None:
         gauge.open(reading)
     try:
+        for opened in live():
+            reach(opened)
         walking_on = advance()
         while walking_on:
             walk = walks[turn]
@@ -746,6 +902,8 @@ async def run_walks(
             # Same cadence as the pause, because the round-boundary gate cannot fire until the round
             # closes — and for an L4 outer round every sample is an entire inner CAMPAIGN.
             tripped = session.budget_tripped() if session.budget_tripped is not None else None
+            if unbounded or walk.rereads_ahead(len(walk.results)):
+                tripped = None
             stopping = skip or pause or tripped is not None
             # A returned cell, or a catch-up already started, is paid for — kept before a stop is
             # honoured, so the stop lands a row later, as if pressed a moment later. Keeping starts
@@ -780,7 +938,7 @@ async def run_walks(
             if settled and settle is not None and backfills is not None:
                 walk.settling = None
                 backfills.commit_backfills(settle)
-                if (verdict := walk.judge()) is not None and not decide(walk, verdict):
+                if not judged(walk):
                     break
                 continue
             if head is not None:
@@ -794,13 +952,13 @@ async def run_walks(
                 ):
                     walk.settling = sample
                     continue
-                if (verdict := walk.judge()) is not None and not decide(walk, verdict):
+                if not judged(walk):
                     break
                 continue
 
             # Re-read every step, so a press landing mid-walk TOPS THE WINDOW UP rather than waiting
             # for it to drain. Nothing is spent here: the round that scored under the depth spends
-            # it (`l1/score/winner.py`).
+            # it (`runner/measurement.py`).
             if not stopping:
                 if backfills is not None:
                     room = min(armed - out(), affordable())
@@ -827,7 +985,7 @@ async def run_walks(
                         walk.n,
                     )
                     # Refused with the ceiling that binds, and the sums that say why.
-                    book.hold(cell, "backend", what="the next cell")
+                    book.hold(cell, label.kind, what=label.node)
                 raise RuntimeError(
                     f"scoring phase stalled: nothing out and nothing to take at query "
                     f"{len(walk.results)}/{walk.n}"
@@ -840,12 +998,12 @@ async def run_walks(
             await land()
     except BaseException as stop:
         # A pause or a spent ceiling first waits out the calls already sent, which bill anyway; an
-        # unreachable backend or a spent provider account lands nothing more, and a cancellation
-        # aimed at this phase is answered at once.
+        # unreachable backend or a provider's refusal lands nothing more, and a cancellation aimed
+        # at this phase is answered at once.
         if not cancels and (
             isinstance(stop, KeyboardInterrupt)
             or (isinstance(stop, StopLoop) and stop.reason in _BUDGET_STOPS)
-            or (isinstance(stop, WalletExhaustedError) and stop.category in _CEILINGS)
+            or (isinstance(stop, SendRefusedError) and stop.category in _CEILINGS)
         ):
             await land()
         # The phase stops rather than decides, so its walks resume later: keep what came back that

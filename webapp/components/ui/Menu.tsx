@@ -5,12 +5,7 @@ import { cx } from "@/lib/cx";
 import { Popover } from "./Popover";
 import s from "./Menu.module.css";
 
-// The overflow menu behind a toolbar's "⋯" — where controls go when they're real
-// but rare. A toolbar earns its density by spending width only on what you read
-// constantly; everything else lives one click away, not on a second row.
-//
-// Built on `Popover`, so click-outside and Escape already work. The trigger is
-// the caller's (usually a `Chip icon`) so it inherits the toolbar's own styling.
+// The overflow menu behind a toolbar's "⋯", for controls that are real but rare.
 export function Menu({
   renderTrigger,
   align = "right",
@@ -31,9 +26,6 @@ export function Menu({
   );
 }
 
-// A row that DOES something, rather than reporting a state. It keeps the checkable
-// rows' gutter so labels line up in a menu that mixes the two, and renders nothing
-// in it: a permanent empty box would read as an unchecked toggle.
 export function MenuItem({
   onClick,
   disabled,
@@ -49,8 +41,7 @@ export function MenuItem({
       role="menuitem"
       className={s.item}
       disabled={disabled}
-      // A menu row's click is the menu's, never the frame's. Without this a menu opened from
-      // inside a `<summary>` or a clickable row fires that frame on the way out.
+      // A menu opened inside a `<summary>` or clickable row must not fire that frame.
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -63,8 +54,6 @@ export function MenuItem({
   );
 }
 
-// A checkable row — the menu form of a toggle. `on` renders the check, so the
-// state is legible without opening anything else.
 export function MenuCheck({
   on,
   onClick,
@@ -94,9 +83,6 @@ export function MenuCheck({
   );
 }
 
-// A row that picks one of N — renders the current value on the right, and the
-// options inline beneath when open. Keeps a submenu's affordance without a
-// submenu's hover-intent problems.
 export function MenuRadioGroup<T extends string>({
   label,
   value,

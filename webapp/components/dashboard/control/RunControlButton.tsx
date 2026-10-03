@@ -14,23 +14,14 @@ const PAUSE_ICON = (
   </svg>
 );
 
-// The dominant run control: a play/pause toggle beside the heat-map +
-// sample-trajectory view toggles. The verb itself is `useRunControl` — shared
-// with the chat composer's Tools row, so the two cannot disagree about what the
-// run is doing or how to move it. This file is the icon-button form of it.
-//
-// Forking is NOT here: it requires a selected searchpoint. The single fork
-// affordance is the Scoring inspector's "Endorse / Steer & fork" — select a
-// candidate, then endorse-as-is or edit-and-steer. No blind "fork from the
-// current leader" parallel write path.
+// The icon-button form of `useRunControl`, shared with the chat composer. No fork here: forking
+// needs a selected searchpoint (the Scoring inspector's Steer & fork).
 export function RunControlButton({ disabledReason }: { disabledReason?: string }) {
   const run = useRunControl();
   if (!run) return null;
 
-  // Inert form — the button mirrors the leaf's phase but fires nothing, and the
-  // tooltip carries why (I3: disabled with the reason stated, never re-targeted).
-  // Checked before the phase branches: an inner run's gate or check-in copy would
-  // name the wrong hop's surfaces.
+  // Checked before the phase branches: an inner run's gate copy would name the wrong hop's
+  // surfaces (I3).
   if (disabledReason) {
     return (
       <div className="run-ctl" role="group" aria-label="Run control" title={disabledReason}>
@@ -46,8 +37,6 @@ export function RunControlButton({ disabledReason }: { disabledReason?: string }
     );
   }
 
-  // Nothing this control can do from here — say which state it is, rather than
-  // offering a button that misfires.
   if (run.noneReason) {
     return (
       <div className="run-ctl" role="group" aria-label="Run control">

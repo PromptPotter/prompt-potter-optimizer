@@ -15,7 +15,7 @@ Implementation notes for architectural seams not obvious from a single file. AI 
 
 Four things every contributor needs to understand:
 
-1. **Prompt structure** — the 8-field scheme + the dispatch hub that fills it.
+1. **Prompt structure** — the six-field scheme, its shots, and the dispatch hub that fills it.
 2. **Dispatch** — which layer fires next, and where the decision lives.
 3. **Scoring node** — the one node that's deterministic, not LLM-driven.
 4. **Cross-run memory** — what persists between runs.
@@ -24,12 +24,9 @@ Four things every contributor needs to understand:
 
 ## 1. Prompt structure
 
-Every optimizer LLM node — `l1_generate`, `l1_critique`, `l2_context`, `l3_plan` — renders a `PromptTemplate` (`promptpotter/domain/opt_search_point.py`). Eight fields, in render order:
+Every optimizer LLM node — `l1_generate`, `l1_critique`, `l2_context`, `l3_plan` — renders an `OptimizerPromptTemplate`; the target prompt the optimizer produces renders a `PromptTemplate`. Both live in `promptpotter/domain/opt_search_point.py`, and **each class's `RENDER_ORDER` is the field order** — they differ on purpose (the optimizer's is cut for the provider prefix cache, the target's is the archive key), so read both there, never from a copy here.
 
-```
-persona → task_intent → problem_description → instruction
-→ thinking_style → answer_format → few_shot_examples → plan
-```
+**Shots are part of the target prompt, carried by id and rendered last.** An individual's `shot_ids` name rows of the campaign's demo pool (`DatasetSplit.demo`); `OptSearchPoint.target_fields(framing, demo=)` resolves each to its query and ground truth and appends the block after the fields, so the rendered prompt the archive hashes is one function of the fields, the ids and the pool — two individuals naming the same ids in the same order render and key identically. Every render of a scored prompt is handed the pool; the individual never carries a row's text, and the export carries the resolved block because its reader has no pool. A demo row is never scored and never reaches a round's panel or the bench set. `l1_generate` edits the list through the `shot_ids` slot, bounded by its node's `k_max` and offered only while the `demo_pool` panel shows the menu; `validators/l1_strict.py::L1_SHOTS_IN_DEMO_POOL` rejects an id outside the pool, a repeat, or a list longer than `k_max`. An `algorithm` member edits shots without a model call — CAPO's `optimizers/capo/members.py::FewShot` mutates each individual's list, and `cross_shots` is what a recombining node calls.
 
 **Invariant:** no prompt site summarizes its own data. If a name isn't in `injection_table()`, it doesn't enter a prompt. **The render chain, the per-layer composition paths and the per-placeholder source map are owned by** [`dispatch-hub.md`](dispatch-hub.md) — read them there.
 
@@ -37,24 +34,24 @@ persona → task_intent → problem_description → instruction
 
 | Field | Writer | Reader(s) | Lifetime |
 |-------|--------|-----------|----------|
-| `RoundResult.critique` | L1 critique | L2, L3 (`critique` injection via `cycle.latest_round.critique`) | per round (lives on the round audit, not OSP) |
-| `OSP.memory.task_context` | operator (frozen for the run) | L1, L1 critique, L2, L3 (`task_context` injection — broadcast) | persistent; set at run init, never overwritten by any layer |
-| `OSP.memory.l1_layout` | L2 | L1 generate (`fill`) | persistent (on `L2L3Memory`, copied on adopt) |
-| `OSP.plan` | L3 | every prompt (`plan` injection in all 4 templates) | persistent — never cleared |
-| `OSP.memory.wounds.l3_note` | L3 | L2 (`l3_to_l2_note` injection — L2 template only) | persistent until L3 next fires |
-| `OSP.memory.wounds.l2_guard_breaches` | L2 parser + layout validator | L3 (rendered in the merged `guard_breaches` injection) | persistent until L3 fires |
-| `OSP.memory.wounds.l3_guard_breaches` | L3 parser | L3 next fire (rendered in the merged `guard_breaches` injection) | persistent |
+| `RoundResult.critique` | L1 critique | L1 generate, L2, L3 (`critique` injection via `bundle.digest.critique`) | per round (lives on the round audit, not the memory) |
+| `Cycle.framing` | operator, at check-in (frozen for the run) | L1 generate (`task_context` injection — on that floor only) | persistent; never overwritten by any layer |
+| `PotterState.memory.l1_layout` | L2 | L1 generate (`fill`); L2 (`l1_layout` injection) | persistent (banked per round as `optimizer_state`) |
+| `PotterState.memory.plan` | L3 | L1 generate, L2, L3 (`plan` injection; not on `l1_critique`'s layout) | persistent — never cleared |
+| `PotterState.memory.wounds.l3_note` | L3 | L2 (`l3_to_l2_note` injection — L2 template only) | persistent until L3 next fires |
+| `PotterState.memory.wounds.l2_guard_breaches` | L2 parser + layout validator | L3 (rendered in the merged `guard_breaches` injection) | persistent until L3 fires |
+| `PotterState.memory.wounds.l3_guard_breaches` | L3 parser | L3 next fire (rendered in the merged `guard_breaches` injection) | persistent |
 
-**Symmetric broadcast:** L3 writes `plan`; every prompt reads it via the same `_r_plan` renderer. `task_context` is operator-authored framing, frozen for the run; every prompt reads it via the same `_r_task_context` renderer, but no layer writes it. (`L2ContextOutput` explicitly carries neither `task_context` nor `action` — see `dispatch/schemas.py`.)
+**One renderer per field:** L3 writes `plan`, and every node whose layout places it reads it through the same `_r_plan`. `task_context` is operator-authored framing, frozen for the run and rendered by `_r_task_context`, but no layer writes it. (`L2ContextOutput` explicitly carries neither `task_context` nor `action` — see `dispatch/schemas.py`.) Which node places which panel is `dispatch/layout.py::NODE_LAYOUTS`.
 
 ---
 
 ## 2. Dispatch (which layer fires when)
 
-The runner asks the escalation rules engine after every round. `EscalationFSM.observe_round` builds a frozen `EscalationInputs` snapshot and delegates to `decide_escalation`, which sort-by-priority first-match-wins over `DEFAULT_ESCALATION_RULES`. All three live in `application/optimization/escalation/rules.py` — the input vocabulary, the rules and the router are one file, so the policy reads without a hop:
+The runner asks the escalation rules engine after every round. `EscalationFSM.observe_round` builds a frozen `EscalationInputs` snapshot and delegates to `decide_escalation`, which sort-by-priority first-match-wins over `DEFAULT_ESCALATION_RULES`. All three live in `application/optimizers/potter/escalation/rules.py` — the input vocabulary, the rules and the router are one file, so the policy reads without a hop:
 
 ```
-round runs L1 → EscalationInputs(improved, l1_stall_count, l1_patience, axes_with_positive_yield, …)
+round runs L1 → EscalationInputs(current_objective, l1_stall_count, l1_patience, separable, axes_with_positive_yield, …)
                   ↓
         decide_escalation(inputs) → EscalationRule
                   ↓
@@ -63,9 +60,9 @@ round runs L1 → EscalationInputs(improved, l1_stall_count, l1_patience, axes_w
 
 **Which rules exist, and which of them preempt patience, is owned by [`dispatch-hub.md`](dispatch-hub.md) § Trigger** — read the membership there and in `escalation/rules.py`, never from a copy on this page.
 
-Counter state lives at `Cycle.escalation` (`l1_stall_count`, `l2_stall_count`, …) — the only mutation surface is observation methods. In-memory during a cycle, persisted to `rounds/round_NNNN.json` after every round, replayed on resume by `resume_with_divergence_check()`. Every transition is checkpointed.
+Counter state lives at `PotterState.escalation` (`l1_stall_count`, `l2_stall_count`, …) — the only mutation surface is observation methods. In-memory during a cycle and rebuilt on resume by `EscalationFSM.from_ledger` — a fold over the cycle's escalation history, not re-derived from one round. Every transition is checkpointed.
 
-Self-healing fires through a different door: failures route directly to the layer *above* the failing one (validation → L2, runtime → L2, L2-output validators → L3), bypassing the escalation ladder. See [`self-healing-internals.md`](self-healing-internals.md).
+Self-healing fires through a different door, bypassing the escalation ladder. **Which layer heals which wound** — owned by [`self-healing-internals.md`](self-healing-internals.md) § The wounds, mapped to the two axes.
 
 ---
 
@@ -101,11 +98,13 @@ measurements/                       MeasurementArchive
                                        (per sample)    (folds both axes)
 ```
 
-Both files are append-only logs folded last-wins (`store/read_model.py`). The index keys on `content_hash`; a run's log keys on `k` — one `"run"` header row (rewritten whole per save; it is the commit marker) and one `"m:{sample_id}"` row per measurement.
+Both files are append-only logs folded last-wins (`store/read_model.py`). The index keys on `run_id`; a run's log keys on `k` — one `"run"` header row (rewritten whole per save; it is the commit marker) and one `"m:{sample_id}"` row per measurement.
+
+**Every row is FACTS, never a grade.** `append_run` writes each row through `domain/scoring.py::measured_facts`, and neither the header nor the index carries a score, so every read path — replay, the δ ruler, the indexes, the cell reads, a bench pairing — grades rows under the `CellScorer` it names (`rescore_results`). Why a grade is not a fact: [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md).
 
 **Write path:** a taken cell (`Walk.take`) → `build_dataset_run_data()` (`application/datasets/loaders.py`) → `archive.append_run(run_id, data, new_measurements)` — the rows already on disk are never rewritten, so a walk of S samples costs O(S) bytes, not O(S²) — → `AxisIndex.refresh()` (`application/intelligence/indexes/axis.py`) pulls via `archive.load_since()`. `compact_run` drops superseded rows at the walk boundary; `reset_run` truncates (a `force_fresh` pass REPLACES its rows, and append-only does not overwrite); `reindex` rebuilds `index.jsonl` from `runs/`.
 
-**Read paths** (both return `list[Measurement]`):
+**Read paths** (both return `list[Measurement]`, ungraded):
 
 - `measurements_for_sample(sample_id)` — *"history of training example X"*. Exposed through `archive_queries.measurements_for_sample()`; **no caller today**, and kept anyway because architecture.md § Measurement archive (the actual database) declares both keys first-class read surfaces of the archive.
 - `measurements_for_config(predicate)` — *"runs whose config matches this subset"*. Optional `run_ids` hint keeps the scan O(K + matches).
@@ -134,7 +133,7 @@ Order for a contributor who wants to follow L1/L2/L3 end-to-end:
 
 1. [`dispatch-hub.md`](dispatch-hub.md) — signal routing, `injection_table()`, `L1Layout`, slot composition, the mermaid flow.
 2. [`dispatch-hub.md`](dispatch-hub.md) § Outputs — what L2 writes, and the layout edits it makes.
-3. [`../../promptpotter/application/optimization/CLAUDE.md`](../../promptpotter/application/optimization/CLAUDE.md) — L3 plan + per-layer agent contracts.
+3. [`../../promptpotter/application/optimizers/potter/CLAUDE.md`](../../promptpotter/application/optimizers/potter/CLAUDE.md) — L3 plan + per-layer agent contracts.
 4. [`self-healing-internals.md`](self-healing-internals.md) — wound channels, heal-trigger ladder.
 
 For the conceptual layer (CONTEXT, PLAN, spend control): [`../concepts/the-loop.md`](../concepts/the-loop.md).

@@ -17,17 +17,18 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 # steer panel edits them through `PromptFieldsEditor`, not the config widgets).
 _PROMPT_OWNED_FIELDS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
     PROMPT_STRING_FIELDS
-) | {"few_shot_examples", "plan"}
+)
 
-MOVABLE_AGENTS: tuple[str, ...] = ("l1", "l2")
+MOVABLE_AGENTS: tuple[str, ...] = ("proposer", "optimizer")
 """Who may move a search axis — the closed set behind ``NodeConfigParam.movable_by``, in the
-order it is emitted (how often each fires). ``l1`` the generator, every round, over the target's
-axes; ``l2`` escalation, on a stall, over the OPTIMIZER's own.
+order it is emitted (how often each fires). ``proposer`` the selected optimizer's candidate
+source, every round, over the target's axes; ``optimizer`` that optimizer moving its OWN node
+config mid-run (``OptimizerRuntime.own_axes``).
 
 The OPERATOR is deliberately absent: they may move anything by fork, so listing them would make
 every axis movable and the field would say nothing. An outer optimizer (L4) needs no member
-either — at that depth the inner loop IS a target pipeline and its axes are ``l1``'s, one level
-up. That is the recursion working; a per-depth agent name would be a second spelling of it."""
+either — at that depth the inner loop IS a target pipeline and its axes are the proposer's, one
+level up. That is the recursion working; a per-depth agent name would be a second spelling of it."""
 
 # The INLINE contract an LLM node answers under: the shape, and which slot in it IS the answer.
 # The pair, not the four below — `schema_family`/`schema_version` name a registry entry the
@@ -63,7 +64,7 @@ NESTED_PARAM_TYPES: Annotated[frozenset[str], shapes_optimizer_prompt] = frozens
 )
 
 # The one nested param a campaign must UNLOCK before its L1 may emit it
-# (`OptimizationConfig.schema_field_rename`): renaming a field on the optimizer's own
+# (potter's `l1_generate` knob `schema_field_rename`): renaming a field on the optimizer's own
 # output schema is the strongest lever and the only one that can break a parser. Named
 # here, beside the other structural param constants, because two layers must agree on the
 # literal without importing each other: `build_l1_response_schema` (drops it from the emitted
@@ -212,6 +213,13 @@ class NodeKind(enum.StrEnum):
     # measurement arm already say it, and a second word for one concept is what this enum exists to
     # stop. `GATEWAY` is what the code says, because "it hands off" is the fact every reader wants.
     GATEWAY = "measurement"
+    # Optimizer members — declared only by an optimizer manifest, each backed by an implementation
+    # registered under the node's name (`docs/developer/node-standard.md` § Optimizer node types).
+    SAMPLER = "sampler"
+    ELIMINATOR = "eliminator"
+    SELECTOR = "selector"
+    ALGORITHM = "algorithm"
+    CONTROLLER = "controller"
 
 
 # A real choice WITHIN the type, so it is asserted rather than derived (`promptpotter/CLAUDE.md`
@@ -221,6 +229,17 @@ THINKING_KINDS: Annotated[frozenset[NodeKind], shapes_optimizer_prompt] = frozen
     {NodeKind.LLM, NodeKind.AGENT}
 )
 assert frozenset(NodeKind) >= THINKING_KINDS
+
+MEMBER_KINDS: Annotated[frozenset[NodeKind], shapes_optimizer_prompt] = frozenset(
+    {
+        NodeKind.SAMPLER,
+        NodeKind.ELIMINATOR,
+        NodeKind.SELECTOR,
+        NodeKind.ALGORITHM,
+        NodeKind.CONTROLLER,
+    }
+)
+assert not (MEMBER_KINDS & THINKING_KINDS) and frozenset(NodeKind) >= MEMBER_KINDS
 
 
 # The dependency kind a ``candidate_source`` node raises, and the file that
@@ -312,15 +331,18 @@ class NodePromptInfo(StrictModel):
 class PipelineViewNode(StrictModel):
     """One node's place in the flow, as a tier and a rank rather than as pixels.
 
-    Tier 0 is the chain a sample runs and tier n>0 is a node reached only by escalating n
-    levels; rank is the tier-0 position it acts on. A renderer maps them to rows and
-    columns.
+    Tier 0 is the chain a sample runs and tier n>0 is a node reached only through the n-th
+    nested alternative pipeline; rank is the tier-0 position it acts on. A renderer maps them
+    to rows and columns.
     """
 
     model_config = ConfigDict(frozen=True)
 
     id: str
     label: str
+    # The node's own declared `description`, which a surface shows as its explainer; `""` where
+    # the declaration gives none, and on the two `io` ends.
+    description: str = ""
     # Exactly what `pipeline_parsing.py::_derive_node_kind` can emit — a member here the
     # producer cannot produce is one the client styles and captions for nothing.
     kind: str = ""  # "io" | "llm" | "tool" | "retriever" | "cache" | "measurement"
@@ -333,7 +355,8 @@ class PipelineViewEdge(StrictModel):
 
     from_: str = Field(alias="from")
     to: str
-    kind: str = "forward"  # "forward" | "loop" | "directive" | "escalate"
+    # `alternative` runs from the chain's end to a node a controller's alternative pipeline adds.
+    kind: Literal["forward", "loop", "directive", "alternative"] = "forward"
 
 
 class PipelineView(StrictModel):
@@ -362,6 +385,9 @@ class LLMSpendBound(StrictModel):
     input_bytes: int = Field(ge=0)
     # The reply cap no retry lifts; a node config's own `max_tokens` replaces it.
     max_tokens: int = Field(ge=1)
+    # The only hosts a gateway may serve the node from, where the sender forbade any other
+    # (`allow_fallbacks: false`) — priced at the dearest of THEM. `None`: any host it lists.
+    hosts: tuple[str, ...] | None = None
 
 
 class WebSpendBound(StrictModel):
@@ -452,7 +478,9 @@ class PipelineNode(StrictModel):
         return "number" if t in ("number", "integer") else "bool" if t == "boolean" else "string"
 
 
-ParamSource = Literal["backend", "dataset", "campaign", "seed", "evolved", "identity", "unset"]
+ParamSource = Literal[
+    "backend", "dataset", "campaign", "model_floor", "seed", "evolved", "identity", "unset"
+]
 """WHICH LAYER set a resolved param's value, stamped BY the merge (last writer wins), never diffed
 against it. Each member is described beside its producer in ``api-openapi.yaml::ParamSource``;
 ``backend`` is the CHECK-IN arm's floor (a captured declaration, where a campaign read has a
@@ -557,8 +585,8 @@ class NestedPipelineRef(StrictModel):
     """Which node of THIS pipeline runs another whole pipeline, and whose. Both halves are
     derived from ``inner_tasks.yaml``, never declared a second time. Null on an ordinary dataset.
 
-    Here rather than in the router that used to declare it, because the CAMPAIGN resolution has to
-    carry it too and ``application/`` cannot import ``presentation/``. Its derivation lives beside
+    Here rather than in a router, because the CAMPAIGN resolution has to carry it too and
+    ``application/`` cannot import ``presentation/``. Its derivation lives beside
     the resolution (``application/pipeline_resolve.py::nested_pipeline_ref``), which is what makes
     the shape reachable from both doors without either owning the other."""
 
@@ -623,6 +651,10 @@ _MODEL_ANSWER_FIELDS: frozenset[str] = frozenset(
 )
 assert CAPABILITY_ANSWERED_PARAMS.issubset(_MODEL_ANSWER_FIELDS)
 
+# The provider's NOMINAL rung order, lowest first — a naming order, never a measured cost.
+# `default` is absent: it omits the field, so it sits at no position on the ladder.
+_EFFORT_LADDER_ORDER: tuple[str, ...] = ("none", "minimal", "low", "medium", "high")
+
 
 class NodeSearchNarrowing(StrictModel):
     """A campaign's own declaration over the dataset's, and the two halves do NOT compose the same
@@ -643,6 +675,15 @@ class NodeSearchNarrowing(StrictModel):
     param_allowed_values: dict[str, list[str]] = Field(default_factory=dict)
 
 
+class ManifestNodeOverlay(StrictModel):
+    """One optimizer node's delta over its manifest's ``config`` — the shape a target pipeline's
+    overlay takes. Validated against the node's own knobs when the optimizer is selected."""
+
+    model_config = ConfigDict(frozen=True)
+
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
 class PipelineSchema(StrictModel):
     """Frozen, backend-agnostic pipeline description; SoT for identity at campaign start."""
 
@@ -656,6 +697,9 @@ class PipelineSchema(StrictModel):
     # round runs. Identity stays on `nodes`: folding these into `sp_hash` re-keys every
     # banked measurement. Empty means "same as `nodes`"; read it through `config_nodes`.
     declared_nodes: list[PipelineNode] = Field(default_factory=list)
+    # Every declared sequence by name, `default` included. The others are an optimizer's own members'
+    # to run — a controller's alternatives, a phase; the manifest digest folds them.
+    pipelines: dict[str, list[str]] = Field(default_factory=dict)
     available_models: list[str] = Field(default_factory=list)
     view: PipelineView | None = None
     # What each selectable model answers for its own knobs (`infrastructure/llm/capabilities.py`),
@@ -670,7 +714,7 @@ class PipelineSchema(StrictModel):
     def _node_map(self) -> dict[str, "PipelineNode"]:
         # Indexed over DECLARED nodes: "is there a node called X" and "what type is its
         # param" are questions about the manifest, not about this round's chain — an
-        # escalation node resolving to None merges its nested params shallow and loses
+        # node off the chain resolving to None merges its nested params shallow and loses
         # every sibling key.
         return {n.name: n for n in (self.declared_nodes or self.nodes)}
 
@@ -761,6 +805,12 @@ class PipelineSchema(StrictModel):
             return [rung for rung in offered if rung in set(declared)]
         return list(offered)
 
+    def effort_floor(self, node: "PipelineNode", *, model: str | None) -> str | None:
+        """The lowest rung *model* accepts here. ``None`` on an unknown model with no declared
+        ladder: the field is then omitted, the one request no endpoint refuses."""
+        offered = self.param_options(node, "reasoning_effort", model=model) or ()
+        return next((rung for rung in _EFFORT_LADDER_ORDER if rung in offered), None)
+
     def pinned(self, node: "PipelineNode", param: str) -> bool:
         """Is this axis's value space a single value? Then every "mutation" of it emits the value
         already there, so it is not something an agent can search: listed anyway it costs a
@@ -845,8 +895,8 @@ class PipelineSchema(StrictModel):
 
         And it is not ``available_models`` alone. That is the ADMIN's catalogue, and a model the
         OPERATOR typed deliberately rides ``param_allowed_values.model`` instead
-        (``draft_build._origin_pipeline_json`` states why merging the two would erase the one thing
-        that marks a value as theirs) — so asking the catalogue could not, by construction, answer
+        (``draft_campaign.py::draft_pipeline_json`` states why merging the two would erase the one
+        thing that marks a value as theirs) — so asking the catalogue could not, by construction, answer
         for a typed model. Picking one resolved no capabilities at all, and the card carrying its
         context, price and modality rendered nothing, silently, on the very surface where the model
         is chosen and the spend is committed.
@@ -860,7 +910,7 @@ class PipelineSchema(StrictModel):
 
     def node_config_schema(
         self,
-        l2_axes: dict[str, set[str]] | None = None,
+        own_axes: dict[str, set[str]] | None = None,
         *,
         values: Mapping[str, Mapping[str, object]] | None = None,
         sources: Mapping[str, Mapping[str, ParamSource]] | None = None,
@@ -870,11 +920,10 @@ class PipelineSchema(StrictModel):
         """COMPLETE by contract, so a reader answers "may anything move here?" by summing
         ``movable_by``. A param dropped here is invisible to every caller — filter downstream.
 
-        *l2_axes* is ``{node: {param}}`` the ESCALATION layers may move. A schema cannot know
-        whether it is the optimizer's own manifest or a target pipeline, so the one route that
-        serves the manifest passes it (``routers/active.py``) and everyone else passes nothing.
-        Its source is ``dispatch/schemas.py::L2_NODE_AXES`` — the same table L2's own override
-        parsing reads, so the picture and the parser cannot disagree about L2's reach.
+        *own_axes* is ``{node: {param}}`` the optimizer moves on itself mid-run. A schema cannot
+        know whether it is the optimizer's own manifest or a target pipeline, so the one route
+        that serves the manifest passes the selected runtime's ``own_axes``
+        (``routers/active.py``) and everyone else passes nothing.
 
         *values* / *sources* / *model_menu* / *declared* are a CAMPAIGN read's answer written over
         the schema's own: the resolved value per param, the layer that won it, and the menus as a
@@ -964,7 +1013,10 @@ class PipelineSchema(StrictModel):
                     if key in SCHEMA_OWNED_FIELDS
                     else ""
                 )
-                reach = {"l1": n.param_keys, "l2": (l2_axes or {}).get(n.name, set())}
+                reach = {
+                    "proposer": n.param_keys,
+                    "optimizer": (own_axes or {}).get(n.name, set()),
+                }
                 movable = (
                     []
                     if never or self.pinned(n, key)
@@ -1094,11 +1146,11 @@ class PipelineSchema(StrictModel):
     def node_configs(self, pipeline_params: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
         """Canonical SearchPoint identity: ordered ``[(node, config), ...]`` for hashing.
 
-        Spans what the optimizer may EDIT (:attr:`config_nodes`), not just what this round RUNS — an
-        escalation node reached only on a stall still changes the measurement, and keyed on the
+        Spans what the optimizer may EDIT (:attr:`config_nodes`), not just what this round RUNS — a
+        node only an alternative pipeline reaches still changes the measurement, and keyed on the
         chain alone an edit landing there is indistinguishable from its parent.
 
-        Off-chain nodes LEAD, and only where configured. ``MeasurementArchive.find_by_node_configs``
+        Off-chain nodes LEAD, and only where configured. ``ReplayFeed`` (the measurement archive)
         matches a prefix whose partial arm forgives divergence past a row's terminal node; an
         off-chain node has no chain position, so trailing it would read as a reusable partial.
         Leading breaks the match at position 0. Configured-only keeps an untouched point on the
@@ -1131,7 +1183,7 @@ class PipelineSchema(StrictModel):
         backend where that is false — which is a wrong number, not a missing one.
 
         DECLARED nodes, matching :attr:`config_nodes`: what the optimizer may EDIT is not what this
-        round happens to run, or an escalation node reached only on a stall could never be told to
+        round happens to run, or a node only an alternative pipeline reaches could never be told to
         improve. Pinned values stay in the tree, marked immutable — "configured and held" is what a
         reader of the harness asks for as much as "being searched".
         """
@@ -1221,9 +1273,11 @@ class PipelineSchema(StrictModel):
 __all__ = [
     "CANDIDATE_LIBRARY",
     "CANDIDATE_LIBRARY_FILE",
+    "MEMBER_KINDS",
     "MOVABLE_AGENTS",
     "THINKING_KINDS",
     "LLMSpendBound",
+    "ManifestNodeOverlay",
     "NestedPipelineRef",
     "NodeConfigParam",
     "NodeKind",

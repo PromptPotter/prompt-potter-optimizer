@@ -57,28 +57,30 @@ def _build_config(
     return {
         "dataset_name": dataset,
         "scoring": _infer_scoring(dataset),
-        "sp_budget_round": samples,
         "exclude_nodes": [],
         "pipeline_overlay": {},
         "optimization": {
-            "l1_patience": patience,
             "max_rounds": rounds,
-            "n_variants": variants,
             "degradation_threshold": 0.4,
-            "l2_patience": 1,
-            "l3_patience": 1,
+            "nodes": {
+                "adaptive_queue": {"config": {"sp_budget_round": samples}},
+                "l1_generate": {"config": {"n_variants": variants}},
+                "escalation": {
+                    "config": {"l1_patience": patience, "l2_patience": 1, "l3_patience": 1}
+                },
+            },
         },
     }
 
 
 def _infer_scoring(dataset: str) -> str:
-    """Prefer the dataset's own declared formula; fall back to ``exact_match``. Through the one
+    """Prefer the dataset's own declared formula; fall back to ``label_match``. Through the one
     reader — this parsed the YAML template with ``json.loads`` behind a bare ``except``, so it
     never once read a formula and every smoke run scored on the fallback."""
     formula = read_campaign_config_file(
         dataset_campaign_path(_REPO_ROOT / "datasets" / dataset)
     ).get("scoring")
-    return str(formula) if formula else "exact_match(predicted, ground_truth)"
+    return str(formula) if formula else "label_match(predicted, ground_truth)"
 
 
 async def _run(args: argparse.Namespace) -> int:
@@ -173,8 +175,8 @@ async def _run(args: argparse.Namespace) -> int:
     else:
         print(
             f"\n[smoke] dataset={args.dataset} "
-            f"rounds={result.n_l1_rounds} "
-            f"best_acc={result.best_accuracy:.3f} (round {result.best_round}) "
+            f"rounds={result.n_rounds_after_origin} "
+            f"best_acc={result.result_accuracy:.3f} (round {result.result_round}) "
             f"cycle={cycle_id or 'unknown'} "
             f"stop={result.stop_reason} "
             f"status=ok",

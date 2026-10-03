@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
+import yaml
 from pydantic import ValidationError
 
 from promptpotter.application.campaign_config import load_campaign_config as _load_cfg
@@ -35,26 +36,20 @@ from promptpotter.application.datasets.draft_campaign import (
 from promptpotter.application.datasets.draft_patch import SETTABLE_SCALARS, EditDraftPatch
 from promptpotter.application.datasets.ingest import SlugTakenError, ingest_draft
 from promptpotter.application.datasets.origin_readiness import origin_readiness
-from promptpotter.application.initialization.session import mint_checkin_skeleton
 from promptpotter.application.jobs.launcher.admission import probe_backend
 from promptpotter.application.jobs.launcher.checkin import prepare_checkin_run
-from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
-from promptpotter.application.optimization.task_context import (
-    checkin_call_context,
-    committed_task_context,
-    decompose_prompt_fields,
-)
+from promptpotter.application.jobs.launcher.mint_and_start import with_optimization
+from promptpotter.application.jobs.mint import fresh_campaign_id, mint_framed_cycle
 from promptpotter.application.runner.entry import RunMode
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.domain.campaign import ArmRequest
 from promptpotter.domain.connector import BackendUnreachableError
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
     backend_reach_line,
     backend_unreachable_result,
-    bind_session_identity,
     cycle_result_command,
     drive_cycle,
     get_verbose,
@@ -96,17 +91,18 @@ _SET_ALIAS: dict[str, str] = {
 }
 
 # The campaign-config knobs are NOT patch fields — they ride the patch's one
-# ``optimization_overrides`` dict, shallow-merged and validated by ``plan_draft_patch`` exactly as
-# the web Advanced block's are. Derived from the model, never hand-listed. ``mechanisms`` is nested
-# and has no flat string form.
-_SET_KNOBS: frozenset[str] = frozenset(OptimizationOverrides.model_fields) - {"mechanisms"}
+# ``optimization_overrides`` dict, merged and validated by ``plan_draft_patch`` exactly as the web
+# Advanced block's are. Derived from the model, never hand-listed. ``nodes`` is nested, so a node's
+# knob is spelled ``nodes.{node}.{knob}=VALUE``.
+_NODES = "nodes"
+_SET_KNOBS: frozenset[str] = frozenset(OptimizationOverrides.model_fields) - {_NODES}
 
 # What a `FIELD=VALUE` can name: every scalar the patch declares, under its CLI spelling.
 _SET_FIELDS: frozenset[str] = (SETTABLE_SCALARS - set(_SET_ALIAS.values())) | set(_SET_ALIAS)
 
 
 def _settable() -> str:
-    return ", ".join(sorted(_SET_FIELDS | _SET_KNOBS))
+    return ", ".join([*sorted(_SET_FIELDS | _SET_KNOBS), f"{_NODES}.<node>.<knob>"])
 
 
 def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
@@ -121,6 +117,11 @@ def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
         field, raw = (part.strip() for part in item.split("=", 1))
         if field in _SET_KNOBS:
             knobs[field] = raw
+        elif field.startswith(f"{_NODES}.") and field.count(".") == 2:
+            _, node, knob = field.split(".")
+            # A node's knob is typed by its member, so the value is read as YAML — `0.3`, `true`.
+            config = knobs.setdefault(_NODES, {}).setdefault(node, {"config": {}})["config"]
+            config[knob] = yaml.safe_load(raw)
         elif field in _SET_FIELDS:
             patch_raw[_SET_ALIAS.get(field, field)] = raw
         else:
@@ -137,6 +138,28 @@ def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
         raise SystemExit(
             f"ERROR: --set {name} rejected: {first.get('msg', 'invalid value')}"
         ) from None
+
+
+def _with_sets(config: CampaignConfig, sets: list[str]) -> CampaignConfig:
+    """The name form's ``--set``: the same patch the file form sends, whose knobs lay onto the
+    dataset's config through the one seam every door validates by. A named dataset has its
+    origin on disk, so a check-in field has nothing to confirm and is refused."""
+    if not sets:
+        return config
+    patch = _sets_to_patch(sets)
+    spelled = {model: cli for cli, model in _SET_ALIAS.items()}
+    fields = patch.model_fields_set - {"optimization_overrides"}
+    if stray := sorted(spelled.get(f, f) for f in fields):
+        raise SystemExit(
+            f"ERROR: --set {', '.join(stray)} confirms a check-in field, which a dataset name "
+            f"does not have. On a name: {', '.join(sorted(_SET_KNOBS))}, {_NODES}.<node>.<knob>."
+        )
+    knobs = patch.optimization_overrides
+    assert knobs is not None  # every --set left after the refusal above is a knob
+    try:
+        return with_optimization(config, knobs)
+    except PotterError as exc:
+        raise SystemExit(f"ERROR: --set rejected: {exc}") from None
 
 
 def _reload_draft(stores: Stores, campaign_id: str) -> DraftCampaign:
@@ -239,7 +262,7 @@ async def _ingest_checkin(args: argparse.Namespace) -> str:
 
 async def _ingest_and_prepare_checkin(
     args: argparse.Namespace,
-) -> tuple[Session, CampaignConfig, str, str]:
+) -> tuple[Session, CampaignConfig, str]:
     """The CLI tail of check-in Start. Backend reachability is not preflighted: a check-in is
     durable, so ``resume`` runs it later."""
 
@@ -270,65 +293,24 @@ async def _ingest_and_prepare_checkin(
         ),
     )
     checkin_line("campaign", f"started check-in {campaign_id}")
-    return (
-        prepared.session,
-        prepared.campaign_config,
-        prepared.session.dataset_name or "?",
-        prepared.session_id,
-    )
+    return prepared.session, prepared.campaign_config, prepared.session.dataset_name or "?"
 
 
-async def _commit_task_framing(
-    session: Session,
-    *,
-    task_file: str | None,
-    task_text: str | None,
-) -> None:
-    """``--task-file`` / ``--task-text`` IS a check-in: decompose the operator's context and COMMIT
-    it as the dataset's framing. Runs BEFORE the mint because framing renders — the cycle id hashes
-    it, so a framing that arrives afterwards names a prompt the id never saw."""
-
-    override = Path(task_file).read_text(encoding="utf-8") if task_file else task_text
-    if not override:
-        # Absent framing is legitimate, but SILENT absent framing is not: the run scores an
-        # unframed prompt and the id honestly says so, which looks identical to a dataset that
-        # never had framing. Four shipped benchmarks are in exactly this state.
-        if not committed_task_context(session.store, session.dataset_name) and (
-            session.dataset_config_dir is not None
-            and (Path(session.dataset_config_dir) / "task_description.md").is_file()
-        ):
-            checkin_line(
-                "task check-in",
-                f"no committed framing — running unframed. "
-                f"`new {session.dataset_name} --task-file "
-                f"datasets/{session.dataset_name}/task_description.md` commits it",
-            )
-        return
-    dataset_name = session.dataset_name or ""
-    # The check-in's own campaign is where the decomposition bills — the same skeleton the web
-    # ingest mints, and the reason one exists: "the origin isn't authored yet, so there is no
-    # content hash to address it by".
-    _sid, campaign_id, cycle_id = mint_checkin_skeleton(
-        session.store,
-        slug=dataset_name,
-        backend_type=backend_type_of_dataset(session.store, dataset_name),
-    )
-    result = await decompose_prompt_fields(
-        override,
-        campaign_id=campaign_id,
-        context=checkin_call_context(
-            session.store, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
-        ),
-    )
-    framing = dict(result.get("task_context") or {})
-    framing["raw_description"] = override
-    session.store.tenant_datasets.save_task_context(dataset_name, framing)
-    checkin_line("task check-in", f"committed framing for {dataset_name}")
+def _arm_request(raw: str | None) -> ArmRequest | None:
+    if raw is None:
+        return None
+    head_to_head_id, sep, arm_key = raw.partition(":")
+    if not sep:
+        raise SystemExit(f"ERROR: --arm takes HEAD_TO_HEAD:KEY, got {raw!r}")
+    try:
+        return ArmRequest(head_to_head_id=head_to_head_id, arm_key=arm_key)
+    except ValidationError as exc:
+        raise SystemExit(f"ERROR: --arm {raw!r}: {exc}") from exc
 
 
 async def _mint_fresh_session(
     args: argparse.Namespace,
-) -> tuple[Session, CampaignConfig, str, str]:
+) -> tuple[Session, CampaignConfig, str]:
     """Find-or-create campaign + mint session + root cycle. No scoring — the origin is phase 0 of the loop."""
 
     file_config = read_campaign_config_file(Path(args.config)) if args.config else {}
@@ -359,26 +341,26 @@ async def _mint_fresh_session(
         if default_config_path.exists():
             file_config = read_campaign_config_file(default_config_path)
 
-    campaign_config = _load_cfg(file_config)
+    campaign_config = _with_sets(_load_cfg(file_config), args.sets)
 
     train_data = session.samples
 
-    # Framing BEFORE identity — the cycle id about to be minted hashes the prompt this commits,
-    # so an operator-supplied description has to land as dataset content first.
-    await _commit_task_framing(session, task_file=args.task_file, task_text=args.task_text)
-
     # The one shared mint prologue — same application seam the web mint runs (detached).
-    minted = prepare_fresh_cycle(
+    minted = await mint_framed_cycle(
         session,
         campaign_config,
         train_data,
         campaign_id=fresh_campaign_id(session, campaign_config),
+        task_text=Path(args.task_file).read_text(encoding="utf-8")
+        if args.task_file
+        else args.task_text,
+        arm=_arm_request(args.arm),
         log=logger.info if get_verbose() else None,
     )
 
     checkin_line("campaign", f"minted {minted.campaign_id}")
 
-    return session, campaign_config, dataset_name, minted.session_id
+    return session, minted.campaign_config, dataset_name
 
 
 async def _run_loop(
@@ -406,9 +388,11 @@ async def cmd_new(args: argparse.Namespace) -> CommandResult:
     """Mint a fresh campaign and run from round 0. The positional is a dataset name or a raw CSV; both
     produce the same session bundle, so the tail (backend → dataset → pipeline → task → loop) is one."""
     if (pos := getattr(args, "dataset", None)) and Path(pos).is_file():
-        session, campaign_config, dataset_name, _sid = await _ingest_and_prepare_checkin(args)
+        if args.arm is not None:
+            raise SystemExit("ERROR: --arm mints a committed dataset's campaign, not a raw file")
+        session, campaign_config, dataset_name = await _ingest_and_prepare_checkin(args)
     else:
-        session, campaign_config, dataset_name, _sid = await _mint_fresh_session(args)
+        session, campaign_config, dataset_name = await _mint_fresh_session(args)
 
     backend_type = backend_type_of_dataset(session.store, dataset_name)
     try:
@@ -421,9 +405,8 @@ async def cmd_new(args: argparse.Namespace) -> CommandResult:
     checkin_line("dataset", f"{dataset_name} ({len(train_data)} queries)")
     checkin_line("pipeline", pipeline_summary(session, session.pipeline_params))
 
-    ctx = load_session(args)
+    ctx = load_session(session.store, session.hop)
     campaign_config = ctx.campaign_config
-    bind_session_identity(session, ctx)
 
     logger.info("Session: %s", session.store.sessions.session_dir(ctx.session_id))
     logger.info("Campaign: %s", session.store.campaigns.campaign_root_dir(ctx.campaign_id))

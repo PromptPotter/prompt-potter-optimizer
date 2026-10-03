@@ -1,6 +1,3 @@
-/* Dialog primitive — backdrop + centred card. The a11y behaviour (focus trap,
-   ESC, focus restore) and the portal to document.body live in Dialog.tsx. */
-
 @layer ui {
 .backdrop {
   position: fixed;
@@ -34,7 +31,6 @@
   font-weight: 600;
 }
 
-/* Body paragraph styling for the simple message-string dialog (Modal). */
 .message {
   margin: 0 0 var(--space-16);
   font-size:var(--text-base);

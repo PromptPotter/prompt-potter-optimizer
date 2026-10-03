@@ -1,11 +1,11 @@
 "use client";
+import { VendorLogo } from "@/components/ui";
+import { cx } from "@/lib/cx";
 import type { RowStatus } from "@/lib/derivations";
 
-// ONE campaign row, wherever a campaign is offered — the sidebar tree and the masthead
-// switcher. Presentational: every value arrives already derived (`lib/derivations/
-// campaign-summary.ts`), so the two surfaces cannot word one campaign two ways.
+// ONE campaign row for the sidebar tree and the masthead switcher; values arrive derived
+// (`lib/derivations/campaign-summary.ts`).
 
-// The glyph stands in for a word the column cannot fit whole; the word is its accessible name.
 export function PhaseMark({ status }: { status: RowStatus }) {
   return (
     <span
@@ -18,36 +18,45 @@ export function PhaseMark({ status }: { status: RowStatus }) {
   );
 }
 
-// Ten runs of one dataset share a display name, so the row keeps its id's `__suffix` whole and
-// lets the name before it truncate — the tail is what tells the rows apart. The second line
-// carries what the tail cannot say: what this run runs with, how far it got, when it last moved.
+// The SCAN surface, never a config dump: no campaign id here — the hover card is the audit one.
 export function CampaignRowLabel({
   name,
-  suffix,
   status,
   spend,
   parts,
+  vendors,
 }: {
   name: string;
-  suffix: string | null;
   status: RowStatus | null;
   spend: string;
   parts: string[];
+  vendors: readonly { vendor: string; models: string[] }[];
 }) {
   const line = parts.join(" · ");
   return (
     <span className="unit-library-row">
       <span className="unit-library-name unit-library-name-split">
+        {vendors.length > 0 && (
+          <span className="unit-library-vendors">
+            {vendors.map((v) => (
+              <VendorLogo key={v.vendor} vendor={v.vendor} models={v.models} />
+            ))}
+          </span>
+        )}
         <span className="unit-library-name-head">{name}</span>
-        {suffix && <span className="unit-library-name-tail">__{suffix}</span>}
       </span>
       <span className="unit-library-meta unit-library-meta-marked">
         {status && <PhaseMark status={status} />}
         <span className="unit-library-spend">{spend}</span>
       </span>
-      <span className="unit-library-sub" title={line}>
-        {line}
-      </span>
+      {line && (
+        <span
+          className={cx("unit-library-sub", vendors.length > 0 && "unit-library-sub-indent")}
+          title={line}
+        >
+          {line}
+        </span>
+      )}
     </span>
   );
 }

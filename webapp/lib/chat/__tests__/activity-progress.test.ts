@@ -2,10 +2,6 @@ import { describe, expect, it } from "vitest";
 import { projectionToActivity } from "../activity";
 import type { ProjectionEnvelope } from "@/lib/api/types";
 
-// The L4 fix: an `llm_call_progress` heartbeat carrying `detail` (the inner
-// campaign's live "inner rX/Y · best Z%") becomes ONE ticking progress chip so
-// the outer L4 chat never reads as silent; a detail-less optimizer heartbeat
-// stays curated out.
 function progressEnv(detail: unknown): ProjectionEnvelope {
   return {
     kind: "llm_call_progress",
@@ -24,8 +20,6 @@ describe("projectionToActivity — llm_call_progress", () => {
       kind: "progress",
       icon: "·",
       label: "inner r2/3 · best 55%",
-      // The clock rides `elapsed_s` on the same record — the engine names WHO the wait belongs
-      // to, this layer formats how long.
       detail: "30s",
       tone: "muted",
     });

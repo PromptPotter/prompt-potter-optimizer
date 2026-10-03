@@ -1,4 +1,5 @@
-"""The optimizer's working state and the prompt scheme under it — models only.
+"""The individual and the prompt scheme under it — models only. An optimizer's own state is not
+here: it rides ``optimizer_state.py``.
 
 The ``pipeline_params`` SHAPE lives in ``pipeline_overlay.py`` and the delta / idea views in
 ``candidate_diff.py``; neither references a model here, and their consumers are disjoint from
@@ -10,38 +11,32 @@ from __future__ import annotations
 import copy
 import re
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Self
 
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import ConfigDict, Field
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
-from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
-from promptpotter.domain.l1_layout import (
-    L1_LAYOUT_SLOTS,
-    VOLATILE_SLOT,
-    L1Layout,
-    default_l1_layout,
-)
 from promptpotter.domain.pipeline_overlay import fold_output_contract
 from promptpotter.domain.search_point import JobSearchPoint, SearchPoint, TaskDecomposition
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
 
 __all__ = [
+    "FEW_SHOT_BLOCK",
+    "ORIGIN_SOURCE",
     "TEMPLATE_TOKEN_RE",
     "EvidenceGrounding",
-    "FewShotExample",
     "IndividualLineage",
-    "L2L3Memory",
     "OptSearchPoint",
+    "OptimizerPromptTemplate",
     "PromptTemplate",
-    "WoundChannels",
+    "node_source",
 ]
 
 
@@ -53,12 +48,8 @@ TEMPLATE_TOKEN_RE: Annotated[re.Pattern[str], shapes_optimizer_prompt] = re.comp
 )
 
 
-class FewShotExample(StrictModel):
-    """An input/output pair used as a few-shot demonstration."""
-
-    input: str
-    output: str
-    explanation: str | None = None
+FEW_SHOT_BLOCK: Annotated[str, shapes_optimizer_prompt] = "few_shot_block"
+"""The rendered shots' key — last in a target render, and in the wire's ``prompt_fields``."""
 
 
 def _check_render_order(cls: type[PromptTemplate]) -> None:
@@ -77,43 +68,18 @@ def _check_render_order(cls: type[PromptTemplate]) -> None:
 
 class PromptTemplate(SearchPoint):
     """The scheme shared by job + optimizer prompts: the six ``render()`` decomposition fields
-    (``PROMPT_STRING_FIELDS``), plus ``few_shot_examples`` and ``plan``, which render separately."""
+    (``PROMPT_STRING_FIELDS``)."""
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         _check_render_order(cls)
 
-    RENDER_ORDER: ClassVar[Annotated[tuple[str, ...], shapes_optimizer_prompt]] = (
-        "persona",
-        "task_intent",
-        "instruction",
-        "thinking_style",
-        "answer_format",
-        "problem_description",
+    RENDER_ORDER: ClassVar[Annotated[tuple[str, ...], shapes_optimizer_prompt]] = tuple(
+        PROMPT_STRING_FIELDS
     )
-    """Order ``render()`` concatenates the decomposition fields in, for the OPTIMIZER prompt
-    (`dispatch/llm_call`). Apart from the SET, so shaping a cache prefix here cannot re-cut the
-    target prompt below.
-
-    ``problem_description`` renders LAST because it is where the evidence goes: it is
-    `l1_layout.py::VOLATILE_SLOT`, the slot every `NODE_LAYOUTS` floor fills, so anything rendered
-    after it would sit behind panels that change every round and could never be served off a
-    provider's prefix cache. Measured before this order: `l1_generate` read 32,512 of 200,554
-    prompt tokens from cache (16%), `l1_critique` 1,024 of 144,961 (0.7%) — same client, model and
-    provider.
-
-    **The corollary binds the prompts, not just this tuple: a value that CHANGES between rounds
-    belongs in ``problem_description``, never in a field ahead of it.** `l1_generate`'s citable
-    menu was substituted into `answer_format`, one slot early, and a menu that moves with the
-    layout truncated the stable prefix at 5,406 of 7,197 chars on a real round pair — a static
-    template voiding itself from the inside. Ordering the fields is half the contract; keeping the
-    moving values behind the boundary is the other half, and the half nothing can assert: the
-    layout axis addresses the earlier slots too, so `validate_l1_layout` REPORTS a panel placed
-    ahead of the boundary (`l1_layout_voids_prefix`) rather than the order alone guaranteeing it.
-
-    A constant ahead of the boundary is free, and the exemption is declared rather than assumed —
-    `PREFIX_STABLE_PANELS`, whose one member is `task_context`; the shared prefix measurably
-    survives all of `task_intent`."""
+    """Order ``render()`` concatenates the decomposition fields in — the TARGET prompt's, so it sits
+    inside the measurement archive's ``node_configs`` key and moving it re-cuts every banked cell.
+    ``OptimizerPromptTemplate`` is the one class that orders otherwise."""
 
     persona: str = ""
     task_intent: str = ""
@@ -121,53 +87,19 @@ class PromptTemplate(SearchPoint):
     instruction: str = ""
     thinking_style: str = ""
     answer_format: str = ""
-    few_shot_examples: list[FewShotExample] = Field(default_factory=list)
-    plan: str = Field(
-        default="",
-        description=(
-            "Strategic frame written by ``l3_plan`` and read by every layer "
-            "next round; persistent until the next L3 fire. Empty until L3 "
-            "fires for the first time."
-        ),
-    )
 
     @shapes_optimizer_prompt
     def _ordered_pairs(self, value_of: Callable[[str], str]) -> list[tuple[str, str]]:
-        pairs = [(f, v) for f in type(self).RENDER_ORDER if (v := value_of(f))]
-        if block := self._render_few_shot_block():
-            pairs.append(("few_shot_examples", block))
-        return pairs
+        return [(f, v) for f in type(self).RENDER_ORDER if (v := value_of(f))]
 
     @shapes_optimizer_prompt
     def render_fields(self) -> list[tuple[str, str]]:
-        return self._ordered_pairs(self._field_value)
-
-    @shapes_optimizer_prompt
-    def stored_fields(self) -> list[tuple[str, str]]:
-        """Each field's OWN value, on the walk ``render()`` joins — for a surface offering the
-        fields for replacement, where a spliced value is text the replacement would absorb."""
+        """Each field's OWN value — never a campaign's framing, which ``target_fields`` splices."""
         return self._ordered_pairs(lambda name: getattr(self, name))
 
     @shapes_optimizer_prompt
     def render(self) -> str:
         return "\n\n".join(v for _, v in self.render_fields())
-
-    @shapes_optimizer_prompt
-    def _field_value(self, name: str) -> str:
-        """Subclass override point — see ``OptSearchPoint`` for task-context splicing."""
-        value: str = getattr(self, name)
-        return value
-
-    @shapes_optimizer_prompt
-    def _render_few_shot_block(self) -> str:
-        if not self.few_shot_examples:
-            return ""
-        lines: list[str] = []
-        for ex in self.few_shot_examples:
-            lines.append(f"Input: {ex.input}\nOutput: {ex.output}")
-            if ex.explanation:
-                lines.append(f"Explanation: {ex.explanation}")
-        return "\n".join(lines)
 
     @shapes_optimizer_prompt
     def compile_prompt(self, **kwargs: str | int) -> str:
@@ -179,26 +111,38 @@ class PromptTemplate(SearchPoint):
         return text
 
     def prompt_fields(self) -> dict[str, str]:
-        """String-only projection (no few-shot) for L1 summaries + validator diffs."""
+        """String-only projection (no shots) for L1 summaries + validator diffs."""
         return {f: v for f in PROMPT_STRING_FIELDS if (v := getattr(self, f))}
-
-    def prompt_field_dict(self) -> dict[str, Any]:
-        """``plan`` rides here — and restores through ``from_prompt_fields`` — so a seed or fork inherits
-        the L3 frame. It is not in ``render()``, so carrying it leaves render identity untouched."""
-        d: dict[str, Any] = dict(self.prompt_fields())
-        if self.few_shot_examples:
-            d["few_shot_examples"] = [ex.model_dump() for ex in self.few_shot_examples]
-        if self.plan:
-            d["plan"] = self.plan
-        return d
 
     @classmethod
     def from_prompt_fields(cls, fields: dict[str, Any], **kwargs: Any) -> Self:
-        fields = dict(fields)
-        fse = fields.pop("few_shot_examples", [])
-        if fse and isinstance(fse[0], dict):
-            fse = [FewShotExample(**ex) for ex in fse]
-        return cls(few_shot_examples=fse, **fields, **kwargs)
+        return cls(**fields, **kwargs)
+
+
+class OptimizerPromptTemplate(PromptTemplate):
+    """A prompt the optimizer RUNS ON (`dispatch/llm_call`), never one it produces."""
+
+    RENDER_ORDER: ClassVar[Annotated[tuple[str, ...], shapes_optimizer_prompt]] = (
+        "persona",
+        "task_intent",
+        "instruction",
+        "thinking_style",
+        "answer_format",
+        "problem_description",
+    )
+    """Ordered for the provider's prefix cache, apart from the target's order so shaping a cache
+    prefix here cannot re-cut a banked measurement.
+
+    ``problem_description`` renders LAST because it is where the evidence goes — the slot potter's
+    layout floors fill (`optimizers/potter/dispatch/layout.py::VOLATILE_SLOT`, asserted there) —
+    so anything rendered after it would sit behind panels that change every round and could never
+    be served off a provider's prefix cache.
+
+    **The corollary binds the prompts, not just this tuple: a value that CHANGES between rounds
+    belongs in ``problem_description``, never in a field ahead of it** — a moving menu substituted
+    one slot early voids the stable prefix from inside a static template. Ordering the fields is
+    half the contract; keeping the moving values behind the boundary is the other half, and the
+    half nothing can assert."""
 
 
 class EvidenceGrounding(StrictModel):
@@ -214,121 +158,100 @@ class EvidenceGrounding(StrictModel):
     citation: str = Field(description="Short string naming the panel entry cited.")
 
 
-class WoundChannels(StrictModel):
-    """Four wound streams + sticky L3 note; rendered by dispatch-hub injections."""
+ORIGIN_SOURCE = "origin"
 
-    l3_note: str = ""
-    validation_failures: list[ValidationFailure] = Field(default_factory=list)
-    runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
-    l2_guard_breaches: list[ValidatorOutcome] = Field(default_factory=list)
-    l3_guard_breaches: list[ValidatorOutcome] = Field(default_factory=list)
+
+def node_source(manifest: str, node: str) -> str:
+    return f"{manifest}:{node}"
 
 
 class IndividualLineage(StrictModel):
     """Identity + provenance — set once at creation, never mutated."""
 
     id: str = Field(default_factory=lambda: uuid.uuid4().hex)
-    parent_id: str | None = None
+    parent_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Every individual this one derives from — one for a mutation, several for a "
+            "crossover; empty at the origin. A tree view hangs it under `parent_ids[0]`."
+        ),
+    )
     changes_description: str = ""
     source: str = Field(
         default="",
         description=(
-            "'origin' / 'l1_generate' / 'l2_context' / 'l3_plan' / 'fork_seed' / 'campaign_origin'."
+            "`{manifest}:{node}` of the node that proposed it (`potter:l1_generate`); "
+            "`origin` for an individual the bench minted."
         ),
     )
     evidence_grounding: EvidenceGrounding | None = None
 
 
-class L2L3Memory(StrictModel):
-    """The candidate's persistent frame — the three surfaces the escalation layers author
-    plus the operator's framing they work inside.
-
-    Bundled together because the first three are written by those layers
-    (L2 writes most; L3 writes ``wounds.l3_note`` + ``wounds.l3_guard_breaches``)
-    and all four are consumed by the dispatch-hub injections that compose the four
-    optimizer prompts. ``OptSearchPoint.copy_memory_to`` deep-copies the
-    whole bundle on L2/L3 adopt; ``OptSearchPoint.mutate`` (L1 child)
-    inherits ``task_context`` + ``l1_overrides`` and resets the other two
-    to defaults — the propagation asymmetry lives in those two methods.
-    """
-
-    wounds: WoundChannels = Field(
-        default_factory=WoundChannels,
-        description=(
-            "Four wound streams (validation/runtime/l2-guard/l3-guard) + "
-            "sticky L3 note. Rendered by dispatch-hub injections; absorbed "
-            "by L2 next round."
-        ),
-    )
-    l1_layout: L1Layout = Field(
-        default_factory=default_l1_layout,
-        description=(
-            "L2-authored ordered list of injection slots that "
-            "``DispatchHub.fill`` walks to compose the L1 optimizer prompt. "
-            "L2's primary lever for changing what evidence L1 sees."
-        ),
-    )
-    l1_overrides: dict[str, Any] = Field(
-        default_factory=dict,
-        description=(
-            "Per-individual L1 optimizer prompt overrides keyed by the surface "
-            "field name (``persona``, ``instruction``, …). L2 writes here "
-            "to nudge L1 without rewriting the shared optimizer prompt."
-        ),
-    )
-    task_context: TaskDecomposition = Field(
-        default_factory=TaskDecomposition,
-        description=(
-            "Operator-authored task framing, spliced around "
-            "``problem_description`` at render time. The five ``FRAMING_FIELDS`` "
-            "are frozen for the run — ``TaskDecomposition.merge`` refuses them "
-            "and the L2 wire schema declares none of them; only "
-            "``upstream_context`` / ``downstream_context`` are mutable."
-        ),
-    )
-
-    @field_validator("task_context", mode="before")
-    @classmethod
-    def _coerce_task_context(cls, v: Any) -> TaskDecomposition:
-        return TaskDecomposition.coerce(v)
-
-
 class OptSearchPoint(PromptTemplate):
-    """Optimizer working state: prompt fields + lineage + L2/L3 memory."""
+    """The individual: prompt structure + lineage.
+
+    The campaign's framing and every optimizer's working state ride elsewhere, so a derive can
+    carry neither."""
 
     model_config = ConfigDict(extra="forbid")
 
-    RENDER_ORDER: ClassVar[Annotated[tuple[str, ...], shapes_optimizer_prompt]] = tuple(
-        PROMPT_STRING_FIELDS
+    shot_ids: list[int] = Field(
+        default_factory=list,
+        description=(
+            "Its few-shot shots, in render order, as ids of the campaign's demo pool — resolved "
+            "to each row's query and ground truth only when the target prompt renders."
+        ),
     )
-    """Order for the TARGET prompt, so it sits inside the measurement archive's ``node_configs``
-    key and moving it re-cuts every banked cell. Restated, not inherited: inheriting is the
-    coupling."""
-
     lineage: IndividualLineage = Field(default_factory=IndividualLineage)
-    memory: L2L3Memory = Field(default_factory=L2L3Memory)
 
-    def copy_memory_to(self, target: OptSearchPoint) -> None:
-        """Deep-copy the L2/L3 memory onto *target* for L2/L3 adopt."""
-        target.memory = self.memory.model_copy(deep=True)
+    def prompt_field_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = dict(self.prompt_fields())
+        if self.shot_ids:
+            d["shot_ids"] = list(self.shot_ids)
+        return d
 
     @shapes_optimizer_prompt
-    def _field_value(self, name: str) -> str:
-        """Splice ``task_context`` up/downstream context around ``problem_description`` — which may
-        be EMPTY, and they still render; they are mutable because they reach the target prompt."""
-        v: str = getattr(self, name)
-        if name != "problem_description":
-            return v
-        tc = self.memory.task_context
-        if not (tc.upstream_context or tc.downstream_context):
-            return v
-        return "\n\n".join(p for p in (tc.upstream_context, v, tc.downstream_context) if p)
+    def _render_few_shot_block(self, demo: Sequence[Sample]) -> str:
+        rows = {s.id: s for s in demo}
+        if missing := [i for i in self.shot_ids if i not in rows]:
+            raise ValueError(f"shot ids {missing} are not in the demo pool this render was handed")
+        return "\n".join(
+            f"Input: {rows[i].query}\nOutput: {rows[i].ground_truth}" for i in self.shot_ids
+        )
+
+    @shapes_optimizer_prompt
+    def target_fields(
+        self, framing: TaskDecomposition, *, demo: Sequence[Sample]
+    ) -> list[tuple[str, str]]:
+        """The campaign's framing spliced up/downstream of ``problem_description`` — which may be
+        EMPTY, and the context still renders — and the shots last. This render, not ``render()``,
+        is what is scored."""
+
+        def value_of(name: str) -> str:
+            v: str = getattr(self, name)
+            if name != "problem_description":
+                return v
+            if not (framing.upstream_context or framing.downstream_context):
+                return v
+            parts = (framing.upstream_context, v, framing.downstream_context)
+            return "\n\n".join(part for part in parts if part)
+
+        pairs = self._ordered_pairs(value_of)
+        if block := self._render_few_shot_block(demo):
+            pairs.append((FEW_SHOT_BLOCK, block))
+        return pairs
+
+    @shapes_optimizer_prompt
+    def render_target(self, framing: TaskDecomposition, *, demo: Sequence[Sample]) -> str:
+        return "\n\n".join(v for _, v in self.target_fields(framing, demo=demo))
 
     def to_job_search_point(
         self,
         base_pipeline_params: dict[str, Any] | None = None,
         *,
         schema: PipelineSchema,
+        framing: TaskDecomposition,
+        demo: Sequence[Sample],
     ) -> JobSearchPoint:
         """*schema* is REQUIRED: without one this produced a valid-looking point carrying neither the
         rendered prompt nor ``steps``, and that point is scored and archived like any other."""
@@ -339,7 +262,8 @@ class OptSearchPoint(PromptTemplate):
         prompt_node = prompt_nodes[0] if prompt_nodes else ""
         if active_steps:
             pp["steps"] = list(active_steps)
-        rendered = self.render()
+        pairs = self.target_fields(framing, demo=demo)
+        rendered = "\n\n".join(v for _, v in pairs)
         if rendered and prompt_node:
             pp.setdefault(prompt_node, {})["prompt"] = rendered
 
@@ -351,62 +275,40 @@ class OptSearchPoint(PromptTemplate):
 
         pf: dict[str, Any] = {}
         if rendered and prompt_node:
-            pf = {f: v for f, v in self.prompt_field_dict().items() if f != "few_shot_examples"}
-            block = self._render_few_shot_block()
-            if block:
-                pf["few_shot_block"] = block
+            pf = self.prompt_fields()
+            if block := dict(pairs).get(FEW_SHOT_BLOCK):
+                pf[FEW_SHOT_BLOCK] = block
 
         return JobSearchPoint(
             pipeline_params=pp,
             prompt_fields=pf,
         )
 
-    def mutate(self, **changes: Any) -> OptSearchPoint:
-        """Prompt fields, ``task_context`` and ``l1_overrides`` inherit; ``wounds`` / ``l1_layout`` reset.
-        Those two flow on L2/L3 adopt through ``copy_memory_to`` instead."""
+    @classmethod
+    def derive(
+        cls,
+        parents: Sequence[OptSearchPoint],
+        *,
+        source: str,
+        changes_description: str = "",
+        evidence_grounding: EvidenceGrounding | None = None,
+        **changes: Any,
+    ) -> OptSearchPoint:
+        """``parents[0]`` supplies every field *changes* leaves unset — a crossover names its
+        recombined fields explicitly."""
+        base = parents[0]
         data: dict[str, Any] = {}
         for f in PROMPT_STRING_FIELDS:
-            data[f] = changes.pop(f, getattr(self, f))
-        fse = changes.pop("few_shot_examples", None)
-        if fse is not None:
-            if fse and isinstance(fse[0], dict):
-                fse = [FewShotExample(**ex) for ex in fse]
-            data["few_shot_examples"] = fse
-        else:
-            data["few_shot_examples"] = [ex.model_copy() for ex in self.few_shot_examples]
-        data["memory"] = L2L3Memory(
-            l1_overrides=changes.pop("l1_overrides", dict(self.memory.l1_overrides)),
-            task_context=changes.pop("task_context", self.memory.task_context.to_dict()),
-        )
-        data["plan"] = changes.pop("plan", self.plan)
+            data[f] = changes.pop(f, getattr(base, f))
+        data["shot_ids"] = list(changes.pop("shot_ids", base.shot_ids))
         data["lineage"] = IndividualLineage(
-            parent_id=self.lineage.id,
-            changes_description=changes.pop("changes_description", ""),
-            source=changes.pop("source", ""),
-            evidence_grounding=changes.pop("evidence_grounding", None),
+            parent_ids=[p.lineage.id for p in parents],
+            changes_description=changes_description,
+            source=source,
+            evidence_grounding=evidence_grounding,
         )
         data.update(changes)
-        return OptSearchPoint(**data)
+        return cls(**data)
 
 
 _check_render_order(PromptTemplate)
-
-# The prefix-cache half of the same contract, and asserted HERE rather than in
-# `_check_render_order` because it is true of the optimizer prompt alone: `OptSearchPoint` below
-# restates `PROMPT_STRING_FIELDS` order for the target prompt, where `problem_description` is
-# third and the archive key — not a cache — is what the order answers to.
-#
-# `l1_layout.py` cannot assert this itself (domain import direction: it is imported BY this
-# module), so the reading lives on the importer. Two claims, both load-bearing and neither
-# previously checked: the volatile slot renders last, and the layout's slot sequence is the
-# render sequence — without the second, `L1_LAYOUT_SLOTS[:-1]` is not "the slots ahead of the
-# boundary" and `validate_l1_layout`'s prefix check reads the wrong ones.
-assert PromptTemplate.RENDER_ORDER[-1] == VOLATILE_SLOT, (
-    f"the optimizer prompt must render {VOLATILE_SLOT!r} last — it is where every NODE_LAYOUTS "
-    f"floor puts its evidence, so a field behind it can never sit in a provider's stable prefix."
-)
-assert [f for f in PromptTemplate.RENDER_ORDER if f in L1_LAYOUT_SLOTS] == list(L1_LAYOUT_SLOTS), (
-    f"L1_LAYOUT_SLOTS {L1_LAYOUT_SLOTS} must be a subsequence of RENDER_ORDER "
-    f"{PromptTemplate.RENDER_ORDER} — the layout is declared in render order so that "
-    f"'ahead of the boundary' means the same thing in both modules."
-)

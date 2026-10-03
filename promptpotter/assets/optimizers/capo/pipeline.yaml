@@ -1,0 +1,123 @@
+# capo — CAPO (Zehle et al., "CAPO: Cost-Aware Prompt Optimization", arXiv 2504.16005) at its
+# paper configuration, as a manifest the bench runs like any other. A campaign selects it with
+# `optimization.optimizer: capo` and adjusts it with `optimization.nodes.{node}.config`.
+#
+# Every value below cites the section it comes from. Where the bench runs CAPO differently from
+# the paper, `docs/methods/candidate-elimination.md` lists it, under § CAPO's race and § CAPO's
+# population and operators.
+#
+# Editing a `resolved_prompts` field below changes what every CAPO call reads; the text is the
+# paper's own (App. D), with its `<placeholder>`s spelled as `{{placeholder}}`.
+name: capo
+version: v1.0
+# Served to the optimizer picker: every knob value below is this paper's configuration.
+paper: 'Zehle et al., "CAPO: Cost-Aware Prompt Optimization", arXiv 2504.16005'
+available_models:
+  - openai/gpt-6-luna
+  - deepseek/deepseek-v4-flash:nitro
+  - openai/gpt-oss-20b:nitro
+  - openai/gpt-oss-120b:nitro
+nodes:
+  # b = 30, z_max = 10 (App. C.4); the blocks are the pool's first, never shuffled (App. C.4).
+  blocks:
+    type: sampler
+    config:
+      block_size: 30
+      max_blocks: 10
+  # c = 4 crossovers per round (App. C.4), parents drawn at random (§4). The paper runs one model
+  # as optimizer and target (§5); set `config.model` to the target's to match it. The paper
+  # states no decoding temperature; 1.0 is the vLLM sampling default it ran under (App. C.1).
+  capo_crossover:
+    type: llm
+    config:
+      prompt_family: capo_crossover
+      prompt_version: 1
+      temperature: 1.0
+      reasoning_effort: low
+      max_tokens: 8000
+      provider: openrouter
+      model: openai/gpt-6-luna
+      crossovers: 4
+  capo_mutate:
+    type: llm
+    config:
+      prompt_family: capo_mutate
+      prompt_version: 1
+      temperature: 1.0
+      reasoning_effort: low
+      max_tokens: 8000
+      provider: openrouter
+      model: openai/gpt-6-luna
+  # k_max = 5 (App. C.4); the shot mutation adds, drops or keeps one shot, then shuffles (§4).
+  few_shot:
+    type: algorithm
+    config:
+      k_max: 5
+  # The race runs over the population and its offspring together (Alg. 1 line 12).
+  population_rejoin:
+    type: algorithm
+    config: {}
+  # α = 0.2, γ = 0.05 (App. C.4); a paired t-test, uncorrected (§4). γ prices the length in
+  # CAPO's objective, which this race and the `population` selector both rank on.
+  paired_t:
+    type: eliminator
+    config:
+      alpha: 0.2
+      length_penalty: 0.05
+  score:
+    type: measurement
+    config: {}
+  # μ = 10 (App. C.4): the population kept, and the arms the `paired_t` race keeps.
+  population:
+    type: selector
+    config:
+      size: 10
+  # The initial instructions (App. D.2, Table 7), generated once from the task description.
+  capo_init:
+    type: llm
+    config:
+      prompt_family: capo_init
+      prompt_version: 1
+      temperature: 1.0
+      reasoning_effort: low
+      max_tokens: 8000
+      provider: openrouter
+      model: openai/gpt-6-luna
+pipelines:
+  default:
+    - blocks
+    - capo_crossover
+    - capo_mutate
+    - few_shot
+    - population_rejoin
+    - paired_t
+    - score
+    - population
+  initial_population:
+    - capo_init
+resolved_prompts:
+  # App. D.3, Table 9: "CAPO cross-over meta-prompt template".
+  capo_crossover/1:
+    instruction: |-
+      You receive two prompts for the following task: {{task_description}}
+      Please merge the two prompts into a single coherent prompt. Maintain the key linguistic features from both original prompts:
+      Prompt 1: {{mother}}
+      Prompt 2: {{father}}
+
+      Return the new prompt in the following format:
+      <prompt>new prompt</prompt>.
+  # App. D.3, Table 9: "CAPO mutation meta-prompt template".
+  capo_mutate/1:
+    instruction: |-
+      You receive a prompt for the following task: {{task_description}}
+      Please rephrase the prompt, preserving its core meaning while substantially varying the linguistic style.
+      Prompt: {{instruction}}
+
+      Return the new prompt in the following format:
+      <prompt>new prompt </prompt>
+  # App. D.2, Table 7.
+  capo_init/1:
+    instruction: |-
+      Please create diverse prompts for the following task. They should be linguistically diverse (but always in English) and have varying lengths and complexities. This means some consist only of a short sentence with a rather high-level description while others elaborate on the task in little more detail.
+      Task: {{task_description}}
+      Explicitly state this expected format as part of the prompts. Create overall 15 prompts within quotes as an array:

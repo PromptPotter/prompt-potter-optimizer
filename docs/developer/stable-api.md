@@ -17,12 +17,14 @@ class Connector:
     extract_experiment: Callable[[dict], tuple[list[dict], list[str]]]  # → (queries, index_terms)
     execution: ConnectorExecution = "remote_http"                   # "remote_http" | "in_process" (no HTTP; TRANSPORT only)
     in_process_run: InProcessRun | None = None                      # async (workload, query, payload) -> {"data": …}; required iff in_process
-    holds_own_sends: bool = False                                   # True: every paid call goes through PP's own clients, so a cell holds nothing
+    holds_own_sends: bool = False                                   # True: every paid send is billed where it is made, so a cell only RESERVES its bound
+    sent_spend_bound: SentSpendBound | None = None                  # (node, config) -> what one cell bills as DECLARED, read off the payload actually sent; None leaves the cell unbounded, and an unbounded cell cannot run under a ceiling
     cancel_stops_billing: bool = False                              # True: cancelling a sent cell stops what it bills; else it is left to land
     required_observation_keys: tuple[str, ...] = ()                 # keys the payload ALWAYS carries; init RAISES if the dataset declares no mapping
     experiment_file: str = ""                                       # on-disk experiment doc read from the dataset dir in place of a sample table
     resolve_experiment: ExperimentResolver | None = None            # parsed experiment_file -> the document every read sees (a named roster pinned)
-    identity_config: Callable[[Path, Mapping | None], dict] | None = None  # (dataset dir, resolved experiment) -> MEASUREMENT IDENTITY, not the wire
+    pipeline_declaration: Callable[[Stores, Mapping | None], dict] | None = None  # in_process only: the graph served in place of GET /pipeline; pipeline.yaml overlays it
+    identity_config: Callable[[Path, Mapping | None], dict] | None = None  # (dataset dir, resolved experiment) -> what EVERY cell is measured with, not the wire
     measured_unit: MeasuredUnit = "sample"                          # what ONE row is CALLED — "sample" | "cell"
     expected_revision: str | None = None                            # backend rev this PP rev expects (paired w/ version_check)
     version_check: VersionCheck | None = None                       # async (http, base_url) -> str | None; init WARNs on drift
@@ -33,10 +35,11 @@ class Connector:
 
 Plus the first-tenant draft seeds (`default_pipeline`, `default_node_config`, `default_optimization`, `default_exclude_nodes`, `node_types`) and `max_cells_in_flight`, which shape the ingest UI and the scoring walk rather than the measurement. **The dataclass is the roster** — read the field notes there, which say what each one costs to get wrong.
 
-Three of the fields above are on this page because omitting them produced WRONG NUMBERS rather than a missing feature, silently:
+Four of the fields above are on this page because omitting them produced WRONG NUMBERS rather than a missing feature, silently:
 
 - **`required_observation_keys`** — an undeclared key is dropped at `sample_measurement.py::measure_sample` and never reaches `pipeline_data`, so the formula grades a measurement it never received. `wiring.py::_verify_required_observation_keys` raises at init instead.
-- **`identity_config`** — what the cell was measured ON, when that is not in the wire payload (a Harbor task's git pins, the inner optimizer's effective revision). Without it, banked rows are silently replayed against bytes nobody read.
+- **`identity_config`** — what every cell is measured WITH, when that is not in the wire payload (a Harbor agent, the inner optimizer's effective revision). Without it, banked rows are silently replayed against bytes nobody read. What ONE cell is measured on — a Harbor task's git pins — rides that cell's row from `extract_experiment` as `source_pin` instead, so a panel that grows re-keys none of its cells.
+- **`sent_spend_bound`** — what one cell bills when it runs as DECLARED, read off the payload the wire adapter actually sends, so the hold cannot count on a limit the agent was never given. Without one the cell is unbounded, and an unbounded cell cannot run under a ceiling at all. Declare the run it declares, never every retry it might need at once: the ceiling admits what the reservation does not cover, so an over-large bound buys nothing and silently holds the walk to one cell in flight.
 - **The answer shape** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § The answer shape — a query yielding `ground_truth: None` declares it, and `extract_experiment` is the only place a connector may.
 
 `SessionProtocol` (`promptpotter/domain/connector.py`): `async set_terms(http, base_url, terms)` (backend handshake; noop ok) · `async recover(http, base_url)` (re-establish after transport error).
@@ -52,7 +55,7 @@ anything = "my_package.connector:CONNECTOR"
 
 The object named must be a `Connector`; **its `name` field is the registry key**, so the entry-point label is free and a package cannot claim a key its connector does not declare. No edits to `application/campaign_config.py` or `infrastructure/backend.py`. Reference impls: [`connectors/termnorm.py`](../../promptpotter/connectors/termnorm.py), [`connectors/promptpotter.py`](../../promptpotter/connectors/promptpotter.py).
 
-**What a plugin is held to** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md); all three rules are enforced in `connectors/__init__.py` when the table completes, and each raise names its rule. What this page promises is only that they will not tighten within v1.
+**What a plugin is held to** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md); all three rules are enforced when the table completes (`connectors/__init__.py::_validate` and `shared/plugin_registry.py`, the loader every entry-point group shares), and each raise names its rule. What this page promises is only that they will not tighten within v1.
 
 `connector_origins()` maps every registered name to `"built-in"` or `"<distribution>: <module>:<attr>"` (the entry point's *value*, not its label — the label is free, the value is what was imported), so a name that greps to nothing in this tree can still be traced to its package. Audit what is loaded with:
 
@@ -76,17 +79,18 @@ Configured per dataset via `campaign.yaml::scoring`:
 {
   "scoring": {
     "per_sample": "acc",                    // required: was this cell RIGHT
-    "per_cell": "acc * 500 / max(1, latency)", // optional: what it was WORTH — θ is fit on this
-    "scorer_id": "acc_v1"                   // optional: explicit id
+    "per_cell": "acc * 500 / max(1, latency)" // optional: what it was WORTH — θ is fit on this
   }
 }
 ```
 
+**The scorer id is derived, never declared** — `compiler.py::auto_scorer_id` over everything that grades a cell. A run stamps the one it graded under at `index.json::final.scorer_id`; `campaign.json` holds only a delta over the dataset file, so an id re-derived from it can name a scorer that never ran.
+
 **Addressable namespace** (`application/scoring/formula/compiler.py`):
 
-- **Builtins:** the `_SAFE_BUILTINS` map in that module — arithmetic and `math` only. Nothing else from `__builtins__`.
-- **Evaluators:** any registered name, per-sample or per-round. `all_evaluators()` (`application/scoring/evaluators.py`) is the PACKAGE registry, `evaluators_meta()` its served projection; a campaign's own `judge` (§3) is addressable by its judge name too, and is deliberately not in that registry — a grader belongs to one campaign, not to the process. Names are stable and implementations may change — read the registry, not a list here.
-- **Matchers:** `SCORING_FUNCTIONS` (`application/scoring/formula/matchers.py`), splatted into the same namespace, so a formula calls one exactly like an evaluator. This is the LABEL arm — it reads answer prose and decides HIT/MISS (`exact_match`, `gsm8k_match`, …), which is why a `per_sample` formula almost always names one. Read the map; it holds what a campaign can actually reach, and nothing is kept in it for a caller that does not exist.
+- **Builtins:** the `SAFE_BUILTINS` map in that module — arithmetic and `math` only. Nothing else from `__builtins__`.
+- **Terms:** every per-sample evaluator in `all_evaluators()` (`application/scoring/evaluators.py`, the PACKAGE registry), banked into the row; and, in a `per_cell` formula, the per-cell terms `CELL_TERMS` names (`compiler.py`). `cell_terms_meta()` is their served projection — the scoring-mask editor's vocabulary, since a `score:` lens IS a `per_cell` formula. A per-round evaluator is a reading of a round, never addressable. A campaign's own `judges` (§3) are addressable by their term keys too, and are deliberately not in that registry — a grader belongs to one campaign, not to the process. Names are stable and implementations may change — read the registry, not a list here.
+- **Matchers:** `SCORING_FUNCTIONS` (`application/scoring/formula/matchers.py`), splatted into the same namespace, so a formula calls one exactly like an evaluator. This is the LABEL arm — it reads answer prose and decides HIT/MISS (`label_match`, `gsm8k_match`, …), which is why a `per_sample` formula almost always names one. Read the map; it holds what a campaign can actually reach, and nothing is kept in it for a caller that does not exist.
 
 Constants, name lookups, arithmetic operators (`+ - * / % **`) addressable. **Calls outside the registry are rejected at compile time** (enforced, not convention).
 
@@ -116,31 +120,31 @@ Connector-described pipeline (the shape `GET /pipeline` exposes, plus an operato
 
 Campaign knobs + scoring + optimizer LLM. Validated by `application/campaign_config.py::CampaignConfig` with `extra="forbid"` — unknown keys raise at boot. See `CampaignConfig` for the full field list.
 
-**Top-level keys.** `dataset_name`, `scoring`, `judge`, `sp_budget_round`, `exclude_nodes` (drop pipeline nodes by name), `pipeline_overlay` (per-node config overlay), `optimization`. (The optimizer LLM is install-global — `promptpotter/assets/optimizer/pipeline.yaml` — not a campaign key.)
+**Top-level keys.** `dataset_name`, `scoring`, `judges`, `sp_budget_origin`, `exclude_nodes` (drop pipeline nodes by name), `pipeline_overlay` (per-node config overlay), `optimization`. (The optimizer is `optimization.optimizer`, a manifest under `promptpotter/assets/optimizers/`; its nodes' knobs and models ride `optimization.nodes`.)
 
-`judge` names a registered LLM-as-judge and the models to run it on — `{name, stages: [{role, model, provider, temperature}]}` — for datasets whose answer no matcher can grade. Its verdict is banked as a per-sample observation the `scoring` formula reads by NAME (never a call: a judge is a measurement, not a formula term). **Its models are inherited from nothing** — not a node's permitted set, not node config, not the optimizer's. A third party ships a judge through the `promptpotter.judges` entry-point group, validated like §1's connectors; contract: [`../../promptpotter/judges/CLAUDE.md`](../../promptpotter/judges/CLAUDE.md).
+`judges` maps a scoring term to a registered LLM-as-judge and the models to run it on — `{term: {name, stages: [{role, model, provider, temperature}]}}` — for datasets whose answer no matcher can grade. Each verdict is banked as a per-sample observation the `scoring` formula reads by its term KEY (never a call: a judge is a measurement, not a formula term). **Its models are inherited from nothing** — not a node's permitted set, not node config, not the optimizer's. A third party ships a judge through the `promptpotter.judges` entry-point group, validated like §1's connectors; contract: [`../../promptpotter/judges/CLAUDE.md`](../../promptpotter/judges/CLAUDE.md).
 
 **`optimization` knobs:** the stable contract is the mechanism, not a
 frozen key/default table (same rule as §4). Every knob is a
-self-describing field on `OptimizationConfig` in
-`application/campaign_config.py` — `Annotated[T, Knob(scope, *estimands)]` plus a
-`Field(description=…)` — and `application/knobs.py::KNOBS` is the walked
-taxonomy. Only `degradation_threshold` is required; everything else
-defaults. Read defaults off the fields, never
-off a doc.
+self-describing field — the bench's on `OptimizationConfig` in
+`application/campaign_config.py`, an optimizer's on its node member's knob model (potter's:
+`application/optimizers/potter/knobs.py`), each `Annotated[T, Knob(scope, *estimands)]` plus a
+`Field(description=…)` — and `application/knobs.py` walks both. Only `degradation_threshold` is
+required; the bench's other knobs default in code, an optimizer's in its manifest. Read defaults
+off the fields and the manifest, never off a doc.
 
-**Optimizer LLM:** install-global, **not** in `campaign.yaml`. Provider, model, temperature, `reasoning_effort`, and `max_tokens` are per-node config in `promptpotter/assets/optimizer/pipeline.yaml` (`nodes.{l1_generate|l1_critique|l2_context|l3_plan|checkin}.config`), resolved inside `llm_call` like any other node tunable. One file configures the optimizer for every campaign.
+**Optimizer LLM:** provider, model, temperature, `reasoning_effort`, and `max_tokens` are per-node config in the selected manifest (`promptpotter/assets/optimizers/{name}/pipeline.yaml::nodes.{node}.config`), resolved inside `llm_call` like any other node tunable; a campaign moves one through `optimization.nodes.{node}.config`. The check-in node is the bench's own, in `promptpotter/assets/checkin/pipeline.yaml`.
 
-Constants moved out of `campaign.yaml` (they live next to their consumer): L1 candidate-generation temperature (the `creativity` arg in `l1/generate.py`, driven by `l1_overrides.creativity`, defaulting to the `l1_generate` node temperature), L2/L3 transition temperatures (the `l2_context`/`l3_plan` node temperatures), runaway-loop ceiling (`runner/loop.py::HARD_CAP`), stale-data recovery ladder (`scoring/sample_measurement.py`). PoBB lock-in went the other way and stayed campaign config — `pobb_lock_in` / `pobb_lock_in_n_min` / `mechanisms.elimination.leader_lock_in`.
+Constants moved out of `campaign.yaml` (they live next to their consumer): L1 candidate-generation temperature (the `creativity` arg in `l1/generate.py`, driven by `l1_overrides.creativity`, defaulting to the `l1_generate` node temperature), L2/L3 transition temperatures (the `l2_context`/`l3_plan` node temperatures), runaway-loop ceiling, in arms raced (`runner/loop.py::HARD_CAP_ARMS`), stale-data recovery ladder (`scoring/sample_measurement.py`). PoBB lock-in went the other way and stayed configurable — potter's `pobb` node `lock_in` / `lock_in_n_min` / `leader_lock_in`.
 
-The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no opt-in flag. Which LAYERS the loop may reach is `optimization.escalation_ladder` (`full` / `l1_l2` / `l1`), the ablation switch; the individual rules are not separately toggleable.
+The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no opt-in flag. Which LAYERS potter may reach is its `escalation` node's `escalation_ladder` (`full` / `l1_l2` / `l1`), the ablation switch; the individual rules are not separately toggleable.
 
 ### Other files
 
 - **`prompts/{node}.yaml`** — 8-field `PromptTemplate` per node. Schema: `domain/opt_search_point.py::PromptTemplate`. Loaded by `application/datasets/prompts.py::load_node_prompt`.
-- **`task_description.md`** — free-form markdown; decomposed at `init` into the `task_context` dict on `OptSearchPoint`.
+- **`task_description.md`** — free-form markdown; decomposed into the campaign's `task_context` framing (`Cycle.framing`) by the first mint that finds none committed, or by a check-in (`new <name> --task-file`, the web check-in).
 - **`dataset.md`** — operator guide; free-form, not parsed.
-- **`task_context.yaml`** — the committed task framing; written once by the `checkin` decomposition (`application/optimization/task_context.py::decompose_prompt_fields`) or by web ingest at commit, and read free on every later run through `infrastructure/store/dataset_access.py::dataset_task_context_path` on the tenant-first ladder.
+- **`task_context.yaml`** — the committed task framing; written once by the `checkin` decomposition (`application/bench/task_context.py::commit_task_framing`) or by web ingest at commit, and read free on every later run through `infrastructure/store/dataset_access.py::dataset_task_context_path` on the tenant-first ladder.
 
 ---
 
@@ -150,7 +154,7 @@ The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no 
 
 **The stable contract is the mechanism, not the slot list** — the set evolves, so this page doesn't freeze a table that drifts. The live set is the registry itself; the doc-level reference with per-slot detail is [`dispatch-hub.md`](dispatch-hub.md) § Reference.
 
-**Per-template extras** (caller-supplied via `compile_prompt(**hub_dict, **extras)`): `l1_generate` → `{n_variants}` · `l1_critique`/`l2_context`/`l3_plan` → `{}` · `checkin` → `{consultation_instruction}`.
+**Per-template extras** (caller-supplied via `compile_prompt(**hub_dict, **extras)`): `l1_generate` → `{n_variants, citable_fields}` · `l1_critique`/`l2_context`/`l3_plan` → `{}` · `checkin` → `{consultation_instruction}`.
 
 ## 4b. Roots — where the package reads and writes
 
@@ -166,12 +170,11 @@ rules; the constants themselves are internal.
 **`PROMPTPOTTER_HOME` is stable.** Set it to relocate the whole user-data tree; it is
 read once at import, so it is an environment decision, not a runtime one.
 
-**`$PROMPTPOTTER_HOME/optimizer/pipeline.yaml` is stable, and it is the one install asset
-an operator may shadow.** Present, it replaces the packaged optimizer manifest (provider /
-model / temperature per optimizer node); absent, the packaged one is read. Its two
-neighbours are deliberately not overridable — `resolved_schemas.json` is generated from the
-Pydantic models, `sets/*.yaml` is the L4 instrument — so the seam is one file, not the
-directory.
+**`$PROMPTPOTTER_HOME/optimizers/{name}/pipeline.yaml` and `$PROMPTPOTTER_HOME/checkin/pipeline.yaml`
+are stable, and they are the install assets an operator may shadow.** Present, one replaces the
+packaged manifest of that name (provider / model / temperature per node); absent, the packaged one
+is read. The generated `resolved_schemas.json` beside each is deliberately not overridable, so the
+seam is a file, never a directory.
 
 Both derived asset trees (`assets/webapp/`, `assets/benchmarks/`) are staged by
 `scripts/build_release.py`, the supported way to build a wheel — a bare `uv build` produces
@@ -186,7 +189,7 @@ which is both where `pip` deletes on upgrade and where the HuggingFace `datasets
 Two behaviours a fork may rely on, neither of them readable off `--help`:
 
 - Every `new` mints a fresh `campaign_id`, but two `new` calls on an unchanged declaration SHARE their content-addressed root `cycle_id` and its origin score, then diverge from round 1 (`runner/campaign_ids.py::mint_campaign_id`). The prior campaign is preserved.
-- A launch flag may only lower a budget. `set-budget` is the verb that raises one.
+- A launch flag SETS the cycle's budget, raise or lower, over what the dataset declares, and stays as the cycle's standing ceiling for later resumes; the account admits the result whole or refuses the launch. `set-limits` moves it mid-flight.
 
 The maintenance and diagnostic verbs are not part of v1.
 
@@ -204,7 +207,8 @@ result = await run_campaign(session, train_data, campaign_config, *, display=Non
 
 `limits` is a `promptpotter.domain.launch_limits.LaunchLimits(halt_at_accuracy=…,
 spend_budget_usd=…, token_budget=…)`, the model the CLI flags and the `start-run` payload build; a
-budget it declares may only lower the campaign's own, and `LaunchLimits()` declares none. `mode`
+budget it declares sets the run's over the campaign's own (no admission — the host program holds no
+slot), and `LaunchLimits()` declares none. `mode`
 is `runner/entry.py::RunMode`, and `RunMode()` is a plain run.
 
 Two steps rather than one because every caller does its own work between them. It mints through
@@ -240,21 +244,34 @@ from the same call that stamps `index.json::final`, so both are projections of o
 ```python
 from promptpotter.domain.export import parse_prompt_export
 export = parse_prompt_export(Path("…/export.json").read_text())
-template = export.template()          # PromptTemplate — fields by name, few-shot intact
+template = export.template()          # PromptTemplate — fields by name
+prompt = export.render()              # the prompt as scored: those fields, then its shots
 export.measurement.composite_fitness  # under export.measurement.formula, never a bare number
 ```
 
 Four rules hold it, each a defect of DSPy's own `save()` inverted (`domain/export.py` argues them):
 **fields by name** (their `load_state` zips positionally with `strict=False`, so a signature that
 gained a field reloads scrambled and raises nothing) · **provenance inside the file** — the fitness
-under its named formula, n, lift + CI, θ, the rows' hash, the optimizer manifest, which is the half
-we compute and they cannot · **an `artifact_version` a reader refuses on**, since we owe no
-back-compat · **JSON and scalars, never pickle**. `tuned_params` carries the node config the winner
-ran under, minus each node's rendered prompt — that is `prompt_fields` again, and one artifact does
-not state a fact twice.
+under its named formula, n, the lift + CI over the parent (in accuracy, beside the parent's
+accuracy as its bar — the composite's lift over the origin is `bench.lift`), θ, the rows' hash, the
+optimizer manifest, which is the half we compute and they cannot · **an `artifact_version` a reader
+refuses on**, since we owe no back-compat · **JSON and scalars, never pickle**. `tuned_params`
+carries the node config the winner ran under, minus each node's rendered prompt — that is
+`prompt_fields` again, and one artifact does not state a fact twice.
+
+That node config names the model the winner was won on, and a reader must treat it as binding: an
+optimized prompt does not carry across models. [Why Prompt Optimization Works, and Why It Sometimes
+Doesn't](https://arxiv.org/abs/2605.26655) found edits that help one benchmark often fail on another
+across four model families, and [Prompting Inversion](https://arxiv.org/abs/2510.22251) reports a
+scaffold that helps GPT-4o and hurts GPT-5. A model swap is a new run, never a copy of the winner.
 
 Absent when no round ever closed: an artifact whose point is a fitness with provenance may not
 carry an unmeasured one.
+
+**Gap:** the provenance carries no optimization spend or tokens, which amortized lifetime cost
+needs ([`../research/external-constraints.md`](../research/external-constraints.md) § Cost
+reporting) — [Databricks](https://www.databricks.com/blog/building-state-art-enterprise-agents-90x-cheaper-automated-prompt-optimization)
+counts optimization cost plus serving cost over 100k requests, and a reader of this file cannot yet.
 
 ## 6. Ledger event types
 
@@ -290,12 +307,13 @@ Sibling cycles (forks, diag) live flat under `cycles/` alongside the root, each 
 
 ## 8. What is NOT stable
 
-- **Internal module structure** beyond §1–§7. The dispatch hub split into `hub/{bundle, injections, facade}` is internal — only the public symbols (`DispatchHub`, `injections`, `build_bundle`, `validate_template`) are stable.
+- **Internal module structure** beyond §1–§7. The dispatch hub split into `dispatch/{bundle, compose, injections, facade}` is internal — only the public symbols (`DispatchHub`, `injections`, `build_bundle`, `validate_template`) are stable.
 - **Private types** (`_Injection`, `_TEMPLATE_EXTRAS`, etc., plus any `_`-prefixed name). Package `__init__` files are namespace markers that re-export nothing — §1–§7 is the whole public surface, not whatever a package surfaces.
 - **`__all__`** — this document is the public surface; `__all__` is a reader's hint and nothing more. It is mechanically inert here (`implicit_reexport = true`, no `import *` anywhere), so neither runtime nor mypy consults it, and a name listed there is not thereby promised. Prune an entry nothing imports rather than reading it as a contract.
 - **Runtime dataclass shapes** not in §1–§7 (`CycleSlice`, `RoundDigest`, `InjectionBundle`, `LiveStateCore`, etc.).
 - **In-memory caches** and their invalidation strategies (optimizer LRU caches, the dispatch hub's pipeline-param-catalogue cache, etc.).
-- **Prompt templates** at `promptpotter/assets/optimizer/pipeline.yaml::resolved_prompts` — data, intentionally tunable. Forks may edit; we may also edit on any release.
+- **Prompt templates** at `promptpotter/assets/optimizers/potter/pipeline.yaml::resolved_prompts` — data, intentionally tunable. Forks may edit; we may also edit on any release.
+- **The optimizer node types** (`application/optimizers/nodes.py`, registered under `promptpotter.optimizer_nodes`). They hand a member the live `Cycle`, so a member built on them builds on internal state.
 - **Test helpers** (`tests/factories.py`, `tests/conftest.py`).
 - **The `webapp/` layout.** The webapp + control plane ship and serve users; internal component layout stays free to move.
 - **The REST API and the events stream**, specified though they are (`docs/specs/api-openapi.yaml`, `events-asyncapi.yaml`). They carry **no inbound credential**: `presentation/api/middleware/oidc.py` derives identity from a browser SESSION COOKIE and nothing else — no bearer token, no API key anywhere on the inbound path — so a third party reaches them only by running the server with `PROMPTPOTTER_AUTH=off`, i.e. with no auth at all. That makes this a same-origin browser surface plus a local no-auth mode, not an integration surface, and saying so is the honest state: per-endpoint guarantees would promise something it cannot yet keep. (The one bearer token the repo holds runs PP→TermNorm — outbound, the other direction.)

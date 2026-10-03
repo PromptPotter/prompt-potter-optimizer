@@ -2,22 +2,15 @@ import type { ReactNode } from "react";
 import { cx } from "@/lib/cx";
 import s from "./SegmentedControl.module.css";
 
-// Exclusive choice across short options — one joined button group where exactly
-// one segment is always on, `value` being the single source of truth. For a
-// NON-exclusive set of toggles (each independently on/off), reach for `Chip`.
+// Exclusive choice, exactly one segment on. A non-exclusive set is `Chip`.
 export interface Segment<T extends string> {
   value: T;
-  // Text, or an icon. When it's an icon, `ariaLabel` is REQUIRED — a glyph has
-  // no accessible name of its own.
+  // An icon label REQUIRES `ariaLabel`.
   label: ReactNode;
   ariaLabel?: string;
   title?: string;
-  // An option the current state can't offer (e.g. a pipeline mode whose steps
-  // this dataset has no research node for). Still rendered, so the choice stays
-  // discoverable — just not selectable.
   disabled?: boolean;
-  // A level drawn behind the label, independent of which segment is on — so one row can be the
-  // choice AND a gauge of how much of it is in use (`full` in use, `part` available).
+  // A gauge drawn behind the label, independent of which segment is on.
   fill?: "full" | "part";
 }
 
@@ -34,9 +27,6 @@ export function SegmentedControl<T extends string>({
   onChange: (value: T) => void;
   ariaLabel: string;
   className?: string;
-  // `sm` is the toolbar scale this was built at. `lg` is page-level chrome — the
-  // unit header's view strip — where a toolbar-sized control reads as a stray
-  // widget rather than the app's navigation.
   size?: "sm" | "lg";
 }) {
   return (

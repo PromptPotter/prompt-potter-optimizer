@@ -11,7 +11,7 @@ agent episode is a measurable cell in this loop — not to publish a competitive
   published sample of the 89-task set. Chosen because it is pure text work: the rest of that
   sample builds Cython extensions, boots qemu or compiles SQLite with coverage — minutes of
   container build before a token is spent. **Taking more tasks means a new dataset name**, not an
-  edit here: `sample_id` is scoped by dataset name and the row text is not in the key.
+  edit here: this name says which one task it is.
 - **Where the roster lives:** Harbor's registry, not this directory. `harbor_tasks.yaml` commits
   the dataset name and version; the connector resolves the task list and Harbor fetches the task
   bytes at the commits it pins. Nothing about the benchmark is vendored here, so there is no copy
@@ -60,4 +60,8 @@ Per `dataset-selection-rationale.md` § Adding a dataset:
 skill that did would be the benchmark leaking into the baseline the lift is read against. What
 varies across arms is the standing operating instruction; what is held fixed is the frontmatter
 that makes the agent open it at all (`connectors/harbor.py`, `_SKILL_DESCRIPTION` — a candidate
-free to write its own could win by hiding its own skill).
+free to write its own could win by hiding its own skill). The candidate body is still bound by the
+[Agent Skills spec](https://agentskills.io/specification)'s size limit (under 500 lines). A skill
+result meant for outside readers is reported on [SkillsBench](https://arxiv.org/abs/2602.12670),
+whose verifiers are deterministic and which found self-generated skills give zero average benefit —
+the reason a skill here is admitted only on measured lift, never on a rewrite alone.

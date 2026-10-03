@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.application.views.render.prefix_reading import prefix_reading
 from promptpotter.application.views.view_models import AnyView
 from promptpotter.domain.connector import MeasuredUnit
+from promptpotter.domain.dashboard_rows import RunStanding
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.results import (
+    ArmOutcome,
     ScoreboardRankKey,
     candidate_label,
     overlap_series,
@@ -32,11 +36,14 @@ from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.live_state import (
     LiveStateCore,
-    apply_p_best_update,
     apply_phase,
+    apply_race_standing,
     roll_p_best_at_round_complete,
     top_n_p_best,
 )
+from promptpotter.infrastructure.store.io import write_text
+from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.judges import judge_instrument
 from promptpotter.presentation.terminal.ansi import to_text
 from promptpotter.presentation.terminal.live.candidate import (
     fmt_individual_header,
@@ -67,37 +74,16 @@ from promptpotter.presentation.terminal.primitives import (
 from promptpotter.shared.composite import render_composite_fitness_block
 
 if TYPE_CHECKING:
-    from typing import TextIO
-
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import RoundResult
 
 
-# Rolling mirror of the live stdout stream to a gitignored, most-recent-only file, so a
-# headless reader (or a returning operator) can open the last run's full readout — satisfies
-# the presentation "everything emitted to stdout is findable on disk" constraint. Truncated
-# per run in ``__init__``; ANSI-stripped per line. Captures the LiveDisplay stream only —
-# ``logging``-level warnings route through Python logging, not ``_write``.
-_READOUT_PATH = Path("logs/latest.log")
-# The run BEFORE this one. A relaunch is exactly when the previous readout is worth having —
-# it is the one that holds why the run stopped — and truncate-in-place destroyed it at the
-# moment of asking. One generation back, not a rotation series: two files answer the question.
-_PREVIOUS_READOUT_PATH = Path("logs/previous.log")
+# Holds the PATH of the newest launch's readout, never a copy: parallel runs each own their
+# cycle's file, and one shared copy interleaves them.
+_LATEST_READOUT_POINTER = Path("logs/latest-readout-path.txt")
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
-
-
-def _open_readout() -> TextIO | None:
-    """Truncate and hold open the run-readout mirror; ``None`` if the filesystem refuses — capture is best-effort and must
-    never abort a costly run. Held open rather than reopened per line, and line-buffered so a hard kill still leaves them."""
-    try:
-        _READOUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        if _READOUT_PATH.is_file():
-            _READOUT_PATH.replace(_PREVIOUS_READOUT_PATH)
-        return _READOUT_PATH.open("w", encoding="utf-8", buffering=1)
-    except OSError:
-        return None
 
 
 class LiveDisplay(Projection):
@@ -105,14 +91,16 @@ class LiveDisplay(Projection):
         self,
         *,
         origin_acc: float,
-        l1_patience: int,
+        # The optimizer's patience (`OptimizerPacing.patience`); `None` on one that keeps none,
+        # which prints no patience line at all.
+        patience: int | None,
         pipeline_schema: PipelineSchema | None,
         scoring_formula: str | None = None,
         campaign_rounds: list[dict[str, Any]] | None = None,
         measured_unit: MeasuredUnit = "sample",
     ) -> None:
         self._core = LiveStateCore(origin_acc=origin_acc)
-        self.l1_patience = l1_patience
+        self.patience = patience
         self.pipeline_schema = pipeline_schema
         self.scoring_formula = scoring_formula
         # The terminal's half of the one noun (`Connector.measured_unit`).
@@ -132,9 +120,16 @@ class LiveDisplay(Projection):
         self._round_best_acc: float | None = None
         self._round_best_label: str | None = None
         self._round_started_at: float | None = None
-        self._pobb_printed_for: str = ""
+        self._standing_printed_for: str = ""
+        # A block race's round: arms racing per block, each block's decided arms (whether each
+        # was cut), the arms headed. Empty on a round raced in turn.
+        self._block_racing: dict[int, int] = {}
+        self._block_decided: dict[int, list[tuple[str, bool]]] = {}
+        self._blocks_of = 0
+        self._block_size = 1
+        self._headed: set[int] = set()
         self._pending_calls: dict[str, int] = {}
-        self._readout = _open_readout()
+        self._readout: Path | None = None
 
     @classmethod
     def for_campaign(
@@ -149,19 +144,38 @@ class LiveDisplay(Projection):
 
         return cls(
             origin_acc=origin_acc,
-            l1_patience=campaign_config.optimization.l1_patience,
+            patience=select_optimizer(campaign_config.optimization).pacing.patience,
             pipeline_schema=session.pipeline_schema,
-            scoring_formula=split_scoring_block(campaign_config.scoring).per_sample,
+            scoring_formula=split_scoring_block(
+                campaign_config.scoring, judge_instrument=judge_instrument(campaign_config.judges)
+            ).per_sample,
             measured_unit=session.backend_client.measured_unit,
         )
 
+    def open_readout(self, cycle_dir: Path) -> None:
+        """Mirror every later line into *cycle_dir*'s readout. A fork rebinds the display, so the
+        readout follows the ledger, and the file it leaves ends on the line naming the next one."""
+        path = CycleLayout(cycle_dir.absolute()).readout
+        line = f"Readout: {path} · {time.strftime('%Y-%m-%d %H:%M:%S')}"
+        self._write(line)
+        self._readout = path
+        self._mirror(line)
+        with contextlib.suppress(OSError):
+            write_text(_LATEST_READOUT_POINTER, f"{path}\n")
+
     def _write(self, line: str) -> None:
         print(line, flush=True)
-        if self._readout is not None:
-            try:
-                self._readout.write(_ANSI_RE.sub("", line) + "\n")
-            except (OSError, ValueError):
-                self._readout = None  # stop retrying; never break the run for a dev mirror
+        self._mirror(line)
+
+    def _mirror(self, line: str) -> None:
+        if self._readout is None:
+            return
+        # Reopened per line, as the ledger is: a held handle blocks a stub fork's delete on Windows.
+        try:
+            with self._readout.open("a", encoding="utf-8") as fh:
+                fh.write(_ANSI_RE.sub("", line) + "\n")
+        except OSError:
+            self._readout = None  # stop retrying; never break the run for its mirror
 
     @property
     def origin_acc(self) -> float:
@@ -188,7 +202,8 @@ class LiveDisplay(Projection):
                 ctx = payload.get("phase_ctx")
                 if isinstance(ctx, dict):
                     self._phase_ctx.update(ctx)
-                self.on_round_complete(round_result, int(payload.get("l1_stall_count") or 0))
+                standing = RunStanding.model_validate(payload["run_standing"])
+                self.on_round_complete(round_result, standing.rounds_without_advance)
             return
         self.on_phase(
             PhaseEvent(
@@ -206,7 +221,7 @@ class LiveDisplay(Projection):
         round_tag = f"r{record.round}" if record.round is not None else ""
         node_label = f"{record.node}_{round_tag}" if round_tag else record.node
         # A REFUSED panel, not a big prompt — same alarm the run log raises, for the reason stated
-        # at `dispatch/llm_call/call.py`: a mandatory floor is admitted whatever it costs.
+        # at `bench/llm_call.py`: a mandatory floor is admitted whatever it costs.
         refused = record.refused_panels
         marker = "⚠ " if refused else "↻ "
         bits = [f"{marker}optimizer call: {node_label} · {model}"]
@@ -281,8 +296,12 @@ class LiveDisplay(Projection):
         rr = record.live_round_result
         if rr is None or not (reason := rr.verdict_reason):
             return
-        crown = record.winner_label or "nobody"
-        self._write(f"  {GREEN}✓ elected {crown}{RESET} {DIM}— {reason}{RESET}")
+        verdict = (
+            f"{GREEN}✓ selected {', '.join(record.selected_labels)}{RESET}"
+            if record.selected_labels
+            else f"{DIM}· held the best-so-far{RESET}"
+        )
+        self._write(f"  {verdict} {DIM}— {reason}{RESET}")
         if series := overlap_series(rr.overlap):
             self._write(f"  {DIM}overlap ({series}){RESET}")
 
@@ -323,15 +342,20 @@ class LiveDisplay(Projection):
             self.on_sample_scored(ci, payload.get("result") or {}, qi, qt)
         elif ev == "candidate_started":
             self.on_candidate_started(
-                ci, ct, payload.get("changes_description") or "", payload.get("pipeline_overlay")
+                ci,
+                ct,
+                payload.get("changes_description") or "",
+                payload.get("pipeline_overlay"),
+                payload.get("block"),
             )
         elif ev == "candidate_scored":
             ctx = payload.get("phase_ctx")
             if isinstance(ctx, dict):
                 self._phase_ctx.update(ctx)
             self.on_candidate_scored(ci, ct, payload.get("scores") or {})
-        elif ev == "p_best_update":
-            self.on_p_best_update(
+        elif ev == "race_standing":
+            self.on_race_standing(
+                str(payload["member"]),
                 str(payload.get("current_id") or ""),
                 int(payload.get("n_samples") or 0),
                 float(payload.get("p_best") or 0.0),
@@ -339,14 +363,16 @@ class LiveDisplay(Projection):
                     str(pid): {str(k): float(v) for k, v in (entry or {}).items()}
                     for pid, entry in (payload.get("paired_breakdown") or {}).items()
                 },
+                bool(payload["decision_grade"]),
             )
         elif ev == "sample_order_preview":
             self.on_sample_order_preview(
                 [int(sid) for sid in (payload.get("sample_order") or [])],
                 int(payload.get("n_priors") or 0),
             )
-        elif ev == "pobb_backfill":
-            self.on_pobb_backfill(
+        elif ev == "race_catch_up":
+            self.on_race_catch_up(
+                str(payload["member"]),
                 int(payload.get("sample_id") or 0),
                 [str(p) for p in (payload.get("prior_ids") or [])],
             )
@@ -358,18 +384,14 @@ class LiveDisplay(Projection):
         # under no round marker.
         if event.phase == CampaignPhase.ORIGIN and event.event == "enter":
             self._write("\n" + _round_rule("ROUND 0 — ORIGIN", "C0 · campaign root"))
-        if event.phase == CampaignPhase.L1_SCORE and event.event == "enter":
-            self._write("\n" + _node_top("SCORE"))
         if view is not None and (rendered := to_text(view)):
             self._write(rendered)
         apply_phase(self._core, event, view)
-        if event.phase == CampaignPhase.L1_GENERATE and event.event == "enter":
+        if event.phase == CampaignPhase.PROPOSE and event.event == "enter":
             self._round_best_key = None
             self._round_best_acc = None
             self._round_best_label = None
             self._round_started_at = time.monotonic()
-        if event.phase == CampaignPhase.ESCALATION and event.event == "exit":
-            self.sample_counter = 0
         # Resume-rewind rebuild needs the live ``env``/``state`` objects, which exist only on
         # the direct in-memory callback path — ``PhaseRecord.data`` is ``exclude=True`` and
         # reaches no disk. On the ledger path ``env`` is absent and the display rebuilds from
@@ -419,21 +441,24 @@ class LiveDisplay(Projection):
             )
         )
 
-    def on_p_best_update(
+    def on_race_standing(
         self,
+        member: str,
         current_id: str,
         n_samples: int,
         p_best: float,
         paired_breakdown: dict[str, dict[str, float]],
+        decision_grade: bool,
     ) -> None:
-        apply_p_best_update(self._core, current_id, n_samples, p_best)
-        POBB_DISPLAY_MIN_SAMPLES = 8  # matches ``lock_in_n_min`` in pobb/checks.py
+        apply_race_standing(self._core, member, current_id, n_samples, p_best)
+        # A block race decides at its closes, and the summary names what each close cut.
         if (
-            current_id
-            and current_id != self._pobb_printed_for
-            and n_samples >= POBB_DISPLAY_MIN_SAMPLES
+            not self._block_racing
+            and current_id
+            and current_id != self._standing_printed_for
+            and decision_grade
         ):
-            self._pobb_printed_for = current_id
+            self._standing_printed_for = current_id
             current_p = p_best
             # Paired PoBB: hardest prior = min P(cand > prior). Read off the field that NAMES
             # that quantity rather than off the P(best) reading, which is one number about
@@ -448,13 +473,13 @@ class LiveDisplay(Projection):
             n_priors = len(paired_breakdown)
             prior_s = "" if n_priors == 1 else "s"
             self._write(
-                f"  {DIM}pobb:{RESET} P(best)={current_p:.1%} @ q{n_samples}  "
+                f"  {DIM}{member}:{RESET} P(best)={current_p:.1%} @ q{n_samples}  "
                 f"vs hardest={hardest_tag} (P(c>p)={hardest_p:.1%})  "
                 f"(of {n_priors} prior{prior_s})"
             )
 
     def on_sample_order_preview(self, sample_order: list[int], n_priors: int) -> None:
-        if not sample_order:
+        if not sample_order or self._block_racing:
             return
         prior_s = "" if n_priors == 1 else "s"
         head = ", ".join(f"#{sid:03d}" for sid in sample_order[:3])
@@ -464,11 +489,11 @@ class LiveDisplay(Projection):
             f"{n_priors} candidate prior{prior_s})"
         )
 
-    def on_pobb_backfill(self, sample_id: int, prior_ids: list[str]) -> None:
+    def on_race_catch_up(self, member: str, sample_id: int, prior_ids: list[str]) -> None:
         if not prior_ids:
             return
         tags = [cid if cid == "origin" or cid.endswith("_winner") else cid[:6] for cid in prior_ids]
-        self._write(f"  {DIM}↻ pobb backfill #{sample_id}:{RESET} " + ", ".join(tags))
+        self._write(f"  {DIM}↻ {member} catch-up #{sample_id}:{RESET} " + ", ".join(tags))
 
     def _render_p_best_line(self) -> str | None:
         """Top-5 P(best) across the round's CANDIDATES, with each arrow against that candidate's own previous reading. Ranking one
@@ -487,7 +512,21 @@ class LiveDisplay(Projection):
                     arrow = "▼"
             tag = f"*{cid[:6]}*" if cid == self._core.current_p_best_id else cid[:6]
             parts.append(f"{tag} {prob * 100:4.1f}%{arrow}")
-        return f"P(best) @ q{self._core.current_p_best_n}: " + " | ".join(parts)
+        member = self._core.race_member
+        return f"{member} P(best) @ q{self._core.current_p_best_n}: " + " | ".join(parts)
+
+    def _render_block_lines(self) -> list[str]:
+        lines = []
+        for n, racing in sorted(self._block_racing.items()):
+            decided = self._block_decided.get(n, [])
+            cut = [label for label, was_cut in decided if was_cut]
+            settled = " · settled" if len(cut) < len(decided) else ""
+            lines.append(
+                f"block {n}/{self._blocks_of}: {racing} raced · "
+                f"{'cut ' + ', '.join(cut) if cut else 'none cut'} · "
+                f"{racing - len(cut)} survive{settled}"
+            )
+        return lines
 
     def on_candidate_started(
         self,
@@ -495,19 +534,35 @@ class LiveDisplay(Projection):
         total: int,
         changes_description: str,
         pipeline_overlay: dict[str, Any] | None,
+        block: dict[str, int] | None = None,
     ) -> None:
-        self._write(
-            fmt_individual_header(
-                candidate_label(self._core.round_num, idx),
-                total,
-                changes_description,
-                pipeline_overlay,
-            )
-        )
+        label = candidate_label(self._core.round_num, idx)
+        if block is not None:
+            if block["n"] not in self._block_racing:
+                self._block_racing[block["n"]] = block["racing"]
+                self._blocks_of = block["of"]
+                self._block_size = block["size"]
+                self._write(
+                    f"  {DIM}▦ block {block['n']}/{block['of']} · {block['size']} cells · "
+                    f"{block['racing']} arms racing{RESET}"
+                )
+            # Named once per round; a later block only marks whose cells follow.
+            if idx in self._headed:
+                self._write(f"  {label}/{total}")
+                return
+            self._headed.add(idx)
+        self._write(fmt_individual_header(label, total, changes_description, pipeline_overlay))
 
     def on_candidate_scored(self, idx: int, total: int, scores: dict[str, Any]) -> None:
         w = 66
         label = scores.get("label") or candidate_label(self._core.round_num, idx)
+        outcome = scores.get("outcome")
+        if self._block_racing and outcome in (ArmOutcome.ELIMINATED, ArmOutcome.LOCKED_IN):
+            # A block race stops an arm at a block's close, so its rows name the block.
+            block = -(-int(scores["scored_samples"]) // self._block_size)
+            self._block_decided.setdefault(block, []).append(
+                (label, outcome == ArmOutcome.ELIMINATED)
+            )
         summary = individual_summary_from_dict(scores, unit=self.measured_unit)
 
         self._write(f"  {_box_top(f'{label}/{total}', summary.tag, width=w)}")
@@ -527,7 +582,7 @@ class LiveDisplay(Projection):
                 self._fmt_round_leader(
                     label,
                     float(acc),
-                    scores.get("matched_parent_lift"),
+                    scores.get("reference_lift"),
                     float(comp) if isinstance(comp, int | float) else None,
                 )
             )
@@ -541,7 +596,7 @@ class LiveDisplay(Projection):
         carries a θ and nobody is crowned, so the key degrades to the composite it always was.
         The θ-ordered scoreboard prints at round close, once the election has fit one.
 
-        The Δ is the SERVED ``matched_parent_lift``, absent until round close stamps it: recomputed
+        The Δ is the SERVED ``reference_lift``, absent until round close stamps it: recomputed
         here it crowns whichever arm was cut earliest."""
         key = scoreboard_rank_key(composite, acc)
         new_round_max = self._round_best_key is None or key > self._round_best_key
@@ -549,13 +604,13 @@ class LiveDisplay(Projection):
             self._round_best_key = key
             self._round_best_acc = acc
             self._round_best_label = label
-            vs = f"  (Δ {_fmt_delta(lift)} vs parent)" if isinstance(lift, int | float) else ""
+            vs = f"  (Δ {_fmt_delta(lift)} vs reference)" if isinstance(lift, int | float) else ""
             return f"  {GREEN}★ leader: {label} {acc:.1%}{vs}{RESET}"
         gap = acc - (self._round_best_acc or acc)
         prior = self._round_best_label or "leader"
         return f"  {DIM}→ {label} {acc:.1%}  ({gap:.1%} from {prior}){RESET}"
 
-    def on_round_complete(self, round_result: RoundResult, l1_stall_count: int) -> None:
+    def on_round_complete(self, round_result: RoundResult, stall: int) -> None:
         self.sample_counter = 0
 
         self.campaign_rounds.append(
@@ -577,7 +632,9 @@ class LiveDisplay(Projection):
             }
         )
 
-        rn = self._core.round_num
+        # `round_result.round`, never `self._core.round_num` — the block race advances that
+        # counter toward the NEXT round before this round's own summary prints.
+        rn = round_result.round
         elapsed_label = ""
         if self._round_started_at is not None:
             elapsed = time.monotonic() - self._round_started_at
@@ -585,11 +642,16 @@ class LiveDisplay(Projection):
         self._round_started_at = None
         self._write("")
         self._write(_node_top(f"ROUND {rn} SUMMARY{elapsed_label}"))
-        for line in render_progress_table(self.campaign_rounds).split("\n"):
+        table = render_progress_table(self.campaign_rounds, stamps_theta=round_result.stamps_theta)
+        for line in table.split("\n"):
             self._write(line)
-        if (p_best_line := self._render_p_best_line()) is not None:
+        if self._block_racing:
+            for line in self._render_block_lines():
+                self._write(_node_line(line))
+        elif (p_best_line := self._render_p_best_line()) is not None:
             self._write(_node_line(p_best_line))
         roll_p_best_at_round_complete(self._core)
+        self._block_racing, self._block_decided, self._headed = {}, {}, set()
         formula_short = self._phase_ctx.get("composite_fitness_formula_short")
         formula_full = self._phase_ctx.get("composite_fitness_formula")
         if formula_short or formula_full:
@@ -599,7 +661,7 @@ class LiveDisplay(Projection):
                 round_result.composite_fitness,
                 dict(round_result.evaluators),
                 formula_short or formula_full,
-                parent=round_result.matched_parent_composite,
+                reference=next((s.reference_composite for s in round_result.selected_scores), None),
                 use_short_names=bool(formula_short),
             ):
                 self._write(_node_line(line))
@@ -607,10 +669,14 @@ class LiveDisplay(Projection):
             for line in stats.split("\n"):
                 if line:
                     self._write(line)
-        for line in render_patience_status(
-            round_result.improved, l1_stall_count, self.l1_patience
-        ).split("\n"):
-            self._write(line)
+        # A note stays off the tape: it is prose the round file and `log.md` hold whole.
+        for fact in (f for f in round_result.optimizer_facts if f.kind == "stat"):
+            self._write(_node_line(f"{fact.label}: {fact.text}"))
+        if self.patience is not None:
+            for line in render_patience_status(round_result.improved, stall, self.patience).split(
+                "\n"
+            ):
+                self._write(line)
         self._write(_node_bottom())
 
 

@@ -1,6 +1,6 @@
-"""Evaluator registry + materializers — the round-level REPORTING surface, and what the read-side
-mask re-scores over. A compute fn returns a float in [0, 1], or ``None`` when the round/sample
-carried nothing to measure: a zero is a verdict, an absence is not.
+"""Evaluator registry + materializers — the round-level REPORTING surface; no formula reads a
+round's map, a mask included. A compute fn returns a float in [0, 1], or ``None`` when the
+round/sample carried nothing to measure: a zero is a verdict, an absence is not.
 
 **Nothing here decides a round.** The election reads the per-cell ``objective``
 (``domain/scoring.py::CellScorer``), so an evaluator says what a round LOOKED like, never what it
@@ -17,8 +17,8 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-from promptpotter.application.optimization.pobb.classification import is_deprecated, scoreable_rows
-from promptpotter.application.scoring.formula.compiler import CELL_INTRINSIC_NAMES
+from promptpotter.application.scoring.classification import scoreable_rows
+from promptpotter.application.scoring.formula.compiler import CELL_INTRINSIC_NAMES, CELL_TERMS
 from promptpotter.domain.pipeline_schema import NodeType
 from promptpotter.domain.scoring import (
     all_verifier_graded,
@@ -41,7 +41,7 @@ __all__ = [
     "DEFAULT_CELL_FORMULA",
     "Evaluator",
     "all_evaluators",
-    "evaluators_meta",
+    "cell_terms_meta",
     "materialize_round_values",
     "materialize_row_derivable",
     "materialize_sample_values",
@@ -52,23 +52,16 @@ __all__ = [
 
 @shapes_optimizer_prompt
 def compute_accuracy(*, results: list[QueryMeasurement], **_: Any) -> float | None:
-    """Mean fitness over SCOREABLE rows. A DEPRECATED row carries no verdict and an ERRORED one
-    never happened; the latter surfaces via ``compute_error_rate``.
+    """Mean fitness over SCOREABLE rows — a refusal and a charged error count as the misses they
+    are, and a row carrying no verdict surfaces via ``compute_error_rate`` instead.
 
-    **With no scoreable row left, what the OTHER rows were decides between a verdict and an
-    absence.** A deprecated row was measured and thrown out — a candidate that ran and produced
-    nothing usable, which is an honest 0.0. A row that errored never happened, so a candidate whose
-    every row errored has no rate at all: scoring it 0.0 invents the worst possible measurement out
-    of no measurement, and at L4, where a cell is a whole inner campaign, that reads as "drove the
-    inner loop maximally DOWN". The composite keeps its 0.0 floor either way — that one is the
-    elected quantity and ``total == 0`` is the marker beside it — but the reported RATE may not."""
-    # Lazy: scoring → optimization circular.
-
-    if not results:
-        return None
+    **With no scoreable row left there is no rate at all.** Scoring it 0.0 invents the worst
+    possible measurement out of no measurement, and at L4, where a cell is a whole inner campaign,
+    that reads as "drove the inner loop maximally DOWN". The composite keeps its 0.0 floor — that
+    one is the elected quantity and ``total == 0`` is the marker beside it — but the RATE may not."""
     scoreable = scoreable_rows(results)
     if not scoreable:
-        return 0.0 if any(is_deprecated(r) for r in results) else None
+        return None
     return sum(r.get("fitness", 0.0) for r in scoreable) / len(scoreable)
 
 
@@ -190,9 +183,9 @@ class Evaluator:
     description: str
     scope: Scope
     # ``None`` = this round/sample carried nothing to measure. The materializers below OMIT
-    # the key rather than substituting a default, so a formula naming an unmeasured term halts
-    # loud (``round_scorer``) instead of scoring on a number nobody computed. An
-    # empty-collection default reads as PERFECT here — inverted for every health term.
+    # the key rather than substituting a default, so a reader shows the absence instead of a
+    # number nobody computed. An empty-collection default reads as PERFECT here — inverted for
+    # every health term.
     compute: Callable[..., float | None | Awaitable[float | None]]
     # The awaitable arm is `per_sample` ONLY, refused elsewhere by `_validate_evaluator` —
     # `judges/CLAUDE.md` § The seam says why a round materializer may never await.
@@ -218,12 +211,9 @@ class Evaluator:
     # alone and the fact lives in the ROWS (`connectors/CLAUDE.md` § The answer shape).
     needs_labels: bool = False
     # True ⇒ a pure function of the persisted per-sample rows alone (``compute`` needs
-    # only ``results`` — no ``schema`` / ``node``). The read-side mask recomputes exactly
-    # this subset from ``all_candidate_results`` at read time (``materialize_row_derivable``),
-    # so it is present on every record regardless of when the record was written — no
-    # backfill, no namespace-gap. The complement (recall / cache / *_shortfall) needs the
-    # unpersisted schema and is read from the stored snapshot only. The per-cell channel
-    # means ``metrics.py`` folds in beside these are row-derivable by construction.
+    # only ``results`` — no ``schema`` / ``node``), so ``candidate_report.py`` refreshes exactly
+    # this subset from the rows over a snapshot off disk (``materialize_row_derivable``). The
+    # complement (recall / cache / *_shortfall) needs the unpersisted schema.
     from_rows: bool = False
 
 
@@ -360,22 +350,19 @@ def all_evaluators() -> list[Evaluator]:
     return list(_REGISTRY)
 
 
-def evaluators_meta() -> list[dict[str, Any]]:
-    """JSON-serializable registry projection for the webapp's scoring-mask editor — drops ``compute``/``requires``."""
-    return [
-        {
-            "name": ev.name,
-            "description": ev.description,
-            "scope": ev.scope,
-            "direction": ev.direction,
-            "node_type": ev.node_type,
-            # Carried because the browser has to know which evaluators survive a SAMPLE-SET mask
-            # intact: only these recompute from the filtered rows, so a mask mixing them with
-            # snapshot-only names reports a subset number added to a whole-set one.
-            "from_rows": ev.from_rows,
-        }
-        for ev in _REGISTRY
+def cell_terms_meta() -> list[dict[str, str]]:
+    """What a ``per_cell`` formula — and so a ``score:`` lens — can name, for the webapp's
+    scoring-mask editor: the per-cell terms, then the per-sample evaluators banked beside them."""
+    terms = [
+        {"name": name, "direction": term.direction, "description": term.description}
+        for name, term in CELL_TERMS.items()
     ]
+    banked = [
+        {"name": ev.name, "direction": ev.direction, "description": ev.description}
+        for ev in _REGISTRY
+        if ev.scope == "per_sample"
+    ]
+    return terms + banked
 
 
 def _round_value(ev: Evaluator, value: float | None | Awaitable[float | None]) -> float | None:
@@ -431,8 +418,7 @@ def materialize_round_values(
 
 
 def materialize_row_derivable(results: list[QueryMeasurement]) -> dict[str, float]:
-    """The per-round evaluators that are pure functions of the persisted rows (``Evaluator.from_rows``).
-    The read-side mask recomputes exactly these, so they survive a re-score over a sample subset."""
+    """The per-round evaluators that are pure functions of the persisted rows (``Evaluator.from_rows``)."""
     out: dict[str, float] = {}
     for ev in _REGISTRY:
         if ev.scope != "per_round" or not ev.from_rows:

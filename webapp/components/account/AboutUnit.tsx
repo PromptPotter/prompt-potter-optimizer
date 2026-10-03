@@ -1,15 +1,6 @@
 "use client";
-// Account → "About this unit" — the meta-info / provenance window. It does
-// NOT own a bespoke manifest; it renders the SAME identity the rest of the app
-// publishes through standard surfaces:
-//   • brand identity  ← lib/brand.ts (the Web App Manifest + <head> consume it)
-//   • provenance       ← softwareApplicationLd() (verbatim what's in <head>)
-//   • live version     ← /api/v1/health (APP_VERSION, server-owned)
-// So this pane is a reader of real surfaces, not a parallel source of truth.
-//
-// publisher = the distributing brand (host). provider = who powers it
-// (PromptPotter, fixed). Provenance is reported honestly: `self-declared`
-// until a signed credential lands — never a "verified" pill before then.
+// "About this unit" — a reader of the identity the app already publishes (brand, the <head>
+// JSON-LD, the server's version), never a parallel manifest.
 
 import { useState } from "react";
 import { PotterMark } from "@/components/brand/PotterMark";
@@ -24,7 +15,6 @@ export function AboutUnit() {
   const [showHow, setShowHow] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
 
-  // Health unreachable → version stays null (we render blank, never invent one).
   const health = readyData(useRead({ key: "health", fetch: fetchHealth }, { surface: "health" }));
   const version = health?.version ?? null;
   const incidents = useIncidents();
@@ -174,9 +164,6 @@ export function AboutUnit() {
         </div>
       </div>
 
-      {/* Reporting a bug should not require a screenshot. Every failed read is
-          recorded with the `error_id` the server stamped on it, so this blob
-          greps straight to the log line that caused it. */}
       <div className="account-row">
         <span className="account-label">Diagnostics</span>
         <div className="account-row-main">
@@ -187,8 +174,7 @@ export function AboutUnit() {
                 : `${incidents.length} recent failure${incidents.length === 1 ? "" : "s"}`}
             </span>
             <CopyButton
-              // Lazy: the blob stamps `captured`, and that has to be when the operator asked
-              // for it, not when this pane last drew.
+              // Lazy: `captured` must stamp the ask, not this pane's last draw.
               data={() => formatDiagnostics({ version })}
               title="Copy the last 24 hours of failed requests"
               disabled={incidents.length === 0}
@@ -228,9 +214,7 @@ function ResourceLink({ href, label }: { href: string; label: string }) {
   );
 }
 
-// Provenance state — color + icon + label (never color alone, per a11y).
-// `self-declared` is a neutral/info state, NOT a success state; only a
-// genuinely `verified` declaration gets the affirmative treatment.
+// `self-declared` is a neutral state, NOT a success state.
 function ProvenancePill({ verified }: { verified: boolean }) {
   return (
     <span className={cx("about-unit-pill", verified ? "verified" : "declared")}>

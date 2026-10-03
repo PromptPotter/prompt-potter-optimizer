@@ -16,6 +16,9 @@ from promptpotter.application.evidence.read import (
 from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.domain.bench import BenchScore, DatasetSplit
+from promptpotter.domain.campaign import Instrument
+from promptpotter.domain.spend import TOKEN_KIND_BUCKET
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
@@ -42,11 +45,21 @@ _UNIT_SPEC: dict[MetricUnit, str] = {
 
 # Adding a `MetricUnit` without a format here is a KeyError on the first campaign that resolves to
 # it — on the operator's terminal, mid-table. Fail at import instead, the way
-# `optimization/resume_and_fork/decisions.py` gates its own kind→policy map.
+# `bench/resume_and_fork/decisions.py` gates its own kind→policy map.
 _unformatted = sorted(set(get_args(MetricUnit)) - set(_UNIT_SPEC))
 if _unformatted:
     raise RuntimeError(f"MetricUnit members with no terminal format: {_unformatted}")
 del _unformatted
+
+# Each `SpendRollup` bucket in the operator's word for it; the webapp's `SPEND_BUCKETS` says the same.
+_BUCKET_WORD = {
+    "loop": "optimizer",
+    "backend": "connector",
+    "judge": "judge",
+    "diagnostic": "diagnostic",
+    "bench": "bench",
+}
+assert set(_BUCKET_WORD) == set(TOKEN_KIND_BUCKET.values()), "a spend bucket has no operator word"
 
 
 def _roster_lines(ev: Evidence) -> list[str]:
@@ -132,6 +145,147 @@ def _roster_lines(ev: Evidence) -> list[str]:
             f"{rep.level_spread:+.3f}. {verdict}"
         )
     return lines
+
+
+def _bench_set_text(bench_set: Instrument | None, field: str) -> str:
+    if bench_set is None:
+        return "—"
+    value = getattr(bench_set, field)
+    if isinstance(value, DatasetSplit):
+        return f"bench {value.bench}, demo {value.demo}, seed {value.seed}"
+    if isinstance(value, dict):
+        return ", ".join(f"{k}={v}" for k, v in sorted(value.items())) or "—"
+    return "—" if value is None else str(value)
+
+
+def _head_to_head_lines(ev: Evidence) -> list[str]:
+    """The headline table, printed first: the bench is what a head-to-head is decided on, and the
+    roster below reads the search rows, which each optimizer chose among."""
+    if (h2h := ev.head_to_head) is None:
+        return []
+    lines = [
+        f"Head-to-head on the held-out bench, oldest first, every row graded by "
+        f"`{h2h.scorer_id}`. {h2h.verdict_line}",
+        *(f"  {note}" for note in h2h.notes),
+    ]
+    if h2h.uncontrolled_note is not None:
+        uncontrolled = ", ".join(r.campaign_id for r in h2h.rows if not r.controlled)
+        lines.append(f"  NOT CONTROLLED: {uncontrolled}. {h2h.uncontrolled_note}")
+    shared = next((r.bench_set for r in h2h.rows if r.comparable), None)
+    if shared is not None and not set(h2h.differs_on) & set(Instrument.model_fields):
+        lines.append(
+            "  bench set: "
+            + " · ".join(
+                f"{field} {_bench_set_text(shared, field)}" for field in Instrument.model_fields
+            )
+        )
+    for field in h2h.differs_on:
+        lines.append(
+            f"  {field} DIFFERS: "
+            + "; ".join(
+                f"{r.campaign_id[:22]}="
+                + (
+                    _bench_set_text(r.bench_set, field)
+                    if field in Instrument.model_fields
+                    else _origin_text(r.bench)
+                )
+                for r in h2h.rows
+            )
+        )
+    lines += [
+        "",
+        f"  /ref divides by {h2h.ratio_reference or '—'}, the oldest run carrying a spend and a "
+        "worked clock: total and optimizer-only INCURRED USD, then worked seconds — every "
+        "launch of the campaign's line, less its origin gate and unworked time. lift/$ is the "
+        "bench lift per USD the SEARCH incurred, the bench's own pass excluded. billed $ is the "
+        "providers' bill; cap $ is what the row's budget counts — the search's incurred USD for "
+        "an arm, the bill otherwise. reads counts the individuals ever graded on those held-out "
+        "rows: each one chosen off a headline spends the holdout.",
+        f"  {'campaign':<24}  {'optimizer':<9}  {'sel':>3}  {'selected':>8}  {'95% CI':>16}  "
+        f"{'origin':>7}  {'95% CI':>16}  {'lift':>7}  {'95% CI':>18}  {'billed $':>8}  "
+        f"{'cap $':>8}  {'tokens':>8}  {'calls':>6}  {'work s':>7}  {'rounds':>6}  "
+        f"{'inc/ref':>8}  {'opt/ref':>8}  {'work/ref':>8}  {'lift/$':>7}  {'reads':>5}",
+    ]
+    for r in h2h.rows:
+        # `x` off the instrument most rows share: its headline is listed, never paired.
+        mark = {True: " ", False: "x", None: " "}[r.comparable]
+        b = r.bench
+        sel, org = (None, None) if b is None else (b.selected, b.origin)
+        spend = r.spend
+        per_usd = r.lift_per_incurred_usd
+        cap = "—" if r.spend_metered is None else f"{r.spend_metered.usd:.4f}"
+        lines.append(
+            f" {mark}{r.campaign_id[:24]:<24}  {r.optimizer[:9]:<9}  "
+            + (
+                f"{sel.round:>3}  {_level(sel.composite_fitness):>8}  "
+                f"{fmt_ci(sel.ci_lo, sel.ci_hi, spec='{:.3f}'):>16}  "
+                + (
+                    f"{_level(org.composite_fitness):>7}  "
+                    f"{fmt_ci(org.ci_lo, org.ci_hi, spec='{:.3f}'):>16}  "
+                    if org is not None
+                    else f"{'—':>7}  {'—':>16}  "
+                )
+                + f"{'—' if b.lift is None else f'{b.lift:+.3f}':>7}  "
+                f"{fmt_ci(b.lift_ci_lo, b.lift_ci_hi, spec='{:+.3f}'):>18}  "
+                if b is not None and sel is not None
+                else f"{'no bench headline':<95}  "
+            )
+            + (
+                f"{spend.total_used_usd:>8.4f}  {cap:>8}  {spend.total_tokens_used:>8}  "
+                if spend is not None
+                else f"{'—':>8}  {'—':>8}  {'—':>8}  "
+            )
+            + f"{'—' if r.calls is None else r.calls:>6}  "
+            + f"{'—' if r.worked_s is None else f'{r.worked_s:.0f}':>7}  {r.rounds:>6}  "
+            + "  ".join(
+                f"{'—' if x is None else f'{x:.2f}':>8}"
+                for x in (r.incurred_usd_ratio, r.loop_incurred_usd_ratio, r.worked_ratio)
+            )
+            + f"  {'—' if per_usd is None else f'{per_usd:+.2f}':>7}"
+            + f"  {'—' if r.bench_reads is None else r.bench_reads:>5}"
+        )
+    for reading, field in (("billed", "used_usd"), ("incurred, replays priced", "incurred_usd")):
+        lines += [
+            "",
+            f"  USD {reading} by bucket — `bench` is the held-out pass that graded the selection:",
+            f"  {'campaign':<24}" + "".join(f"  {w:>10}" for w in _BUCKET_WORD.values()),
+        ]
+        for r in h2h.rows:
+            spend = r.spend
+            lines.append(
+                f"  {r.campaign_id[:24]:<24}"
+                + "".join(
+                    f"  {'—' if spend is None else f'{getattr(getattr(spend, b), field):.4f}':>10}"
+                    for b in _BUCKET_WORD
+                )
+            )
+    if h2h.pairs:
+        lines += [
+            "",
+            "  selection b - selection a on the bench rows both scored, in the composite — "
+            "the lift column's arithmetic with the origin replaced by a:",
+            f"  {'pair (b - a)':<50}  {'shift':>7}  {'95% CI':>18}  {'n':>4}  {'p':>12}  "
+            f"{'p (Holm)':>12}",
+        ]
+        for p in h2h.pairs:
+            label = f"{p.campaign_a[:23]} -> {p.campaign_b[:23]}"
+            lines.append(
+                f"  {label:<50}  {p.shift:>+7.3f}  "
+                f"{fmt_ci(p.ci_lo, p.ci_hi, spec='{:+.3f}'):>18}  {p.n_rows:>4}  "
+                f"{fmt_pvalue(p.p_value):>12}  {fmt_pvalue(p.p_adjusted):>12}"
+            )
+    lines.append("")
+    return lines
+
+
+def _level(value: float | None) -> str:
+    return "—" if value is None else f"{value:.3f}"
+
+
+def _origin_text(bench: BenchScore | None) -> str:
+    if bench is None or bench.origin is None:
+        return "—"
+    return f"{bench.origin.sp_hash[:8]} at {_level(bench.origin.composite_fitness)}"
 
 
 def _config_lines(ev: Evidence) -> list[str]:
@@ -473,6 +627,7 @@ async def cmd_evidence(args: argparse.Namespace) -> CommandResult:
         # a flag the operator had not passed.
         return CommandResult(data={"error": str(exc)}, human=str(exc))
     lines = [
+        *_head_to_head_lines(ev),
         *_roster_lines(ev),
         *_factor_lines(ev),
         *_grid_lines(ev),

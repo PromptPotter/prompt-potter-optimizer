@@ -1,14 +1,10 @@
-/* Menu primitive — the overflow panel behind a toolbar's "⋯". */
-
 @layer ui {
 .menu {
   display: flex;
   flex-direction: column;
   min-width: 190px;
   padding: var(--space-4);
-  /* Bounded: a disclosure inside the menu (the θ explainer) can outgrow the
-     viewport, and a panel that runs off the bottom of the screen silently loses
-     its last rows. Scroll instead. */
+  /* A disclosure inside (the θ explainer) can outgrow the viewport. */
   max-height: min(60vh, 480px);
   overflow-y: auto;
 }

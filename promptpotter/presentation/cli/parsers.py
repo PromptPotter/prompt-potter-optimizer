@@ -4,13 +4,27 @@ text is verbose by design — this is the operator-facing surface."""
 from __future__ import annotations
 
 import argparse
+from typing import get_args
 
+from promptpotter.application.runner.origin_gate import GateDecision
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
     settings,
 )
+from promptpotter.domain.launch_limits import RoundsCap
 from promptpotter.infrastructure.store.layout import SHARED_CACHE_DIRS
+
+
+def _rounds_cap_arg(raw: str) -> RoundsCap:
+    if raw.strip().lower() == "none":
+        return RoundsCap(max_rounds=None)
+    try:
+        return RoundsCap(max_rounds=int(raw))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"expected a round count >= 0 or `none`, got {raw!r}"
+        ) from exc
 
 
 def _add_global_args(parser: argparse.ArgumentParser) -> None:
@@ -53,7 +67,7 @@ def _add_runtime_halts(p: argparse.ArgumentParser) -> None:
         type=float,
         default=None,
         metavar="ACC",
-        help="Halt when best accuracy ≥ ACC (e.g. 0.66).",
+        help="Halt when the optimizer's declared pick has accuracy ≥ ACC (e.g. 0.66).",
     )
     p.add_argument(
         "--spend-budget",
@@ -61,8 +75,8 @@ def _add_runtime_halts(p: argparse.ArgumentParser) -> None:
         type=float,
         default=None,
         metavar="USD",
-        help="Halt when cumulative cycle spend (optimizer + backend) ≥ USD. Lowers the "
-        "configured ceiling only; `set-budget` is what raises one.",
+        help="Halt when cumulative cycle spend (optimizer + backend) ≥ USD. Sets the "
+        "cycle's ceiling, raise or lower, over the dataset's; kept for later resumes.",
     )
     p.add_argument(
         "--token-budget",
@@ -104,7 +118,6 @@ def _add_new_args(p_new: argparse.ArgumentParser) -> None:
     p_new.add_argument(
         "--task-text", default=None, help="Override datasets/<name>/task_description.md inline"
     )
-    # File-ingest form only (ignored for the name form).
     p_new.add_argument(
         "--slug",
         default=None,
@@ -117,13 +130,20 @@ def _add_new_args(p_new: argparse.ArgumentParser) -> None:
         action="append",
         default=[],
         metavar="FIELD=VALUE",
-        help="(file form) Confirm an origin field directly (operator-stated), e.g. "
-        "`--set task_description='map names to codes'` or "
-        "`--set column.query=input`. Repeatable. Applied before the resolver "
-        "runs, so it seeds the rest.",
+        help="Repeatable. Both forms take the campaign knobs — `--set optimizer=capo`, "
+        "`--set max_rounds=3`, `--set nodes.<node>.<knob>=VALUE`. The file form also "
+        "confirms an origin field, e.g. `--set task_description='map names to codes'` or "
+        "`--set column.query=input`, applied before the resolver runs.",
     )
     p_new.add_argument("--backend-url", default=DEFAULT_BACKEND_URL)
     p_new.add_argument("--backend-id", default=DEFAULT_BACKEND_ID)
+    p_new.add_argument(
+        "--arm",
+        default=None,
+        metavar="HEAD_TO_HEAD:KEY",
+        help="Mint as a controlled arm of a head-to-head, declared by its first arm off that "
+        "arm's instrument and budget; a later arm on any other is refused.",
+    )
 
     p_new.add_argument(
         "--diag",
@@ -446,8 +466,8 @@ def build_parser() -> argparse.ArgumentParser:
         "A measurement row is paid LLM spend, so `compact` never drops a field — "
         "it moves `hit`/`scored`/`objective` plus pipeline_data's `reasoning_trace`, "
         "`result_ranking`, `final_ranking` and `total_time`, and stamps the run header with what "
-        "left. `origin` and `round_parent` runs are never touched: they serve the overwhelming "
-        "majority of cache replays. Refuses while any cycle can still append. Dry-run by default; "
+        "left. Only `panel` runs (a candidate's own walk) are touched: `origin` and `parent` "
+        "serve the overwhelming majority of cache replays. Refuses while any cycle can still append. Dry-run by default; "
         "`purge-cold --apply` is the ONE irreversible step. Pure disk work, zero spend.",
     )
     p_compact.add_argument(
@@ -472,9 +492,9 @@ def build_parser() -> argparse.ArgumentParser:
         "has from every CampaignConfig — the minted snapshots and the dataset templates; "
         "every dropped key is reported with the value its file held. (2) Re-project each "
         "finished cycle's ledger onto the current record shape, dropping what the archive "
-        "and the round files already hold and lifting escalation's resume counters onto "
-        "the persisted view. A cycle with a live producer is left alone. (3) REPORT whether "
-        "every banked round document still loads, grouped by what drifted — read-only, because "
+        "and the round files already hold. A cycle with a live producer is left alone. (3) "
+        "REPORT whether every banked round document still loads, grouped by what drifted — "
+        "read-only, because "
         "pruning cannot restore a renamed field's value, so a repair there would be silently "
         "wrong. The sanctioned remedy after a field rename or a record-shape change, and (3) is "
         "how you find out you need one. Dry-run by default. Pure disk work, zero spend.",
@@ -485,10 +505,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_evidence = sub.add_parser(
         "evidence",
-        help="What a SET of subjects jointly says: the roster, whether their levels are "
-        "comparable at all, the cell/subject/residual decomposition, what the selection can "
-        "resolve at its current width, the run-order confound, and (with --ranking) the measured "
-        "edits. Read-only, zero spend, no LLM calls; naming a leader, never adopting one.",
+        help="What a SET of subjects jointly says: the campaigns' bench headlines head-to-head, "
+        "never paired where one bench set did not grade them all, then the roster, whether their "
+        "levels are comparable at all, the cell/subject/residual decomposition, what the "
+        "selection can resolve at its current width, the run-order confound, and (with --ranking) "
+        "the measured edits. Read-only, zero spend, no LLM calls; naming a leader, never adopting one.",
     )
     p_evidence.add_argument(
         "dataset",
@@ -598,7 +619,7 @@ def build_parser() -> argparse.ArgumentParser:
         "honours and print the `registry._MODEL_PROFILES` row the readings support. A "
         "catalogue publishes that `reasoning_effort` EXISTS and never which values it takes, "
         "so this is the only way that table gets filled. ~6 cheap calls of real spend; writes "
-        "nothing, and the loop never invokes it.",
+        "nothing but its bills, and the loop never invokes it.",
     )
     p_probe.add_argument(
         "model", help="Model id, e.g. openai/gpt-oss-20b (a :nitro suffix is fine)"
@@ -621,31 +642,41 @@ def build_parser() -> argparse.ArgumentParser:
         "--reason", default="", help="Optional operator-supplied reason, recorded with the command."
     )
 
-    p_set_budget = sub.add_parser(
-        "set-budget",
-        help="Raise or lower an EXISTING cycle's spend / token ceiling — the same "
-        "change-spend-budget command the webapp fires. This is how a budget-halted cycle is "
-        "continued: set a higher ceiling, then `resume`. The launch flags only shape a launch. "
-        "Clamped against your account allowance; read the armed value off the dashboard.",
+    p_set_limits = sub.add_parser(
+        "set-limits",
+        help="Raise or lower an EXISTING cycle's spend / token / round ceiling — the same "
+        "change-run-limits command the webapp fires. This is how a budget- or round-halted "
+        "cycle is continued: set a higher ceiling, then `resume`. The launch flags only shape a "
+        "launch. Spend is clamped against your account allowance; read the armed value off the "
+        "dashboard.",
     )
-    p_set_budget.add_argument(
+    p_set_limits.add_argument(
         "--campaign", default="", help="Campaign id (default: the active one)."
     )
-    p_set_budget.add_argument("--cycle", default="", help="Cycle id (default: the active one).")
-    p_set_budget.add_argument(
+    p_set_limits.add_argument("--cycle", default="", help="Cycle id (default: the active one).")
+    p_set_limits.add_argument(
         "--max-usd",
         dest="max_usd",
         type=float,
         default=None,
         help="New USD ceiling. 0 halts after the current round. Omit to leave it untouched.",
     )
-    p_set_budget.add_argument(
+    p_set_limits.add_argument(
         "--max-tokens",
         dest="max_tokens",
         type=int,
         default=None,
         help="New token ceiling — the unit that survives an unpriced model. 0 halts after the "
         "current round. Omit to leave it untouched.",
+    )
+    p_set_limits.add_argument(
+        "--max-rounds",
+        dest="rounds_cap",
+        type=_rounds_cap_arg,
+        default=None,
+        metavar="N|none",
+        help="New L1 round cap, read at the next round boundary. `none` lifts it, so the spend "
+        "ceiling governs. Omit to leave it untouched.",
     )
 
     for verb, summary in (
@@ -701,6 +732,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_skip.add_argument("--campaign", default="", help="Campaign id (default: the active one).")
     p_skip.add_argument("--cycle", default="", help="Cycle id (default: the active one).")
+
+    p_gate = sub.add_parser(
+        "origin-gate",
+        help="Answer a cycle holding at the round-0 origin gate — the same origin-gate-decision "
+        "command the webapp modal fires. A run launched without a TTY has no prompt to type "
+        "into, so this is its terminal answer. Defaults to the active cycle.",
+    )
+    p_gate.add_argument(
+        "decision",
+        choices=get_args(GateDecision),
+        help="proceed into L1 anyway, rescore the origin force-fresh, or abort the cycle.",
+    )
+    p_gate.add_argument("--campaign", default="", help="Campaign id (default: the active one).")
+    p_gate.add_argument("--cycle", default="", help="Cycle id (default: the active one).")
 
     p_step = sub.add_parser(
         "step-cycle",

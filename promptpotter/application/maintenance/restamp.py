@@ -35,20 +35,15 @@ from promptpotter.application.maintenance.archive_maintenance import (
     iter_cycle_ledgers,
     workspace_trees,
 )
-from promptpotter.application.run_observers import QUERY_PREVIEW_CHARS
-from promptpotter.application.views.view_models import (
-    L2RefineExitView,
-    PlanExitView,
-    ViewContext,
-)
+from promptpotter.application.optimizers import runtimes
+from promptpotter.application.views.view_models import OptimizerStepExitView, ViewContext
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.phases import CampaignPhase, RunPhase
+from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results import DiagnosticRunRecord, RoundResult
 from promptpotter.domain.run_records import CycleRecord
-from promptpotter.domain.scoring import ledger_sample_view
-from promptpotter.infrastructure.llm.pricing import compute_usd
+from promptpotter.domain.scoring import GRADE_KEYS, ledger_sample_view
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.campaign_store.store import reproject_round_index
 from promptpotter.infrastructure.store.io import (
@@ -86,8 +81,8 @@ def _iter_round_documents() -> list[pathlib.Path]:
 _Rewrite = Callable[[dict[str, Any]], dict[str, Any]]
 
 
-def _as_delta(pruned: dict[str, Any]) -> dict[str, Any]:
-    """The minted snapshot's rewrite — today's config as the delta from today's defaults."""
+def _as_frozen(pruned: dict[str, Any]) -> dict[str, Any]:
+    """The minted snapshot's rewrite — whole, as the mint freezes it today."""
     return freeze_campaign_config(CampaignConfig.model_validate(pruned))
 
 
@@ -117,12 +112,12 @@ class _Surface(NamedTuple):
 # round document safe — it does not — and `check_round_documents` is what covers it instead.
 _SURFACES: tuple[_Surface, ...] = (
     _Surface(
-        title="Minted snapshots (campaigns/*/campaign.json::config) — rewritten as a delta",
+        title="Minted snapshots (campaigns/*/campaign.json::config) — rewritten whole",
         verb="re-stamped",
         workspace_globs=("*/campaigns/*/campaign.json",),
         key_path=("config",),
         model_cls=CampaignConfig,
-        rewrite=_as_delta,
+        rewrite=_as_frozen,
     ),
     _Surface(
         title="Campaign manifests (campaigns/*/campaign.json) — pruned only",
@@ -321,26 +316,21 @@ def restamp_campaign_configs(*, apply: bool) -> dict[str, int]:
 # each drift silently deletes a different field.
 #
 # It is compaction, not deletion. The ledger is the append-only chronology: which round, which
-# candidate, in what order, against which rival. The archive is a last-wins fold keyed
-# (dataset_name, node_configs, sample_id) and cannot answer any of those — so what comes out
+# candidate, in what order, against which rival. The archive is addressed by
+# (node_configs, sample_key) and cannot answer any of those — so what comes out
 # here is only what the archive and ``rounds/round_NNNN.json`` already hold verbatim.
 # --------------------------------------------------------------------------- #
 
 # The keys each projection leaves behind, DERIVED from the writer's own definitions so a field
 # added to either view reaches this pass without a second edit.
 _ANCHOR_KEYS: frozenset[str] = frozenset(ViewContext().ledger_anchors())
-_L2_EXIT_VIEW_KEYS: frozenset[str] = frozenset(L2RefineExitView.__dataclass_fields__)
-_PLAN_EXIT_VIEW_KEYS: frozenset[str] = frozenset(PlanExitView.__dataclass_fields__)
-_EXIT_VIEW_KEYS: dict[str, frozenset[str]] = {
-    CampaignPhase.REFINE_STRATEGY: _L2_EXIT_VIEW_KEYS,
-    CampaignPhase.MODIFY_PLAN: _PLAN_EXIT_VIEW_KEYS,
-}
+_STEP_EXIT_VIEW_KEYS: frozenset[str] = frozenset(OptimizerStepExitView.__dataclass_fields__)
 # Rewrite only a cycle nothing is appending to. A live producer holds `_next_offset`, and every
 # `sequence`/`offset` join (the SSE tail, the family ray) is that line index — renumber under one
 # and the stream skips or repeats. PAUSED qualifies on the run-phase contract's own terms ("a
 # paused producer has exited", `runtime_flags.derive_run_phase`) and MUST be included, not merely
-# may: a paused cycle is the one an operator resumes, and resume is what reads the counters this
-# pass migrates. RUNNING / GATE (a fresh producer) and CHECKIN (pre-loop) are the exclusions.
+# may: a paused cycle is the one an operator resumes, and resume skips every line this pass
+# would have pruned. RUNNING / GATE (a fresh producer) and CHECKIN (pre-loop) are the exclusions.
 _COMPACTABLE_PHASES: frozenset[RunPhase] = frozenset(
     {RunPhase.TERMINAL, RunPhase.DETACHED, RunPhase.PAUSED}
 )
@@ -372,26 +362,13 @@ def _prune_record(rec: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     return (pruned, [dotted for dotted, _ in dropped]) if dropped else (rec, [])
 
 
-def _stamp_price(rec: dict[str, Any]) -> dict[str, Any] | None:
-    """A usage record carrying no price, stamped as the writer stamps one today — every reader sums
-    the stamp and none re-prices. ``None`` ⇒ already stamped, or no rate to stamp it with."""
-    if rec.get("cost_usd") is not None:
-        return None
-    usd = compute_usd(
-        rec.get("model"),
-        int(rec.get("input_tokens", 0)),
-        int(rec.get("output_tokens", 0)),
-        provider=rec.get("provider"),
-        cache_read_tokens=int(rec.get("cache_read_tokens", 0)),
-        cache_write_tokens=int(rec.get("cache_write_tokens", 0)),
-    )
-    return None if usd is None else rec | {"cost_usd": usd}
+def _optimizer_phases() -> frozenset[str]:
+    """Every optimizer's own phases: a ledger carries no manifest name for this pass to read."""
+    return frozenset(p.phase for rt in runtimes().values() for p in rt.phases)
 
 
 def _compact_record(rec: dict[str, Any]) -> dict[str, Any] | None:
     """One stored record → what the writer would emit for it today. ``None`` ⇒ already current."""
-    if rec.get("record_type") == "token_usage":
-        return _stamp_price(rec)
     payload = rec.get("payload")
     if not isinstance(payload, dict):
         return None
@@ -405,10 +382,6 @@ def _compact_record(rec: dict[str, Any]) -> dict[str, Any] | None:
                 if lean == payload["result"]
                 else rec | {"payload": {**payload, "result": lean}}
             )
-        if event == "sample_started" and "query_text" in payload:
-            trimmed = {k: v for k, v in payload.items() if k != "query_text"}
-            trimmed["query_preview"] = str(payload.get("query_text") or "")[:QUERY_PREVIEW_CHARS]
-            return rec | {"payload": trimmed}
         if event == "candidate_scored" and isinstance(payload.get("phase_ctx"), dict):
             ctx = payload["phase_ctx"]
             if _ANCHOR_KEYS.issuperset(ctx):
@@ -421,21 +394,14 @@ def _compact_record(rec: dict[str, Any]) -> dict[str, Any] | None:
     if rec.get("record_type") != "phase":
         return None
 
-    new = {k: v for k, v in payload.items() if k != "data"}
+    new = dict(payload)
     ctx = new.get("phase_ctx")
     if isinstance(ctx, dict):
         new["phase_ctx"] = {k: ctx.get(k) for k in _ANCHOR_KEYS}
-    keep = _EXIT_VIEW_KEYS.get(str(rec.get("phase"))) if rec.get("event") == "exit" else None
     view = new.get("view")
-    if keep is not None and isinstance(view, dict):
-        # MIGRATE before pruning. On a record written before the counters became view fields
-        # they sit in `data`, which this pass drops — lift them across first or `resume` on
-        # this cycle dies in `EscalationFSM.from_ledger` on the key that moved. The lift is
-        # the whole reason a paused cycle must be compacted rather than left alone.
-        old = payload.get("data")
-        if isinstance(old, dict):
-            view = {**view, **{k: old[k] for k in keep if k not in view and k in old}}
-        new["view"] = {k: v for k, v in view.items() if k in keep}
+    step_exit = rec.get("event") == "exit" and str(rec.get("phase")) in _optimizer_phases()
+    if step_exit and isinstance(view, dict):
+        new["view"] = {k: v for k, v in view.items() if k in _STEP_EXIT_VIEW_KEYS}
     return None if new == payload else rec | {"payload": new}
 
 
@@ -558,7 +524,7 @@ def reproject_cycle_indexes(*, apply: bool) -> dict[str, int]:
     return {"cycle_indexes": len(by_cycle), "cycle_indexes_reprojected": touched}
 
 
-# --- (5) the run-level pipeline config re-stored on every measurement row --------------------
+# --- (5) what an archived row no longer keeps: grades, and the run-level pipeline config --------
 
 
 def _iter_measurement_runs() -> list[pathlib.Path]:
@@ -587,12 +553,20 @@ def _shrink_one(path: pathlib.Path, *, apply: bool) -> tuple[int, int, int]:
                 lines.append(line)
                 after += len(line)
                 continue
-            pd = row.get("pipeline_data") if isinstance(row, dict) else None
-            if not isinstance(pd, dict) or "pipeline_params" not in pd:
+            if not isinstance(row, dict):
                 lines.append(line)
                 after += len(line)
                 continue
-            del pd["pipeline_params"]
+            pd = row.get("pipeline_data")
+            dropped = [k for k in (*GRADE_KEYS, "scores") if k in row]
+            if not dropped and not (isinstance(pd, dict) and "pipeline_params" in pd):
+                lines.append(line)
+                after += len(line)
+                continue
+            for key in dropped:
+                del row[key]
+            if isinstance(pd, dict):
+                pd.pop("pipeline_params", None)
             rewritten += 1
             new_line = json.dumps(row, separators=(",", ":"), default=str) + "\n"
             lines.append(new_line)
@@ -605,9 +579,10 @@ def _shrink_one(path: pathlib.Path, *, apply: bool) -> tuple[int, int, int]:
 
 
 def shrink_measurement_runs(*, apply: bool) -> dict[str, int]:
-    """Drop ``pipeline_data.pipeline_params`` from archived measurement rows.
+    """Drop from archived rows what the archive does not keep: a grade (``GRADE_KEYS`` on a row,
+    ``scores`` on a header — a reader grades under its own formula) and ``pipeline_params``.
 
-    It is constant across a run, and the archive already keeps it twice at run level — on the
+    The last is constant across a run, and the archive already keeps it twice at run level — on the
     detail log's own header row and on the index entry (``measurement_archive.py::_summary``),
     which is where its one reader takes it from (``intelligence/indexes/axis.py``). Per sample it
     was the same ~3 KB blob on every row.

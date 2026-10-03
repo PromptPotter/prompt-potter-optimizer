@@ -8,9 +8,8 @@ description: >-
   same artifact class the skill-evolution literature evolves.
 
   A one-cell panel is a PATH PROOF, not an instrument: nothing can be ranked against one cell and
-  no spread is readable from it. Widening the cut means a new dataset name, never an edit here —
-  `sample_id` is scoped by dataset name (`datasets/CLAUDE.md` § Re-cutting a dataset needs a NEW
-  name).
+  no spread is readable from it. Widening the cut means a new dataset name, never an edit here
+  (`harbor_tasks.yaml`).
 backend_name: Harbor
 backend_type: harbor
 available_models:
@@ -31,6 +30,14 @@ nodes:
       model: openai/gpt-oss-120b
       temperature: 0.0
       max_turns: 30
+      # With `max_turns`, the limits a cell's spend is bounded by — sent to Harbor, and held
+      # against the ceiling before the cell runs (`connectors/harbor.py::_sent_spend_bound`). The
+      # caps and their evidence are `spreadsheetbench-s10/pipeline.yaml`'s.
+      max_tokens: 4096
+      max_input_tokens: 49152
+      # Off: terminus-2's summarizing never fired in 1,172 banked harbor cells
+      # (`summarization_count=0` in every digest), and on, it quadruples what a turn may bill.
+      enable_summarize: false
     # DECLARED here rather than inherited, and it is load-bearing: a `remote_http` backend serves
     # its own schema over `GET /pipeline`, so a termnorm dataset can leave this out. There is no
     # server here to ask. Without `prompt_info` this node is not prompt-bearing, the candidate's

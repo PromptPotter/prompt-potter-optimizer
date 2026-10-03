@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 import sys
 from dataclasses import dataclass
@@ -10,6 +11,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter import connectors
+from promptpotter.application.bench.resume_and_fork.decisions import (
+    GatingMode,
+    resume_checkpoint_gating,
+)
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.launcher.admission import (
@@ -19,20 +24,17 @@ from promptpotter.application.jobs.launcher.admission import (
     release_slot,
     request_launch,
 )
-from promptpotter.application.jobs.registry import JobRegistry, default_jobs_dir
-from promptpotter.application.optimization.resume_and_fork.decisions import (
-    RESUME_CHECKPOINT_GATING,
-    GatingMode,
-)
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.config.logging import setup_logging
+from promptpotter.config.paths import default_jobs_dir
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
 )
 from promptpotter.domain.connector import BackendUnreachableError
-from promptpotter.domain.launch_limits import LaunchLimits
+from promptpotter.domain.launch_limits import HeldLimits, LaunchLimits
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.layout import campaign_cycles_dir
@@ -111,7 +113,7 @@ def campaign_result_human(campaign_dir: Path, *, dataset_name: str, cycle_id: st
         f"Directory: {campaign_dir}\n"
         f"  campaign.json          — manifest\n"
         f"  log.md                 — campaign digest\n"
-        f"  cycles/{cycle_id or '?'}/  — session telemetry (dashboard.json) + rounds"
+        f"  cycles/{cycle_id or '?'}/  — session telemetry (dashboard.json) + rounds + readout.log"
     )
 
 
@@ -152,14 +154,6 @@ def launch_limits_from_args(args: argparse.Namespace) -> LaunchLimits:
     )
 
 
-def bind_session_identity(session: Session, ctx: SessionCtx) -> None:
-    """Stamp a resumed session's identity onto the freshly-initialized :class:`Session` — the shared
-    bind every cycle-scoped CLI command runs after :func:`init_services_cli`."""
-    session.session_id = ctx.session_id
-    session.campaign_id = ctx.campaign_id
-    session.state.cycle_id = ctx.cycle_id
-
-
 def backend_reach_line(backend_type: str, backend_url: str) -> str:
     """What the check-in readout says once the preflight passed. An ``in_process`` connector was
     never contacted, so claiming a URL is reachable states a fact nothing established."""
@@ -194,7 +188,6 @@ def backend_unreachable_result(exc: BackendUnreachableError) -> CommandResult:
 def _build_observers(
     session: Session,
     campaign_config: CampaignConfig,
-    train_data: list[Sample],
     origin_acc: float,
 ) -> RunObservers:
 
@@ -202,15 +195,14 @@ def _build_observers(
     return build_run_observers(
         session=session,
         campaign_config=campaign_config,
-        dataset=train_data,
         display=LiveDisplay.for_campaign(session, campaign_config, origin_acc=origin_acc),
         origin_accuracy=origin_acc,
     )
 
 
 async def _hold_machine_slot(
-    args: argparse.Namespace, ctx: SessionCtx, session: Session
-) -> tuple[JobRegistry, Job, LaunchLimits]:
+    args: argparse.Namespace, ctx: SessionCtx, session: Session, campaign_config: CampaignConfig
+) -> tuple[JobRegistry, Job, HeldLimits]:
     """Take the SAME machine slot the browser takes, joining the SAME queue when the box is full.
 
     A terminal run that holds nothing makes every statement the machine makes about itself false
@@ -261,6 +253,8 @@ async def _hold_machine_slot(
         backend_type=backend_type_of_dataset(session.store, dataset_name),
         backend_url=ctx.backend_url,
         requested=launch_limits_from_args(args),
+        config=lambda: campaign_config,
+        hop=ctx.hop,
     )
     return registry, job, held
 
@@ -282,11 +276,11 @@ async def drive_cycle(
     mint), and deliberately so: the front of a CLI verb can sit for minutes on an interactive
     check-in, and a slot held across operator typing is a slot nobody else can have."""
 
-    registry, job, held = await _hold_machine_slot(args, ctx, session)
+    registry, job, held = await _hold_machine_slot(args, ctx, session, campaign_config)
     registry.mark_started(job.job_id)
     pre_origin_acc = ctx.state.get("origin_accuracy", 0.0)
     try:
-        observers = _build_observers(session, campaign_config, train_data, pre_origin_acc)
+        observers = _build_observers(session, campaign_config, pre_origin_acc)
 
         # Control-local hooks (pause.flag under .runtime/) are bound centrally in
         # run_optimization (the single runner seam) so CLI and API launches behave
@@ -297,9 +291,10 @@ async def drive_cycle(
             session=session,
             observers=observers,
             mode=mode,
-            # What admission HELD, not what the flags asked for. Identical for the operator of
-            # the box, who is metered in neither unit; a delegate reaching the terminal under
-            # `--tenant` is held to the ceiling their grant allows, exactly as in the browser.
+            # What admission HELD — the campaign's declaration under the flags, admitted against
+            # the account. For the operator of the box, metered in neither unit, that is the
+            # declaration itself; a delegate reaching the terminal under `--tenant` is held to the
+            # ceiling their grant allows, exactly as in the browser.
             limits=held,
         )
     except BaseException as exc:
@@ -326,16 +321,14 @@ def cycle_result_command(
     )
 
 
-def _build_divergence_hint() -> str:
-    """Derive the divergence-checked kinds from ``RESUME_CHECKPOINT_GATING``. Walking the enum means
+@functools.cache
+def divergence_hint() -> str:
+    """Derive the divergence-checked kinds from ``resume_checkpoint_gating``. Walking the table means
     adding a kind updates the operator message automatically."""
 
-    replayed = sorted(
-        k.value for k, m in RESUME_CHECKPOINT_GATING.items() if m is GatingMode.REPLAYED
-    )
-    archival = sorted(
-        k.value for k, m in RESUME_CHECKPOINT_GATING.items() if m is GatingMode.ARCHIVAL
-    )
+    gating = resume_checkpoint_gating()
+    replayed = sorted(k.value for k, m in gating.items() if m is GatingMode.REPLAYED)
+    archival = sorted(k.value for k, m in gating.items() if m is GatingMode.ARCHIVAL)
     hint = (
         f"Checked decisions: {', '.join(replayed)}.\n"
         f"(Archival, not divergence-gated: {', '.join(archival)}.)\n\n"
@@ -347,15 +340,10 @@ def _build_divergence_hint() -> str:
         "  • Revert `campaign.json::scoring` — continue the original trajectory.\n"
         "  • `python -m promptpotter resume --no-check` — accept the divergence."
     )
-    # Import-time exhaustiveness (built once at module load): every gated kind
-    # must surface in the operator hint. Fails at the source if a format edit
-    # ever drops a branch — replaces a standalone completeness test.
-    if not all(k.value in hint for k in RESUME_CHECKPOINT_GATING):
-        raise RuntimeError("divergence hint must name every ResumeCheckpointKind")
+    # Exhaustiveness at first build: every gated kind must surface in the operator hint.
+    if not all(k.value in hint for k in gating):
+        raise RuntimeError("divergence hint must name every CheckpointKind")
     return hint
-
-
-_DIVERGENCE_HINT = _build_divergence_hint()
 
 
 def _campaign_matches(stores: Stores, needle: str) -> list[str]:
@@ -453,7 +441,6 @@ def confirm_tty(prompt: str, *, default_no: bool = True) -> bool | None:
 __all__ = [
     "CommandResult",
     "backend_unreachable_result",
-    "bind_session_identity",
     "confirm_tty",
     "cycle_result_command",
     "drive_cycle",

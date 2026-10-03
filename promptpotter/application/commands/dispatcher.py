@@ -13,12 +13,17 @@ from typing import Any, Literal, assert_never
 
 from pydantic import ConfigDict, ValidationError
 
+from promptpotter.application.bench.resume_and_fork.fork_siblings import (
+    cleanup_stub_fork_if_empty,
+    mint_operator_fork,
+)
+from promptpotter.application.campaign_config import CampaignConfig, apply_cycle_seed
 from promptpotter.application.commands.payloads import (
     KIND_OF_PAYLOAD,
     ArchiveCampaignPayload,
     CampaignPayload,
     CancelQueuedRunPayload,
-    ChangeSpendBudgetPayload,
+    ChangeRunLimitsPayload,
     CheckinPayload,
     CleanupEmptyCyclesPayload,
     CommandAcceptedBody,
@@ -50,13 +55,15 @@ from promptpotter.application.datasets.dataset_replace import (
 from promptpotter.application.diagnostics.verify import verify_candidate
 from promptpotter.application.jobs.launcher.admission import launch
 from promptpotter.application.jobs.launcher.mint_and_start import (
+    dataset_campaign_config,
     mint_campaign_command,
     start_run_command,
 )
+from promptpotter.application.jobs.mint import move_arm_budget
 from promptpotter.application.jobs.quota import (
     admit_spend,
     clamp_budget_change,
-    hold_ceiling,
+    hold_run_limits,
     set_concurrent_cycles,
 )
 from promptpotter.application.jobs.registry import JobRegistry
@@ -66,16 +73,14 @@ from promptpotter.application.maintenance.archive_maintenance import (
     purge_cold_store,
     restore_measurement_archive,
 )
-from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
-    cleanup_stub_fork_if_empty,
-    mint_operator_fork,
-)
+from promptpotter.application.optimizer_manifest import select_optimizer
+from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.runner.origin_gate import GateDecision, submit_gate_decision
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.launch_limits import LaunchLimits
+from promptpotter.domain.launch_limits import LaunchLimits, RoundsCap
 from promptpotter.domain.pipeline_overlay import steers_disallowed_model
 from promptpotter.domain.results import parse_candidate_label
 from promptpotter.domain.run_records import CommandAckRecord, CommandRecord, CycleSeed
@@ -90,6 +95,7 @@ from promptpotter.infrastructure.llm.telemetry import (
     set_cycle_ledger,
 )
 from promptpotter.infrastructure.runtime_flags import write_sample_lookahead
+from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     inner_sandboxes_dir,
@@ -118,7 +124,9 @@ from promptpotter.shared.identity import (
 )
 
 
-class _DeleteCycleRejectedError(Exception):
+class _RejectedError(Exception):
+    """A domain guard refusing a recorded command: the ack lands ``rejected`` and the caller 409s."""
+
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
         self.reason = reason
@@ -130,15 +138,18 @@ class _IdempotentMatch(StrictModel):
     offset: int
 
 
-def _parse_cycle_seed(raw: object) -> CycleSeed:
+def _parse_cycle_seed(raw: object, campaign: CampaignConfig) -> CycleSeed:
     """Stamps the C0 lineage provenance ``origin_source="fork_seed"``: every operator fork
-    carries a seed, and the wire schema ``OperatorForkOverride`` does not carry the tag."""
+    carries a seed, and the wire schema does not carry the tag. Its node knobs resolve against
+    the campaign's manifest here, so a refused one is refused before a fork is minted."""
     if not isinstance(raw, dict):
         raise PayloadInvalidError("payload.seed (object) is required.")
     try:
-        return CycleSeed.model_validate({**raw, "origin_source": "fork_seed"})
+        seed = CycleSeed.model_validate({**raw, "origin_source": "fork_seed"})
     except ValidationError as exc:
         raise PayloadInvalidError(f"payload.seed invalid: {exc}") from exc
+    select_optimizer(apply_cycle_seed(campaign, seed).optimization)
+    return seed
 
 
 def _slugify_backend_id(name: str) -> str:
@@ -201,7 +212,7 @@ CAP_FOR_KIND: dict[str, str] = {
     "start-run": CAMPAIGN_RUN_CAP,
     "fork-cycle": CAMPAIGN_RUN_CAP,
     "start-checkin": CAMPAIGN_RUN_CAP,
-    "change-spend-budget": CAMPAIGN_BUDGET_CAP,
+    "change-run-limits": CAMPAIGN_BUDGET_CAP,
     "mint-campaign": CAMPAIGN_CREATE_CAP,
     # Leaving the queue is the same authority as joining it — and the OWNER check is stricter
     # still, enforced in `JobRegistry.cancel_queued`, so a delegate holding `campaign.run`
@@ -376,7 +387,7 @@ class CommandDispatcher:
                 parent_cycle_id=parent_cycle_id,
             )
             if not deleted:
-                raise _DeleteCycleRejectedError(reason)
+                raise _RejectedError(reason)
 
         return await self._record_and_apply(root_ledger, call, Applier(_apply))
 
@@ -484,7 +495,7 @@ class CommandDispatcher:
                 if asyncio.iscoroutine(result):
                     result = await result
                 applied_value = result
-            except _DeleteCycleRejectedError as exc:
+            except _RejectedError as exc:
                 ack_status = "rejected"
                 ack_detail = exc.reason
             except Exception as exc:
@@ -536,6 +547,30 @@ class CommandDispatcher:
         # Every launch this dispatcher starts runs the campaign's own dataset; the queue entry has
         # to name it, and this is the one place the manifest is already open.
         dataset_name = campaign.dataset_name if campaign else ""
+        if campaign.arm is not None and isinstance(payload, ChangeRunLimitsPayload):
+            # An arm's ceiling is its head-to-head's, so set-limits moves the declaration's.
+            h2h_id, usd, rounds = campaign.arm.head_to_head_id, payload.max_usd, payload.rounds_cap
+            tokens = payload.max_tokens
+
+            def _move() -> None:
+                if tokens is not None:
+                    raise _RejectedError(f"head-to-head {h2h_id} budgets USD and rounds only")
+                registry = self._require_job_registry()
+                move_arm_budget(self._stores, registry, h2h_id, usd=usd, rounds=rounds)
+
+            return Applier(_move)
+        if campaign.arm is not None and isinstance(
+            payload, ForkCyclePayload | SkipSearchpointPayload
+        ):
+            reason = (
+                f"{campaign.campaign_id} is arm {campaign.arm.arm_key} of head-to-head "
+                f"{campaign.arm.head_to_head_id}: its search and steer are the declaration's"
+            )
+
+            def _refuse() -> None:
+                raise _RejectedError(reason)
+
+            return Applier(_refuse, dedupe=False)
         if isinstance(payload, VerifyCandidatePayload):
 
             async def _apply_verify() -> None:
@@ -557,15 +592,15 @@ class CommandDispatcher:
 
             return Applier(_apply_verify)
         if isinstance(payload, ForkCyclePayload):
-            seed = _parse_cycle_seed(payload.seed)
+            seed = _parse_cycle_seed(
+                payload.seed, resolve_campaign_config(self._stores, campaign, None)
+            )
             # Steering the model OUTSIDE what the node permits (nothing declared = nothing
             # sanctioned) is the ADR-0005 §4 babysit action, a distinct cap above the
             # `campaign.run` fork. A PERMITTED steer is a clean human fork. The same call
             # answers `POST /campaigns/{id}/fork-preview`, so the pre-confirm warning and this
             # gate cannot disagree.
-            disallowed = steers_disallowed_model(
-                campaign.config if campaign else None, seed.pipeline_overlay
-            )
+            disallowed = steers_disallowed_model(campaign.config, seed.pipeline_overlay)
             if disallowed and not has_capability(self._stores.identity, CAMPAIGN_BABYSIT_CAP):
                 logger.warning(
                     "fork-cycle disallowed-model steer denied for principal %s (missing %s)",
@@ -629,9 +664,10 @@ class CommandDispatcher:
         if isinstance(payload, OriginGateDecisionPayload):
             decision = payload.decision
             return Applier(lambda: self._apply_origin_gate_decision(hop, decision))
-        if isinstance(payload, ChangeSpendBudgetPayload):
+        if isinstance(payload, ChangeRunLimitsPayload):
             change = BudgetChange(payload.max_usd, payload.max_tokens)
-            return Applier(lambda: self._apply_change_spend_budget(hop, change))
+            rounds = payload.rounds_cap
+            return Applier(lambda: self._apply_change_run_limits(hop, change, rounds))
         if isinstance(payload, StartRunPayload):
             run = payload
 
@@ -755,22 +791,20 @@ class CommandDispatcher:
             hop=hop,
         )
 
-    async def _apply_change_spend_budget(self, hop: CycleHop, change: BudgetChange) -> None:
-        """The round loop's BudgetGate re-reads the moved ceiling every clean round. A ``None`` arm
-        leaves that ceiling untouched; ``0`` halts at the next round boundary. Both arms compose
-        against the account first, because ``entry.py::_usd_cap`` prefers this file over the cap the
-        launch composed — unclamped, raising one here is the way around the host-wallet gate."""
-        registry = self._job_registry
-        if registry is None:
-            raise ServiceUnavailableError(
-                "job registry not initialised", code="job_registry_unavailable"
-            )
-        clamped = await asyncio.to_thread(self._clamp_to_account_ceilings, hop, registry, change)
-        hold_ceiling(
-            job_registry=registry,
-            hop=hop,
-            cycle_dir=self._stores.campaigns.cycle_dir(hop),
-            change=clamped,
+    async def _apply_change_run_limits(
+        self, hop: CycleHop, change: BudgetChange, rounds: RoundsCap | None
+    ) -> None:
+        """The round loop re-reads the moved ceiling every clean round. A ``None`` arm leaves that
+        ceiling untouched; ``0`` halts at the next round boundary. Both spend arms compose against
+        the account first, because the run's gate prefers the standing ceiling's mirror over the cap
+        the launch admitted — unclamped, raising one here is the way around the host-wallet gate.
+        The next launch declares the standing ceiling again and re-admits it. A round cap is no
+        money, so a rounds-only change skips the wallet read, whose contention would refuse it."""
+        registry = self._require_job_registry()
+        if change != BudgetChange(None, None):
+            change = await asyncio.to_thread(self._clamp_to_account_ceilings, hop, registry, change)
+        hold_run_limits(
+            job_registry=registry, stores=self._stores, hop=hop, change=change, rounds=rounds
         )
 
     async def _apply_mint_campaign(self, payload: MintCampaignPayload) -> None:
@@ -779,6 +813,11 @@ class CommandDispatcher:
         webapp discovers the new ids by polling ``/api/v1/active`` either way."""
 
         registry = self._require_job_registry()
+        # Refused here, before a slot is asked for: a queued mint would refuse it only later.
+        dataset_campaign_config(
+            readable_dataset_dir(self._stores, payload.dataset_name),
+            optimization=payload.optimization_sent,
+        )
         # Campaign-from-origin rides the check-in path, not this workspace verb, so there is no
         # origin_override here. Its PotterErrors map centrally in `_record_and_apply`.
         await launch(
@@ -791,6 +830,8 @@ class CommandDispatcher:
                 job_registry=registry,
                 job=job,
                 limits=payload,
+                optimization=payload.optimization_sent,
+                arm=payload.arm,
             ),
         )
 

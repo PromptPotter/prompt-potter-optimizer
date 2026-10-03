@@ -64,14 +64,13 @@ class LLMResponse(StrictModel):
             "``response_schema`` was supplied; ``None`` for text-mode."
         ),
     )
-    schema_repair_attempts: int = Field(
-        0,
+    schema_repair_errors: list[str] = Field(
+        default_factory=list,
         description=(
-            "Times the schema-validation repair-retry path fired before "
-            "the parsed response landed. 0 = clean first parse; 1 = one "
-            "repair round-trip. Surfaces L1-prompt parse-failure rate as a "
-            "quality signal — bad templates produce schema-noncompliant "
-            "JSON and silently double-up the LLM spend."
+            "The schema rules each retried attempt broke, one entry per paid retry before the "
+            "parsed response landed — empty on a clean first parse. Its length is the retry "
+            "count: bad templates produce schema-noncompliant JSON and silently double-up the "
+            "LLM spend, and the entries say which rule the prompt fails to teach."
         ),
     )
 

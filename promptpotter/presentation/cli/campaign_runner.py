@@ -15,6 +15,7 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
+from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.reaper import sweep_dead_cycles
 from promptpotter.config.first_run import ensure_api_key
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
@@ -36,11 +37,12 @@ from promptpotter.presentation.cli.commands.lifecycle import (
     cmd_cleanup_empty_cycles,
     cmd_delete,
     cmd_delete_cycle,
+    cmd_origin_gate,
     cmd_pause,
     cmd_rename,
     cmd_replace_dataset,
-    cmd_set_budget,
     cmd_set_concurrent_cycles,
+    cmd_set_limits,
     cmd_skip_searchpoint,
     cmd_step_cycle,
     cmd_unarchive,
@@ -59,7 +61,7 @@ from promptpotter.presentation.cli.parsers import build_parser, parser_verbs
 from promptpotter.shared.errors import (
     PotterError,
     RequestTooLargeError,
-    WalletExhaustedError,
+    SendRefusedError,
 )
 
 __all__ = ["main"]
@@ -84,8 +86,9 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], Coroutine[Any, Any, CommandRe
     "unarchive": cmd_unarchive,
     "pause": cmd_pause,
     "rename": cmd_rename,
-    "set-budget": cmd_set_budget,
+    "set-limits": cmd_set_limits,
     "skip-searchpoint": cmd_skip_searchpoint,
+    "origin-gate": cmd_origin_gate,
     "step-cycle": cmd_step_cycle,
     "delete-cycle": cmd_delete_cycle,
     "cleanup-empty-cycles": cmd_cleanup_empty_cycles,
@@ -121,9 +124,10 @@ CLI_VERB_FOR_KIND: dict[str, str | None] = {
     "delete-cycle": "delete-cycle",
     "cleanup-empty-cycles": "cleanup-empty-cycles",
     "skip-searchpoint": "skip-searchpoint",
+    "origin-gate-decision": "origin-gate",
     "step-cycle": "step-cycle",
     "pause-cycle": "pause",
-    "change-spend-budget": "set-budget",
+    "change-run-limits": "set-limits",
     "set-campaign-label": "rename",
     "replace-dataset": "replace-dataset",
     "edit-draft-campaign": "new",
@@ -135,15 +139,13 @@ CLI_VERB_FOR_KIND: dict[str, str | None] = {
     # terminal changes the same state and writes no `CommandRecord` naming who asked. Each is its
     # own standing finding; they are named here so the next reader inherits them instead of
     # rediscovering them. `new`/`resume` mint and run inline (`--steer` is the fork),
-    # `register-backend` is written by init wiring, `origin-gate-decision` is answered by the
-    # in-run stdin prompt, `verify` calls `verify_candidate` and `compact-archive` the maintenance
-    # pass direct.
+    # `register-backend` is written by init wiring, `verify` calls `verify_candidate` and
+    # `compact-archive` the maintenance pass direct.
     "verify-candidate": "verify",
     "mint-campaign": "new",
     "register-backend": "new",
     "start-run": "resume",
     "fork-cycle": "resume",
-    "origin-gate-decision": "resume",
     "compact-archive": "compact-archive",
     # Browser-only ON PURPOSE, and the absence IS the boundary: look-ahead spends the box's shared
     # provider rate bucket, so an assistant may recommend the control but never press it. Root
@@ -199,6 +201,10 @@ def main() -> None:
             return
         args = parser.parse_args([*sys.argv[1:], "resume"])
 
+    # Every verb may read a round document, whose optimizer payload only a completed registry
+    # can type.
+    complete_registries()
+
     # Reconcile liveness before dispatch. The reaper had exactly two call sites, both bound
     # to the API server's lifespan — so on a CLI-only install nothing ever ran it, and a
     # cycle whose process died hard (SIGKILL, laptop lid, power) kept `status: active`
@@ -222,7 +228,7 @@ def main() -> None:
 
     try:
         result = asyncio.run(handler(args))
-    except (RequestTooLargeError, WalletExhaustedError, PotterError) as exc:
+    except (RequestTooLargeError, SendRefusedError, PotterError) as exc:
         # Operator-facing input errors (e.g. `resume --from N` past the last
         # completed round → BadRequestError) surface as a clean message, not a
         # traceback. PotterError is the one typed-error family the seams raise.

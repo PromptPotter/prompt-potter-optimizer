@@ -1,8 +1,12 @@
 """Measurement archive — DB core. **Nothing whole, in either direction**: a save appends only what
-is new (the scoring walk re-saves per sample), and a read tails only the bytes since the last one."""
+is new (the scoring walk re-saves per sample), and a read tails only the bytes since the last one.
+
+**It holds FACTS, never a grade.** Every row it writes passes ``measured_facts``, so no formula's
+reading of a cell (``GRADE_KEYS``) reaches disk, and a reader grades under its own ``CellScorer``."""
 
 from __future__ import annotations
 
+import contextlib
 import gzip
 import hashlib
 import json
@@ -10,7 +14,9 @@ import logging
 import os
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
+
+from filelock import BaseFileLock, FileLock, Timeout
 
 from promptpotter.domain.measurement_provenance import (
     REUSABLE_MIN_GRADE,
@@ -18,9 +24,13 @@ from promptpotter.domain.measurement_provenance import (
     meets_grade,
 )
 from promptpotter.domain.sample import Measurement
+from promptpotter.domain.scoring import measured_facts
 from promptpotter.infrastructure.store.io import (
     read_bytes_optional,
+    read_json_optional,
+    unlink_robust,
     write_bytes,
+    write_json,
     write_jsonl,
     write_text,
 )
@@ -31,6 +41,7 @@ from promptpotter.infrastructure.store.read_model import (
     fold_jsonl,
     fold_jsonl_from,
 )
+from promptpotter.shared.errors import is_error_result
 
 logger = logging.getLogger(__name__)
 
@@ -38,13 +49,8 @@ logger = logging.getLogger(__name__)
 _FOLD_KEY = "k"
 _HEADER_KEY = "run"
 # The INDEX's fold key — a run's identity, which is what addresses its detail file
-# (`runs/{run_id}.jsonl`). It was `content_hash` while the file was `{label}_{content_hash}`, and
-# the two disagree by construction: the label is not in the hash, so `origin_<h>` and
-# `round_parent_<h>` are one entry, last-wins. Those two are the SAME searchpoint on the same rows
-# and different readings of it — the parent fold is scored `opt_sp=None, l1_diversity=1.0` — so the
-# surviving entry's `scores`, `item_count`, `source` and `provenance` were whichever landed last,
-# a per-sample write could overwrite a complete run with a 3-of-30 one, and `reindex` unlinked the
-# loser's detail as an orphan: paid measurement, destroyed and reported as GC.
+# (`runs/{run_id}.jsonl`). Never `content_hash`: `origin_<h>` and `parent_<h>` are two readings of
+# one searchpoint, and folded on the hash they merge last-wins and `reindex` unlinks one as an orphan.
 _INDEX_FOLD_KEY = "run_id"
 _DETAIL_SUFFIX = ".jsonl"
 _COLD_SUFFIX = ".jsonl.gz"
@@ -76,7 +82,6 @@ def _summary(data: dict[str, Any]) -> dict[str, Any]:
         "dataset_name": data.get("dataset_name"),
         "prompt_fields_id": data["prompt_fields_id"],
         "item_count": data["item_count"],
-        "scores": data["scores"],
         "content_hash": data["content_hash"],
         "rendered_prompt_hash": data.get("rendered_prompt_hash", ""),
         "node_configs": data.get("node_configs"),
@@ -112,6 +117,33 @@ def _matches_subset(
     return True
 
 
+def _match_length(node_configs: list[tuple[str, dict[str, Any]]], stored: list[Any] | None) -> int:
+    """How many leading nodes a run's stored chain shares with *node_configs*, position by position."""
+    match_len = 0
+    for (n_want, c_want), stored_pair in zip(node_configs, stored or (), strict=False):
+        if not (isinstance(stored_pair, list | tuple) and len(stored_pair) == 2):
+            break
+        n_have, c_have = stored_pair
+        if n_have != n_want or c_have != c_want:
+            break
+        match_len += 1
+    return match_len
+
+
+def _cell_key(node_configs: list[tuple[str, dict[str, Any]]], sample_key: str) -> str:
+    blob = json.dumps([node_configs, sample_key], sort_keys=True, default=str)
+    return hashlib.blake2b(blob.encode(), digest_size=16).hexdigest()
+
+
+def _tail_from(st: os.stat_result, cursor: tuple[int, int] | None) -> int:
+    """Where a tail of the file *st* describes resumes: the cursor's ``(inode, offset)`` only while
+    it is still that file, else 0 — a compaction swaps the file, and ext4 reuses a freed inode."""
+    if cursor is None:
+        return 0
+    inode, offset = cursor
+    return offset if st.st_ino == inode and st.st_size >= offset else 0
+
+
 def _entry_dataset(entry: dict[str, Any]) -> str | None:
     val = entry.get("dataset_name")
     return val if isinstance(val, str) and val else None
@@ -123,6 +155,15 @@ def _entry_matches_dataset(entry: dict[str, Any], dataset_name: str | None) -> b
     return dataset_name is None or _entry_dataset(entry) == dataset_name
 
 
+class ReplayableRow(NamedTuple):
+    """A banked row a configuration may replay, and the dataset that measured it. Replay matches on
+    the row's ``sample_key`` alone; the dataset is what a POSITIONAL reader still needs, since its
+    ``sample_id`` names a slot in that dataset and nowhere else."""
+
+    dataset_name: str | None
+    row: dict[str, Any]
+
+
 class MeasurementArchive:
     """**Identity does not include the execution path.** A measurement is keyed by content, and no
     read or write takes a ``backend_id`` — repointing a dataset at another connector serves the old rows."""
@@ -131,7 +172,11 @@ class MeasurementArchive:
         self._base_dir = base_dir
         self._rows: dict[str, dict[str, Any]] | None = None
         self._stat: tuple[int, int] | None = None
-        self._offset = 0
+        self._cursor: tuple[int, int] | None = None
+        # run_id -> the tick its entry last changed at, oldest first, so a `ReplayFeed` reads only
+        # the runs banked since its own mark.
+        self._ticks: dict[str, int] = {}
+        self._clock = 0
 
     # -- path helpers ---------------------------------------------------------
 
@@ -158,12 +203,15 @@ class MeasurementArchive:
     def _detail_path(self, run_id: str) -> Path:
         return self._runs_dir() / f"{run_id}{_DETAIL_SUFFIX}"
 
+    def _claim_path(self, node_configs: list[tuple[str, dict[str, Any]]], sample_key: str) -> Path:
+        return self._store_dir() / "claims" / _cell_key(node_configs, sample_key)
+
     # -- index read model -----------------------------------------------------
 
     def _invalidate(self) -> None:
         self._rows = None
         self._stat = None
-        self._offset = 0
+        self._cursor = None
 
     def _live_rows(self) -> dict[str, dict[str, Any]]:
         """Tailed rather than re-folded, and every read STATS the file first — an L4 inner cycle runs
@@ -177,16 +225,32 @@ class MeasurementArchive:
         sig = (st.st_mtime_ns, st.st_size)
         if self._rows is not None and sig == self._stat:
             return self._rows
-        if self._rows is not None and st.st_size > self._offset:
-            fresh, self._offset = fold_jsonl_from(path, _INDEX_FOLD_KEY, self._offset)
+        start = 0 if self._rows is None else _tail_from(st, self._cursor)
+        # The fold returns the newline-aligned offset, so a crash-truncated trailing line stays
+        # pending instead of being skipped forever once the writer completes it.
+        fresh, offset = fold_jsonl_from(path, _INDEX_FOLD_KEY, start)
+        if start and self._rows is not None:
             self._rows.update(fresh)
         else:
-            # Fold from 0 through the same primitive: it returns the newline-aligned
-            # offset, so a crash-truncated trailing line stays pending instead of being
-            # skipped forever once the writer completes it.
-            self._rows, self._offset = fold_jsonl_from(path, _INDEX_FOLD_KEY, 0)
+            self._rows = fresh
+        self._cursor = (st.st_ino, offset)
+        for run_id in fresh:
+            self._ticks.pop(run_id, None)
+            self._clock += 1
+            self._ticks[run_id] = self._clock
         self._stat = sig
         return self._rows
+
+    def _entries_since(self, mark: int) -> tuple[list[dict[str, Any]], int]:
+        """Index entries changed after tick *mark*, and the tick to pass next time."""
+        rows = self._live_rows()
+        changed: list[dict[str, Any]] = []
+        for run_id, tick in reversed(self._ticks.items()):
+            if tick <= mark:
+                break
+            if run_id in rows:
+                changed.append(rows[run_id])
+        return changed, self._clock
 
     # -- complete runs --------------------------------------------------------
 
@@ -200,7 +264,7 @@ class MeasurementArchive:
         sample is O(samples²). Measurements land before the header, so the header is the commit marker."""
         detail_path = self._detail_path(run_id)
         for item in new_measurements:
-            append_row(detail_path, {_FOLD_KEY: _measurement_key(item), **item})
+            append_row(detail_path, {_FOLD_KEY: _measurement_key(item), **measured_facts(item)})
         header = {_FOLD_KEY: _HEADER_KEY, **{k: v for k, v in data.items() if k != "measurements"}}
         append_row(detail_path, header)
 
@@ -349,7 +413,7 @@ class MeasurementArchive:
         dataset_name: str | None = None,
     ) -> list[dict[str, Any]]:
         """Index entries (summaries), one fold of ``index.jsonl`` (last-wins by
-        ``content_hash``). *dataset_name* scopes to one dataset (None = forensic/admin)."""
+        ``run_id``). *dataset_name* scopes to one dataset (None = forensic/admin)."""
         entries = list(self._live_rows().values())
         if dataset_name is None:
             return entries
@@ -391,37 +455,6 @@ class MeasurementArchive:
             if detail is None:
                 continue
             yield run_id, detail
-
-    def find_by_node_configs(
-        self,
-        node_configs: list[tuple[str, dict[str, Any]]],
-        *,
-        dataset_name: str | None = None,
-    ) -> list[tuple[dict[str, Any], int]]:
-        """Position-by-position prefix-equal match. `(entry, match_length)` sorted by match_length
-        desc then item_count desc.
-        """
-        if not node_configs:
-            return []
-
-        scored: list[tuple[dict[str, Any], int]] = []
-        for entry in self.list_all(dataset_name=dataset_name):
-            stored = entry.get("node_configs")
-            if not stored:
-                continue
-            match_len = 0
-            for (n_want, c_want), stored_pair in zip(node_configs, stored, strict=False):
-                if not (isinstance(stored_pair, list | tuple) and len(stored_pair) == 2):
-                    break
-                n_have, c_have = stored_pair
-                if n_have != n_want or c_have != c_want:
-                    break
-                match_len += 1
-            if match_len > 0:
-                scored.append((entry, match_len))
-
-        scored.sort(key=lambda t: (t[1], t[0].get("item_count", 0)), reverse=True)
-        return scored
 
     # -- direct retrieval (the database-core view) -----------------------------
 
@@ -490,56 +523,158 @@ class MeasurementArchive:
                 out.append(_to_measurement(run_id, detail, item))
         return out
 
-    def load_reusable_results(
+
+class CellClaim:
+    """An OS lock on one cell, dropped by the kernel with its holder, so no expiry is needed and none
+    can time a live holder out. Its row is SHARED on return: no waiter waits on the holder's walk."""
+
+    def __init__(
+        self, lock: BaseFileLock, row_path: Path, shareable: Callable[[dict[str, Any]], bool]
+    ) -> None:
+        self._lock = lock
+        self.row_path = row_path
+        self._shareable = shareable
+
+    def publish(self, row: dict[str, Any]) -> None:
+        """Share *row* with every waiter — or, where no replay could serve it, let them measure."""
+        if not self._shareable(row):
+            self.release()
+            return
+        # Windows refuses the replace while a waiter reads a row a past holder left there — the same
+        # cell, already shareable, so the waiters keep it and this walk keeps its own.
+        with contextlib.suppress(PermissionError):
+            write_json(self.row_path, measured_facts(row))
+
+    def release(self) -> None:
+        """Idempotent. The row goes first: one standing with the lock free is no live holder's."""
+        try:
+            _drop_row(self.row_path)
+        finally:
+            if self._lock.is_locked:
+                self._lock.release()
+
+
+def _drop_row(path: Path) -> None:
+    # Windows refuses the delete while a waiter reads the row. Left so, it is no live holder's, and the
+    # next claimer's drop or publish removes it — a busy row never fails a walk.
+    with contextlib.suppress(PermissionError):
+        unlink_robust(path)
+
+
+class ReplayFeed:
+    """Every banked row one configuration may replay, keyed by ``sample_key`` and drawn from EVERY
+    dataset: a cell is the sample's content under the instrument's configuration, never the panel it
+    sat in, so widening a panel or renaming a dataset re-measures nothing already measured. A config
+    change at node N re-measures past N.
+
+    Read FORWARD — each :meth:`advance` returns only the rows banked since the last, so a walk sees a
+    cell a concurrent walk banked after it opened — and :meth:`claim` holds a cell while it is being
+    measured, so no two walks buy one. The grade floor is `REUSABLE_MIN_GRADE`, never a caller's."""
+
+    def __init__(
         self,
+        archive: MeasurementArchive,
         node_configs: list[tuple[str, dict[str, Any]]],
         is_fatal: Callable[[dict[str, Any]], bool] | None = None,
-        *,
-        dataset_name: str,
-    ) -> dict[int, dict[str, Any]]:
-        """*dataset_name* is REQUIRED — ``sample_id`` identifies a sample WITHIN a dataset, so a pooled
-        slice serves one dataset's measurement under another's. A config change at node N re-measures past N.
+    ) -> None:
+        self._archive = archive
+        self._node_configs = node_configs
+        self._is_fatal = is_fatal
+        self._mark = 0
+        # run_id -> (inode, bytes folded), the cursor `_tail_from` resumes a run's log at.
+        self._read: dict[str, tuple[int, int]] = {}
+        # sample_key -> whether the row already served is fatal, the one row an upgrade replaces.
+        self._served: dict[str, bool] = {}
 
-        The grade floor is `REUSABLE_MIN_GRADE`, not a caller's argument: replay is the fourth consumer
-        of the grade and a per-call floor is what let it be the one that excluded nothing."""
-        if not dataset_name:
-            raise ValueError("load_reusable_results requires a dataset_name — see the docstring")
-        if not node_configs:
+    def advance(self) -> dict[str, ReplayableRow]:
+        if not self._node_configs:
             return {}
-        chain_len = len(node_configs)
-        cache: dict[int, dict[str, Any]] = {}
-
-        for entry, match_length in self.find_by_node_configs(
-            node_configs,
-            dataset_name=dataset_name,
-        ):
+        entries, self._mark = self._archive._entries_since(self._mark)
+        ranked = [
+            (entry, n)
+            for entry in entries
+            if (n := _match_length(self._node_configs, entry.get("node_configs"))) > 0
+        ]
+        # Best-first, and the first row to reach a key wins it: unconditional assignment would
+        # serve the row matching the FEWEST nodes.
+        ranked.sort(key=lambda t: (t[1], t[0].get("item_count", 0)), reverse=True)
+        chain_len = len(self._node_configs)
+        fresh: dict[str, ReplayableRow] = {}
+        for entry, match_length in ranked:
             if not meets_grade(entry_grade(entry), REUSABLE_MIN_GRADE):
                 continue
-            detail = self.load_by_id(entry["run_id"])
-            if not detail:
-                continue
             is_full_match = match_length >= chain_len
-            trusted_nodes: set[str] = (
-                set() if is_full_match else {node_configs[i][0] for i in range(match_length)}
-            )
-            for item in detail.get("measurements", []):
-                sid = item.get("sample_id")
-                if not isinstance(sid, int) or item.get("predicted") == "ERROR":
+            trusted_nodes = {name for name, _ in self._node_configs[:match_length]}
+            for item in self._banked_since(entry["run_id"]):
+                if is_error_result(item):
                     continue
                 if not is_full_match:
                     terminal_node = (item.get("pipeline_data") or {}).get("terminal_node", "")
                     if not (terminal_node and terminal_node in trusted_nodes):
                         continue
-                # FIRST wins: `find_by_node_configs` sorted best-first, so assigning
-                # unconditionally would serve the row matching the FEWEST nodes. The one upgrade
-                # allowed is replacing a fatal row, which is not an answer, with a live one.
-                existing = cache.get(sid)
-                if existing is not None and not (
-                    is_fatal is not None and is_fatal(existing) and not is_fatal(item)
+                key = item.get("sample_key")
+                if not key:
+                    raise ValueError(
+                        f"run {entry['run_id']!r} banks a row with no `sample_key`, so nothing can "
+                        "say which sample it measured. Every row the scoring walk writes carries "
+                        "one; this archive holds rows written before it did."
+                    )
+                fatal = self._is_fatal is not None and self._is_fatal(item)
+                # The one upgrade allowed: a fatal row, which is not an answer, for a live one.
+                if (served_fatal := self._served.get(key)) is not None and not (
+                    served_fatal and not fatal
                 ):
                     continue
-                cache[sid] = item
-        return cache
+                self._served[key] = fatal
+                fresh[key] = ReplayableRow(_entry_dataset(entry), item)
+        return fresh
+
+    def claim(
+        self, sample_key: str, *, shareable: Callable[[dict[str, Any]], bool]
+    ) -> CellClaim | None:
+        """This process's hold on one cell while it measures it, or ``None`` while another holds it.
+        *shareable* is the caller's replay floor, so no waiter replays a row the archive would not."""
+        path = self._archive._claim_path(self._node_configs, sample_key)
+        lock = FileLock(f"{path}.lock", timeout=0, thread_local=False)
+        try:
+            lock.acquire()
+        except Timeout:
+            return None
+        claim = CellClaim(lock, path.with_suffix(".json"), shareable)
+        # A holder unlinks its row before it unlocks, so a row found here outlived its holder.
+        _drop_row(claim.row_path)
+        return claim
+
+    def cell_key(self, sample_key: str) -> str:
+        """The cell's identity — this configuration measuring this sample — the one its claim holds."""
+        return _cell_key(self._node_configs, sample_key)
+
+    def claimed_row(self, sample_key: str) -> dict[str, Any] | None:
+        """The row the cell's holder measured and has not taken yet; ``None`` until it returns."""
+        path = self._archive._claim_path(self._node_configs, sample_key)
+        try:
+            return read_json_optional(path.with_suffix(".json"))
+        except PermissionError:
+            # Windows: a holder is unlinking or replacing it this instant — the next poll reads again.
+            return None
+
+    def _banked_since(self, run_id: str) -> list[dict[str, Any]]:
+        path = self._archive._detail_path(run_id)
+        try:
+            st = path.stat()
+        except FileNotFoundError:
+            return []
+        start = _tail_from(st, self._read.get(run_id))
+        rows, offset = fold_jsonl_from(path, _FOLD_KEY, start)
+        if start == 0 and _HEADER_KEY not in rows:
+            # A log with no header yet is a walk that died before its first commit — not a run.
+            return []
+        self._read[run_id] = (st.st_ino, offset)
+        return [
+            {k: v for k, v in row.items() if k != _FOLD_KEY}
+            for k, row in rows.items()
+            if k != _HEADER_KEY
+        ]
 
 
 def _fold_detail(path: Path) -> dict[str, Any] | None:
@@ -567,19 +702,14 @@ def _to_measurement(
         for pair in raw_configs
         if isinstance(pair, list | tuple) and len(pair) == 2 and isinstance(pair[1], dict)
     ]
-    fitness = item.get("fitness")
     return Measurement(
         run_id=run_id,
         content_hash=detail.get("content_hash", ""),
         sample_id=int(item.get("sample_id", -1)),
-        query=item.get("query", ""),
-        ground_truth=item.get("ground_truth", ""),
-        predicted=item.get("predicted", ""),
-        fitness=float(fitness) if fitness is not None else None,
         node_configs=node_configs,
-        pipeline_data=item.get("pipeline_data") or {},
+        row=item,
         created_at=detail.get("created_at", ""),
     )
 
 
-__all__ = ["MeasurementArchive"]
+__all__ = ["CellClaim", "MeasurementArchive", "ReplayFeed", "ReplayableRow"]

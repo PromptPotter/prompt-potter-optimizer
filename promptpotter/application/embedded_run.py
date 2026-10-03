@@ -16,7 +16,8 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
+from promptpotter.application.jobs.mint import fresh_campaign_id, mint_framed_cycle
+from promptpotter.application.jobs.quota import unadmitted_limits
 from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
     purge_cold_store,
@@ -28,6 +29,7 @@ from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.application.runner.origin_gate import submit_gate_decision
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.settings import DEFAULT_BACKEND_ID, DEFAULT_BACKEND_URL
+from promptpotter.domain.campaign import ArmRequest
 from promptpotter.domain.results import CycleResult
 
 if TYPE_CHECKING:
@@ -98,17 +100,28 @@ async def run_campaign(
     langfuse_session_id: str | None = None,
     limits: LaunchLimits,
     mode: RunMode,
+    arm: ArmRequest | None = None,
 ) -> CycleResult:
-    """Mint through ``prepare_fresh_cycle``, the prologue ``new`` and the web mint run, then run the
-    loop from its origin. With no slot there is no admission: a declared budget may only LOWER the
-    campaign's own, and ``LaunchLimits()`` declares none."""
+    """Mint through ``mint_framed_cycle``, the prologue ``new`` and the web mint run, then run the
+    loop from its origin. With no slot there is no admission: the run holds its declaration as-is —
+    the config's budget under *limits*' — composed exactly as every admitted launch composes it, and
+    ``LaunchLimits()`` adds nothing to the config's own."""
     if not session.campaign_id:
-        prepare_fresh_cycle(
+        minted = await mint_framed_cycle(
             session,
             campaign_config,
             train_data,
             campaign_id=fresh_campaign_id(session, campaign_config),
+            task_text=None,
+            arm=arm,
         )
+        campaign_config = minted.campaign_config
+    held = unadmitted_limits(
+        campaign_config,
+        stores=session.store,
+        hop=session.hop if session.state.cycle_id else None,
+        requested=limits,
+    )
     return await run_optimization(
         train_data,
         campaign_config,
@@ -116,10 +129,9 @@ async def run_campaign(
         observers=build_run_observers(
             session=session,
             campaign_config=campaign_config,
-            dataset=train_data,
             display=display,
         ),
         langfuse_session_id=langfuse_session_id,
-        limits=limits,
+        limits=held,
         mode=mode,
     )

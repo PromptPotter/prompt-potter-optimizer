@@ -1,14 +1,15 @@
-// ONE reading of a campaign — the row line, the hover card and the masthead all take it from
-// here, so two surfaces cannot word one campaign two ways. Pure formatting of served values:
-// `runs_with` is the campaign list's transport of the root pipeline resolution, and every
-// number below already arrived on the wire.
+// One reading of a campaign for the row line, hover card and masthead, so no two surfaces word
+// it two ways. Formatting only — every number already arrived on the wire.
 
 import type { ReactNode } from "react";
 import type {
+  BenchScore,
   CampaignSummary,
   ConfigKnob,
   ConfigMapResponse,
   LineageNode,
+  LiveDashboardState,
+  MeteredSpend,
   RunsWithParam,
 } from "@/lib/api";
 import { campaignDisplayName } from "@/lib/names";
@@ -16,26 +17,26 @@ import { runPhaseLabel, runPhaseMark, type RunPhaseMark } from "@/lib/run-phase"
 import {
   fmtAgo,
   fmtDateTime,
+  fmtFitness,
   fmtPct0,
+  fmtSigned,
   fmtTokens,
   fmtUsd,
   fmtUsdCents,
   fmtValue,
   shortId,
-  shortModel,
+  vendorOf,
 } from "@/lib/format";
 import type { RunGroup } from "./campaign-forest";
+import { METER_WORD, meteredBucketsLine } from "./spend";
 
 export interface RowStat {
   label: string;
   value: string;
-  // A second line under the value — which floor a Δ is against, what a figure leaves out.
   sub?: string;
   className?: string;
 }
 
-// One resolved pipeline setting, already rendered: the node it rides, the config grid's own key,
-// the value whole, and the layer that won it.
 export interface RowSetting {
   node: string;
   key: string;
@@ -43,65 +44,97 @@ export interface RowSetting {
   source: RunsWithParam["source"];
 }
 
-export interface RowCardFacts {
+// What `shell/SummaryBlock` draws, for each host that summarises a campaign.
+export interface SummaryFacts {
   title: string;
-  // The row's run-state or verdict word — always a word, never colour alone.
+  // Always a word, never colour alone.
   state?: string | null;
   tags?: string[];
-  lede: string;
   stats: RowStat[];
-  // A served caveat that makes a number above unreadable as it stands.
+}
+
+export interface RowCardFacts extends SummaryFacts {
+  lede: string;
   caveat?: ReactNode;
   facts: [string, string][];
-  // What the root course runs with. `null` ⇒ the pipeline did not resolve, which is a state the
-  // card says out loud; absent ⇒ this row is not a campaign.
+  // `null` ⇒ the pipeline did not resolve, which the card says out loud; absent ⇒ not a campaign.
   settings?: RowSetting[] | null;
-  // Present ⇒ the on-disk breakdown and the declared config are fetched (lazily — the card
-  // mounts only while open).
+  // Present ⇒ the on-disk breakdown and declared config are fetched, lazily while open.
   campaignId?: string;
 }
 
-// Which provenance layers a ROW prints. A campaign or seed value is what the operator chose for
-// this run; a backend or dataset one is shared by every sibling, so printing it tells two rows
-// apart not at all. Exhaustive over the served union, so a new layer is a compile error here.
-const SHOWN_SOURCE: Record<RunsWithParam["source"], boolean> = {
-  backend: false,
-  dataset: false,
-  campaign: true,
-  seed: true,
-  evolved: false,
-  identity: false,
-  unset: false,
-};
-
-// A served param value as one line — a list joins on its own separator so `route_order` reads
-// as a route, not as JSON.
 function settingValue(v: unknown): string {
   return Array.isArray(v) ? v.map((x) => fmtValue(x)).join(",") : fmtValue(v);
 }
 
-// A campaign's served lifetime spend. A price-less model makes it a FLOOR, and the `≥` says so
-// on the row itself rather than only inside the card.
+// A price-less model makes the spend a FLOOR, and the `≥` says so on the row itself.
 function spendFloor(c: CampaignSummary): string {
   return c.spend_unpriced_tokens > 0 ? "≥" : "";
 }
 
+// What the campaign's cap counts, so an arm stopped at its cap reads at its cap.
 export function spendLabel(c: CampaignSummary): string {
-  return `${spendFloor(c)}${fmtUsdCents(c.spend_used_usd)}`;
+  return `${spendFloor(c)}${fmtUsdCents(c.spend_metered.usd)}`;
 }
 
-export function accuracyStat(origin: number | null, best: number | null): RowStat {
-  const lifted = origin != null && best != null && best !== origin;
+export const SPEND_STAT_LABEL = "Spend";
+
+export function spendStat(metered: MeteredSpend, floor: string): RowStat {
   return {
-    label: "Accuracy",
-    value: lifted ? `${fmtPct0(origin)} → ${fmtPct0(best)}` : fmtPct0(origin ?? best),
-    sub: `${lifted ? "origin → best" : origin != null ? "origin" : "best"} · rounds are won on θ`,
+    label: SPEND_STAT_LABEL,
+    value: `${floor}${fmtUsd(metered.usd)} ${METER_WORD[metered.meter]}`,
+    sub: meteredBucketsLine(metered),
   };
 }
 
-// The three parts of a campaign's name, for a surface that renders them apart. `label` is the
-// operator's alone and is empty when they set none; `suffix` is the `__xxxxxx` tail that tells
-// ten runs of one dataset apart, absent only where the id carries none.
+// The headline: the selection graded on held-out rows no optimizer node read. It is the campaign's
+// COMPOSITE, a 0–1 score and never a rate, so accuracy rides beside it; every value served, and a
+// pass that read nothing shows the served reason in place of a number.
+export const BENCH_STAT_LABEL = "Bench composite";
+
+export function benchStat(bench: BenchScore): RowStat {
+  const { selected, origin, missing_reason } = bench;
+  return {
+    label: BENCH_STAT_LABEL,
+    value: selected === null ? "—" : fmtFitness(selected.composite_fitness),
+    sub:
+      missing_reason !== null
+        ? missing_reason
+        : `accuracy ${fmtPct0(selected?.accuracy)} · origin ` +
+          `${origin === null ? "—" : fmtFitness(origin.composite_fitness)} · ` +
+          `lift ${fmtSigned(bench.lift)} · ${bench.bench_size} held-out rows`,
+  };
+}
+
+// A split holding nothing out is served as a score with its `missing_reason`, so a null one is
+// only ever a pass not taken: still to come, or skipped by the way the run ended.
+export function benchReading(
+  bench: BenchScore | null | undefined,
+  runPhase: LiveDashboardState["run_phase"] | undefined,
+): RowStat {
+  if (bench) return benchStat(bench);
+  const sub =
+    runPhase === "terminal" ? "not graded — the run ended first" : "graded when the run ends";
+  return { label: BENCH_STAT_LABEL, value: "—", sub };
+}
+
+// The θ clause only where the served node elects on θ: a peer optimizer's rounds are not.
+export function accuracyStat(
+  origin: number | null,
+  best: number | null,
+  node: LineageNode | null,
+): RowStat {
+  const lifted = origin != null && best != null && best !== origin;
+  const which = lifted ? "origin → best" : origin != null ? "origin" : "best";
+  return {
+    label: "Accuracy",
+    value: lifted ? `${fmtPct0(origin)} → ${fmtPct0(best)}` : fmtPct0(origin ?? best),
+    sub: node?.stamps_theta ? `${which} · rounds are won on θ` : which,
+  };
+}
+
+// `suffix` (the `__xxxxxx` tail) survives only while it is all that tells one dataset's runs
+// apart, so a campaign named via Rename (`label`) drops it.
 export function campaignTitle(c: CampaignSummary): {
   dataset: string;
   label: string;
@@ -111,64 +144,73 @@ export function campaignTitle(c: CampaignSummary): {
   return {
     dataset: c.dataset_name,
     label: c.label,
-    suffix: tail === c.campaign_id ? null : tail,
+    suffix: c.label || tail === c.campaign_id ? null : tail,
   };
 }
 
-// A campaign row's run-state: the glyph a narrow column can hold, and the word that names it.
 export interface RowStatus {
   mark: RunPhaseMark;
   word: string;
 }
 
-// An archived campaign moves nowhere, so the phase its last cycle stopped on is not what the
-// row reports.
 const ARCHIVED: RowStatus = { mark: { glyph: "▫", tone: "quiet" }, word: "Archived" };
 
-// Off the cycle that ANSWERS for the campaign, so the sidebar row and the masthead switcher
-// cannot word one campaign's state two ways.
-export function campaignStatus(run: RunGroup): RowStatus {
-  if (run.campaign.lifecycle_status === "archived") return ARCHIVED;
-  const { run_phase, status } = run.answering;
-  return { mark: runPhaseMark(run_phase, status), word: runPhaseLabel(run_phase, status) };
+// One cycle's served phase as a row mark — a campaign row, a fork row and an inner run alike.
+export function phaseStatus(
+  runPhase: string | null | undefined,
+  reason: string | null | undefined,
+): RowStatus {
+  return { mark: runPhaseMark(runPhase, reason), word: runPhaseLabel(runPhase, reason) };
 }
 
-// Does the campaign's ROOT still answer for it? After a supersede cut the line continues on a
-// fork, which carries its own cap and its own rounds.
+// Off the ANSWERING cycle, so the sidebar row and the masthead switcher cannot disagree.
+export function campaignStatus(run: RunGroup): RowStatus {
+  if (run.campaign.lifecycle_status === "archived") return ARCHIVED;
+  return phaseStatus(run.answering.run_phase, run.answering.status);
+}
+
+// After a supersede cut the line continues on a fork, which carries its own cap and rounds.
 function rootAnswers(run: RunGroup): boolean {
   return run.answering.cycle_id === run.root.cycle_id;
 }
 
-// The rounds part, in the CAP's own unit: `rounds_closed` counts rounds after the origin, which
-// is what `max_rounds` bounds.
+// `rounds_closed` counts rounds after the origin, which is the unit `max_rounds` bounds.
 function roundsPart(run: RunGroup, cap: number | null): string {
   if (!rootAnswers(run)) return `R${run.answering.rounds_closed}`;
-  if (cap === 0) return "origin only";
+  // Capped at zero, it measured its origin and stopped; `R0` would read as a run that went nowhere.
+  if (cap === 0) return "origin";
   return cap == null
     ? `R${run.answering.rounds_closed}`
     : `R${run.answering.rounds_closed}/${cap}`;
 }
 
-// What tells one campaign row from the next, in reading order: what it runs (models, then the
-// settings this run chose), how far it got, and when it last moved. Parts, not a string, so a
-// caller picks its own separator.
+// Full ids: `gpt-oss-20b` versus `gpt-oss-120b` is the distinction a vendor mark cannot draw.
+export function campaignModels(run: RunGroup): string[] {
+  const runsWith = run.campaign.runs_with;
+  if (runsWith == null) return [];
+  const seen = new Set<string>();
+  for (const p of runsWith.params) {
+    if (p.key === "model" && p.value != null) seen.add(settingValue(p.value));
+  }
+  return [...seen];
+}
+
+export function campaignVendors(run: RunGroup): { vendor: string; models: string[] }[] {
+  const byVendor = new Map<string, string[]>();
+  for (const model of campaignModels(run)) {
+    const arr = byVendor.get(vendorOf(model));
+    if (arr) arr.push(model);
+    else byVendor.set(vendorOf(model), [model]);
+  }
+  return [...byVendor].map(([vendor, models]) => ({ vendor, models }));
+}
+
+// No resolved setting rides this line: no served predicate picks the ones worth the space
+// (`source` is not one), so the hover card carries them all.
 export function campaignLineParts(run: RunGroup): string[] {
   const runsWith = run.campaign.runs_with;
   const parts: string[] = [];
-  if (runsWith == null) {
-    parts.push("pipeline unreadable");
-  } else {
-    const models = new Set<string>();
-    for (const p of runsWith.params) {
-      if (p.key === "model" && p.value != null) models.add(shortModel(settingValue(p.value)));
-    }
-    parts.push(...models);
-    for (const p of runsWith.params) {
-      if (p.key !== "model" && SHOWN_SOURCE[p.source]) parts.push(`${p.key} ${settingValue(p.value)}`);
-    }
-  }
-  // A campaign still at its origin check-in has run no rounds, and "R0" would read as one that
-  // ran and got nowhere.
+  if (runsWith == null) parts.push("pipeline unreadable");
   if (run.answering.run_phase !== "checkin") {
     parts.push(roundsPart(run, runsWith ? runsWith.max_rounds : null));
   }
@@ -177,9 +219,7 @@ export function campaignLineParts(run: RunGroup): string[] {
   return parts;
 }
 
-// The hover card for a CAMPAIGN row — the campaign and the course it ran, whichever cycle
-// currently answers for it. `node` is the served root of its lineage tree, absent until the row
-// is expanded, so every reading off it is optional.
+// `node` (the served lineage root) is absent until the row is expanded.
 export function campaignCard(
   run: RunGroup,
   node: LineageNode | null,
@@ -191,6 +231,13 @@ export function campaignCard(
   const runsWith = campaign.runs_with;
 
   const facts: [string, string][] = [["Dataset", campaign.dataset_name]];
+  if (runsWith) facts.push(["Optimizer", runsWith.optimizer]);
+  facts.push([
+    "Comparison",
+    campaign.arm
+      ? `controlled — arm ${campaign.arm.arm_key} of head-to-head ${campaign.arm.head_to_head_id}`
+      : "not controlled — optimizes with every measurement and steer",
+  ]);
   facts.push(["Last activity", fmtAgo(run.updatedAt) || fmtDateTime(run.updatedAt)]);
   const created = fmtAgo(campaign.created_at);
   facts.push([
@@ -203,14 +250,21 @@ export function campaignCard(
 
   const cap = runsWith ? runsWith.max_rounds : null;
   const stats: RowStat[] = [
+    ...(campaign.bench ? [benchStat(campaign.bench)] : []),
+    spendStat(campaign.spend_metered, spendFloor(campaign)),
     {
-      label: "Spend",
+      label: "Billed",
       value: `${spendFloor(campaign)}${fmtUsd(campaign.spend_used_usd)}`,
       sub:
         campaign.spend_unpriced_tokens > 0
           ? `floor — ${fmtTokens(campaign.spend_unpriced_tokens)} unpriced`
-          : "lifetime, every cycle",
-      className: campaign.spend_unpriced_tokens > 0 ? "rowhover-tone-warn" : undefined,
+          : campaign.spend_unreported_usd > 0
+            ? `billed · up to ${fmtUsd(campaign.spend_unreported_usd)} more unreported`
+            : "lifetime, every cycle",
+      className:
+        campaign.spend_unpriced_tokens > 0 || campaign.spend_unreported_usd > 0
+          ? "summary-block-warn"
+          : undefined,
     },
     {
       label: "Rounds",
@@ -223,10 +277,15 @@ export function campaignCard(
             ? `of ${cap} — rounds cap`
             : undefined,
     },
-    accuracyStat(node?.origin_accuracy ?? null, run.bestAccuracy ?? node?.best_accuracy ?? null),
+    accuracyStat(
+      node?.origin_accuracy ?? null,
+      run.bestAccuracy ?? node?.best_accuracy ?? null,
+      node,
+    ),
   ];
-  if (node?.hearts != null && node.lives_cap != null) {
-    stats.push({ label: "Lives", value: `${node.hearts} / ${node.lives_cap}` });
+  const standing = node?.run_standing;
+  if (standing?.stalls_left != null && standing.stalls_left_cap != null) {
+    stats.push({ label: "Lives", value: `${standing.stalls_left} / ${standing.stalls_left_cap}` });
   }
 
   return {
@@ -250,9 +309,8 @@ export function campaignCard(
   };
 }
 
-// The knobs an operator DECLARED for this campaign, out of every estimand group that names one.
-// A knob moving several estimands is listed by each of them, so the path is what makes it one
-// row; a nested value is the config-map panel's to render, never a JSON blob in a hover card.
+// A knob moving several estimands is listed under each, so the path dedupes it; a nested value
+// is the config-map panel's to render, never a JSON blob here.
 export function declaredKnobs(map: ConfigMapResponse): ConfigKnob[] {
   const byPath = new Map<string, ConfigKnob>();
   for (const group of map.groups) {

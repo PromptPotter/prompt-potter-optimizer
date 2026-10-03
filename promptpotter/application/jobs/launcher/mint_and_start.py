@@ -8,12 +8,16 @@ import json
 import logging
 import time
 import traceback
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
+
+from pydantic import ValidationError
 
 from promptpotter.application.campaign_config import (
     CampaignConfig,
     load_campaign_config,
+    merge_config_layers,
 )
 from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
@@ -39,9 +43,10 @@ from promptpotter.application.jobs.launcher.draft_build import (
     _build_default_campaign_json,
     _build_task_context,
 )
-from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
+from promptpotter.application.jobs.mint import fresh_campaign_id, mint_framed_cycle
 from promptpotter.application.jobs.quota import QuotaExceededError
 from promptpotter.application.jobs.registry import Job, JobRegistry
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import (
     configure_and_apply_pipeline,
     resolve_campaign_config,
@@ -49,8 +54,9 @@ from promptpotter.application.pipeline_resolve import (
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
+from promptpotter.domain.campaign import ArmRequest
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.launch_limits import LaunchLimits
+from promptpotter.domain.launch_limits import HeldLimits, LaunchLimits
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.infrastructure.llm.telemetry import set_cycle_ledger
 from promptpotter.infrastructure.projections.live_dashboard.projection import (
@@ -129,10 +135,34 @@ def _assert_origin_ready(draft: DraftCampaign) -> None:
         raise OriginIncompleteError(readiness.gaps)
 
 
+def with_optimization(config: CampaignConfig, overrides: Mapping[str, Any]) -> CampaignConfig:
+    """*config* under a sparse ``optimization`` override — a mint's, a check-in's, the terminal's —
+    validated, with the manifest it then selects resolved through ``resolve_optimizer``."""
+    merged = merge_config_layers(config.model_dump(mode="json"), {"optimization": dict(overrides)})
+    try:
+        out = load_campaign_config(merged)
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        where = ".".join(str(p) for p in first["loc"])
+        raise PayloadInvalidError(f"{where}: {first['msg']}", code="optimization_invalid") from exc
+    select_optimizer(out.optimization)
+    return out
+
+
+def dataset_campaign_config(
+    dataset_root: Path, *, optimization: Mapping[str, Any]
+) -> CampaignConfig:
+    """The dataset's own campaign declaration under the ``optimization`` a launch chose — what
+    admission reads the budget arms off, since neither that nor a node overlay moves one."""
+    config = load_campaign_config(read_campaign_config_file(dataset_campaign_path(dataset_root)))
+    return with_optimization(config, optimization) if optimization else config
+
+
 def build_cycle_config(
     session: Session,
     dataset_root: Path,
     *,
+    optimization: Mapping[str, Any],
     pipeline_overlay: dict[str, Any] | None = None,
     pipeline_steps: list[str] | None = None,
 ) -> CampaignConfig:
@@ -147,9 +177,7 @@ def build_cycle_config(
     channel a campaign already has; a second `pipeline_steps` knob would be `exclude_nodes` spelled
     twice (measured: they have identical expressive power, and `filter_to_steps` preserves the
     schema's own order, so a step list cannot even reorder)."""
-    campaign_config = load_campaign_config(
-        read_campaign_config_file(dataset_campaign_path(dataset_root))
-    )
+    campaign_config = dataset_campaign_config(dataset_root, optimization=optimization)
     if pipeline_overlay:
         overrides, narrowing = split_overlay(pipeline_overlay)
         campaign_config = campaign_config.model_copy(
@@ -177,6 +205,8 @@ async def mint_campaign_command(
     job_registry: JobRegistry,
     job: Job,
     limits: LaunchLimits,
+    optimization: Mapping[str, Any],
+    arm: ArmRequest | None,
     origin_override: dict[str, Any] | None = None,
     pipeline_overlay: dict[str, Any] | None = None,
     backend_url: str = DEFAULT_BACKEND_URL,
@@ -205,6 +235,11 @@ async def mint_campaign_command(
         backend_type=backend_type,
         backend_url=backend_url,
         requested=limits,
+        # The dataset's own declaration, read before the session exists: the overlay that
+        # `build_cycle_config` folds on afterwards touches no budget arm. No hop — a fresh mint
+        # has no seed and no standing ceiling.
+        config=lambda: dataset_campaign_config(dataset_root, optimization=optimization),
+        hop=None,
     )
 
     # SETUP — the ids bind only once the mint resolves; init them so the failure handler can tell
@@ -224,22 +259,25 @@ async def mint_campaign_command(
         # Reused-dataset setup edits ride the overlay onto a per-campaign snapshot;
         # prepare_fresh_cycle freezes the result into the Campaign manifest.
         campaign_config = build_cycle_config(
-            session, dataset_root, pipeline_overlay=pipeline_overlay
+            session, dataset_root, optimization=optimization, pipeline_overlay=pipeline_overlay
         )
 
         train_data = session.samples
         # The one shared mint prologue — the same seam CLI ``new`` runs inline; the web path
         # adds only the gates + detached task.
-        minted = prepare_fresh_cycle(
+        minted = await mint_framed_cycle(
             session,
             campaign_config,
             train_data,
             campaign_id=fresh_campaign_id(session, campaign_config),
+            task_text=None,
+            arm=arm,
             origin_override=origin_override,
         )
         campaign_id, cycle_id = minted.campaign_id, minted.cycle_id
+        campaign_config = minted.campaign_config
         # Resolve the reservation onto the cycle it now names. Every hop-keyed join reads this —
-        # `running_job_for` (how `change-spend-budget` reaches the held cap), `reap_cycle_by_id`,
+        # `running_job_for` (how `change-run-limits` reaches the held cap), `reap_cycle_by_id`,
         # the holder readout — and each answers nothing at all against `UNRESOLVED_HOP`.
         job_registry.update_target(
             job.job_id, hop=CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
@@ -356,6 +394,8 @@ async def start_run_command(
         backend_type=backend_type,
         backend_url=backend_url,
         requested=limits,
+        config=lambda: resolve_campaign_config(stores, campaign, hop),
+        hop=hop,
     )
 
     try:
@@ -372,9 +412,9 @@ async def start_run_command(
         train_data = session.samples
         configure_and_apply_pipeline(session, campaign_config, log=lambda *_a, **_k: None)
         # Bind to the EXISTING campaign/cycle before launch, mirroring CLI `cmd_resume`.
-        # `_ensure_session_minted` guards on an empty session_id, so without this it mints a
-        # fresh campaign + root cycle and steals the active pointer, stranding an
-        # operator-steered fork in its real campaign.
+        # The embedded launch (`embedded_run.py::run_campaign`) mints on an empty
+        # `session.campaign_id`, so without this it mints a fresh campaign + root cycle and steals
+        # the active pointer, stranding an operator-steered fork in its real campaign.
         session.campaign_id = hop.campaign_id
         session.state.cycle_id = hop.cycle_id
         index = stores.campaigns.load(hop) or {}
@@ -411,7 +451,7 @@ async def _run_in_background(
     train_data: list[Any],
     job_registry: JobRegistry,
     job_id: str,
-    limits: LaunchLimits,
+    limits: HeldLimits,
     stop_after_rounds: int | None = None,
 ) -> None:
 
@@ -426,7 +466,6 @@ async def _run_in_background(
         observers = build_run_observers(
             session=session,
             campaign_config=campaign_config,
-            dataset=train_data,
             display=None,
             resumed_from_round=None,
             origin_accuracy=0.0,
@@ -506,8 +545,10 @@ __all__ = [
     "OriginIncompleteError",
     "QuotaExceededError",
     "build_cycle_config",
+    "dataset_campaign_config",
     "materialize_and_write_origin",
     "mint_campaign_command",
     "persist_origin_candidate_library",
     "start_run_command",
+    "with_optimization",
 ]

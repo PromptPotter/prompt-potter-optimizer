@@ -1,8 +1,6 @@
 import { BRAND } from "@/lib/brand";
 import { PotterMark } from "@/components/brand/PotterMark";
 
-// Bare host for the CTA ("promptpotter.com"). Falls back to the raw string if
-// it isn't a parseable URL — the value is build-time config.
 function siteHost(url: string): string {
   try {
     return new URL(url).host.replace(/^www\./, "");
@@ -11,8 +9,6 @@ function siteHost(url: string): string {
   }
 }
 
-// Checkbox glyph — filled cobalt tick (done) or outlined square (pending).
-// Inline SVG keeps the showcase dependency-free (no icon webfont).
 function Check({ done }: { done: boolean }) {
   return done ? (
     <svg className="ls-check ls-check-done" viewBox="0 0 16 16" aria-hidden="true">
@@ -33,8 +29,6 @@ const BEHAVIORS: { label: string; done: boolean }[] = [
   { label: "Cite the matched source row", done: false },
 ];
 
-// Gantt bars — [label, left%, width%, tone]. Offset timeline mapped to the
-// L1/L2/L3 escalation rounds.
 const STAGES: { label: string; left: number; width: number; tone?: "success" }[] = [
   { label: "L1 · generate", left: 1, width: 32 },
   { label: "L2 · refine", left: 22, width: 34 },
@@ -42,11 +36,8 @@ const STAGES: { label: string; left: number; width: number; tone?: "success" }[]
   { label: "converged", left: 71, width: 27, tone: "success" },
 ];
 
-// The login right-pane brand moment: one large, colorful, self-contained
-// advertising composition — NOT operator chrome. It carries its own brand
-// palette (theme-independent on purpose) and reads its copy/URL from
-// `BRAND.marketing`, so a whitelabel host either re-skins by replacing this
-// one file or drops it wholesale by clearing NEXT_PUBLIC_MARKETING_URL.
+// The login pane's advertising composition — NOT operator chrome, so its palette ignores the theme.
+// A whitelabel host drops it by clearing NEXT_PUBLIC_MARKETING_URL.
 export function BrandShowcase() {
   const { url, title, tagline } = BRAND.marketing;
 
@@ -65,7 +56,6 @@ export function BrandShowcase() {
         </h2>
         <p className="ls-lead">{tagline}</p>
 
-        {/* One composed scene — overlapping panels, not a row of cards. */}
         <div className="ls-art" role="img" aria-label="Live optimization run preview">
           <div className="ls-panel ls-panel-chart">
             <div className="ls-panel-head">
@@ -98,7 +88,6 @@ export function BrandShowcase() {
             </div>
           </div>
 
-          {/* Behavior-checks panel — analogy to the reference "Final QA" list. */}
           <div className="ls-panel ls-panel-checks" aria-hidden="true">
             <div className="ls-checks-head">
               <span className="ls-checks-title">Behavior checks</span>
@@ -114,7 +103,6 @@ export function BrandShowcase() {
             </ul>
           </div>
 
-          {/* Run-timeline gantt — analogy to the reference "Launch tracker". */}
           <div className="ls-panel ls-panel-timeline" aria-hidden="true">
             <div className="ls-tl-head">
               <span className="ls-tl-title">Run timeline</span>

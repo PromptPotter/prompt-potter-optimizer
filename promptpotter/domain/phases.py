@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import enum
 from collections.abc import Callable
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from pydantic import ConfigDict, Field
 
@@ -10,8 +10,11 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ErrorCategory
 
+if TYPE_CHECKING:
+    from promptpotter.domain.run_records import RebaseRequest
+
 __all__ = [
-    "WALLET_STOPS",
+    "REFUSAL_STOPS",
     "CampaignPhase",
     "DashboardState",
     "PhaseEvent",
@@ -25,13 +28,17 @@ __all__ = [
 
 
 class CampaignPhase(enum.StrEnum):
+    """The bench's phases. An optimizer's own are its runtime's (``OptimizerRuntime.phases``)."""
+
     INIT = "init"
     ORIGIN = "origin"
-    L1_GENERATE = "l1_generate"
-    L1_SCORE = "l1_score"
-    REFINE_STRATEGY = "refine_strategy"
-    MODIFY_PLAN = "modify_plan"
-    ESCALATION = "escalation"
+    PROPOSE = "propose"
+    MEASURE = "measure"
+    SELECT = "select"
+    ADAPT = "adapt"
+    # The held-out pass grading the selection, bracketed once per pass with no round;
+    # `bench:scored` carries its `BenchScore`.
+    BENCH = "bench"
 
 
 class StopReason(enum.StrEnum):
@@ -45,8 +52,8 @@ class StopReason(enum.StrEnum):
     PANEL_CUT = "panel_cut"
     CRASHED = "crashed"
     DIVERGED = "diverged"
-    ABORT = "escalation_abort"
-    L3_PATIENCE = "l3_patience_exhausted"
+    OPTIMIZER_ABORT = "optimizer_abort"
+    CONVERGED = "converged"
     HARD_CAP = "hard_cap_reached"
     DIAG_COMPLETE = "diag_complete"
     TARGET_HIT = "target_hit"
@@ -55,6 +62,7 @@ class StopReason(enum.StrEnum):
     ORIGIN_GATE = "origin_gate"
     BACKEND_UNREACHABLE = "backend_unreachable"
     PROVIDER_CREDIT = "provider_credit_exhausted"
+    PROVIDER_THROTTLED = "provider_throttled"
     RENDER_ERROR = "render_error"
     OPTIMIZER_TIMEOUT = "optimizer_timeout"
     REBASED = "rebased_to_fork"
@@ -112,17 +120,17 @@ class RunPhase(enum.StrEnum):
 
 class DashboardState(enum.StrEnum):
     """The fine-grained ACTIVITY vocabulary (``dashboard.json::state``), orthogonal to
-    :class:`RunPhase`. Declared here because it is a vocabulary the webapp must agree on."""
+    :class:`RunPhase`. Declared here because it is a vocabulary the webapp must agree on.
+    ``OPTIMIZER_STEP`` is any phase an optimizer declares for itself; its words ride beside it."""
 
     INIT = "init"
     ORIGIN = "origin"
+    PROPOSING = "proposing"
     SCORING = "scoring"
     BETWEEN_SAMPLES = "between_samples"
     BETWEEN_CANDIDATES = "between_candidates"
-    L1_GENERATE = "l1_generate"
-    L2_REFINING = "l2_refining"
-    L3_REPLANNING = "l3_replanning"
-    ESCALATION = "escalation"
+    OPTIMIZER_STEP = "optimizer_step"
+    BENCH = "bench"
     STOPPED = "stopped"
 
 
@@ -156,12 +164,12 @@ class StopReasonInfo(NamedTuple):
 #
 # Mid-round is decided by WHERE the stop is raised, not by how bad it sounds:
 #   - `scoring/query_loop.py::run_walks` raises inside the scoring phase -> SPEND_BUDGET,
-#     TOKEN_BUDGET, BACKEND_UNREACHABLE, PROVIDER_CREDIT.
+#     TOKEN_BUDGET, BACKEND_UNREACHABLE, PROVIDER_CREDIT, PROVIDER_THROTTLED.
 #   - a pause is raised from that same loop between samples -> PAUSED.
 #   - CRASHED / RENDER_ERROR / OPTIMIZER_TIMEOUT are exceptions from anywhere, round included, and
-#     so is PROVIDER_CREDIT when an optimizer call is the one refused.
+#     so are PROVIDER_CREDIT and PROVIDER_THROTTLED when an optimizer call is the one refused.
 #   - everything else fires at a round BOUNDARY: `runner/round.py` raises only after
-#     `close_round`, escalation's ABORT/REBASED ride the post-round transition seam,
+#     `close_round`, the optimizer's OPTIMIZER_ABORT/REBASED ride the post-round transition seam,
 #     ORIGIN_GATE runs once round 0 is scored, and DIVERGED is decided at resume before any
 #     round starts.
 #
@@ -181,18 +189,19 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
         StopOutcome.SUCCESS,
         False,
         False,
-        "Raise `max_rounds` and `resume` if the curve was still moving; else read `review.md`.",
+        "`set-limits --max-rounds <more>` then `resume` if the curve was still moving; else read "
+        "`review.md`.",
     ),
     StopReason.TARGET_HIT: StopReasonInfo("Target reached", StopOutcome.SUCCESS, False, False, ""),
     StopReason.LIVES_EXHAUSTED: StopReasonInfo(
         "Out of lives", StopOutcome.SUCCESS, False, False, ""
     ),
-    StopReason.HARD_CAP: StopReasonInfo("Round cap", StopOutcome.SUCCESS, False, False, ""),
+    StopReason.HARD_CAP: StopReasonInfo("Arm cap", StopOutcome.SUCCESS, False, False, ""),
     StopReason.DIAG_COMPLETE: StopReasonInfo(
         "Diagnostic complete", StopOutcome.SUCCESS, False, False, ""
     ),
-    StopReason.L3_PATIENCE: StopReasonInfo(
-        "Converged (L3 patience)", StopOutcome.SUCCESS, False, False, ""
+    StopReason.CONVERGED: StopReasonInfo(
+        "Optimizer converged", StopOutcome.SUCCESS, False, False, ""
     ),
     StopReason.REBASED: StopReasonInfo("Rebased to fork", StopOutcome.SUCCESS, False, False, ""),
     StopReason.PAUSED: StopReasonInfo(
@@ -207,10 +216,13 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
         StopOutcome.PAUSED,
         False,
         False,
-        "Give the cut cells room (`Connector.cell_envelope_s`) before `resume`, or "
+        "Give the cut cells room (`Connector.cell_envelope_s`, or the backend deadline their "
+        "rows name) before `resume`, or "
         "`optimization.panel_gate: off` to elect on the holed panel.",
     ),
-    StopReason.ABORT: StopReasonInfo("Escalation abort", StopOutcome.HALTED, False, False, ""),
+    StopReason.OPTIMIZER_ABORT: StopReasonInfo(
+        "Optimizer abort", StopOutcome.HALTED, False, False, ""
+    ),
     # The two the private or-chain missed: the budget gate stops INSIDE the sample loop. The
     # counter is CUMULATIVE across resume, so a new ceiling must clear what is already spent —
     # the one fact neither label carries and every operator gets wrong once.
@@ -219,14 +231,14 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
         StopOutcome.HALTED,
         True,
         False,
-        "`set-budget --max-usd <above what is already spent>` then `resume`.",
+        "`set-limits --max-usd <above what is already spent>` then `resume`.",
     ),
     StopReason.TOKEN_BUDGET: StopReasonInfo(
         "Token budget reached",
         StopOutcome.HALTED,
         True,
         False,
-        "`set-budget --max-tokens <above what is already spent>` then `resume`.",
+        "`set-limits --max-tokens <above what is already spent>` then `resume`.",
     ),
     StopReason.ORIGIN_GATE: StopReasonInfo(
         "Origin gate (unhealthy origin)", StopOutcome.HALTED, False, False, ""
@@ -239,7 +251,7 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
         "The unreached cell is a hole, not a score: restore the backend or the network it "
         "needs, then `resume` re-measures it.",
     ),
-    # Not SPEND_BUDGET: that ceiling is ours and `set-budget` moves it. This one is the provider's.
+    # Not SPEND_BUDGET: that ceiling is ours and `set-limits` moves it. This one is the provider's.
     StopReason.PROVIDER_CREDIT: StopReasonInfo(
         "Provider out of credit",
         StopOutcome.HALTED,
@@ -247,6 +259,17 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
         False,
         "Raise the provider key's limit or top up its credit, then `resume`; a refused cell is a "
         "hole it re-measures.",
+    ),
+    # Not BACKEND_UNREACHABLE: the provider answered, with a refusal the run already waited out
+    # (`rate_limit.py::Backpressure`) — or a quota no wait outlasts. More waiting is not the cure.
+    StopReason.PROVIDER_THROTTLED: StopReasonInfo(
+        "Provider rate-limited",
+        StopOutcome.HALTED,
+        True,
+        False,
+        "Use your own key for that provider (OpenRouter BYOK) or route to another host "
+        "(`route_order`), or wait out its quota, then `resume`; the refused cell is a hole it "
+        "re-measures.",
     ),
     StopReason.CRASHED: StopReasonInfo("Crashed", StopOutcome.FAILED, True, True, ""),
     # Written by the REAPER straight onto index.json — the producer is already gone, so
@@ -280,10 +303,11 @@ def stop_reason_outcome(reason: StopReason | str) -> StopOutcome:
     return STOP_REASON_INFO[StopReason(reason)].outcome
 
 
-# Which stop each wallet's refusal ends a run on — raised before a call (`WalletExhaustedError`) or
-# banked on the hole a refused cell leaves (`CellWalletExhaustedError`), one table for both.
-WALLET_STOPS: dict[ErrorCategory, StopReason] = {
+# Which stop each refusal ends a run on — raised at a send (`SendRefusedError`) or banked on the
+# hole a refused cell leaves (`CellSendRefusedError`), one table for both.
+REFUSAL_STOPS: dict[ErrorCategory, StopReason] = {
     ErrorCategory.PROVIDER_CREDIT: StopReason.PROVIDER_CREDIT,
+    ErrorCategory.PROVIDER_THROTTLED: StopReason.PROVIDER_THROTTLED,
     ErrorCategory.SPEND_CEILING: StopReason.SPEND_BUDGET,
     ErrorCategory.TOKEN_CEILING: StopReason.TOKEN_BUDGET,
 }
@@ -292,10 +316,19 @@ WALLET_STOPS: dict[ErrorCategory, StopReason] = {
 class StopLoop(Exception):  # noqa: N818 — control-flow signal, not an error
     """Control-flow signal caught once at the top of the round loop."""
 
-    def __init__(self, reason: StopReason, *, unmeasured: int | None = None) -> None:
+    def __init__(
+        self,
+        reason: StopReason,
+        *,
+        unmeasured: int | None = None,
+        fork: RebaseRequest | None = None,
+    ) -> None:
+        if (reason is StopReason.REBASED) != (fork is not None):
+            raise ValueError("a REBASED stop, and only one, carries the fork it asks for")
         self.reason = reason
         # Cells of the walk this stop left unmeasured, where the raiser is a walk.
         self.unmeasured = unmeasured
+        self.fork = fork
         super().__init__(reason.value)
 
 

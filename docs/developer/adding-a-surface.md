@@ -18,7 +18,7 @@ tests. Add new ones the same way — never as a `test_structure` scan.
 
 | You want to add… | Recipe | What actually catches you |
 |---|---|---|
-| A telemetry event / ledger record | [§1](#1-a-ledger-record--telemetry-event) | Breaks loud in use — a union member with no `on_record` arm never reaches `dashboard.json`; on the tracing half, `ObservabilityBridge.__init__` raises on an unrouted `Event` |
+| A telemetry event / ledger record | [§1](#1-a-ledger-record--telemetry-event) | Import-time: `_ROUTES` (`projections/base.py`) must answer for every `CycleRecord` arm; on the tracing half, `ObservabilityBridge.__init__` raises on an unrouted `Event` |
 | A prompt injection (`{{slot}}`) | [§2](#2-a-prompt-injection) | Init-time: the `injection_table()` guard + `validate_template()` |
 | A dashboard / view field | [§3](#3-a-dashboard--view-field) | Breaks loud — a wrong/empty dashboard |
 | A resume / decision checkpoint | [§4](#4-a-resume--decision-checkpoint-kind) | Import-time: `decisions.py` + `replayers.py` asserts |
@@ -85,19 +85,19 @@ Contract: [`application/CLAUDE.md`](../../promptpotter/application/CLAUDE.md) §
 ## 2. A prompt injection
 
 A `{{slot}}` the optimizer LLM sees. The registry is `injection_table()`
-(`application/optimization/dispatch/injections/registry.py`); every renderer
-is a pure `(InjectionBundle) -> str`.
+(`application/optimizers/potter/dispatch/injections/registry.py`); every renderer
+is a pure `(InjectionBundle) -> list[Item]`.
 
 **Recipe:**
 
-1. Write a `_r_<name>(bundle) -> str` renderer in `dispatch/injections/`
-   (returns `""` when its source field is empty — empty injections are skipped).
+1. Write a `_r_<name>(bundle) -> list[Item]` renderer in `dispatch/injections/`
+   (returns `[]` when its source field is empty — a panel that produces nothing is silent).
 2. Decorate it with `@signal("<name>", kind=…, char_cap=…, citable=…)` — registration
    happens at the definition site; key and body are co-located, no separate
    registry edit.
 3. To make it reachable, add it to the node's `NODE_LAYOUTS[node].possible`
-   (and `.floor` to put it on by default — for `l1_generate` these alias
-   `L1_POSSIBLE`/`L1_MANDATORY`), or use `{{<name>}}` directly in a template.
+   (and `.floor` to put it on by default — for `l1_generate`, `.possible` and `.mandatory`
+   alias `L1_POSSIBLE` / `L1_MANDATORY`).
 
 **Guard (at registry completion, no standing test):** `injection_table()` fails loud if a
 `possible` name has no registered renderer, and
@@ -178,20 +178,24 @@ Contract: [`presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md).
 
 ## 4. A resume / decision checkpoint kind
 
-A replayable or archival decision (`ResumeCheckpointKind` + its gating mode).
+A replayable or archival decision (a checkpoint kind + its gating mode).
 
 **Recipe:**
 
-1. Add the kind to `ResumeCheckpointKind` (`domain/run_records.py`) **and** a gating
-   entry to `RESUME_CHECKPOINT_GATING` (`application/optimization/resume_and_fork/
-   decisions.py` — the gating SoT; the enum and the table live in different files).
-2. If replayable, add it to the replayer; if archival, leave it out.
+1. Add the kind to the deciding party's `CheckpointKind` enum — `BenchCheckpointKind`
+   (`domain/run_records.py`) or the optimizer's own, in its package (potter's
+   `PotterCheckpointKind`, `optimizers/potter/records.py`) — **and** a gating
+   entry beside the party that decides it: `BENCH_CHECKPOINT_GATING`
+   (`application/bench/resume_and_fork/decisions.py`) or the optimizer runtime's
+   `checkpoint_gating` (potter's is `optimizers/potter/resume.py`). `resume_checkpoint_gating`
+   merges them — the gating SoT.
+2. If replayable, add it to that party's replayers; if archival, leave it out.
 3. Emit it through `record_decision` with the typed kind, never a bare string.
 
-**Guards (all import-time, no standing test):** `decisions.py` raises on a
-`ResumeCheckpointKind` member missing from `RESUME_CHECKPOINT_GATING`;
-`replayers.py` raises when a `REPLAYED` kind has no replayer or an `ARCHIVAL` kind
-has one; `cli/commands/_shared.py` asserts the divergence hint lists every kind.
+**Guards (no standing test), all run where the registries complete
+(`wiring.py::complete_registries`):** `resume_checkpoint_gating` raises on a kind no table
+maps; `replayers.py::replayers` raises when a `REPLAYED` kind has no replayer or an `ARCHIVAL`
+kind has one; `cli/commands/_shared.py::divergence_hint` asserts the hint lists every kind.
 
 ---
 
@@ -239,7 +243,7 @@ The hard half, and the one that has no default. Five questions, each with a cons
 - **What must it never move?** Anything that is a cost rail rather than a search axis stays
   pinned in `config` and out of `param_keys` (Harbor's `max_turns` moves a cell's cost by an
   order of magnitude). `model` and `provider` are structurally unreachable and need no decision —
-  [`optimization/CLAUDE.md`](../../promptpotter/application/optimization/CLAUDE.md).
+  [`optimizers/potter/CLAUDE.md`](../../promptpotter/application/optimizers/potter/CLAUDE.md).
 
 And one question that is theirs, not ours: **which slice have they reserved as test?** Never
 optimize on the rows they will later report on. [`dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md)
@@ -251,7 +255,7 @@ published benchmarks and does not apply to a private backend, but steps 2–4 do
 The connector file, then the dataset directory
 ([`datasets/CLAUDE.md`](../../datasets/CLAUDE.md) § Canonical layout). Every tunable starts at its
 **floor**, never its centre —
-[`optimization/CLAUDE.md`](../../promptpotter/application/optimization/CLAUDE.md)
+[`optimizers/potter/CLAUDE.md`](../../promptpotter/application/optimizers/potter/CLAUDE.md)
 § Origin = conservative floor.
 
 ### Step 4 — Screen the instrument before funding a campaign
@@ -288,16 +292,22 @@ Three things the recipe cannot show you:
 
 ## 6. An optimizer node
 
-One of the optimizer's own LLM nodes — `dispatch/schemas.py::OPTIMIZER_RESPONSE_MODELS`
-enumerates them, and is the only place that count is correct. The JSON declaration format
+One of the optimizer's own LLM nodes — its runtime's `response_models` enumerates the structured
+ones, and is the only place that count is correct. The JSON declaration format
 and registry live in [`developer/node-standard.md`](node-standard.md). A node renders a
 `PromptTemplate` through the same `DispatchHub` fill path as every other node —
 adding a slot it needs is §2.
 
 **Guard (at template load):** `validate_template()` at `load_optimizer_prompt` rejects any
 `{{slot}}` the node's template references that isn't in `injection_table()`. Keep every
-optimizer LLM call on the one `dispatch/llm_call/call.py::llm_call` path — an
+optimizer LLM call on the one `bench/llm_call.py::llm_call` path — an
 unwrapped LLM call is an automatic block at review (pre-flight gate), not a test.
+
+**A whole optimizer is one package and edits nothing outside it:** `members.py` exports `MEMBERS`
+and `RUNTIME` (a plugin ships them through the two entry-point groups instead), the runtime's
+`manifest_dir` holds its `pipeline.yaml`, its payload is a `RoundPayload` registered under the
+manifest's name and its decision kinds a `CheckpointKind` its runtime gates.
+`tests/test_numerics.py` § 4 runs `tests/fixtures/optimizer_plugin/` as the proof.
 
 ---
 
@@ -322,7 +332,8 @@ purpose). A maintenance verb owes two things a diagnostic does not: it is dry-ru
 and it refuses while a producer could still be writing what it rewrites
 (`application/maintenance/archive_maintenance.py::archive_writers`) — except `reindex`, which
 rebuilds a derived index from the detail files and deletes nothing, so it owes neither. And do
-**not** add a read verb: reads happen by opening the artifact tree, and raw-file ingest is
+**not** add a read verb: reads happen by opening the artifact tree. The one exception is
+`evidence`, because a comparison ACROSS subjects is in no single file. Raw-file ingest is
 `new <file.csv>`, not an `ingest` verb.
 
 **Guard:** the import-time assert named above — `COMMANDS.keys()` must equal

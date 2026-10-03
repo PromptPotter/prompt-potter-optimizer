@@ -3,12 +3,13 @@ from __future__ import annotations
 import copy
 import logging
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, NoReturn
 
 from promptpotter.config.settings import WELL_KNOWN_PARAM_TYPES
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_JSON,
     ANSWER_AS_TEXT,
+    MEMBER_KINDS,
     OUTPUT_CONTRACT_KEYS,
     SCHEMA_TOGGLE_PARAM,
     THINKING_KINDS,
@@ -135,6 +136,8 @@ def _derive_node_kind(node: PipelineNode | None) -> str:
         return "tool"
     if kind in THINKING_KINDS:
         return "llm"
+    if kind in MEMBER_KINDS:
+        return "tool"
     match kind:
         case NodeKind.GATEWAY:
             return "measurement"
@@ -149,14 +152,17 @@ def _derive_node_kind(node: PipelineNode | None) -> str:
 def derive_pipeline_view(
     nodes: Mapping[str, PipelineNode],
     pipelines: Mapping[str, Sequence[str]],
+    descriptions: Mapping[str, str],
 ) -> PipelineView:
-    """The graph the engine actually runs, read off the two blocks that declare it.
+    """The graph the engine actually runs, read off the two blocks that declare it, each node
+    carrying the ``description`` its declaration gives.
 
-    ``default`` is the chain a sample runs. A node declared but named by no pipeline runs
-    once ahead of it, so it joins the chain without being a member of anything that
-    repeats. Every other pipeline is an ESCALATION: the nodes it introduces are placed at
-    its depth, and the depths order by containment, since a deeper escalation re-runs the
-    shallower one's steps. A pipeline with no escalations is one straight tier.
+    ``default`` is the chain a sample runs, and an optimizer manifest's repeats once per round.
+    A pipeline sharing no step with it is a PHASE its optimizer opens on its own occasion (CAPO's
+    initial population), drawn ahead of the chain and outside the repeat. Every other pipeline
+    is an ALTERNATIVE a controller picks at the round boundary: the nodes it introduces are
+    placed at its depth, and the depths order by containment, since a deeper alternative re-runs
+    the shallower one's steps. A target pipeline with no alternatives is one straight tier.
     """
     declared = list(nodes)
     chain = [n for n in (pipelines.get("default") or declared) if n in nodes]
@@ -168,13 +174,13 @@ def derive_pipeline_view(
     )
     # Sharing no step with the chain makes a pipeline a separate PHASE — its own occasion,
     # ahead of the chain and outside anything that repeats. Sharing steps makes it an
-    # ESCALATION, which re-runs the chain rather than standing beside it. A node named by
+    # ALTERNATIVE, which re-runs the chain rather than standing beside it. A node named by
     # NO pipeline is not in the flow at all and is drawn nowhere.
     spine = [*(s for _n, seq in others if not (set(seq) & in_chain) for s in seq), *chain]
     rank_of = {name: i for i, name in enumerate(spine)}
     placed: dict[str, tuple[int, int]] = {n: (0, i) for i, n in enumerate(spine)}
 
-    # Shortest first: an escalation that re-runs another's steps is the deeper of the two,
+    # Shortest first: an alternative that re-runs another's steps is the deeper of the two,
     # so length IS the containment order for a chain of them.
     ordered = sorted(
         ((name, seq) for name, seq in others if set(seq) & in_chain),
@@ -202,6 +208,7 @@ def derive_pipeline_view(
             PipelineViewNode(
                 id=name,
                 label=name,
+                description=descriptions[name],
                 kind=_derive_node_kind(nodes.get(name)),
                 tier=tier,
                 rank=rank,
@@ -217,15 +224,15 @@ def derive_pipeline_view(
     sequence = ["input", *spine, "output"]
     for i in range(len(sequence) - 1):
         _edge(sequence[i], sequence[i + 1], "forward")
-    # An escalation re-runs the chain, which is what makes the chain repeat — so a view
-    # carrying any tier above 0 always carries this edge too, and a renderer may lay a
-    # loopless view out as a straight rail knowing every node on it is tier 0.
-    if introduced and chain:
+    # The bench walks an optimizer's chain once per round, and an alternative re-runs a chain — so
+    # a loopless view is a target pipeline, which a renderer may lay out as a straight rail.
+    repeats = bool(introduced) or any(n.wire_type in MEMBER_KINDS for n in nodes.values())
+    if repeats and chain:
         _edge(chain[-1], chain[0], "loop")
     for fresh, seq in introduced:
         for step in fresh:
             if chain:
-                _edge(chain[-1], step, "escalate")
+                _edge(chain[-1], step, "alternative")
             after = seq[seq.index(step) + 1 :]
             if after:
                 _edge(step, after[0], "directive")
@@ -326,6 +333,46 @@ def _infer_param_types(opt: dict[str, Any], node_config: dict[str, Any]) -> dict
     return declared
 
 
+def _check_member_structure(
+    parsed: Mapping[str, PipelineNode], pipelines: Mapping[str, Sequence[str]]
+) -> None:
+    def kind(name: str) -> NodeKind | None:
+        node = parsed.get(name)
+        return node.wire_type if node is not None else None
+
+    def refuse(message: str, **details: Any) -> NoReturn:
+        raise PayloadInvalidError(message, code="pipeline_config_invalid", details=details)
+
+    if not any(node.wire_type in MEMBER_KINDS for node in parsed.values()):
+        return
+    default = list(pipelines.get("default") or [])
+    measurements = [n for n in default if kind(n) is NodeKind.GATEWAY]
+    if len(measurements) != 1:
+        refuse(
+            "an optimizer manifest's `default` pipeline must name exactly one measurement node "
+            f"(found {measurements}): with none the round has no rows, with two nothing says "
+            "which set a selector reads.",
+            measurement_nodes=measurements,
+        )
+    controllers = [n for n in default if kind(n) is NodeKind.CONTROLLER]
+    if len(controllers) > 1:
+        refuse(
+            f"`default` names {len(controllers)} controllers ({controllers}); a round has one.",
+            controller_nodes=controllers,
+        )
+    for pipeline, steps in pipelines.items():
+        for i, step in enumerate(steps):
+            if kind(step) is NodeKind.ELIMINATOR and not any(
+                kind(s) is NodeKind.SAMPLER for s in steps[:i]
+            ):
+                refuse(
+                    f"pipeline {pipeline!r}: eliminator {step!r} has no sampler before it — a cut "
+                    "decides between blocks, and only a sampler cuts the panel into blocks.",
+                    pipeline=pipeline,
+                    eliminator=step,
+                )
+
+
 def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
     if not data:
         logger.warning("Empty pipeline response; returning empty schema")
@@ -341,7 +388,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
     # Step order from pipelines.default, fallback to nodes dict order
     step_order = config.get("pipelines", {}).get("default", list(nodes.keys()))
 
-    # EVERY declared node, because the escalation pipelines name nodes beside the chain and
+    # EVERY declared node, because the alternative pipelines name nodes beside the chain and
     # both the view and the config surface reach them. `steps` below stays the chain alone,
     # which is what keeps `active_steps` — and so `sp_hash` — a fact about the round.
     parsed: dict[str, PipelineNode] = {}
@@ -475,24 +522,31 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
 
     steps: list[PipelineNode] = [parsed[name] for name in step_order if name in parsed]
 
-    logger.info(
+    # DEBUG, not INFO: this is a pure parse on a READ path, so it fires per request and scales
+    # with polling rather than with anything happening — measured at two per `GET /origins`, one
+    # per dataset. At INFO it printed a line every few seconds into the console an operator
+    # supervises a live run in, which is where the run's own events have to be findable.
+    logger.debug(
         "Parsed pipeline '%s' with %d steps",
         config.get("name", "unknown"),
         len(steps),
     )
 
+    pipelines = config.get("pipelines") or {"default": step_order}
+    _check_member_structure(parsed, pipelines)
     schema = PipelineSchema(
         name=config.get("name", "").lower(),
         version=config.get("version", ""),
         description=config.get("description", ""),
         nodes=steps,
         declared_nodes=list(parsed.values()),
+        pipelines={name: list(seq) for name, seq in pipelines.items()},
         available_models=config.get("available_models", []),
     )
 
     # Always derived, never read off the manifest: a declared ``view`` is a second roster
     # beside `nodes`, with nothing able to catch the two drifting apart.
-    pipelines = config.get("pipelines") or {"default": step_order}
-    view = derive_pipeline_view(parsed, pipelines) if parsed else None
+    descriptions = {name: str(nodes[name].get("description") or "") for name in parsed}
+    view = derive_pipeline_view(parsed, pipelines, descriptions) if parsed else None
 
     return schema.model_copy(update={"view": view})

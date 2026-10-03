@@ -11,13 +11,11 @@ from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 
-from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
-from promptpotter.application.optimization.pobb.classification import terminal_ranking
 from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
+from promptpotter.application.scoring.classification import terminal_ranking
 from promptpotter.application.scoring.evaluators import materialize_sample_values
 from promptpotter.application.scoring.formula import rescore_results
-from promptpotter.application.scoring.formula.compiler import ScoringFormulaError
 from promptpotter.application.scoring.row_diagnostics import rank_ground_truth
 from promptpotter.config.settings import NO_RESULT
 from promptpotter.domain.l4.proxies import (
@@ -27,29 +25,33 @@ from promptpotter.domain.l4.proxies import (
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_schema import WebSpendBound
 from promptpotter.domain.results_health import classify_result, terminal_node
-from promptpotter.domain.run_records import PhaseRecord
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import QueryMeasurement, extract_item_label, is_hit, turn_scalars
+from promptpotter.domain.scoring import (
+    CellScorer,
+    QueryMeasurement,
+    extract_item_label,
+    is_hit,
+    turn_scalars,
+)
 from promptpotter.domain.spend import StepTokenUsage, TokenAccount
+from promptpotter.infrastructure.llm.heartbeat import heartbeat
 from promptpotter.infrastructure.llm.pricing import rate_ceiling
-from promptpotter.infrastructure.llm.rate_limit import is_quota_rate_limit
 from promptpotter.infrastructure.llm.spend_book import FRAMING_TOKENS, Billed, SendBound
 from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND, emit_token_usage
 from promptpotter.shared.errors import (
     CellUnscoreableError,
     ErrorCategory,
-    WalletExhaustedError,
-    has_pipeline_warnings,
+    SendRefusedError,
 )
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.intelligence.indexes.axis import AxisIndex
+    from promptpotter.application.intelligence.indexes.sample import SampleIndex
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 logger = logging.getLogger(__name__)
 
-STALE_DATA_LOAD_PROTOCOL: tuple[str, ...] = ("rerun", "samplescan", "sampleswitch")
+STALE_DATA_LOAD_PROTOCOL: tuple[str, ...] = ("rerun", "sampleswitch")
 """Step order for handling a degraded cached query. ``execute_stale_data_protocol``
 walks this in order; first step that returns a non-degraded result wins."""
 
@@ -121,7 +123,7 @@ def interpolate_pipeline_params(
     return out
 
 
-__all__ = ["execute_stale_data_protocol", "measure_sample"]
+__all__ = ["execute_stale_data_protocol", "measure_sample", "needs_rerun"]
 
 # Wire-response keys always kept on pipeline_data, whatever the pipeline schema.
 # ``reasoning_trace`` is the task model's chain-of-thought (head-capped at the backend); the
@@ -142,6 +144,7 @@ _INFRA_KEYS: frozenset[str] = frozenset(
         # it: a dataset does not declare an `observation_mapping` for how its backend talks, and
         # a formula must never read a turn — see `domain/scoring.py::TurnRecord`.
         "turns",
+        "outcome_note",
         # Where an episode's wall clock went, by harness phase (`PipelineData.step_phases`).
         "step_phases",
         # L4: the arm's own half of a paired cell difference (`domain/l4/proxies.py`). It rides
@@ -150,7 +153,8 @@ _INFRA_KEYS: frozenset[str] = frozenset(
         PARENT_LEVEL_SE_KEY,
         # L4: what the inner campaign knows about ITSELF (`domain/l4/proxies.py`). Infra keys, so
         # they need no dataset `observation_mapping` — an undeclared observation is dropped here
-        # silently, which is exactly the trap `_verify_outer_panel_contract` exists to catch.
+        # silently — the trap `initialization/wiring.py::_verify_required_observation_keys`
+        # exists to catch.
         *INNER_FACT_KEYS,
     }
 )
@@ -261,16 +265,20 @@ def cell_billing(
 async def cell_bound(session: Session, wire_params: Mapping[str, Any]) -> SendBound | None:
     """The most one cell can bill: the bound each node's backend serves, priced at the dearest the
     model this configuration runs it on can charge. ``None`` for a backend whose own sends are
-    each admitted. A backend bounding nothing, or an LLM node it serves no bound for, leaves the
-    cell unbounded — and an unbounded cell cannot run under a ceiling."""
-    if session.backend_client.holds_own_sends:
+    each admitted and that derives no bound for the cell they make up. A backend bounding nothing,
+    or an LLM node it serves no bound for, leaves the cell unbounded — and an unbounded cell
+    cannot run under a ceiling."""
+    client = session.backend_client
+    if client.holds_own_sends and not client.derives_spend_bounds:
         return None
     usd = 0.0
     input_tokens = output_tokens = 0
     bounded = priced = True
     served = False
     for node in session.pipeline_schema.nodes:
-        spend = node.spend_bound
+        raw_cfg = wire_params.get(node.name)
+        cfg = raw_cfg if isinstance(raw_cfg, Mapping) else {}
+        spend = client.node_spend_bound(node, cfg)
         if spend is None:
             bounded = bounded and not node.is_llm
             continue
@@ -278,15 +286,13 @@ async def cell_bound(session: Session, wire_params: Mapping[str, Any]) -> SendBo
         if isinstance(spend, WebSpendBound):
             usd += spend.queries * spend.usd_per_query
             continue
-        raw_cfg = wire_params.get(node.name)
-        cfg = raw_cfg if isinstance(raw_cfg, Mapping) else {}
         reply = int(cfg.get("max_tokens") or spend.max_tokens)
         reads = spend.input_bytes + FRAMING_TOKENS
         input_tokens += spend.attempts * reads
         output_tokens += spend.attempts * reply
         model, provider = cfg.get("model"), cfg.get("provider")
         ceiling = (
-            await rate_ceiling(model, provider)
+            await rate_ceiling(model, provider, hosts=spend.hosts)
             if isinstance(model, str) and isinstance(provider, str)
             else None
         )
@@ -398,9 +404,10 @@ def _error_result(
     category: ErrorCategory,
 ) -> QueryMeasurement:
     """``category`` is the typed error channel and owns "this sample errored"; ``error`` is the human
-    message. Error rows carry no ``hit``/``score`` — those belong to ``rescore_results`` alone."""
+    message. Ungraded like every row here: the walk grades it, and a charged error is a verdict."""
     return QueryMeasurement(
         sample_id=sample.id,
+        sample_key=sample.key,
         query=sample.query,
         ground_truth=sample.ground_truth or "",
         predicted="ERROR",
@@ -436,27 +443,33 @@ def _extract_upstream_detail(exc: httpx.HTTPStatusError) -> str:
     return body_text[:300]
 
 
+# TermNorm's typed 422 codes for a model that ANSWERED but left nothing gradeable after its repair
+# turns (`llm_providers.py`) — an answer cut at the candidate's own `max_tokens`, or one that is not
+# the declared JSON. That is what THIS configuration produced, so it is a measured miss: never a
+# hole (a round halts before electing on one) and never a stop for the walk.
+_OUTPUT_FAILURE_CODES = frozenset(
+    {"json_parse_failed", "schema_validation_failed", "output_truncated"}
+)
+
+
+def _answered_nothing(exc: httpx.HTTPStatusError) -> dict[str, Any] | None:
+    """The response ``data`` of a cell whose model answered nothing gradeable — no answer, and the
+    tokens it was billed for — or ``None`` where the error is not that."""
+    try:
+        detail = exc.response.json().get("detail")
+    except Exception:
+        return None
+    if not isinstance(detail, dict) or detail.get("error_code") not in _OUTPUT_FAILURE_CODES:
+        return None
+    return {"step_tokens": detail.get("step_tokens") or {}}
+
+
 def _classify_http_error(exc: httpx.HTTPStatusError) -> tuple[ErrorCategory, str]:
+    """Never a 429: ``BackendClient.run_query`` answers every one with the run's backpressure, which
+    re-sends the cell or refuses the run. A throttle is the provider's load, never a row charged to
+    the candidate."""
     code = exc.response.status_code
     upstream = _extract_upstream_detail(exc)
-    if code == 429:
-        # A throttle is only the CALLER's fault when it is a quota no retry can outlast. A
-        # per-minute window that just closed is transient, and CLIENT is read by two consumers that
-        # both punish the candidate for the provider's load: ``query_loop.Walk._abort_reason`` voided
-        # the whole panel on the first occurrence, and ``results_health.py::classify_result`` adds
-        # ``backend:client_error`` to ``fatal_codes``, which PoBB fast-eliminates on one sighting.
-        # A quota still reaches both — that one IS the operator's to act on.
-        quota = is_quota_rate_limit(exc.response.headers, exc.response.text)
-        # Says only what this site knows. Its predecessor hardcoded "attempts exhausted" onto every
-        # 429 — including the ones that had spent no attempt at all, because the provider sent no
-        # `Retry-After` and the backoff read that absence as a refusal. The text sent diagnosis the
-        # wrong way for as long as it stood.
-        retry_after = exc.response.headers.get("Retry-After")
-        window = f"Retry-After={retry_after}s" if retry_after else "no Retry-After"
-        return (
-            ErrorCategory.CLIENT if quota else ErrorCategory.SERVER,
-            f"HTTP 429 rate-limited ({'quota' if quota else 'window'}, {window}): {upstream!r}",
-        )
     if 400 <= code < 500:
         tail = f" :: {upstream}" if upstream else ""
         return ErrorCategory.CLIENT, f"HTTP {code} — caller config rejected by backend{tail}"
@@ -469,6 +482,7 @@ async def measure_sample(
     session: Session,
     pipeline_params: dict[str, Any] | None = None,
 ) -> QueryMeasurement:
+    """One cell's FACTS — ungraded; the walk grades every row it takes, fresh or replayed."""
     query = sample.query
     # The ONE place a labelless cell becomes a row. `QueryMeasurement.ground_truth` is `str`, and
     # everything downstream of here — the matcher, the rank, the archive — reads it as one; a
@@ -479,24 +493,6 @@ async def measure_sample(
 
     try:
         wire_params = interpolate_pipeline_params(pipeline_params or {}, sample.model_dump())
-
-        def _emit_backend_warning(payload: dict[str, Any]) -> None:
-            # Pure visibility — the retry itself is unchanged. The dashboard projection bumps
-            # its backend-retry counter off this record.
-            ledger = session.state.ledger
-            if ledger is None:
-                return
-
-            try:
-                ledger.append(
-                    PhaseRecord(
-                        phase="backend",
-                        event="warning",
-                        payload={**payload, "query": query[:80]},
-                    )
-                )
-            except Exception:
-                logger.exception("backend warning ledger emit failed; continuing")
 
         client = session.backend_client
         bound = await cell_bound(session, wire_params)
@@ -517,13 +513,22 @@ async def measure_sample(
         )
         try:
             async with envelope:
-                resp = await client.run_query(
-                    query,
-                    pipeline_params=wire_params,
-                    bound=bound,
-                    billed=cell_billing(pipeline_schema, wire_params),
-                    on_warning=_emit_backend_warning,
-                )
+                try:
+                    resp = await client.run_query(
+                        query,
+                        pipeline_params=wire_params,
+                        bound=bound,
+                        billed=cell_billing(pipeline_schema, wire_params),
+                    )
+                except httpx.HTTPStatusError as exc:
+                    if (answered := _answered_nothing(exc)) is None:
+                        raise
+                    logger.warning(
+                        "measure_sample for %s: answered nothing gradeable (%s) — a miss",
+                        query[:60],
+                        _extract_upstream_detail(exc),
+                    )
+                    resp = {"data": answered}
         finally:
             # Cancel whether the query succeeded or raised — an in-flight task survives and
             # keeps appending progress records against a closed call.
@@ -585,6 +590,13 @@ async def measure_sample(
         if envelope.budget_s is not None:
             pd["unworked_s"] = envelope.unworked
 
+        # Off the node `to_job_search_point` renders the candidate onto, and off `pipeline_params`
+        # rather than `wire_params`, so no sample's own length reaches a prompt-length term.
+        prompt_nodes = pipeline_schema.prompt_node_names()
+        node_cfg = (pipeline_params or {}).get(prompt_nodes[0]) if prompt_nodes else None
+        if isinstance(node_cfg, dict) and isinstance(node_cfg.get("prompt"), str):
+            pd["target_prompt_chars"] = len(node_cfg["prompt"])
+
         # The bare question, where the dataset declared one distinct from `query` — banked so a
         # JUDGE can read it, since a judge is handed this row and never the `Sample`. Absent on
         # every dataset where the two are the same string, which is what keeps the judges'
@@ -600,6 +612,7 @@ async def measure_sample(
 
         result: dict[str, Any] = {
             "sample_id": sample.id,
+            "sample_key": sample.key,
             "query": query,
             "predicted": predicted,
             "ground_truth": ground_truth,
@@ -617,8 +630,7 @@ async def measure_sample(
         # the AST allowlist bans attribute access, so the value was materialized into a shape no
         # formula could name. `validate_campaign_evaluator` refuses a name that would collide here.
         #
-        # Banked BEFORE `rescore_results`, and that ordering is the contract: the cached-replay
-        # path (`query_loop.py::_materialize_cached`) never re-enters this function, so a value
+        # Banked HERE, and that is the contract: a replay never re-enters this function, so a value
         # not written into the row now is one the formula raises `ScoringTermMissingError` on for
         # every later cache hit. For an LLM-backed evaluator it is also what stops a re-bill —
         # which is per TERM, so a multi-step schema's three gradings are three banked keys.
@@ -629,19 +641,6 @@ async def measure_sample(
                 extra=session.scoring.judges,
             )
         )
-
-        assert session.scoring.scorer is not None, "session.scoring.scorer required for measurement"
-        try:
-            rescore_results([result], session.scoring.scorer)
-        except ScoringFormulaError as exc:
-            # A formula CONTRACT bug — it raised, or returned a non-finite. Deterministic, so every
-            # cell fails it, and the row is marked so the run stops rather than grading a campaign
-            # against a broken formula. A judge that merely could not grade never arrives here:
-            # `rescore_results` resolves that row to UNSCORED, keeping the paid measurement.
-            # The outer catch-all would have banked `pipeline_data=None` and thrown a paid cell away.
-            logger.warning("measure_sample could not score %s: %s", query[:60], exc)
-            result["error"] = str(exc)
-            result["error_category"] = ErrorCategory.PIPELINE
         return result  # type: ignore[return-value]
     except httpx.HTTPStatusError as exc:
         category, error_msg = _classify_http_error(exc)
@@ -651,8 +650,8 @@ async def measure_sample(
         error_msg = f"{exc} — Backend may be down or unreachable."
         logger.warning("measure_sample CONNECTION for %s: %s", query[:60], error_msg)
         return _error_result(sample, error_msg, category=ErrorCategory.CONNECTION)
-    except (KeyboardInterrupt, asyncio.CancelledError, WalletExhaustedError):
-        # A wallet that refused the cell refused it before it was sent: a stop, never a row.
+    except (KeyboardInterrupt, asyncio.CancelledError, SendRefusedError):
+        # A refused send is refused for every cell after it: a stop, never a row.
         raise
     except CellUnscoreableError as exc:
         # The cell RAN and there is nothing to grade. The exception's own category says WHICH of the
@@ -661,8 +660,11 @@ async def measure_sample(
         logger.warning("measure_sample %s for %s: %s", exc.category.value, query[:60], exc)
         return _error_result(sample, str(exc), category=exc.category)
     except Exception as exc:
-        logger.warning("measure_sample failed for %s: %s", query[:60], exc)
-        return _error_result(sample, str(exc), category=ErrorCategory.UNKNOWN)
+        # Named by TYPE: a bare `TimeoutError()` has no message, and banked as its `str` it read
+        # "unknown error" on every surface while the cause sat one attribute away.
+        failure = f"{type(exc).__name__}: {exc}"
+        logger.warning("measure_sample failed for %s: %s", query[:60], failure, exc_info=True)
+        return _error_result(sample, failure, category=ErrorCategory.UNKNOWN)
 
 
 def find_gt_rank(result: Mapping[str, Any]) -> int | None:
@@ -676,10 +678,11 @@ def find_gt_rank(result: Mapping[str, Any]) -> int | None:
 
 
 def compare_rerun(
-    cached_result: Mapping[str, Any], rerun_result: Mapping[str, Any]
+    cached_result: Mapping[str, Any], rerun_result: Mapping[str, Any], scorer: CellScorer
 ) -> dict[str, Any]:
-    cached_hit = is_hit(cached_result.get("fitness"))
-    rerun_hit = is_hit(rerun_result.get("fitness"))
+    cached, rerun = rescore_results([dict(cached_result), dict(rerun_result)], scorer)
+    cached_hit = is_hit(cached.get("fitness"))
+    rerun_hit = is_hit(rerun.get("fitness"))
     hit_change = f"{'HIT' if cached_hit else 'MISS'}->{'HIT' if rerun_hit else 'MISS'}"
 
     cached_rank = find_gt_rank(cached_result)
@@ -733,6 +736,12 @@ def _rerun_would_repeat_token_budget_failure(
     return int(rerun_max_tokens) <= cached_completion
 
 
+def needs_rerun(row: Mapping[str, Any]) -> bool:
+    """Whether the stale-data ladder re-sends a row: an infra or fatal code, never a bare warning.
+    A schema repair that went on to answer leaves an advisory and a gradeable row, which replays."""
+    return classify_result(row).is_fatal
+
+
 async def execute_stale_data_protocol(
     protocol_steps: list[str],
     sample: Sample,
@@ -740,10 +749,10 @@ async def execute_stale_data_protocol(
     session: Session,
     *,
     pipeline_params: dict[str, Any] | None = None,
-    axes: AxisIndex | None = None,
+    sample_index: SampleIndex | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Walk the stale-data ladder for a degraded cached query, returning ``(result, step_taken)``.
-    Observation counts come from ``axes.sample_index``, constant within a round — no mutable state."""
+    Observation counts come from ``sample_index``, constant within a round — no mutable state."""
     result = cached_result
 
     for step in protocol_steps:
@@ -751,7 +760,7 @@ async def execute_stale_data_protocol(
             declare_run_phase(session, RunPhase.PAUSED)
             return {**result, "cached": result.get("cached", False)}, "paused"
         if step == "rerun":
-            historical = axes.sample_index.degradation_count(sample.id) if axes else 0
+            historical = sample_index.degradation_count(sample.id) if sample_index else 0
             effective_count = historical + 1
             if effective_count < RERUN_TRIGGER_COUNT:
                 return {
@@ -772,22 +781,16 @@ async def execute_stale_data_protocol(
 
             result = dict(await measure_sample(sample, session, pipeline_params=pipeline_params))
             result["retry_of_degraded"] = True
-            result["rerun_comparison"] = compare_rerun(cached_result, result)
-            if not has_pipeline_warnings(result):
+            result["rerun_comparison"] = compare_rerun(
+                cached_result, result, session.scoring.require_scorer()
+            )
+            if not needs_rerun(result):
                 return result, "rerun"
-
-        elif step == "samplescan":
-            probe_params = session.pipeline_schema.to_pipeline_params()
-            result = dict(await measure_sample(sample, session, pipeline_params=probe_params))
-            result["samplescan_resolved"] = True
-            if not has_pipeline_warnings(result):
-                return result, "samplescan"
 
         elif step == "sampleswitch":
             if (
-                axes
-                and axes.sample_index.degradation_rate(sample.id)
-                >= SAMPLESWITCH_MIN_DEGRADATION_RATE
+                sample_index
+                and sample_index.degradation_rate(sample.id) >= SAMPLESWITCH_MIN_DEGRADATION_RATE
             ):
                 result = {**cached_result, "cached": True, "switched_out": True}
                 return result, "sampleswitch"

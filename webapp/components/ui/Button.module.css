@@ -1,6 +1,3 @@
-/* Button primitive — the one button surface. Tokens only, so it is
-   theme-agnostic. */
-
 @layer ui {
 .btn {
   padding: var(--space-6) var(--space-14);

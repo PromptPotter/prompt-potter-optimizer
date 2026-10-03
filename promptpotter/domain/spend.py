@@ -10,21 +10,31 @@ from __future__ import annotations
 import operator
 from collections.abc import Iterable, Mapping
 from functools import reduce
-from typing import Literal, NamedTuple, NotRequired, TypedDict, get_args
+from typing import TYPE_CHECKING, Literal, NamedTuple, NotRequired, TypedDict, get_args
 
 from pydantic import ConfigDict, Field, ValidationError
 
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.shared.instrument import MeasurementRole
+
+if TYPE_CHECKING:
+    # Type-only: the record's module imports this one for `TokenUsageKind`.
+    from promptpotter.domain.run_records import TokenUsageRecord
 
 __all__ = [
+    "ROLE_SPEND_KIND",
+    "SEARCH_KINDS",
     "TOKEN_KIND_BUCKET",
     "BudgetChange",
+    "CeilingMeter",
+    "MeteredSpend",
     "SpendBucket",
     "SpendCeilings",
     "SpendRollup",
     "StepTokenUsage",
     "TokenAccount",
     "TokenUsageKind",
+    "declare_ceiling",
 ]
 
 
@@ -128,7 +138,7 @@ class TokenAccount(StrictModel):
 
         REPLAYED rows are excluded: their counts are the banked call's, so folding them in reports
         a prefix discount this run never bought. Same exclusion the spend buckets fold under
-        (``live_dashboard/projection.py::_bank_call``). ``None`` where no measured row carried one."""
+        (:meth:`SpendRollup.bank`). ``None`` where no measured row carried one."""
         accounts = [
             a
             for r in rows
@@ -166,14 +176,24 @@ class TokenAccount(StrictModel):
         return self.cache_read / self.input
 
 
-TokenUsageKind = Literal["optimizer", "backend", "judge", "diagnostic"]
+TokenUsageKind = Literal["optimizer", "backend", "judge", "diagnostic", "bench"]
 """Who spent it, and therefore which bucket it lands in. ``judge`` is a third arm rather than a
 flavour of either: folded into ``loop`` an operator reads grading cost as optimizer cost, folded
 into ``backend`` as the measured system's (``judges/CLAUDE.md`` § Scoring, never the optimizer
 loop). ``diagnostic`` is what a `verify` / `ab` / `noise-floor` spends — it answers a question ABOUT
 the search rather than advancing it, so folding it into `backend` would report re-measuring a
-candidate as the cost of finding one. It is a bucket and not an exemption: a diagnostic is inside
-every ceiling, always, because the loop can fire one itself."""
+candidate as the cost of finding one. ``bench`` is the held-out pass, the price of the headline
+every optimizer is compared on. Each is a bucket and not an exemption: inside a ``bill`` ceiling,
+because the loop fires both itself; a ``search_incurred`` one meters them beside it."""
+
+CeilingMeter = Literal["bill", "search_incurred"]
+"""What a run's spend ceiling counts. ``bill`` — every kind, billed, a replay free: the run's own
+cost. ``search_incurred`` — ``SEARCH_KINDS`` alone, replays priced: a controlled arm's declared
+budget, which a sibling arm's cache cannot stretch and its bench pass cannot eat into."""
+
+ROLE_SPEND_KIND: dict[str, TokenUsageKind] = {MeasurementRole.BENCH: "bench"}
+"""The scoring passes whose ROLE files their spend, whatever each call would otherwise bank as —
+keyed by the ``MeasurementRole`` that also names the pass's archive run."""
 
 
 class SpendCeilings(NamedTuple):
@@ -190,9 +210,20 @@ class BudgetChange(NamedTuple):
     tokens: int | None
 
 
+def declare_ceiling(base: SpendCeilings, *layers: BudgetChange) -> SpendCeilings:
+    """Lay each declaration over *base*, per arm, the LAST set arm winning — raise or lower alike.
+    Declaring is preference, never authority: the account bound is admission's, applied to what
+    this returns, which is why no layer here has to be trusted only downward."""
+    usd, tokens = base
+    for layer in layers:
+        usd = usd if layer.usd is None else layer.usd
+        tokens = tokens if layer.tokens is None else layer.tokens
+    return SpendCeilings(usd, tokens)
+
+
 class SpendBucket(StrictModel):
     """One spend sub-bucket (backend, optimizer-loop, or judge). Mutated only by
-    ``_handle_token_usage``. ``used_usd`` is the BILL; ``incurred_usd`` prices cache hits too."""
+    ``SpendRollup.bank``. ``used_usd`` is the BILL; ``incurred_usd`` prices cache hits too."""
 
     used_usd: float = 0.0
     input_tokens: int = 0
@@ -216,9 +247,12 @@ class SpendBucket(StrictModel):
     # reads cheapness that never happened. The L4 no-evidence guard refuses such a cell.
     incurred_unpriced_tokens: int = 0
 
+    def metered_usd(self, meter: CeilingMeter) -> float:
+        return self.used_usd if meter == "bill" else self.incurred_usd
+
 
 class SpendRollup(StrictModel):
-    """A cycle's spend: the four buckets, and the totals every consumer reads off them.
+    """A cycle's spend: a bucket per spend kind, and the totals every consumer reads off them.
     ``total_used_usd`` is the BILL a budget caps; ``total_incurred_usd`` prices cache hits too."""
 
     backend: SpendBucket = Field(default_factory=SpendBucket)
@@ -227,6 +261,8 @@ class SpendRollup(StrictModel):
     judge: SpendBucket = Field(default_factory=SpendBucket)
     # Spend that asked a question ABOUT the search — see `TokenUsageKind`.
     diagnostic: SpendBucket = Field(default_factory=SpendBucket)
+    # The held-out pass that grades the selection — see `TokenUsageKind`.
+    bench: SpendBucket = Field(default_factory=SpendBucket)
     total_used_usd: float = 0.0
     total_incurred_usd: float = 0.0
     # Cumulative BILLED tokens across every bucket — the token halt probe's source. Cache hits are
@@ -235,10 +271,50 @@ class SpendRollup(StrictModel):
     # Billed tokens with no resolvable USD rate. >0 means ``total_used_usd`` UNDERSTATES real spend
     # — it is a floor, not the total.
     unpriced_tokens: int = 0
-    # Both are FOLDED beside the USD totals (`live_dashboard/projection.py::_handle_token_usage`), never
-    # derived on read: a `@computed_field` serializes but does not round-trip, and a resume
-    # re-folds this whole state off the ledger (`resolve_resume_state`) before carrying it.
-    # Serving them is also what keeps the gauge and the halt gate one computation.
+    # Both are FOLDED beside the USD totals (`bank`), never derived on read: a `@computed_field`
+    # serializes but does not round-trip, and a resume re-folds this whole state off the ledger
+    # (`resolve_resume_state`) before carrying it. Serving them is also what keeps the gauge and
+    # the halt gate one computation.
+
+    def bank(self, record: TokenUsageRecord) -> None:
+        """One call, at the price it carries, into its bucket and the totals — the ONE fold, so a
+        cycle's live rollup and a ledger re-read of it cannot disagree."""
+        # Through the declared mapping, never a branch here: a two-way `if kind == "optimizer"`
+        # does not fail when a third kind appears, it files it under `backend` in silence.
+        bucket: SpendBucket = getattr(self, TOKEN_KIND_BUCKET[record.kind])
+        usd = record.cost_usd
+        in_tok = int(record.input_tokens)
+        out_tok = int(record.output_tokens)
+        if record.model and not bucket.model:
+            bucket.model = record.model
+
+        if usd is not None:
+            bucket.incurred_usd = round(bucket.incurred_usd + usd, 6)
+        elif in_tok or out_tok:
+            bucket.incurred_unpriced_tokens += in_tok + out_tok
+
+        if not record.cached:
+            bucket.input_tokens += in_tok
+            bucket.output_tokens += out_tok
+            bucket.reasoning_tokens += int(record.reasoning_tokens)
+            # Only the billed side: a reuse-cache hit reached no provider, so counting its
+            # replayed cache tokens would report a prefix holding on calls never made.
+            bucket.cache_read_tokens += int(record.cache_read_tokens)
+            bucket.cache_write_tokens += int(record.cache_write_tokens)
+            if usd is not None:
+                bucket.used_usd = round(bucket.used_usd + usd, 6)
+                bucket.rate_known = True
+            elif in_tok or out_tok:
+                # Billed but with no resolvable cost, so the USD cap cannot see this spend.
+                # Tracked so the dashboard flags the cap as inactive.
+                bucket.unpriced_tokens += in_tok + out_tok
+
+        # Over `buckets`, never a hand-named pair: the budget gate reads `total_used_usd`, so a
+        # bucket left out of this fold is spend the cap cannot see.
+        self.total_used_usd = round(sum(b.used_usd for b in self.buckets), 6)
+        self.total_incurred_usd = round(sum(b.incurred_usd for b in self.buckets), 6)
+        self.total_tokens_used = sum(b.input_tokens + b.output_tokens for b in self.buckets)
+        self.unpriced_tokens = sum(b.unpriced_tokens for b in self.buckets)
 
     @property
     def buckets(self) -> tuple[SpendBucket, ...]:
@@ -253,12 +329,67 @@ class SpendRollup(StrictModel):
         an understated cost and read cheapness that never happened, so such a cell is refused."""
         return sum(b.incurred_unpriced_tokens for b in self.buckets)
 
+    def metered(self, meters: CeilingMeter) -> tuple[float, int]:
+        """What a ceiling of ``meters`` has already counted: USD, then billed tokens."""
+        counted = [getattr(self, TOKEN_KIND_BUCKET[k]) for k in METER_KINDS[meters]]
+        return (
+            round(sum(b.metered_usd(meters) for b in counted), 6),
+            sum(b.input_tokens + b.output_tokens for b in counted),
+        )
+
+    @property
+    def search_replay_share(self) -> float | None:
+        """The share of the search's incurred USD a replay answered — billed nothing, since a
+        cache another run paid into served it. ``None`` where the search incurred nothing."""
+        search = [getattr(self, TOKEN_KIND_BUCKET[k]) for k in SEARCH_KINDS]
+        incurred = sum(b.incurred_usd for b in search)
+        return None if incurred <= 0.0 else 1.0 - sum(b.used_usd for b in search) / incurred
+
+    @property
+    def search_incurred_usd(self) -> float | None:
+        """What the SEARCH incurred (``SEARCH_KINDS``), replays priced — ``None`` where a search
+        bucket carries tokens no rate priced, since dividing by an understated cost reads cheapness
+        nobody bought."""
+        search: list[SpendBucket] = [getattr(self, TOKEN_KIND_BUCKET[k]) for k in SEARCH_KINDS]
+        if any(b.incurred_unpriced_tokens for b in search):
+            return None
+        return sum(b.incurred_usd for b in search)
+
+
+class MeteredSpend(StrictModel):
+    """What a run's spend caps have counted, in the units they meter, by bucket.
+    Every surface sets this beside a cap, so none picks the bill or the incurred total itself."""
+
+    meter: CeilingMeter
+    usd: float
+    tokens: int
+    # Each `SpendRollup` bucket the meter counts, in its units, summing to `usd`; `beside` holds the
+    # rest in the same units — a search meter's bench and diagnostic passes.
+    buckets: dict[str, float]
+    beside: dict[str, float]
+    billed_usd: float
+
+    @classmethod
+    def of(cls, spend: SpendRollup, meter: CeilingMeter) -> MeteredSpend:
+        usd, tokens = spend.metered(meter)
+        counted = {TOKEN_KIND_BUCKET[k] for k in METER_KINDS[meter]}
+        at = {name: getattr(spend, name).metered_usd(meter) for name in TOKEN_KIND_BUCKET.values()}
+        return cls(
+            meter=meter,
+            usd=usd,
+            tokens=tokens,
+            buckets={name: v for name, v in at.items() if name in counted},
+            beside={name: v for name, v in at.items() if name not in counted},
+            billed_usd=spend.total_used_usd,
+        )
+
 
 TOKEN_KIND_BUCKET: dict[TokenUsageKind, str] = {
     "optimizer": "loop",
     "backend": "backend",
     "judge": "judge",
     "diagnostic": "diagnostic",
+    "bench": "bench",
 }
 """Which :class:`SpendRollup` bucket each :data:`TokenUsageKind` lands in — declared once.
 
@@ -272,3 +403,12 @@ assert set(TOKEN_KIND_BUCKET) == set(get_args(TokenUsageKind)), (
 assert set(TOKEN_KIND_BUCKET.values()) <= set(SpendRollup.model_fields), (
     "TOKEN_KIND_BUCKET names a bucket SpendRollup does not declare"
 )
+
+SEARCH_KINDS: tuple[TokenUsageKind, ...] = ("optimizer", "backend", "judge")
+"""The spend that FINDS a result — what a lift is priced in. The bench's pass is the instrument
+grading the result, and a diagnostic asks a question about it; neither is the search's."""
+
+METER_KINDS: dict[CeilingMeter, tuple[TokenUsageKind, ...]] = {
+    "bill": tuple(TOKEN_KIND_BUCKET),
+    "search_incurred": SEARCH_KINDS,
+}

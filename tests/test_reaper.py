@@ -30,11 +30,11 @@ import pytest
 
 from promptpotter.application.jobs import reaper
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
-from promptpotter.application.optimization.dispatch.llm_call import heartbeat as heartbeat_mod
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.run_records import TokenUsageRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm import heartbeat as heartbeat_mod
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import write_json

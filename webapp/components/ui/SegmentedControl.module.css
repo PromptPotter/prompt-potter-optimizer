@@ -1,5 +1,3 @@
-/* SegmentedControl primitive — a joined group of buttons, exactly one on. */
-
 @layer ui {
 .group {
   display: inline-flex;
@@ -27,8 +25,6 @@
   border-right: 0;
 }
 
-/* Page-level chrome scale. The icon rides inside the button, so the segment becomes
-   a flex row rather than growing a wrapper. */
 .lg .segment {
   display: inline-flex;
   align-items: center;

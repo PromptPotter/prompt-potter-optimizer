@@ -22,6 +22,9 @@
 # dropped them while still advancing its line index, which showed up to clients
 # as a `sequence` gap and tripped the reconnect recipe in clause 4 below.
 # **A record kind that is not listed here is not "filtered", it is a hole.**
+#
+# A payload property may carry `x-status`, with the two values and meaning
+# `api-openapi.yaml`'s header defines.
 
 asyncapi: 3.0.0
 
@@ -215,6 +218,10 @@ components:
             # The cycle's δ scale, appended WHOLE at lock and after every
             # extension (``RulerRecord``).
             - ruler
+            # The cycle's standing operator ceiling (spend and round cap), appended by
+            # ``set-limits`` and by a launch flag that moves it
+            # (``RunLimitsRecord``); the last one wins.
+            - run_limits
             # An account's banked spend, written before a delete takes the rows
             # carrying it (``SpendTombstoneRecord``). Rides the WORKSPACE ledger,
             # so it reaches no cycle subscriber — listed because the enum's rule
@@ -262,6 +269,10 @@ components:
             - $ref: '#/components/schemas/RoundWarningPayload'
             - $ref: '#/components/schemas/CandidateMintedPayload'
             - $ref: '#/components/schemas/CycleSeedPayload'
+            - $ref: '#/components/schemas/ElectionPayload'
+            - $ref: '#/components/schemas/RulerPayload'
+            - $ref: '#/components/schemas/RunLimitsPayload'
+            - $ref: '#/components/schemas/SpendTombstonePayload'
 
     # ---- Profile A: projection-synthesized payload ----
 
@@ -298,20 +309,25 @@ components:
 
     DecisionPayload:
       type: object
-      description: ResumeCheckpointRecord — one recorded loop decision.
+      description: |
+        ResumeCheckpointRecord — one recorded loop decision. `fork_cut` and
+        `panel_coverage` are the bench's; every other kind is taken by one
+        optimizer node, and `node` names which.
       required: [kind, inputs_ref, outcome, data, timestamp]
       additionalProperties: false
       properties:
         kind:
           type: string
-          enum:
-            - round_winner
-            - elimination_cut
-            - margin_cut
-            - leader_lock_in
-            - l2_escalation_trigger
-            - l3_escalation_trigger
-            - fork_cut
+          description: |
+            A `CheckpointKind` value: the bench's `BenchCheckpointKind`, or the
+            enum the deciding optimizer's own package declares. The set is those
+            registries (`decisions.py::resume_checkpoint_gating` merges them),
+            so it is open here and grows with every optimizer installed.
+        node:
+          type: [string, 'null']
+          description: |
+            The manifest node whose member took this decision; null for a
+            bench decision.
         inputs_ref:
           type: object
           additionalProperties: true
@@ -344,6 +360,56 @@ components:
         timestamp:
           type: string
           format: date-time
+
+    BenchScoredPayload:
+      type: object
+      description: |
+        `PhaseRecord.payload.view` of `phase: bench`, `event: scored` — the
+        bench pass graded the selection. `bench` is the `BenchScore` the
+        OpenAPI file declares, the run's reading of its passes stamped with its
+        `scorer_id`; the dashboard serves it as `bench_score`.
+      required: [bench]
+      properties:
+        bench: { type: object, additionalProperties: true }
+
+    BenchGradedPayload:
+      type: object
+      description: |
+        `PhaseRecord.payload.view` of `phase: bench`, `event: graded` — under
+        `bench_each_round`, one pass grading a round's declared selection (the
+        origin at round 0). `reading` is the `BenchReading` the OpenAPI file
+        declares, null with `missing` saying why; the dashboard serves it as
+        `rounds[].bench` on the round it names.
+      required: [reading, missing]
+      properties:
+        reading: { type: [object, 'null'], additionalProperties: true }
+        missing: { type: [string, 'null'] }
+
+    RaceStandingPayload:
+      type: object
+      description: |
+        `SnapshotRecord.payload` of `event: race_standing` — one candidate's
+        standing in its eliminator's race, per sample. `member` names the
+        manifest node racing it.
+      required: [member, current_id, n_samples, p_best, paired_breakdown]
+      properties:
+        member: { type: string, minLength: 1 }
+        current_id: { type: string }
+        n_samples: { type: integer, minimum: 0 }
+        p_best: { type: number }
+        paired_breakdown: { type: object, additionalProperties: true }
+
+    RaceCatchUpPayload:
+      type: object
+      description: |
+        `SnapshotRecord.payload` of `event: race_catch_up` — the priors the
+        race caught up on the sample just measured; absent where the archive
+        already held them.
+      required: [member, sample_id, prior_ids]
+      properties:
+        member: { type: string, minLength: 1 }
+        sample_id: { type: integer }
+        prior_ids: { type: array, items: { type: string } }
 
     SnapshotPayload:
       type: object
@@ -458,7 +524,7 @@ components:
             - layer_parse_failure
             # The round measured cleanly and still resolved nothing: no arm's
             # blocked lift over the parent excluded 0
-            # (`ScoredCandidate.matched_parent_lift_ci_*`). The round's numbers
+            # (`ScoredCandidate.reference_lift_ci_*`). The round's numbers
             # are real and its winner is the best of what it saw — but the
             # panel cannot tell that winner from the parent, so the point
             # estimate must not be read as a result. Distinct from every kind
@@ -529,9 +595,12 @@ components:
             The searchpoint id (`IndividualLineage.id`) minted with this
             candidate. **Re-minted per run**, so a resume/rewind re-mints the
             same `(round, idx)` under a NEW id — join on `label`, not on this.
-        parent_id:
-          type: [string, 'null']
-          description: The individual this candidate was mutated from; null at the origin.
+        parent_ids:
+          type: array
+          items: { type: string, minLength: 1 }
+          description: |
+            Every individual this candidate was derived from — one for a
+            mutation, several for a crossover; empty at the origin.
         label:
           type: string
           minLength: 1
@@ -543,6 +612,132 @@ components:
           type: string
         source:
           type: string
+          description: |
+            `{manifest}:{node}` of the node that proposed it (`potter:l1_generate`);
+            the bench's own source (`origin`) for an individual the bench minted.
+        timestamp:
+          type: string
+          format: date-time
+
+    ElectionPayload:
+      type: object
+      description: |
+        ElectionRecord — what the round's selection produced, appended by the
+        optimizer's selector before the round closes, keyed by LABEL because a
+        resume re-mints candidate ids. θ stays on `round:complete`, which every
+        close re-reads; only the selection never moves.
+      required: [round, fit, stamps_theta, timestamp]
+      additionalProperties: false
+      properties:
+        round:
+          type: integer
+          minimum: 0
+        stamps_theta:
+          type: boolean
+          description: |
+            `RoundResult.stamps_theta` — whether the selector fits θ per arm at all.
+            False: θ is not a column of this round, never a cold ruler.
+        selected_labels:
+          type: array
+          items: { type: string, minLength: 1 }
+          description: |
+            The individuals the next round derives from — one for potter, a
+            population or a front for a peer; empty when the round held.
+            Round 0 selects the `C0` it adopted.
+        fit:
+          type: object
+          description: Per-arm readings the selection stamped, keyed by label.
+          additionalProperties:
+            type: object
+            additionalProperties: true
+            properties:
+              reference_id:
+                type: string
+                description: |
+                  The individual this arm's lift is read against, over the cells
+                  it touched.
+        timestamp:
+          type: string
+          format: date-time
+
+    RulerPayload:
+      type: object
+      description: |
+        RulerRecord — a δ ruler as it stands, written WHOLE at lock and after
+        every extension; the last record for a `dataset_name` wins. Not a
+        progress event: the tail skips it, so it is declared for the union.
+      required: [ruler, dataset_name, round, timestamp]
+      additionalProperties: false
+      properties:
+        ruler:
+          type: object
+          additionalProperties: true
+          description: The `DeltaRuler` model dump.
+        dataset_name:
+          type: string
+          description: Whose sample ids the δ keys are — an L4 outer ledger carries the inner scale too.
+        round:
+          type: integer
+          minimum: 0
+        timestamp:
+          type: string
+          format: date-time
+
+    RunLimitsPayload:
+      type: object
+      description: |
+        RunLimitsRecord — the cycle's standing operator ceiling, whole; the last
+        record wins. Appended by `set-limits` and by a launch flag that moves
+        it. Not a progress event: the tail skips it.
+      required: [timestamp]
+      additionalProperties: false
+      properties:
+        usd:
+          type: [number, 'null']
+          minimum: 0
+        tokens:
+          type: [integer, 'null']
+          minimum: 0
+        rounds:
+          oneOf:
+            - type: 'null'
+            - type: object
+              required: [max_rounds]
+              additionalProperties: false
+              properties:
+                max_rounds:
+                  type: [integer, 'null']
+                  minimum: 0
+                  description: '`null` lifts the round cap, so the spend ceiling governs.'
+          description: The `RoundsCap`; `null` never moved it.
+        timestamp:
+          type: string
+          format: date-time
+
+    SpendTombstonePayload:
+      type: object
+      description: |
+        SpendTombstoneRecord — a deleted campaign's or cycle's spend, banked on
+        the WORKSPACE ledger before the delete so the money outlives the data.
+        Reaches no cycle subscriber.
+      required: [campaign_id, used_usd, used_tokens, unpriced_tokens, timestamp]
+      additionalProperties: false
+      properties:
+        campaign_id:
+          type: string
+        cycle_id:
+          type: string
+          description: Empty for a whole-campaign bank.
+        used_usd:
+          type: number
+        used_tokens:
+          type: integer
+        unpriced_tokens:
+          type: integer
+        unreported_usd:
+          type: number
+        unreported_tokens:
+          type: integer
         timestamp:
           type: string
           format: date-time
@@ -583,7 +778,7 @@ components:
       properties:
         kind:
           type: string
-          enum: [optimizer, backend]
+          enum: [optimizer, backend, judge, diagnostic, bench]
         node: { type: string, minLength: 1 }
         model: { type: [string, 'null'] }
         input_tokens:
@@ -722,7 +917,7 @@ components:
         gates, coerces, or infers: `resolve-origin` carries only `{draft_id}` in
         its payload, so the fields its LLM turn moved exist nowhere else on the
         ledger. Empty for commands whose payload already IS their effect
-        (`pause-cycle`, `change-spend-budget`), and for every `rejected` ack.
+        (`pause-cycle`, `change-run-limits`), and for every `rejected` ack.
       required: [command_id, status, timestamp]
       additionalProperties: false
       properties:

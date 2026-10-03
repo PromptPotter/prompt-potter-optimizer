@@ -4,20 +4,13 @@ import type { DashboardSnapshot } from "@/lib/poll";
 import { currentRound, dash, liveRow, sampleRow } from "@/lib/test-fixtures";
 import type { DashboardSample } from "@/lib/api/types";
 
-// The live candidate as `dashboard.json` carries it — BOTH halves, because the projection
-// writes both: the ROW under `current_round.candidates` (what a bar plots) and the served
-// sample rows under the l1_score node block (what the walk reads).
 const live = (
   samples: DashboardSample[],
   currentSampleId: number | null = null,
 ): DashboardSnapshot =>
   dash({
     current_sample_id: currentSampleId,
-    current_round: currentRound({
-      round: 1,
-      candidates: [liveRow({ label: "C1.1" })],
-      nodes: { l1_score: { output: { candidates: [{ idx: 0, label: "C1.1", samples }] } } },
-    }),
+    current_round: currentRound({ round: 1, candidates: [liveRow({ label: "C1.1", samples })] }),
   });
 
 describe("sampleWalk", () => {
@@ -56,18 +49,14 @@ describe("sampleWalk", () => {
     expect(w.cursor).toBe(2);
   });
 
-  // `sample_order_preview` fires ONCE per candidate, so a reader that joined mid-candidate
-  // never receives it. Before the projection carried the order, that reader got the past and
-  // nothing ahead — and on a candidate that had scored nothing yet, exactly one row with both
-  // arrows dead. The served copy answers the same question for them.
+  // `sample_order_preview` fires ONCE per candidate; a mid-candidate joiner reads the served copy.
   it("takes the SERVED order when the stream never delivered one", () => {
     const served = dash({
       current_sample_id: 419,
       declared_sample_order: order,
       current_round: currentRound({
         round: 1,
-        candidates: [liveRow({ label: "C1.1" })],
-        nodes: { l1_score: { output: { candidates: [{ idx: 0, label: "C1.1", samples: tape }] } } },
+        candidates: [liveRow({ label: "C1.1", samples: tape })],
       }),
     });
     const w = sampleWalk(served, null, true);
@@ -75,21 +64,16 @@ describe("sampleWalk", () => {
     expect(w.cursor).toBe(2);
   });
 
-  // A candidate that has just started has NO tape, which is the state that rendered the single
-  // dead row: without the served order there is nothing but the in-flight sample.
+  // A just-started candidate has NO tape: without the served order only the in-flight sample shows.
   it("shows the road ahead on a candidate that has measured nothing yet", () => {
     const fresh = dash({
       current_sample_id: 99,
       declared_sample_order: order,
-      current_round: currentRound({
-        round: 1,
-        candidates: [liveRow({ label: "C1.1" })],
-        nodes: { l1_score: { output: { candidates: [{ idx: 0, label: "C1.1", samples: [] }] } } },
-      }),
+      current_round: currentRound({ round: 1, candidates: [liveRow({ label: "C1.1" })] }),
     });
     expect(sampleWalk(fresh, null, true).ids).toEqual(order);
     expect(sampleWalk(fresh, null, true).cursor).toBe(0);
-    // The bug, pinned: with neither channel it collapses to the one in-flight row.
+    // With neither channel it collapses to the one in-flight row.
     const blind = { ...fresh, declared_sample_order: [] } as DashboardSnapshot;
     expect(sampleWalk(blind, null, true).ids).toEqual([99]);
   });
@@ -117,17 +101,7 @@ describe("sampleWalk", () => {
         current_round: currentRound({
           round: 1,
           // Two rows: the walk follows the LATEST-seeded candidate, so C1.2 at position 1.
-          candidates: [liveRow({ label: "C1.1" }), liveRow({ label: "C1.2" })],
-          nodes: {
-            l1_score: {
-              output: {
-                candidates: [
-                  { idx: 0, label: "C1.1", samples: [] },
-                  { idx: 1, label: "C1.2", samples: tape },
-                ],
-              },
-            },
-          },
+          candidates: [liveRow({ label: "C1.1" }), liveRow({ label: "C1.2", samples: tape })],
         }),
       }),
       order,

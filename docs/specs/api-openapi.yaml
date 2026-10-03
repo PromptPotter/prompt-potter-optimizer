@@ -28,6 +28,8 @@
 # value is `wired-scheduled-for-removal`, a live route whose consumers are being
 # migrated off it (today: `GET /datasets/{name}/pipeline`). Declaring a route
 # that is about to go makes its removal a visible diff instead of a silence.
+# A schema PROPERTY takes the same key with the same two values: a field no code
+# writes yet, and the field it replaces.
 #
 # READS HAD NO BUCKET, and that is why several shipped undeclared. §0's five I/O
 # kinds define Control-remote as MUTATION, so a GET adds no kind and needed no
@@ -118,7 +120,7 @@ tags:
 #     delete, cleanup-empty, register-backend).
 #   - 2 CLI verbs hoisted into the wire surface (mint-campaign = `new`,
 #     start-run = `resume` / launcher per ADR-0001 control plane).
-#   - M12-new commands (pause, step, rewind-to-round, change-spend-budget,
+#   - M12-new commands (pause, step, rewind-to-round, change-run-limits,
 #     change-pipeline-param) — plan-listed v0 candidates. `pause-cycle` is the
 #     single operator-interrupt verb: the worker exits cleanly, the cycle stays
 #     resumable, and `start-run`/`resume` relaunches it (there is no `stop-cycle`
@@ -771,6 +773,7 @@ paths:
         '202': { $ref: '#/components/responses/CommandAccepted' }
         '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
         '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '404': { $ref: '#/components/responses/CommandTargetNotFound' }
         '422': { $ref: '#/components/responses/PayloadInvalid' }
         '503': { $ref: '#/components/responses/BackendUnreachable' }
 
@@ -807,10 +810,10 @@ paths:
         '422': { $ref: '#/components/responses/PayloadInvalid' }
         '503': { $ref: '#/components/responses/BackendUnreachable' }
 
-  /commands/change-spend-budget:
+  /commands/change-run-limits:
     post:
-      operationId: changeSpendBudget
-      summary: Raise or lower a cycle's USD and/or token spend cap mid-flight.
+      operationId: changeRunLimits
+      summary: Raise or lower a cycle's USD, token and/or round cap mid-flight.
       tags: [budget]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -825,36 +828,8 @@ paths:
                 - type: object
                   required: [kind, payload]
                   properties:
-                    kind: { const: change-spend-budget }
-                    payload: { $ref: '#/components/schemas/ChangeSpendBudgetPayload' }
-      responses:
-        '202': { $ref: '#/components/responses/CommandAccepted' }
-        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
-        '403': { $ref: '#/components/responses/CapabilityDenied' }
-        '409': { $ref: '#/components/responses/VersionConflict' }
-        '422': { $ref: '#/components/responses/PayloadInvalid' }
-
-  /commands/change-halt-budget:
-    post:
-      operationId: changeHaltBudget
-      x-status: declared-not-wired  # no handler; POST 404s `command_kind_unknown`
-      summary: Raise or lower a cycle's max-rounds halt cap mid-flight.
-      tags: [budget]
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/ExpectedVersion'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              allOf:
-                - $ref: '#/components/schemas/CommandEnvelope'
-                - type: object
-                  required: [kind, payload]
-                  properties:
-                    kind: { const: change-halt-budget }
-                    payload: { $ref: '#/components/schemas/ChangeHaltBudgetPayload' }
+                    kind: { const: change-run-limits }
+                    payload: { $ref: '#/components/schemas/ChangeRunLimitsPayload' }
       responses:
         '202': { $ref: '#/components/responses/CommandAccepted' }
         '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
@@ -866,7 +841,7 @@ paths:
     post:
       operationId: changeSampleBudget
       x-status: declared-not-wired  # no handler; POST 404s `command_kind_unknown`
-      summary: Adjust the per-round PoBB sample budget (`sp_budget_round`) mid-flight.
+      summary: Adjust potter's per-round sample budget (`adaptive_queue.sp_budget_round`) mid-flight.
       tags: [budget]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -997,7 +972,7 @@ paths:
       summary: Set a cycle's composite formula.
       description: |
         Wire form of editing `campaign.json::scoring`. There is no live-swap
-        counterpart to be the wire form OF: `round_scorer` compiles once at run
+        counterpart to be the wire form OF: the cell scorer compiles once at run
         init and is never re-read, and a mid-cycle redefinition makes the
         composite incomparable to its own past — `EscalationFSM._advanced` reads
         `best_composite_fitness` as the L2/L3 stall gate whenever the θ ruler is
@@ -1344,10 +1319,17 @@ paths:
         here. Each summary carries the campaign's lifetime billed spend
         (`spend_used_usd`, a floor while `spend_unpriced_tokens > 0`), summed
         server-side over its cycle ledgers and banked tombstones — the
-        per-campaign split of `GET /auth/quota-status`'s account total, so the
-        sidebar prints dollars it never adds up itself. Each also carries
+        per-campaign split of `GET /auth/quota-status`'s account total. Beside
+        it, `spend_metered` is what the campaign's cap counts along its line —
+        the bill, or a controlled arm's search incurred — by bucket: the
+        number the sidebar prints, so it never picks or adds one up itself.
+        Each carries `bench`, the headline read off the campaign's result (`campaigns/{id}/result.json`,
+        `domain/campaign.py::CampaignResult`) under the formula its line runs —
+        whichever cycle a rebase handed the line to — and never a per-cycle copy.
+        Each also carries
         `runs_with` — what the ROOT course runs with (models and every scalar
-        setting, each with the layer that won it, plus the DECLARED rounds cap)
+        setting, each with the layer that won it, the optimizer manifest it
+        selects, plus the DECLARED rounds cap)
         — a second transport of the `GET /campaigns/{id}/pipeline` answer at the
         root, never a second source; null when the root pipeline did not
         resolve, so one broken dataset drops its own row's answer only.
@@ -1581,10 +1563,34 @@ paths:
         `/cycles` and `/tree` serve — overriding what the file declares, and
         `Last-Modified` covers that derivation's inputs rather than this file's mtime
         alone, since the phase turns `detached` on the clock with nothing written.
-        The in-flight round's per-candidate searchpoints
-        (`current_round.nodes.l1_score.input.candidates[]`) carry the
-        `SearchpointCandidate` shape — the same shape a round file's
-        `candidate_scores[]` carries historically.
+        `spend_metered` (`MeteredSpend`) is set at read time too, head and replay
+        alike: `spend` read under the campaign's `ceiling_meter` — the bill, or a
+        controlled arm's search incurred — by bucket, the number every
+        surface sets beside `run_limits`' spend cap.
+        The body names no optimizer's node in a key the bench serves.
+        `current_round.candidates[]` (`LiveCandidate`) carries the round in flight
+        whole: the closed-row numbers, the searchpoint in the `SearchpointCandidate`
+        shape a round file's `candidate_scores[]` carries historically, the sample
+        tape (`samples[]`, `sample_lines[]`) and `validation_failures[]`;
+        `current_round.nodes` holds optimizer LLM calls alone.
+        `current_round.measurement_node` names the node the ledger recorded at
+        `measure:enter`, and `active_node` names it while it measures.
+        `current_round.racing` is the eliminator's live standing, named by its
+        manifest `member` and null before a reading; `catch_up_log[]` names the
+        member too. `bench_score` (`BenchScore`) is the headline, folded from the
+        `bench:scored` phase record — the run's own reading, stamped with its
+        `scorer_id` — and null until the bench pass grades the selection. `run_limits` holds the bench's ceilings and `optimizer[]` — the
+        run-bounding knobs the selected optimizer declares (`OptimizerLimit`), empty
+        where it declares none. `run_standing` (`RunStanding`) is where the optimizer
+        stands after the last closed round — rounds without advance, and the stalls
+        it may still absorb out of their cap — null before round 0 closes.
+        `rounds[].optimizer_facts` are the optimizer's own words about each closed
+        round (`OptimizerFact`); `rounds[].best_so_far` is the BEST line as each
+        round closed, and `rounds[].bench` the bench's `BenchReading` of the
+        selection that round declared — the origin, the final pick, and under
+        `bench_each_round` every round that selected; `state: optimizer_step`
+        names a phase the optimizer declares for itself, its words in
+        `optimizer_step`.
       tags: [cycles]
       parameters:
         - name: campaign_id
@@ -1662,10 +1668,10 @@ paths:
         are finished on disk under a parent that a positional read cannot name. The ledger
         is the only witness independent of round close.
 
-        The round-CLOSE facts (`is_winner`, `theta`, `cumulative_theta`) come from
-        `dashboard.json::rounds[]`, the declared projection for them — the ledger genuinely
-        does not carry them. A round that never closed reports **no winner** rather than
-        promoting its lone candidate.
+        The round facts (`is_selected`, `theta`, `stamps_theta`) come off the same ledger:
+        the `ElectionRecord` stamps them at the election, and `round:complete` re-reads θ. A
+        round that never elected reports **no winner** rather than promoting its lone
+        candidate.
 
         ONE tree per campaign, and every consumer reads it. There is no `depth` dial:
         two clients choosing different depths for the same served object is how they
@@ -1704,9 +1710,12 @@ paths:
           in: query
           required: false
           description: |
-            A counterfactual overlay. `score:<formula>` = an alternative scoring formula —
-            stamps each candidate's `lens_value` and marks a `divergence` on the spine node
-            where that criterion would have elected someone else. `abort:<variant>`,
+            A counterfactual overlay. `score:<formula>` = an alternative `per_cell` composite:
+            every candidate's rows are re-graded under the campaign's per-sample formula and it,
+            then folded — the number a fresh run under it reports — into `lens_value`, with a
+            `divergence` on the spine node where that criterion would have elected someone
+            else. Reads every round document of each campaign the tree spans and grades each
+            row once per request. `abort:<variant>`,
             variant ∈ {`epsilon_off`, `lock_in_off`, `all_off`} = switch off a PoBB abort
             contributor. Absent → the tree is the raw read. Unknown value → 400.
           schema: { type: string }
@@ -1716,7 +1725,8 @@ paths:
           description: |
             The sample-set mask: a comma-separated sample-id list. Re-scores each candidate
             over only those samples into `sample_set_accuracy` / `sample_set_n`. Composes
-            with a `score:` lens; ignored for an `abort:` lens. A non-integer token → 400.
+            with a `score:` lens, which then reads the same subset per cell and so stays
+            exact on it; ignored for an `abort:` lens. A non-integer token → 400.
           schema: { type: string }
         - name: If-None-Match
           in: header
@@ -1954,8 +1964,9 @@ paths:
         carried the field. `restore` puts them back. `purge-cold` is the only
         step that destroys, and `compact` cannot perform it.
 
-        Applies to `candidate_*` runs only: `origin` and `round_parent` serve
-        the overwhelming majority of cache replays, so they are never touched.
+        Applies to `panel` runs only (a candidate's own walk): `origin` and
+        `parent` serve the overwhelming majority of cache replays, so they are
+        never touched.
         A row carrying `mean_round_delta` keeps its `reasoning_trace` — the L4
         narrative panel gate needs both, and a row with one but not the other
         silently changes which panel the round renders.
@@ -2121,8 +2132,8 @@ paths:
       operationId: ingestDataset
       summary: Upload a tabular file; receive a server-held `DraftCampaign` with parsed preview + smart defaults.
       description: |
-        Ingest path for the M13 chat-first user web (see
-        `docs/specs/roadmap.md § Ingest`). Workspace-scoped,
+        Ingest path for the chat-first user web (roadmap `C1`; contract in
+        `docs/specs/chat-foundation.md`). Workspace-scoped,
         identity-bound by `IdentityContext.tenant_id`. Mints a durable `checkin`
         campaign on this first action: the draft's `draft_id` IS the new
         `campaign_id`, its working state lands at
@@ -2236,16 +2247,97 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
 
+  /datasets/{name}/cells:
+    get:
+      operationId: getDatasetCells
+      summary: The measurement log of one scope — every cell (candidate × sample), served ranked.
+      description: |
+        One read behind every measurement view. `samples` in hard-sample rank,
+        `candidates` chronological within a cycle, `cells` by candidate then
+        walk order (the time series); a
+        client groups by bucketing under those served orders and never
+        re-sorts. Grouped by sample it IS the hard-sample leaderboard. The
+        round still being measured is merged here, once. `candidate_id` /
+        `round` / `status` narrow the rows — a preset, not a second read.
+        Wire shape: `domain/cells.py::CellsResponse`.
+      tags: [datasets]
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { name: scope, in: query, schema: { type: string, enum: [cycle, campaign, dataset], default: dataset } }
+        - { name: campaign_id, in: query, schema: { type: string } }
+        - { name: cycle_id, in: query, schema: { type: string } }
+        - { name: descend, in: query, schema: { type: string } }
+        - { name: order, in: query, schema: { type: string, enum: [info_gain, difficulty] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000, default: 50 } }
+        - { name: max_unmeasured, in: query, schema: { type: integer, minimum: 0, maximum: 1000 } }
+        - { name: candidate_id, in: query, schema: { type: string } }
+        - { name: round, in: query, schema: { type: integer } }
+        - { name: status, in: query, schema: { type: string, enum: [HIT, MISS, ERR, UNSC] } }
+      responses:
+        '200':
+          description: The scope's ranked samples, its candidates and their cells.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '404':
+          description: No such dataset, campaign or cycle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /datasets/{name}/cells/{run_id}/{sample_id}:
+    get:
+      operationId: getDatasetCell
+      summary: One cell opened — its archive row assembled into a trace.
+      description: |
+        Addressed `(run_id, sample_id)`: the archive run the row was filed
+        under and its sample. One span per pipeline node, in chain order —
+        the input re-rendered from the run's own node config, tokens and
+        seconds off the row, outputs attributed through the dataset's schema.
+        Assembled at read time; nothing is stored for it. Wire shape:
+        `domain/cells.py::Cell`.
+      tags: [datasets]
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { name: run_id, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - { name: sample_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: The cell and its spans.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '404':
+          description: No such dataset, no such run under it, or the run holds no cell for that sample.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
   /optimizer-pipeline:
     get:
       operationId: getOptimizerPipeline
-      summary: The optimizer's OWN manifest — install content, no campaign scope.
+      summary: One optimizer manifest as authored — install content, no campaign scope.
       description: |
-        `promptpotter/assets/optimizer/pipeline.yaml` parsed: the loop's own
-        nodes, their config schema and output contracts. One operator-owned
-        file per install, no per-campaign overlay — the one pipeline read where
-        a single answer for everyone is correct.
+        `promptpotter/assets/optimizers/{optimizer}/pipeline.yaml` parsed: that
+        optimizer's nodes, their config schema and output contracts, with no
+        campaign's overlay — a campaign's own changes ride its
+        `optimization.nodes` and are read off the campaign.
       tags: [campaigns]
+      parameters:
+        - name: optimizer
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            default: potter
+          description: The manifest to read, as `optimization.optimizer` names it.
       responses:
         '200':
           description: The optimizer manifest's view, config schema and output schemas.
@@ -2254,6 +2346,129 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+        '404':
+          description: No optimizer of that name is registered (`optimizer_unknown`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /optimizers:
+    get:
+      operationId: listOptimizers
+      summary: The optimizer manifests this install can run.
+      description: |
+        One entry per optimizer the registry holds a runtime for
+        (`application/optimizers::runtimes`, which the
+        `promptpotter.optimizer_runtimes` entry points extend), each resolved
+        through the same `resolve_optimizer` a run takes — so a menu offers
+        exactly what `optimization.optimizer` accepts, never a hand-written
+        list. `paper` is the citation a paper preset reproduces, whose declared
+        knob values are that paper's configuration; null for an optimizer that
+        reproduces none. Install content: no campaign scope.
+      tags: [campaigns]
+      responses:
+        '200':
+          description: The optimizer roster, the default first.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [default, optimizers]
+                properties:
+                  default:
+                    type: string
+                    description: What a campaign naming no `optimization.optimizer` runs.
+                  optimizers:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [name, version, paper, origin]
+                      properties:
+                        name: { type: string }
+                        version: { type: string }
+                        paper: { type: [string, 'null'] }
+                        # The package that registered it; null for one PromptPotter ships.
+                        origin: { type: [string, 'null'] }
+
+  /optimizers/{name}/knobs:
+    get:
+      operationId: getOptimizerKnobs
+      summary: Every knob an optimizer manifest's nodes take.
+      description: |
+        One row per knob per node — its JSON Schema type, its closed options,
+        whether null is legal, and the value the manifest declares — so a
+        settings surface draws one control per knob and writes a campaign's
+        `optimization.nodes.{node}.config.{key}`. Install content: no campaign
+        scope, no auth beyond the server's own.
+      tags: [campaigns]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        '200':
+          description: The manifest's knob menu.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [optimizer, version, nodes]
+                properties:
+                  optimizer: { type: string }
+                  version: { type: string }
+                  nodes:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [node, kind, knobs]
+                      properties:
+                        node: { type: string }
+                        kind: { type: string }
+                        knobs:
+                          type: array
+                          items:
+                            type: object
+                            additionalProperties: false
+                            required:
+                              - key
+                              - description
+                              - type
+                              - options
+                              - nullable
+                              - minimum
+                              - exclusive_minimum
+                              - maximum
+                              - exclusive_maximum
+                              - value
+                            properties:
+                              key: { type: string }
+                              description: { type: string }
+                              type: { type: string }
+                              options:
+                                type: [array, 'null']
+                                items: { type: string }
+                              nullable: { type: boolean }
+                              # The member's own bounds, as its knob model declares them, so a
+                              # surface refuses what the run would before sending it.
+                              minimum: { type: [number, 'null'] }
+                              exclusive_minimum: { type: [number, 'null'] }
+                              maximum: { type: [number, 'null'] }
+                              exclusive_maximum: { type: [number, 'null'] }
+                              value: {}
+        '404':
+          description: No such manifest ships with this install.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /datasets/{name}/draft:
     post:
@@ -2329,9 +2544,12 @@ paths:
       operationId: getActiveSession
       summary: The caller-tenant's active-session pointer.
       description: |
-        The three ids naming what is running for this tenant, read off
-        `.workspace/active_session.json`. The webapp polls it on the live 2 s beat
-        so a CLI-minted cycle is followed promptly.
+        The three ids naming this tenant's LATEST launch (`new`, Start or a fork, from
+        any entry point), read off `.workspace/active_session.json` — the terminal's
+        default `resume` target and what an unpinned webapp follows. It is not the
+        set of live runs: several may run at once, and each is a `/cycles` entry whose
+        `run_phase` says so. The webapp polls it on the live 2 s beat so a new launch
+        is followed promptly.
 
         **There is no 404 on this route, deliberately.** "No active session" is a
         steady state — nothing launched yet, or the workspace was cleared — so it
@@ -2554,7 +2772,7 @@ components:
         One candidate searchpoint as the webapp joins it — DESCRIPTIVE, not a
         route body: both carriers are `additionalProperties: true` passthroughs
         (the file IS the contract per the folder-UI doctrine). Carried by
-        `dashboard.json::current_round.nodes.l1_score.input.candidates[]` (live,
+        `dashboard.json::current_round.candidates[]` (live, `LiveCandidate`,
         writer `projections/live_dashboard/blocks.py`) and
         `rounds/round_NNNN.json::candidate_scores[]` (historical, writer
         `domain/results.py::ScoredCandidate`, served via the generic file route).
@@ -2571,14 +2789,11 @@ components:
         addressed candidate.
       properties:
         candidate_id:
-          type: string
-          description: Live id is `r{round}_{idx}`; round files carry the stable id.
+          type: [string, 'null']
+          description: Null on a live row until its score report lands; round files carry the stable id.
         label:
           type: string
-          description: Display label, e.g. `C1.2`.
-        idx:
-          type: integer
-          minimum: 0
+          description: Display label, e.g. `C1.2` — the join key on both carriers.
         prompt_fields:
           type: object
           additionalProperties: true
@@ -2596,7 +2811,7 @@ components:
         pipeline_overlay:
           type: object
           additionalProperties: true
-          description: The sparse fork-transport delta. Round files only.
+          description: The sparse fork-transport delta.
 
     CommandEnvelope:
       type: object
@@ -2609,7 +2824,7 @@ components:
             The command kind. MUST be one of the kinds declared in this
             file's `paths` keys (the closed set). Examples once Profile B
             lands: `pause-cycle`, `fork-cycle`,
-            `change-spend-budget`. See `docs/adr/0001-m12-control-plane.md`
+            `change-run-limits`. See `docs/adr/0001-m12-control-plane.md`
             Profile B table.
           minLength: 1
           maxLength: 64
@@ -2687,13 +2902,16 @@ components:
         id:
           type: string
           description: Course → the cycle_id. Candidate → the searchpoint id minted at L1/origin.
-        parent_id:
-          type: [string, "null"]
+        parent_ids:
+          type: array
+          items: { type: string }
           description: |
-            The candidate this node descends from; null only at the true root. A fork and
-            an L4 inner run carry the SAME edge — one resolver reads
-            `fork.from_candidate_id` and `spawned_by`, so a course hangs off a node and
-            needs no lane geometry.
+            Every candidate this node derives from — one for a mutation, several for a
+            crossover; empty only at the true root. Lineage is a DAG; this tree view hangs
+            the node under `parent_ids[0]`, the declared rule until the surfaces decide how
+            to draw the other edges. A fork and an L4 inner run carry their one edge here —
+            one resolver reads `fork.from_candidate_id` and `spawned_by`, so a course hangs
+            off a node and needs no lane geometry.
         label:
           type: string
           description: |
@@ -2732,26 +2950,22 @@ components:
         status:
           type: string
           description: |
-            Candidate → `minted` | `measured`. Never `winner` (that rides `is_winner`):
+            Candidate → `minted` | `measured`. Never `winner` (that rides `is_selected`):
             election is stamped at round close, so an unclosed round HAS no winner and this
             tree declines to invent one. Course → `index.json::status`, the same StopReason
             value `/cycles` serves under this same name. Was `state`, which is what
             `dashboard.json::state` calls the fine-grained ACTIVITY phase — a different axis.
-        is_winner:
+        is_selected:
           type: boolean
           description: |
-            Elected this round. False throughout a round that never closed — such a round
-            has no winner, and a lone candidate is not promoted to one.
+            In this round's `selected_labels` — the individuals the next round derives
+            from. False throughout a round that has not elected.
         theta:
           type: [number, "null"]
           description: |
             Difficulty-adjusted Rasch ability the election ranked on — what explains a
             lower-accuracy winner. Null outside the round's election fit.
         theta_se: { type: [number, "null"] }
-        evaluators:
-          type: object
-          additionalProperties: { type: number }
-          description: The candidate's stored evaluator namespace — what a `score:` lens re-scores.
         mean_fitness_ci_lo: { type: [number, "null"] }
         mean_fitness_ci_hi: { type: [number, "null"] }
         scored_samples: { type: [integer, "null"] }
@@ -2761,19 +2975,19 @@ components:
           description: |
             Of `scored_samples`, how many were replayed from the MeasurementArchive rather
             than measured. Null on a course and on any candidate never measured.
-        cumulative_theta:
-          type: [number, "null"]
+        stamps_theta:
+          type: boolean
           description: |
-            Ability of the parent lineage on the cycle's fixed δ ruler — the
-            subset-invariant, cross-round-comparable series. Carried by the round's WINNER
-            only: it is a property of the advancing spine, and a losing sibling never
-            joined it. Its accuracy-space predecessor was a mean over rows measured by
-            DIFFERENT configurations and is gone; `accuracy` is what this node MEASURED.
+            Whether the optimizer fits θ per arm at all. Candidate: what its round's election
+            carried, false on a round that never elected. Course: the campaign-constant
+            declaration of the optimizer it runs, so a course row can say its rounds are won
+            on θ. False: θ is not a column here, and a surface hides it.
         lens_value:
           type: [number, "null"]
           description: |
-            This candidate's fitness under the request's `score:` lens, re-scored
-            server-side. Null without a lens, or when the namespace can't satisfy it.
+            This candidate's composite fitness under the request's `score:` lens — its rows
+            re-graded per cell and folded, server-side. Null without a lens, or where no
+            row carries a verdict under it.
         sample_set_accuracy:
           type: [number, "null"]
           description: |
@@ -2824,8 +3038,15 @@ components:
             candidate, so the candidate edge alone does not identify an inner run.
         best_accuracy: { type: [number, "null"] }
         origin_accuracy: { type: [number, "null"] }
-        hearts: { type: [integer, "null"] }
-        lives_cap: { type: [integer, "null"] }
+        run_standing:
+          description: |
+            The optimizer's standing as the course's last closed round left it, read
+            off the course's own ledger; null before round 0 closes.
+          type: [object, "null"]
+          properties:
+            rounds_without_advance: { type: integer }
+            stalls_left: { type: [integer, "null"] }
+            stalls_left_cap: { type: [integer, "null"] }
 
     RayItem:
       type: object
@@ -2907,7 +3128,7 @@ components:
             `PotterError` subclass at the single `main.py` handler. Control-plane
             specifics: `version_conflict` (409), `idempotency_key_missing` (400),
             `command_kind_unknown` (404), `slug_collision` (409),
-            `machine_busy` (409), `backend_unreachable` (503),
+            `machine_busy` (409), `cycle_busy` (409), `backend_unreachable` (503),
             `admission_gate_stuck` (503 — a process is wedged inside the
             machine-wide admission window, so occupancy cannot be read and
             nothing was started; retryable),
@@ -2928,6 +3149,7 @@ components:
             - tenant_mismatch
             - slug_collision
             - machine_busy
+            - cycle_busy
             - backend_unreachable
             - ingest_failed
             - origin_incomplete
@@ -2980,11 +3202,17 @@ components:
               `holder_user`, `campaign_id`, `cycle_id`, `started_at`. What the
               webapp reads is `GET /machine-status` — occupancy, and the
               caller's own place in line.
+            * `cycle_busy` (409 on `start-run`, `step-cycle` and
+              `start-checkin`) — the targeted cycle already has an unfinished
+              job (queued included), so a second launch would put two
+              producers on one ledger. Carries that job: `job_id`, `status`,
+              `holder_user`, `campaign_id`, `cycle_id`, `started_at`.
             * `backend_unreachable` (503 on any command that needs the
               backend reachable) — `backend_type` (connector name) and
-              `backend_url` (configured URL). Used by the frontend to
-              compose the "Start the backend and try again" message
-              without re-parsing the `message` field.
+              `backend_url` (configured URL) — the IDENTITY of what refused.
+              The REMEDY is the connector probe's own and rides `message`: a
+              surface renders that, never a sentence rebuilt from these two,
+              which cannot say why.
             * `ingest_failed` (422 on `/datasets/ingest`) — `reason`
               ∈ `bad_csv` | `bad_json` | `empty` | `too_large` | `bad_slug` |
               `unsupported_format` | `hardened_blocked`. (Ingest is
@@ -3039,11 +3267,68 @@ components:
           type: string
           enum: [checkin, running, paused, detached, terminal]
           default: detached
-        best_accuracy: { type: [number, 'null'] }
+        best_accuracy:
+          type: [number, 'null']
+          description: |
+            The optimizer's own selection score — what it KEPT, read on the rows that chose
+            it. Never the headline; the campaign's `CampaignSummary.bench` is.
         rounds_closed: { type: integer, default: 0 }
         created_at: { type: string, default: '' }
         updated_at: { type: string, default: '' }
         human_intervened: { type: boolean, default: false }
+
+    BenchReading:
+      type: object
+      additionalProperties: false
+      required: [round, sp_hash, accuracy, composite_fitness, ci_lo, ci_hi, n_scored]
+      description: One individual's bench pass, read under a named scorer.
+      properties:
+        round: { type: integer, description: The round whose selection this is; 0 is the origin. }
+        sp_hash: { type: string, description: "The searchpoint scored — the archive's `prompt_fields_id`." }
+        accuracy: { type: [number, 'null'] }
+        composite_fitness: { type: [number, 'null'] }
+        ci_lo: { type: [number, 'null'] }
+        ci_hi: { type: [number, 'null'] }
+        n_scored:
+          type: integer
+          description: |
+            Bench rows carrying a verdict, a miss the prompt caused included; never fewer than
+            the bench set less its split's `tolerance` — a pass past it is no reading.
+
+    BenchScore:
+      type: object
+      additionalProperties: false
+      required:
+        [bench_size, scorer_id, origin, selected, missing_reason, lift, lift_ci_lo, lift_ci_hi]
+      description: |
+        A reading of the passes' archived facts (`campaigns/{id}/result.json::bench`) under
+        `scorer_id`. Every served copy is a cache of that reading: a reader under another
+        grader reads the passes again, never this.
+      properties:
+        bench_size: { type: integer }
+        scorer_id:
+          type: string
+          description: The grader every number here was read under.
+        origin:
+          oneOf:
+            - $ref: '#/components/schemas/BenchReading'
+            - type: 'null'
+        selected:
+          oneOf:
+            - $ref: '#/components/schemas/BenchReading'
+            - type: 'null'
+        missing_reason:
+          type: [string, 'null']
+          description: |
+            Why a reading is null: each pass that stopped before its last row, or ended past its
+            split's `tolerance` of rows with no verdict. Null when both read.
+        lift:
+          type: [number, 'null']
+          description: |
+            `selected` over `origin` on the bench rows both scored, paired per row; null below
+            two shared rows, 0.0 where the origin is the selection.
+        lift_ci_lo: { type: [number, 'null'] }
+        lift_ci_hi: { type: [number, 'null'] }
 
     CyclesResponse:
       type: object
@@ -3276,14 +3561,16 @@ components:
                 seed carrying `origin_prompt_fields`: the lifted round 0 already
                 IS the origin, so declaring a second one is contradictory.
             seed:
-              $ref: '#/components/schemas/OperatorForkOverride'
+              $ref: '#/components/schemas/CycleSeed'
 
-    OperatorForkOverride:
+    CycleSeed:
       type: object
       additionalProperties: false
       description: |
-        The edited-searchpoint origin override that makes a fork's origin =
-        chosen searchpoint + operator edits. Required on every operator fork.
+        `domain/run_records.py::CycleSeed` as a fork sends it — the chosen
+        starting point that makes a fork's origin = chosen searchpoint +
+        operator edits. `origin_source` is not sent: the dispatcher stamps
+        `fork_seed`. Required on every operator fork.
         Under `keep_rounds` the origin is the LIFTED round 0 instead, so only the
         override half of this applies and `origin_prompt_fields` is refused.
         Persisted to the fork's ledger as a read-once `CycleSeedRecord` (read at
@@ -3339,16 +3626,16 @@ components:
       description: |
         The fork's campaign-config delta. Every field optional — absent
         inherits the parent's value; applied to the fork's snapshot at init,
-        never mutates the parent's frozen config. Four kinds of knob ride here:
-        (1) run limits (`max_rounds`/`spend_budget_usd`/`token_budget`/patiences/
-        `pobb_epsilon`) — ABSOLUTE values the reconcile dialog re-sets (defaults to
-        the parent's remaining, e.g. "3 of 6 rounds left"); (2) the selection-policy
-        toggle (`per_round_resubset`) → the nested
-        `mechanisms.selection`; (3) the search-space policy toggle
-        (`schema_field_rename`); (4) the composite criterion (`scoring`), which
-        sits on `CampaignConfig` itself rather than under `optimization`. Every
-        policy knob invalidates search comparability, so a fork-at-offset-0 is how
-        you A/B one without touching the global default or the parent cycle.
+        never mutates the parent's frozen config. Three kinds of knob ride here:
+        (1) the bench's run limits (`max_rounds`/`spend_budget_usd`/`token_budget`)
+        — ABSOLUTE values the reconcile dialog re-sets (defaults to the parent's
+        remaining, e.g. "3 of 6 rounds left"); (2) `nodes`, the fork's delta over
+        the selected optimizer manifest — every knob its nodes take, which
+        `GET /optimizers/{name}/knobs` lists; (3) the composite
+        criterion (`scoring`), which sits on `CampaignConfig` itself rather than
+        under `optimization`. Every policy knob invalidates search comparability,
+        so a fork-at-offset-0 is how you A/B one without touching the manifest or
+        the parent cycle.
       properties:
         max_rounds:
           type: integer
@@ -3366,25 +3653,22 @@ components:
           minimum: 0
           nullable: true
           description: Absolute cumulative-token cap for the fork; `null` lifts the cap.
-        l1_patience:
-          type: integer
-          minimum: 1
-          description: Consecutive non-improving L1 rounds before escalation.
-        l2_patience:
-          type: integer
-          minimum: 1
-          nullable: true
-          description: L2 stall tolerance; `null` disables the L2 gate.
-        l3_patience:
-          type: integer
-          minimum: 1
-          nullable: true
-          description: L3 stall tolerance; `null` disables the L3 gate.
-        pobb_epsilon:
-          type: number
-          minimum: 0
-          maximum: 1
-          description: Per-candidate P(best) elimination threshold.
+        nodes:
+          type: object
+          description: |
+            The fork's delta over the selected optimizer manifest, keyed by node name —
+            `{node: {config: {...}}}`, the shape a target pipeline's overlay takes.
+            Every optimizer knob rides here, resolved against the campaign's manifest
+            before the fork is minted (an unknown node or a refused value is a 422);
+            the fields around it are the bench's own. No field here switches the
+            manifest: a head-to-head between optimizers is two campaigns, not a fork.
+          additionalProperties:
+            type: object
+            additionalProperties: false
+            properties:
+              config:
+                type: object
+                additionalProperties: true
         scoring:
           oneOf:
             - type: string
@@ -3393,29 +3677,14 @@ components:
           nullable: true
           description: |
             The composite-fitness criterion (`CampaignConfig.scoring`) — a formula
-            string, or the per-node map. The ONE override a mask can preview
-            against the record: a lens re-elects every round from rows already
-            measured, so the round the preview parts at is the round a
-            `keep_rounds` fork carrying this is minted at. Every other field here
+            string (the per-sample formula, replacing the block), or a
+            `{per_sample, per_cell}` map laid key by key over the parent's block.
+            The ONE override a mask can preview against the record: a `score:F`
+            lens IS `{per_cell: F}`, re-grading rows already measured, so the round
+            the preview parts at is the round a `keep_rounds` fork carrying this is
+            minted at. Every other field here
             moves a ceiling or a patience count, which no measurement can be
             re-read under, so those forks preview nothing.
-        per_round_resubset:
-          type: boolean
-          nullable: true
-          description: |
-            Re-pick the most-informative scoring subset every round (adaptive
-            Rasch selection) for this fork. `null` inherits the parent. Safe to
-            A/B now that every cross-round comparator measures on one fixed θ ruler.
-        schema_field_rename:
-          type: boolean
-          nullable: true
-          description: |
-            Let this fork's L1 rename a field on the inner `l1_generate`'s output
-            schema, not merely re-describe it. `null` inherits the parent (locked by
-            default: `build_l1_response_schema` never declares the rename param, so the
-            LLM cannot emit a key the schema omits). Only meaningful on a campaign
-            that optimizes an optimizer (`promptpotter-self`). An L2/L3
-            `fork_proposal` can request this same unlock autonomously.
 
     DeleteCyclePayload:
       $ref: '#/components/schemas/CycleRef'
@@ -3446,7 +3715,7 @@ components:
           minimum: 0
           maximum: 1
           description: |
-            Stop once the best measured accuracy reaches this. Omitted, the run
+            Stop once the optimizer's declared pick reaches this accuracy. Omitted, the run
             never halts on accuracy. Must be FINITE — `NaN` satisfies a
             `minimum`/`maximum` pair and then never compares true, so a halt that
             can never fire looks identical to no halt at all.
@@ -3480,6 +3749,39 @@ components:
             with the origin's exact prompt fields, then `start-checkin` seeds C0
             (`campaign_origin` lineage). This verb mints the dataset's own
             authored origin only.
+        optimization:
+          $ref: '#/components/schemas/OptimizationOverrides'
+          description: |
+            Which optimizer this campaign runs and its knobs, laid over the
+            dataset's `campaign.yaml::optimization` before the mint freezes it —
+            only the fields SENT move anything. Validated as the check-in's and
+            the terminal's `--set` are, by the one resolution a run takes: an
+            optimizer this install lacks is a 404 `optimizer_unknown`, a knob its
+            manifest refuses a 422. Omitted, the dataset's own declaration runs.
+        arm:
+          type: object
+          required: [head_to_head_id, arm_key]
+          additionalProperties: false
+          description: |
+            Mint as a CONTROLLED arm of a head-to-head (`head_to_heads/{id}.json`).
+            The first arm declares it off its own instrument (dataset rows, split,
+            held-out rows, scorer, target models, origin) and budget; a later arm
+            on any other is refused 409 `arm_off_instrument`, a key another arm
+            holds 409 `arm_taken`. An arm reads no other campaign's measurements,
+            refuses fork/skip/limit commands 409, and its spend ceiling is its
+            search's INCURRED USD, the bench pass metered beside it. Omitted, the
+            campaign optimizes with everything that helps.
+          properties:
+            head_to_head_id:
+              type: string
+              pattern: '^[A-Za-z0-9_-]+$'
+              minLength: 1
+              maxLength: 64
+            arm_key:
+              type: string
+              pattern: '^[A-Za-z0-9_-]+$'
+              minLength: 1
+              maxLength: 64
 
     StartRunPayload:
       allOf:
@@ -3500,7 +3802,7 @@ components:
               minimum: 0
               maximum: 1
               description: |
-                Stop once the best measured accuracy reaches this. Omitted, the run
+                Stop once the optimizer's declared pick reaches this accuracy. Omitted, the run
                 never halts on accuracy. Must be FINITE — `NaN` satisfies a
                 `minimum`/`maximum` pair and then never compares true.
             spend_budget_usd:
@@ -3519,7 +3821,7 @@ components:
                 when a model has no rate on file. Whichever ceiling is met first halts
                 the cycle. The CLI's `--token-budget`, hoisted onto the wire.
 
-    ChangeSpendBudgetPayload:
+    ChangeRunLimitsPayload:
       allOf:
         - $ref: '#/components/schemas/CycleRef'
         - type: object
@@ -3527,13 +3829,14 @@ components:
           anyOf:
             - required: [max_usd]
             - required: [max_tokens]
+            - required: [max_rounds]
           description: |
-            At least one of `max_usd` / `max_tokens` must be present — expressed as
-            `anyOf`, because the `minProperties: 1` this carried was satisfied by
-            `campaign_id` alone and so asserted nothing (the handler enforced the
-            real rule by itself). A field that is omitted leaves that ceiling
-            unchanged, in the running job's reservation and the cycle's live file
-            alike, each from its own prior. Whichever ceiling is met first halts
+            At least one of `max_usd` / `max_tokens` / `max_rounds` must be present —
+            expressed as `anyOf`, because the `minProperties: 1` this carried was
+            satisfied by `campaign_id` alone and so asserted nothing (the handler
+            enforced the real rule by itself). A field that is omitted leaves that
+            ceiling unchanged, in the running job's reservation and the cycle's live
+            file alike, each from its own prior. Whichever ceiling is met first halts
             the cycle.
           properties:
             max_usd:
@@ -3551,6 +3854,14 @@ components:
                 for the cycle. Setting `0` halts at the next checkpoint; raising
                 above current usage releases the halt. The model-portable twin of
                 `max_usd` — counts free-backend work the USD ceiling misses.
+            max_rounds:
+              type: [integer, "null"]
+              minimum: 0
+              description: |
+                New L1 round cap for the cycle, read at the next round boundary.
+                `null` lifts it, so the spend ceiling governs; a cap at or below
+                the rounds already run halts after the current round. Not clamped
+                against the account — a round is not money.
 
     ChangePipelineParamPayload:
       allOf:
@@ -3682,20 +3993,6 @@ components:
               minLength: 1
               maxLength: 512
               description: 'Operator-supplied reason; stored on the archive marker for audit.'
-
-    ChangeHaltBudgetPayload:
-      allOf:
-        - $ref: '#/components/schemas/CycleRef'
-        - type: object
-          required: [max_rounds]
-          additionalProperties: false
-          properties:
-            max_rounds:
-              type: integer
-              minimum: 0
-              description: |
-                New round cap. Setting `0` halts the cycle at the next
-                checkpoint; raising above current round count releases.
 
     ChangeSampleBudgetPayload:
       allOf:
@@ -3861,7 +4158,7 @@ components:
 
     ParamSource:
       type: string
-      enum: [backend, dataset, campaign, seed, evolved, identity, unset]
+      enum: [backend, dataset, campaign, model_floor, seed, evolved, identity, unset]
       description: |
         WHICH LAYER set a resolved param's value — stamped BY the merge (last
         writer wins), never diffed against it. A member is admitted with its
@@ -3871,7 +4168,9 @@ components:
         dataset overlay is read from.
         `dataset` the slug's `nodes.{n}.config`; `campaign` the frozen
         `pipeline_overlay`, and a check-in draft's overlay (a draft IS the
-        pre-committed config); `seed` a cycle seed; `evolved` the candidate's
+        pre-committed config); `model_floor` a declared `reasoning_effort` no
+        layer above set, at the lowest rung the node's model accepts; `seed` a
+        cycle seed; `evolved` the candidate's
         sparse `pipeline_overlay`; `identity` connector + judge
         contributions, unoverridable, so a surface never offers to edit one;
         `unset` declared with no value at any layer — never attributed to a
@@ -3916,7 +4215,7 @@ components:
         movable_by:
           type: array
           items: { type: string }
-          description: Who may move this axis now (`l1`, `l2`); EMPTY is the only true lock.
+          description: Who may move this axis now (`proposer`, `optimizer`); EMPTY is the only true lock.
         never_axis:
           type: string
           enum: ['', cost_lever, schema_owned]
@@ -3964,7 +4263,7 @@ components:
       additionalProperties: false
       description: |
         The in-progress steer, and only the half the verdict reads. The rest of an
-        `OperatorForkOverride` — the origin prompt, the narrowing, the reconciled
+        `CycleSeed` — the origin prompt, the narrowing, the reconciled
         limits — decides nothing here, and asking for it would let a caller believe
         the answer covered them.
       properties:
@@ -3973,7 +4272,7 @@ components:
           additionalProperties: true
           description: |
             The `nodes.*.config` value overlay the fork would carry, exactly as
-            `OperatorForkOverride.pipeline_overlay` sends it.
+            `CycleSeed.pipeline_overlay` sends it.
 
     ForkPreviewResponse:
       type: object
@@ -4014,11 +4313,28 @@ components:
       type: object
       required:
         [campaign_id, cycle_id, dataset_name, connector, backend_type,
-         node_config_schema, node_output_schema, model_capabilities, params,
-         reach, is_single_node]
+         optimizer, optimizer_knobs, node_config_schema, node_output_schema,
+         model_capabilities, params, reach, is_single_node]
       description: One campaign's resolved pipeline at one searchpoint — the answer, not the parts.
       properties:
         campaign_id: { type: string }
+        optimizer:
+          type: string
+          description: |
+            The optimizer manifest the addressed course runs
+            (`optimization.optimizer`), resolved through the same config layers
+            as `params` — the one answer a surface reads which optimizer's
+            graph, knobs and analytics apply by, a check-in's draft included.
+        optimizer_knobs:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: true
+          description: |
+            That optimizer's knob values per node as the addressed course runs
+            them — the manifest's under the campaign's `optimization.nodes` and
+            the cycle seed's — so a knob surface reads the resolution rather
+            than laying `campaign.json` over the manifest itself.
         cycle_id:
           type: [string, 'null']
           description: The hop actually resolved; null for a campaign-level read.
@@ -4077,9 +4393,12 @@ components:
       description: |
         The campaign-config knobs a draft carries, as one object — materialized
         into the committed `campaign.yaml::optimization` block. Operator-facing
-        (UI) vocabulary. Sent whole on `DraftCampaign`; on the edit patch any
-        subset is shallow-merged onto the current value (a new knob is one property
-        here, not a fresh field threaded through every surface).
+        (UI) vocabulary. Sent whole on `DraftCampaign`; on the edit patch and on
+        `mint-campaign` any subset is merged depth-first onto the current value —
+        `nodes` node by node and knob by knob, and naming another `optimizer`
+        drops the previous one's `nodes` — then resolved against the manifest it
+        selects (a new knob is one property here, not a fresh field threaded
+        through every surface).
       properties:
         max_rounds:
           type: integer
@@ -4090,39 +4409,28 @@ components:
             Round ceiling; `0` measures the origin and stops. Smart-default `5`
             (matches the M10 prompt-iteration
             framework default). Operator-editable.
-        prompt_block_catalogue:
+        optimizer:
           type: string
-          enum: [guidance, restrict, off]
-          default: guidance
+          minLength: 1
+          default: potter
           description: |
-            How the reusable prompt building-block library reaches the optimizer:
-            `guidance` (suggest blocks, L1 may still invent), `restrict` (library
-            values only — an off-library value fails `L1_PROMPT_BLOCKS_IN_LIBRARY`
-            and rides the existing forbidden-value wound), `off` (render empty;
-            prompt bit-for-bit identical to a no-library ablation).
-        escalation_ladder:
-          type: string
-          enum: [full, l1_l2, l1]
-          default: full
-          description: |
-            How far up L1 → L2 → L3 this campaign may climb. `full` is the whole
-            ladder; `l1_l2` lets L2 re-frame but never reaches L3, force-trigger
-            included; `l1` is the L1-only ablation arm, where no escalation rule
-            can return a fire and neither the `l2_context` nor the `l3_plan` prompt
-            is ever composed. L1's own prompt is identical under all three.
-        mechanisms:
+            The optimizer manifest this campaign runs — a name under
+            `assets/optimizers/`, or one a registered package ships. Every
+            entry point selects it here; nothing selects it install-wide.
+        nodes:
           type: object
+          description: |
+            The campaign's overlay on the selected manifest, keyed by node name —
+            `{node: {config: {...}}}`, the shape a target pipeline's overlay
+            takes. An optimizer's knobs, a paper's configuration and each llm
+            node's `config.model` all ride here.
           additionalProperties:
             type: object
-            additionalProperties:
-              type: boolean
-          description: |
-            Pluggable orchestration mechanism toggles
-            (`optimization.mechanisms` — sorting/selection + early-abort groups).
-            Nested `{group: {toggle: bool}}`; seeded with stock defaults,
-            operator-editable in the new-campaign form, materialized verbatim into
-            the committed `campaign.json`. Self-describing schema served by
-            `GET /campaigns/mechanisms-schema`.
+            additionalProperties: false
+            properties:
+              config:
+                type: object
+                additionalProperties: true
 
     DraftCampaign:
       type: object
@@ -4196,9 +4504,9 @@ components:
           type: string
           minLength: 1
           maxLength: 64
-          default: exact_match
+          default: label_match
           description: |
-            Smart-default `exact_match` (only universally-applicable scorer
+            Smart-default `label_match` (only universally-applicable scorer
             for `(query, ground_truth)`). Operator-editable.
         optimization_overrides:
           allOf:
@@ -4261,8 +4569,8 @@ components:
           type: object
           additionalProperties: true
           description: |
-            The campaign's origin prompt — a `PromptTemplate.prompt_field_dict()`
-            shape (the six string fields + optional `few_shot_examples`). Seeded
+            The campaign's origin prompt — an `OptSearchPoint.prompt_field_dict()`
+            shape (the six string fields + optional `shot_ids`). Seeded
             by the check-in node's decomposition, or from an authored dataset's
             prompt on the derived-draft path; operator-editable before commit and
             written verbatim to `prompts/default.json` at mint. `{}` until the
@@ -4436,8 +4744,9 @@ components:
       additionalProperties: false
       required: [tenant_id, session_id, campaign_id, cycle_id]
       description: |
-        What is running for this tenant. All three ids are null together while no
-        session is active — that state is served on a 200, never a 404.
+        This tenant's latest launch — not the set of live runs, which is `run_phase`
+        on every `/cycles` entry. All three ids are null together while nothing has
+        launched — that state is served on a 200, never a 404.
       properties:
         tenant_id:
           type: string
@@ -4447,10 +4756,10 @@ components:
           description: Active session id; null when no session is active.
         campaign_id:
           type: [string, 'null']
-          description: Active campaign id (pinned by the webapp); null when no session is active.
+          description: Campaign of the latest launch; null when no session is active.
         cycle_id:
           type: [string, 'null']
-          description: Active cycle id within the campaign; null when no session is active.
+          description: Cycle of the latest launch; null when no session is active.
 
     MachineHolder:
       type: object
@@ -4670,11 +4979,12 @@ components:
               allOf:
                 - $ref: '#/components/schemas/OptimizationOverrides'
               description: |
-                The campaign-config knobs (`max_rounds` / `mechanisms`). The sent
-                keys are shallow-merged onto the draft's
-                current overrides — send one knob or several; a nested `mechanisms`
-                replaces wholesale. Validated against `OptimizationOverrides`
-                server-side (rejects unknown keys / out-of-range `max_rounds`).
+                The campaign-config knobs (`max_rounds` / `optimizer` / `nodes`). The
+                sent keys are merged onto the draft's current overrides — send one knob
+                or several; `nodes` merges node by node and key by key. Validated against
+                `OptimizationOverrides` and the selected manifest's node knobs
+                server-side (rejects unknown keys, an out-of-range `max_rounds`, a node
+                the manifest does not declare, a knob value its node refuses).
             raw_task_description:
               type: string
               maxLength: 16384
@@ -4739,7 +5049,7 @@ components:
           minimum: 0
           maximum: 1
           description: |
-            Stop once the best measured accuracy reaches this. Omitted, the run
+            Stop once the optimizer's declared pick reaches this accuracy. Omitted, the run
             never halts on accuracy. Must be FINITE — `NaN` satisfies a
             `minimum`/`maximum` pair and then never compares true.
         spend_budget_usd:
@@ -4872,8 +5182,8 @@ components:
         runs_skipped:
           type: integer
           description: |
-            Runs deliberately passed over — an `origin` or `round_parent` label,
-            or a run already carrying a cold payload.
+            Runs deliberately passed over — any label but `panel`, or a run
+            already carrying a cold payload.
         rows_moved: { type: integer, description: Measurement rows whose fields moved. }
         bytes_before: { type: integer }
         bytes_after: { type: integer }

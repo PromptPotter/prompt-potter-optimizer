@@ -1,8 +1,4 @@
-/* L4 dashboard boxes — the outer pp-self loop's extra surfaces (outer verdict,
-   the prompt-ranking readings table, the `ov-*` effect rows `compare.css` also
-   borrows), folded into the Dashboard tab and gated to the outer loop.
-   Theme-aware (reads tokens); leans operator/dense. Not shown to whitelabeled
-   end-users (they never run a self-optimizing campaign). */
+/* L4-only surfaces, gated to the outer loop; `compare.css` also borrows the `ov-*` rows. */
 
 .l4-lede,
 .l4-note,
@@ -17,14 +13,13 @@
 .l4-note strong {
   color: var(--color-text-primary);
 }
-/* A comparability or confound flag: the reading that decides whether the numbers above may be
-   compared at all, so it must not skim like prose. */
+/* A comparability or confound flag decides whether the numbers above compare at all, so it
+   must not skim like prose. */
 .l4-warn,
 .l4-warn strong {
   color: var(--color-danger);
 }
 
-/* The variance strip — four served SDs read side by side. */
 .l4-readings {
   display: flex;
   flex-wrap: wrap;
@@ -62,7 +57,6 @@
   background: var(--color-background-tint-strong);
 }
 
-/* ── Table ──────────────────────────────────────────────────── */
 .l4-table-wrap {
   overflow-x: auto; /* wide table scrolls in its own box; page never scrolls x */
 }
@@ -130,7 +124,6 @@
   white-space: nowrap;
 }
 
-/* ── Outer verdict forest plot ──────────────────────────────── */
 .ov-forest {
   display: flex;
   flex-direction: column;

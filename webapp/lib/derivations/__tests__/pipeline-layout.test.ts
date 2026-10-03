@@ -7,16 +7,16 @@ const node = (
   tier = 0,
   rank = 0,
   kind = "llm",
-): PipelineViewNode => ({ id, label: id, kind, tier, rank });
+): PipelineViewNode => ({ id, label: id, description: "", kind, tier, rank });
 
-const edge = (from: string, to: string, kind = "forward"): PipelineViewEdge => ({
-  from,
-  to,
-  kind,
-});
+const edge = (
+  from: string,
+  to: string,
+  kind: PipelineViewEdge["kind"] = "forward",
+): PipelineViewEdge => ({ from, to, kind });
 
 // The optimizer's shape: a three-step round that repeats, a check-in that runs once ahead
-// of it, and two escalations reached only by leaving the round.
+// of it, and two alternatives reached only by leaving the round.
 const OPT_NODES = [
   node("checkin", 0, 0),
   node("l1_generate", 0, 1),
@@ -30,9 +30,9 @@ const OPT_EDGES = [
   edge("l1_generate", "l1_score"),
   edge("l1_score", "l1_critique"),
   edge("l1_critique", "l1_generate", "loop"),
-  edge("l1_critique", "l2_context", "escalate"),
+  edge("l1_critique", "l2_context", "alternative"),
   edge("l2_context", "l1_generate", "directive"),
-  edge("l1_critique", "l3_plan", "escalate"),
+  edge("l1_critique", "l3_plan", "alternative"),
   edge("l3_plan", "l2_context", "directive"),
 ];
 
@@ -59,7 +59,7 @@ describe("cycleOf", () => {
 });
 
 describe("flowOrder", () => {
-  it("runs preamble, then the round, then each escalation by depth", () => {
+  it("runs preamble, then the round, then each alternative by depth", () => {
     const ids = flowOrder(OPT_NODES, cycleOf(OPT_NODES, OPT_EDGES)).map((n) => n.id);
     expect(ids).toEqual([
       "checkin",

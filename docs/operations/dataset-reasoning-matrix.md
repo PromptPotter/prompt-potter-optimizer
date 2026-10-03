@@ -4,18 +4,21 @@ Single canonical view of the model + reasoning_effort + max_tokens defaults ship
 
 | Dataset | model (default) | `reasoning_effort` | `max_tokens` | Notes |
 |---|---|---|---|---|
-| `aime_2025` | `openai/gpt-oss-20b:nitro` | `low` | absent | Competition math. Chosen on price ($0.03/$0.14) with `:nitro` routing to the highest-throughput provider at no cost premium. |
+| `aime_2025` | `openai/gpt-oss-20b:nitro` | model floor | absent | Competition math. Chosen on price ($0.03/$0.14) with `:nitro` routing to the highest-throughput provider at no cost premium. |
 | `gsm8k` | `openai/gpt-oss-120b` | `medium` | absent | Grade-school math word problems. Medium reasoning is enough. |
 | `bbeh` | `mistralai/mistral-small-3.2-24b-instruct` (openrouter) | `low` | absent | "Big-Bench Extra Hard" puzzles. `low` is intentional — the rationale in `task_description.md` is written against Groq's `gpt-oss-20b` output ceiling, which is where the dataset's screening numbers were taken; `available_models` now admits this model only. |
-| `justlogic-d234` | `openai/gpt-oss-20b:nitro` | `low` | absent | JustLogic (Chen 2025), 3-class deductive reasoning. iid random mix of depths 2, 3, 4 (200/depth from HF `train`, seed=42, interleaved). Each depth cut is a separate dataset name sharing no cache key with another — never compare across cuts (`datasets/CLAUDE.md` § L4). |
+| `justlogic-d234` | `openai/gpt-oss-20b:nitro` | model floor | absent | JustLogic (Chen 2025), 3-class deductive reasoning. iid random mix of depths 2, 3, 4 (200/depth from HF `train`, seed=42, interleaved). Each depth cut is a separate dataset name sharing no cache key with another — never compare across cuts (`datasets/CLAUDE.md` § L4). |
 | `lca-termnorm` | `openai/gpt-oss-120b` | n/a | absent (`null`) | Multi-node TermNorm pipeline; not a single-call reasoning dataset. |
 | `lca-bom-termnorm` | `entity_profiling` → `openai/gpt-oss-20b` | `low` (entity_profiling) | absent (`null`) | Tenant material-matching pipeline (`web_search → entity_profiling → token_matching`, no `llm_ranking`). `entity_profiling` emits **native** `json_schema` and pins `reasoning_effort: low` — the cap is load-bearing, see § The Groq output ceiling. Multi-node, so the single-call columns describe the profiling node only. Tenant config on disk, gitignored. |
-| `spreadsheetbench-s10` | `qwen/qwen3.7-flash:nitro` (agent) | unset | absent | Harbor agent episode: the prompt is an injected `SKILL.md`. The agent model is chosen under § The agent model on a Harbor dataset. |
-| `sealqa-longseal-12` | `qwen/qwen3.7-flash:nitro` (agent) | unset | absent | Harbor agent episode, `max_turns: 4`, graded by a `gpt-oss-120b` judge. Same selection section. |
+| `spreadsheetbench-s10` | `qwen/qwen3.7-flash:nitro` (agent) | unset | `4096` (a spend limit) | Harbor agent episode: the prompt is an injected `SKILL.md`. The agent model is chosen under § The agent model on a Harbor dataset. |
+| `spreadsheetbench-s20` | `qwen/qwen3.7-flash` (agent, `route_order: [alibaba]`) | `none` | `4096` (a spend limit) | s10's episode on twenty tasks, the search panel; origin on all twenty, fifteen per candidate per round. Pinned to the configuration the Qwen campaign on s10 ran its origin with, so their shared cells replay. |
+| `sealqa-longseal-12` | `qwen/qwen3.7-flash:nitro` (agent) | unset | `4096` (a spend limit) | Harbor agent episode, `max_turns: 4`, graded by a `gpt-oss-120b` judge. Same selection section. |
 
-`max_tokens` is **never** set as a numeric default in any dataset's `pipeline.yaml` node config — the provider ceiling applies. Held by convention, not by a test, so check the overlay rather than assuming.
+`max_tokens` is **never** set as a numeric default in any dataset's `pipeline.yaml` node config — the provider ceiling applies. Held by convention, not by a test, so check the overlay rather than assuming. **A Harbor agent node is the exception:** there `max_tokens`, `max_input_tokens` and `max_turns` are the limits we send the agent, and the only thing its cell's spend is bounded by — leave one out and no cell runs under a spend ceiling (`connectors/harbor.py::_sent_spend_bound`).
 
-**The floor default for a new dataset** is `openai/gpt-oss-20b:nitro @ low` via OpenRouter — cheapest, fastest, and it leaves L1 headroom.
+**The default for a new dataset** is `openai/gpt-oss-20b:nitro` via OpenRouter with no `reasoning_effort` — cheapest, fastest, and it leaves L1 headroom.
+
+**"model floor" is a rung the MODEL decides, never the file.** A declared `reasoning_effort` no layer sets resolves to the lowest rung (`none` < `minimal` < `low` < `medium` < `high`) the running model's capability answer offers — `low` on `openai/gpt-oss-*`, which refuses `none`; `none` on a model that takes it. A model no layer answers for has no floor, and the field is omitted. A rung spelled in the file is an explicit pin (`gsm8k`, `bbeh`) and follows no model a campaign swaps in.
 
 **What a dataset DECLARES is not what the axis SEARCHES.** `PipelineSchema.param_options` replaces these defaults with the model's own answer at run time — widening as often as narrowing — while a CAMPAIGN narrowing intersects instead, so an operator's closing still binds (`promptpotter/infrastructure/CLAUDE.md` § LLM client owns both halves). The columns above are the starting point in the literal sense: they say what the file asks for, never what the endpoint takes. Two consequences a reader of this table has to hold:
 
@@ -34,6 +37,7 @@ Measured 2026-09-08/09 against the live endpoints with `probe-reasoning <model>`
 | `qwen/qwen3.8-flash` | 2853 | 0 | unmeasured | nothing to narrow, so it carries no row |
 | `inclusionai/ling-3.0-flash` | 818 | 0 | 2350 / 2497 / 1486 / 1262 | rungs INDISTINCT; `low` overran a 3000-token cap |
 | `deepseek/deepseek-v4-flash` | ~4k (tail 11.4k) | unmeasured | unmeasured | `min_max_tokens=8000` only |
+| `openai/gpt-6-luna` | ~400 (a 3-candidate JSON task, ~350 output beside it) | unmeasured | unmeasured | `min_max_tokens=8000` only — the peers' floor, which every node the manifests declare clears |
 
 The three flash models carry no `reasoning_effort` in the catalogue and honour `none` regardless, which is why the offered ladder cannot be derived from the parameter list. **An indistinct ladder is not narrowed** — every rung stays searchable and the finding is served as a caveat, so a round stops paying cells to separate two spellings of one call.
 
@@ -161,6 +165,32 @@ Measured 2026-09-16: six rounds, two variants per round, `deepseek/deepseek-v4-f
 - **Cost:** $0.39 billed, of which $0.37 was the agent and $0.03 the optimizer. Priced with cache hits included, it comes to $0.64.
 - **Time:** 2 h 41 min wall clock, of which 2 h 34 min was cell scoring; each round took 26–38 min.
 - **What comes next.** The ten-cell cut is nearly used up: the winner solves eight cells and leaves two to win, so a further campaign needs a larger cut.
+
+### Optimization: the other arms on the same benchmarks
+
+Measured 2026-09-16 to 2026-09-19; the campaigns were retired on 2026-09-24 and their artifacts
+kept locally in `.scratch/retired-campaigns-2026-09-24/` (`digest.md` is one line per cycle).
+
+| Dataset | Agent model | Rounds | Origin → best | Cost | Reading |
+|---|---|---|---|---|---|
+| `sealqa-longseal-12` (20 cells) | `qwen/qwen3.7-flash:nitro` | 4 | 0.075 → 0.50–0.55 (r2–r3) | $0.20 | **The floor moves.** The winner rewrote `task_intent` and `instruction` toward decomposing the question's constraints and verifying each one, aimed at misread temporal ordinals. No lift interval was stamped, so it is a level, not a separable promotion. A second run of the same arm reached 0.45 in two rounds before diverging. |
+| `spreadsheetbench-s10` | `qwen/qwen3.7-flash`, `none` | 7 | 0.70 → no winner | $0.34 | Six rounds of candidates at 0.0–0.7; nothing beat the origin. Headroom alone was not enough. |
+| `spreadsheetbench-s10` | `inception/mercury-2.5` | 3 | 0.70 → 0.70 | $0.24 | Stopped on provider throttling; lift +0.00 (−0.34 to +0.34). |
+| `spreadsheetbench-s20` (20 cells) | `qwen/qwen3.7-flash`, `none` | 3 | 0.65 → no winner | $0.37 | Candidates 0.40–0.53; stopped when the backend became unreachable. |
+
+**`swiss-invoices-eval`** (a tenant upload, not in `datasets/`; 20 invoices, map each to one of 25
+account codes). Seven campaigns, `llm_only`, all starting at 0.05–0.10:
+
+- **The lever is the code list, then the catch-all.** The origin names a few codes; the first
+  winning edit lists all 25 with one-line descriptions, and the next forces an explicit
+  category match before the `6500` catch-all, whose "last resort" wording the winner removes.
+  Service expenses (cleaning, freight, marketing, travel, bank fees) are where `6500` absorbs errors.
+- **`openai/gpt-oss-20b`, `low`:** 0.65–0.70 after one or two rounds for about $0.03, lift +0.40
+  to +0.55 with every interval clear of zero — the best value arm.
+- **`upstage/solar-pro4`, `low`:** 0.75 by round 2, lift +0.40 (+0.12 to +0.68), $0.07.
+- **`openai/gpt-oss-20b`, `high`:** 1.00 at round 9 (`perfect_score`), $0.08 — but the last step's
+  lift is +0.05 (−0.05 to +0.15), so the final climb is not separable.
+- **`inclusionai/ling-3.0-flash`:** 0.40, lift not separable.
 
 ## Per-sample timings understate wall-clock
 

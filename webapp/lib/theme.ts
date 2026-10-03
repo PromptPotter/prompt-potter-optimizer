@@ -1,5 +1,4 @@
-// Theme-aware color resolution for JS-painted things (Chart.js, SVG markers).
-// Canvas/SVG can't resolve var(...); these read off :root at call time.
+// Theme resolution for JS-painted surfaces: a <canvas> cannot resolve var(...), so it reads :root.
 
 import { useSyncExternalStore } from "react";
 import {
@@ -35,16 +34,7 @@ export function ensureChartRegistered(): void {
   registered = true;
 }
 
-// Shared chart-option bases. Every dashboard chart is `responsive` and fills
-// its container; each caller spreads its own `plugins` / `scales` over the
-// base (a shallow spread — axis/legend config stays at the call site, where
-// it visibly diverges chart to chart).
-//
-// `animation: false` is the project-wide default. The dashboard polls
-// dashboard.json every 2 s; a 200 ms tween that interpolates every bar's
-// height on every poll is a constant frame-cost for a metric that already
-// changes legibly without animation. Operators who want a smoother update
-// can override at the call site.
+// `animation: false`: the dashboard polls every 2 s, so a tween would re-animate every bar per poll.
 
 export function lineChartDefaults(
   over?: Partial<ChartOptions<"line">>,
@@ -67,31 +57,24 @@ export function cssRgba(rgbVar: string, alpha: number): string {
   return `rgba(${getCss(rgbVar)},${alpha})`;
 }
 
-// Ink for the Nth arbitrary series — a campaign in Compare, a model in Activity. The palette is
-// `--chart-series-1..8` in tokens.css and cycles past the eighth; every categorical chart reads
-// it through here, because a hardcoded copy beside a canvas is a palette that never flips theme.
+// Every categorical chart reads `--chart-series-1..8` (tokens.css) through here; never a local copy.
 const SERIES_SLOTS = 8;
 
 function seriesToken(index: number): string {
   return `--chart-series-${(index % SERIES_SLOTS) + 1}`;
 }
 
-// RESOLVED, for a `<canvas>` — it has no cascade to read a token off, so the value has to be
-// looked up and the surface re-read on a theme flip (`useThemeVersion`).
+// Resolved, for a `<canvas>` only — re-read it on a theme flip (`useThemeVersion`).
 export function seriesColor(index: number): string {
   return getCss(seriesToken(index));
 }
 
-// The same ink as a `var()` reference — for inline SVG and `style={{}}`, which read the token off
-// the cascade and repaint themselves on a theme flip with no read, no subscription and no
-// re-render. A swatch built from `seriesColor` instead freezes at whatever the theme was when its
-// component last rendered, which is a stale colour beside a chart that repainted.
+// For inline SVG and `style={{}}`, which repaint on a theme flip with no re-render; a swatch
+// built from `seriesColor` freezes at the theme of its last render.
 export function seriesVar(index: number): string {
   return `var(${seriesToken(index)})`;
 }
 
-// Updates Chart.defaults to the current theme's CSS-var colours. Called
-// once on mount and re-called on every theme flip via bumpThemeVersion.
 export function applyChartDefaults(): void {
   ChartJS.defaults.color = getCss("--color-text-secondary");
   ChartJS.defaults.borderColor = getCss("--color-border");
@@ -127,10 +110,6 @@ export function applyTheme(t: Theme): void {
   bumpThemeVersion();
 }
 
-// Subscribable theme-change counter. Bumped after applyTheme flips the
-// data-theme attribute; canvas/SVG consumers that read CSS vars at paint
-// time subscribe via useThemeVersion() and use the counter as a memo dep
-// — no more synthetic themeKey prop carried through the tree.
 let themeVersion = 0;
 const themeListeners = new Set<() => void>();
 

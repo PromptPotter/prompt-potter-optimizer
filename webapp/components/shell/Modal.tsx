@@ -17,10 +17,7 @@ interface Props {
   onClose: () => void;
 }
 
-// Confirm dialog: title + message + a row of action buttons. The canonical
-// confirm surface, built on the Dialog + Button primitives (which carry the
-// focus-trap / ESC / restore a11y). Actions render in order — rightmost is the
-// primary by convention.
+// The canonical confirm dialog. Actions render in order — rightmost is the primary.
 export function Modal({ open, title, message, actions, onClose }: Props) {
   return (
     <Dialog

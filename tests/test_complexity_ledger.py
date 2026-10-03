@@ -34,7 +34,7 @@ LEDGER_BASELINE = {
     # backend shape whose row is graded by a verifier rather than matched against a label.
     # +4: `judges/` — `protocol.py`, `simpleqa.py`, `call.py`, `__init__.py`. The surface it buys
     # is an LLM-as-judge as a measured observation, which is what a dataset whose answer is free
-    # text has no other way to score: `exact_match` on a bold span cannot grade a factoid, and
+    # text has no other way to score: `label_match` on a bold span cannot grade a factoid, and
     # three datasets already record being blocked on it. It is FOUR and not one because a judge is
     # not a connector — the protocol is a public extension point, the built-in rubric is verbatim
     # third-party text that must not sit in the same file as the registry that validates it, and
@@ -103,14 +103,101 @@ LEDGER_BASELINE = {
     # so each call out when it tripped landed past it ($0.1018 on a $0.10 campaign) and a
     # cancelled call billed with no record. It PAYS for itself: the SDK retries, the two caller
     # 429 loops, the deadline re-send and the three caller emits fold into the one send seam.
-    "modules": 357,
+    # +1: `infrastructure/llm/litellm_sends.py` — Harbor's agent sends through litellm, never our
+    # clients, so its spend reached the ledger only as one per-cell total read off the finished
+    # trial; a cancelled cell lost every bill it had paid and was charged its whole bound in their
+    # place ($1.87 of fiction on a campaign the provider had billed $0.235). The meter puts each
+    # send through the same admission and bill as our own, which folds the per-cell settle away.
+    # +3: the CELL read — `domain/cells.py` (the one served shape of candidate × sample),
+    # `infrastructure/store/cell_queries.py` (the three scope walks, which replace the three
+    # per-sample dot series deleted from `archive_queries.py`) and `application/scoring/cells.py`
+    # (one cell assembled into its trace at read time). A cell had three shapes and an opaque `ord`
+    # string encoding its candidate; the browser rebuilt it per surface, four renderings of a row.
+    # +1: `domain/optimizer_state.py` — the `{manifest, payload}` envelope a round carries and
+    # potter's typed payload under it. It is what takes L2/L3 memory and the plan OFF the
+    # individual; neither `opt_search_point.py` (the individual) nor `results.py` (the round) can
+    # host a type both import without re-coupling state to the individual.
+    # +1: `shared/plugin_registry.py` — the one entry-point loader. Connectors and judges each held a
+    # hand copy of it (built-ins, then plugins, no shadowing, a broken plugin fatal) and the two
+    # had already drifted on label format and key rule; optimizer node implementations are the
+    # third group. In `shared/` because no one of the three groups owns the others.
+    # +1: `domain/bench.py` — the bank's partition into search pool, bench set and demo pool, and
+    # the one pure function every seam that draws or hashes the search pool calls. It folds into
+    # no neighbour: `sample.py` is one row, `campaign_config.py` may import no rows at all, and the
+    # identity, the runner and the diagnostics each partitioning by hand is three rules to align.
+    # +1: `application/runner/bench.py` — the bench's pass and the headline it composes. Apart from
+    # `entry.py` because the pass is a unit a later optimizer's bench reuses whole, and apart from
+    # `scoring/` because it is orchestration: it picks rows, a spend bucket and when to grade.
+    # +6: the config split. `application/optimizer_manifest.py` — which manifest a campaign runs and
+    # its overlay, the ONE resolution a run, a draft edit and a served menu share; it folds into no
+    # neighbour because `campaign_config.py` may import nothing and `pipeline_resolve.py` resolves
+    # the TARGET pipeline. `application/optimizers/{__init__,nodes}.py` — the node-member registry
+    # (the loader's third group) and the contract it checks. `optimizers/potter/{__init__,knobs,
+    # members}.py` — potter's knob models, off `OptimizationConfig`, and the members declaring them.
+    # -1: the round walks the manifest. Gone: `l1/execute.py` and `l1/score/{__init__,loop,
+    # candidate,winner,signal_effect}.py`. New: `runner/measurement.py` (the bench's measurement
+    # node), `scoring/candidate_report.py` (the report every arm, parent and origin takes, and the
+    # bench's reading of a walk its own checks stopped), and potter's `race.py` (PoBB as the
+    # measurement drives it), `election.py` (its selector) and `couplings.py` (the hashed prose,
+    # apart so `members.py` can hold behaviour the L4 digest does not read).
+    # +1: `optimizers/potter/state.py` — potter's working state (memory, the stall ladder, earned
+    # blocks), off `Cycle`, which now carries it opaque. Not `members.py`: every potter internal
+    # that reads the state imports its type, and `members.py` imports all of them.
+    # +1: `optimizers/potter/resume.py` — potter's half of resume: its decision kinds' gating and
+    # replayers, its per-round package fingerprints, its critique re-derivation. They sat in the
+    # generic `resume_and_fork/`, which now reaches them through the runtime; `state.py` is the
+    # state object alone, and this half reads the dispatch hub and the critique node.
+    # +2: `optimizers/capo/{__init__,members}.py` — CAPO's members, `few_shot` first. The registry
+    # finds a preset's members by its subpackage, so the first member opens the package.
+    # +2: `optimizers/capo/state.py` — CAPO's working state, the population, apart from `members.py`
+    # for potter's reason; `optimizers/capo/operators.py` — what CAPO's llm nodes send and read
+    # back, the prompt text apart from the nodes that decide when to send it.
+    # +4: `optimizers/levi/{__init__,members,state,operators}.py` — LEVI's preset, split as CAPO's
+    # is and for CAPO's reasons: the registry finds members by subpackage, the working state is
+    # imported apart from them, and `operators.py` is the prompt text its members send.
+    # +1: `optimizers/descriptors.py` — an arm's rows as a behaviour descriptor. The bench's rows,
+    # read for any archive: no optimizer owns what a row reports, and a second archive-keeping
+    # preset (GEPA's per-instance front) reads the same per-cell profile.
+    # +1: `optimizers/paper_templates.py` — the template fill, the call and the `<prompt>` markers
+    # every paper preset shares, out of CAPO's `operators.py` so LEVI stops importing CAPO. It also
+    # holds the one preset source digest, over itself and the preset's whole package.
+    # +4: `optimizers/gepa/{__init__,members,state,operators}.py` — GEPA's preset, split as CAPO's
+    # and LEVI's are and for their reasons; `operators.py` is the reflection's prompt text.
+    # +1: `evidence/head_to_head.py` — the campaigns' bench headlines and the one-instrument guard
+    # over them. It reads the finished cycle's bench files and archive runs, which `read.py`'s
+    # round-0 walk never opens, and folds into `comparison.py` only by giving that pure module I/O.
+    # -1: `application/optimization/__init__.py` — the package is gone, its harness half to
+    # `bench/`, its algorithm to `optimizers/potter/`; `bench/__init__.py` replaced the
+    # `dispatch/llm_call/__init__.py` that went with `call.py` to `bench/llm_call.py`.
+    # +1: `optimizers/fence.py` — the untrusted-content fence potter, GEPA and LEVI wrap dataset
+    # text in. It sat in potter's `bundle.py`, so two peers imported potter; `paper_templates.py`
+    # is the paper presets' alone, and every optimizer's source digest must hash the fence.
+    # +1: `optimizers/potter/records.py` — potter's payload models and decision kinds, out of
+    # `domain/`, which enumerated every optimizer's. Apart from `state.py`, which imports the
+    # dispatch layout that imports `L1Layout`.
+    # +1: `runner/campaign_result.py` — the campaign's result, which only the cycle holding its
+    # line writes, and the readings off it. Not `bench.py`'s: a pass and its reading are that
+    # module's subject, while the result also folds the line's cost off every ledger on it.
+    # +1: `bench/difficulty.py` — the δ ruler as a scoped bench view any selector reads. It takes
+    # three fields, six helpers and four methods off `Cycle`; the A/B replay and the L4 shared
+    # scale anchor through it, and inside `cycle.py` the ruler would read as Cycle state again.
+    # -1: `scoring/formula/round_scorer.py` — a lens compiles to the cell scorer the loop runs, so
+    # no formula reads a round's evaluator map.
+    "modules": 389,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
-    "init_files": 53,
+    # +2: `application/optimizers/__init__.py` (the member registry) and its `potter/`, empty.
+    # -1: `optimization/l1/score/`, its modules gone to the round walk.
+    # +1: `optimizers/capo/__init__.py`, empty, as `potter/`'s is.
+    # +1: `optimizers/levi/__init__.py`, empty, as `capo/`'s is.
+    # +1: `optimizers/gepa/__init__.py`, empty, as `levi/`'s is.
+    # -1: `application/optimization/__init__.py`, the split package's, as `modules` says.
+    "init_files": 56,
     # +1: `judges/__init__.py` — flagged for the same reason `connectors/__init__.py` is, and by
     # the same text test: a registry module has both an `__all__` and imports. Named rather than
     # emptied; the protocol types are deliberately NOT re-exported through it.
-    "reexport_shims": 6,
+    # +1: `application/optimizers/__init__.py`, the third registry module, flagged by the same text.
+    "reexport_shims": 7,
     # +1: `CampaignConfig.judges` — which LLM-as-judge grades this campaign's cells, on which
     # models, and under which TERM. One leaf though it nests twice: `Knob` marks a field as a leaf
     # whatever its shape, and how a campaign grades a cell IS one decision however many steps it
@@ -118,7 +205,7 @@ LEDGER_BASELINE = {
     # one; `Estimand.GATE` because it decides what counts as a correct answer.
     # +1: `CampaignConfig.accuracy_ceiling` — the accuracy a best-reachable prompt would score on
     # this dataset at this model, which `rounds_to_ceiling` counts rounds against. It folds into no
-    # neighbour: `dataset_split` is a fold SIZE and `headline_metric` picks which existing number
+    # neighbour: `dataset_split` partitions the bank and `display_metric` picks which existing number
     # renders, while this one is a claim no code can derive — only the dataset owner holds it, and
     # the clock reported nothing on any benchmark until a field existed to say it. `Scope.POLICY` /
     # `Estimand.DISPLAY`: it moves no gate, no selection and no stop.
@@ -141,13 +228,53 @@ LEDGER_BASELINE = {
     # the L1 / L1+L2 / full ablation needs an arm where L2 cannot fire at all. Every earlier
     # attempt at it was a patience set high enough to outlast the round budget, which is a
     # property of the budget rather than of the arm.
-    "config_leaf_fields": 44,
+    # ±0 across the config split: potter's knobs left `OptimizationConfig` for its manifest's node
+    # members and are counted there (`knobs.py::member_knob_count`), `mechanisms.*` flattened, and
+    # `optimizer_set` became `optimizer` — a named prompt set is now a family a node's overlay picks.
+    # +1: `l1_generate.k_max` — the most shots a variant may carry. The bound is the proposer's, so
+    # it rides that node's knobs; no existing knob says how long a shot list may grow.
+    # +1: `few_shot.k_max` — the same bound on CAPO's algorithm node, which a manifest sets apart
+    # from any proposer's: CAPO's mutation and potter's generator are separate nodes.
+    # +4: CAPO's race at its paper values — `blocks.block_size` / `max_blocks` (b, z_max) and
+    # `paired_t.alpha` / `survivors` (α, μ). Each is a paper hyperparameter a manifest declares;
+    # potter's sampler and eliminator decide per cell on a posterior, so no existing knob holds them.
+    # +2: `capo_crossover.crossovers` (c) and `population.size` (μ) — CAPO's paper values on the
+    # nodes that spend them. `size` is `paired_t.survivors`' number, one YAML anchor in the
+    # manifest, kept apart because the paper's no-racing ablation keeps a population and no race.
+    # +1: `CampaignConfig.task_framing` — the framing ablation. Absent framing on disk is not a
+    # declaration: the first mint decomposes a description, so running unframed ON PURPOSE needs its
+    # own leaf, and one on the campaign reaches every entry point that mints and rides the manifest.
+    # +1: `paired_t.length_penalty` (γ) — CAPO's objective, declared once where the race reads it;
+    # the campaign's `per_cell` formula cannot carry it without changing every arm's bench score.
+    # +1: `OptimizationConfig.lift_reference` — what an arm's lift is read against, the round's
+    # best-so-far or its own parents. The bench's, not a node's: every optimizer's arms carry the
+    # lift, and a paper comparing the two readings needs both runnable under one manifest.
+    # +14: LEVI at its paper values, each on the node that spends it — `proxy_css.size` / the three
+    # CSS weights (K_proxy, r, s, c), `levi_paradigm_shift.interval` / `n_clusters` /
+    # `n_diverse_seeds`, `levi_refine`'s parent temperatures, inspiration count and drop rate and
+    # feedback count, `map_elites.centroids` / `cvt_samples` / `descriptors`. No CAPO or potter
+    # knob holds any: a proxy, an archive and a routing period are mechanisms neither runs.
+    # +2: GEPA's split on the sampler that draws it — `minibatch.size` (b) and `pareto_share`, the
+    # share of the pool held as the Pareto set. No sampler knob draws a fresh subset beside a fixed
+    # one: CAPO's blocks and LEVI's proxy are both one fixed panel.
+    # +1: `bench_each_round` — a bench pass per selecting round costs about a round's own panel,
+    # so the per-round bench series is the operator's spend to opt into; no knob priced it before.
+    # -1: `paired_t.survivors` folds into `population.size` — μ is one number, which the race reads
+    # off the selector; a no-race ablation drops the eliminator and still keeps the population.
+    "config_leaf_fields": 71,
     # +1: `QUEUE_MAX_WAIT_S` — how long a launch may wait in line before it is withdrawn. It is a
     # setting and not a constant because it is the one queue number a HOST has to be able to
     # answer for: on a shared box it decides when someone else's waiting launch is given up on.
     "settings_env": 32,
-    "settings_const": 14,
-    "opt_search_point_fields": 39,
+    # -1: `TASK_CONTEXT_OVERRIDES` — the L1 context slot it keyed is gone; target text has one
+    # carrier, `prompt_fields_updates`.
+    # -1: `POBB_DEFAULT_EPSILON` — a second source for the `pobb` node's ε, which its manifest owns.
+    "settings_const": 12,
+    # -24: `memory` (wounds, l1_layout, l1_overrides, task_context and the wound subtree) and
+    # `plan` left the individual — optimizer state rides `optimizer_state`, framing the campaign.
+    # -2: shots ride as demo-pool ids (`shot_ids`), one leaf where `few_shot_examples` carried
+    # three (`input`, `output`, `explanation`); the pool resolves them at render.
+    "opt_search_point_fields": 13,
     # +1: `theta_caveat` on `ScoredCandidate` and `ScoreboardRow` — the per-ARM half of
     # `ThetaCaveat`, so a floor-pinned arm's θ is disclaimed on the row it invalidates rather
     # than only on the round's scale reading. A served state, not a derived one: the rows a
@@ -191,7 +318,56 @@ LEDGER_BASELINE = {
     # 230 depending only on whether anything in the process had validated a `RoundResult` first,
     # and the gate saw 213 because `test_complexity_ledger` sorts ahead of every file that builds
     # one. The walk rebuilds each model now; nothing was added.
-    "cycle_result_fields": 230,
+    # +1: `ScoredCandidate.run_id` — the archive run a report's rows were filed under, which makes
+    # `(run_id, sample_id)` a cell's address. `sp_hash` names the configuration, not the reading.
+    # -5: the round envelope is optimizer-neutral. Potter's readouts (critique, L1 yield and parse
+    # failure, axis peaks, prompt hashes) moved under `optimizer_state.payload`, counted there once;
+    # the round-level parent floor, the winner id/label and `escalation_signal` (never set: every
+    # escalation target stops the arm or locks the leader) left for `selected_labels`, and each arm
+    # names its own `reference_id`.
+    # +22: `CycleResult.bench` — the headline, a `BenchScore` of two `BenchReading`s and the paired
+    # lift. Folds into no round field: every one of those is read on the rows that chose the
+    # winner, and this is the one reading taken on rows no optimizer node saw.
+    # -3: `ScoredCandidate.outcome` replaces `escalation_aborted`, `elimination_stopped`, `invalid`
+    # and `partial_reason` — one fact, how the walk ended, told four ways, none saying BROKEN.
+    # -2: the individual's shots are demo-pool ids, reached through each round's `opt_sp`.
+    # +14: `CapoRoundState` under `optimizer_state.payload` — the population (the individual's 12
+    # leaves) and its rounds without advance. CAPO's state between rounds, which a resume re-seats
+    # off the round document; potter's payload holds nothing it could ride.
+    # ±0: `axis_memory_peaked` moved from potter's payload to the round — the bench writes it.
+    # +1: `CapoRoundState.length_norm` — the longest initial prompt's length, measured once in
+    # round 1; the initial population is gone by round 2, so no round field can re-derive it.
+    # +11: `SpendRollup.bench`, one `SpendBucket` — the held-out pass's price. `diagnostic` held it
+    # beside `verify`'s re-measures, so a head-to-head could not read what its headline cost.
+    # +22: `LeviRoundState` under `optimizer_state.payload` — the calibration (proxy, centroids and
+    # the running descriptor statistics, 5 leaves), each elite (cell, score, measuring round and the
+    # individual's 13) and its rounds without advance. The archive between rounds, re-seated off
+    # the round document on resume; the statistics fold every arm ever offered, so no round's rows
+    # re-derive them.
+    # +1: `RoundResult.stamps_theta` — the selected optimizer's own declaration
+    # (`Selector.stamps_theta`), mirrored onto the round document so the webapp's per-arm θ column
+    # can be ABSENT for a selector that never fits one (CAPO) rather than reading as a cold ruler.
+    # The terminal already read this off a phase event; the round document had no field for it.
+    # +17: `GepaRoundState` under `optimizer_state.payload` — the Pareto set's keys, the pool (each
+    # member the individual's 13 leaves and its per-cell scores), the parent the next round mutates
+    # and the rounds without advance. The scores come from rows of the round each member was
+    # admitted in, so no one round re-derives the front a resume must re-seat.
+    # +5: `RoundResult.optimizer_facts` — the selected optimizer's own words about the round, one
+    # `OptimizerFact` of 5 leaves. Stamped at the close because the dashboard fold cannot ask the
+    # runtime; it replaced potter's yield/critique fields on the log.md digest, which is no leaf here.
+    # +1: `BenchScore.missing_reason` — why a bench reading is `None`: a pass the gateway gave up
+    # on, or a stop, yields no reading, and the headline serves the stop and its error instead.
+    # -80: `optimizer_state.payload` is a `RoundPayload` each optimizer registers from its own
+    # package, so the bench's result no longer declares potter's, CAPO's, LEVI's and GEPA's.
+    # +1: `ScoredCandidate.elimination_reason` — the eliminator's own words for a stop. The context
+    # beside it is that eliminator's opaque payload, so no surface can word a cut it does not know.
+    # -1: `axis_memory_peaked` rides potter's payload again — only potter's review reads it, and a
+    # neutral round document names no optimizer's index reading.
+    # -2: `BenchReading.stopped` — a pass that stopped short is no reading, so no reading can
+    # carry a stop.
+    # -1: `BenchReading.run_id` (-2, one per reading) is a FACT and moves to the pass, and
+    # `BenchScore.scorer_id` (+1) stamps the reading with the grader it was read under.
+    "cycle_result_fields": 232,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
@@ -203,7 +379,12 @@ LEDGER_BASELINE = {
     # know which fields a nested description dict named; one key per path names its own.
     # -1: `evidence/read.py::_coerce_state(raw: Any)` is GONE with the overlay-keyed edit identity
     # it existed to canonicalise. `sp_hash` is a stamped string, so nothing coerces a nested dict.
-    "any_params": 48,
+    # -1: `L2L3Memory._coerce_task_context(v: Any)` — the framing no longer rides the memory.
+    # -1: `judges/__init__.py::_validate(j: Any)` takes `object` like the connector validator,
+    # the signature `shared/plugin_registry.py::load_registry` asks of every group.
+    # -1: `decompose_prompt_fields(context_input: Any)` is `commit_task_framing(description: str)`:
+    # its dict arm had no caller, so the one decomposition input is a description's text.
+    "any_params": 45,
     # +1: `results.py::is_floor_pinned(rows: Sequence[Mapping[str, Any]])`, the same signature as
     # `measured_cells` and `is_answer_collapsed` beside it — a round row read off disk is a plain
     # mapping, so a narrower annotation here would be a claim the callers cannot honour.
@@ -235,10 +416,24 @@ LEDGER_BASELINE = {
     # it. Its return is typed; only the `Campaign.config` snapshot param counts.
     # −2: `EscalationSignal.to_dict` and `ValidatorOutcome.to_dict` — neither had a caller, and the
     # signal's candidate position they would have serialized was read by nothing either.
-    "domain_any_maps": 90,
+    # +1: `CellSpan.config` — a node's config for one run, prompt excepted: the per-node dict every
+    # node config already is, served as the panel's Details tab.
+    # -2: `TaskDecomposition.merge(overrides)` and `CandidateProposal.prompt_fields_updates` — the
+    # context slot's only writer, and a copy of the delta the child OSP already carries.
+    # -1: `TaskDecomposition.coerce(v: … | dict[str, Any] | None)` — its one caller was the
+    # memory's field validator, and the framing no longer rides the memory.
+    # -1: `layout_json_schema(...) -> dict[str, Any]` — potter's layout left `domain/` for its
+    # dispatch hub; the map it builds is potter's wire schema, not a domain type.
+    # +1: `ArmBudget.determinism` — the determinism clamp a head-to-head declares per arm, as its
+    # JSON dump: the typed clamp is `campaign_config.py`'s, whose `Knob` annotations `domain/` may
+    # not import, and the record needs only equality over it.
+    "domain_any_maps": 88,
     "models_lax": 3,
     "prompt_string_fields": 6,
-    "injections": 32,
+    # +1: `demo_pool` — the value space of the `shot_ids` slot and the one carrier of the parent's
+    # shots, which `rendered_prompt` leaves out. Folds into no catalogue: its rows are fenced
+    # dataset text, and the slot withdraws on this panel's silence alone.
+    "injections": 33,
     # +1: `l1_only_ladder`. The L1 / L1+L2 / full ablation needs an arm where L2 PROVABLY never
     # fires, and a rule is the only place that can be true of: the router is the whole policy, so
     # a gate at the caller would leave the policy saying FIRE_L2 while the loop quietly did not.
@@ -261,12 +456,20 @@ LEDGER_BASELINE = {
     # justification measured false: `_shared`/`reaper` already ride most handlers' own module-scope
     # imports, so `--help` paid their cost either way; hoisting the 24 handlers adds only their
     # verb-specific tail (numpy for `ab`, httpx for `new`).
-    # Of the 10, all are deliberate: `complexity_ledger`'s own 7 (it counts every layer, so it may
+    # Of the 10, all are deliberate: `complexity_ledger`'s own 6 (it counts every layer, so it may
     # import none at module scope), `escalation/state` (1, documented there) and the two walks,
     # which import each member when the table completes. Count cycles with care: an
     # `if TYPE_CHECKING:` import sits in the module body and reads as top-level to an AST walk,
     # which made three "pairs" that were never runtime edges. The files whose cycle is invisible
     # until the build breaks say so at the import.
+    # +1: the node-member registry's walk (`application/optimizers/__init__.py`), the third of the
+    # registry walks above — each optimizer's members import when the table completes.
+    # +1: the preset digest's walk (`paper_templates.py::preset_source_digest`) — every module of a
+    # preset's package, walked as `renderer_modules` is: a hand-kept list left members unhashed.
+    # -1: the ledger reads each optimizer's own rows off `OptimizerRuntime.priced_surface`, one
+    # `optimizers` import where potter's panel table and rule set were two.
+    # -1: the preset digest hashes the preset's `operators` module, what its llm nodes send, and
+    # walks the package no more: members' search code re-keyed every inner cell it touched.
     "deferred_imports": 10,
     # +1: `judges/CLAUDE.md` — the per-layer contract for a new top-level package, indexed from
     # `promptpotter/CLAUDE.md` like every other. It earns a page rather than a section in
@@ -275,7 +478,10 @@ LEDGER_BASELINE = {
     # formula term — and that rule is what stops six re-derivation sites re-billing the archive.
     # +1: `application/evidence/CLAUDE.md` — the evidence rules, apart from `application/CLAUDE.md`
     # so only a reader editing that package pays for them.
-    "claude_md": 9,
+    # +1: `application/bench/CLAUDE.md` — the check-in rule, out of potter's page because
+    # `checkin` is the bench's node: a reader editing potter stops paying for it, and one editing
+    # the bench, who can add a second decomposition node, starts.
+    "claude_md": 10,
     # SIX by charter (`tests/CLAUDE.md` § What each file is for). This row never rises: a test
     # rides an existing file's existing section, or it is not written.
     "test_files": 6,
@@ -360,7 +566,7 @@ LEDGER_BASELINE = {
     # held. One `object` param reached top-level fields only and locked all or none, so a nested
     # field's prose was unreachable and a locked one could not be told apart. (test_integrity § 4)
     # +1: moving one spend ceiling leaves the other at the cap its launch composed. Merged against
-    # the job's reservation instead, the untouched arm would land in `spend_cap.json`, which the
+    # the job's reservation instead, the untouched arm would land in `run_limits.json`, which the
     # gate prefers, and a USD raise would lift the token ceiling to the account's headroom.
     # (test_security)
     # +1: a cell the active formula cannot grade keeps its measurement rather than being banked a
@@ -416,7 +622,98 @@ LEDGER_BASELINE = {
     # +1: a campaign list row naming a model its root does not run — the shared file's or the
     # frozen delta's instead of the root seed's — and the campaign read without `at` skipping that
     # seed; every row renders, and siblings are told apart by the wrong model (test_integrity § 4).
-    "test_functions": 196,
+    # +1: a solved cell the edits keep losing, shown to neither optimizer node — the loop runs,
+    # elects nothing and spends every round on cells no edit cracks (test_integrity § 5).
+    # +1: a backend retry served without the backend's own reason — every surface then reports a
+    # stop whose cause exists in one console, and a run hosted by the API server writes no
+    # terminal mirror at all, so the diagnosis is the operator's to paste (test_integrity § 8).
+    # +1: the sweep that removes what a killed run left reaching a SIBLING's live container — the
+    # machine's cells are one pool, so the wrong liveness test forces an episode mid-flight and
+    # banks it as an infrastructure failure, minutes and its whole bill (test_integrity § 7).
+    # +1: a `new` that reads its campaign back off the shared pointer after another mint rewrote
+    # it runs its own model under that campaign's manifest and cycle (test_integrity § 4).
+    # +1: a resume before round 1 keyed on the round-0 FILE skips the origin gate, so L1 elects
+    # against a partial origin with no refusal anywhere (test_resume).
+    # +1: a second launch on a cycle with an unfinished job — two producers interleave one ledger
+    # and mint C0 twice, each believing it is the only writer (test_integrity § 8).
+    # +1: an origin's `reasoning_effort` spelled as a dataset constant followed no model a campaign
+    # swapped in — a rung that switched hidden reasoning ON cost ~6000 tokens a cell and most of
+    # its cells timed out, every number rendering. The floor follows the model (test_integrity § 4).
+    # +1: four readers disagreed whether "" was an edit, so a blank L1 answer skipped the repair
+    # re-ask and was scored as an arm. Both boundaries now read one
+    # `candidate_delta`, pinned by test_numerics § 9.
+    # -2: adoption carrying the wound ledger and the plan never leaking into the target render —
+    # both are structural now: memory is the cycle's and the plan is not a field of the individual.
+    # +1: a tenant copy of the inner benchmark hashed into the L4 fingerprint by one path and run
+    # by an inner cell through another, so outer rows replay under a config never run
+    # (test_integrity § 1).
+    # +1: deepening a rebased inner cell reopened its retired root, and the outer round scored a
+    # trajectory other than the one banked (test_resume).
+    # +1: a bench or demo row reaching a round's panel or an archive view the optimizer reads
+    # lets it grade its own exam — every number renders, only higher (test_integrity § 3).
+    # +1: a search free to spend the whole ceiling leaves the bench pass refused, so a campaign
+    # ending on its budget reports no headline (test_numerics § 10).
+    # +1: a prompt-length term read off the interpolated prompt charges each cell for its own
+    # query, so arms on different subsets rank by the cells they drew; read without the shots it
+    # exempts what CAPO's term prices. Every number renders (test_numerics § 2).
+    # +1: CAPO's race cutting on `> μ`, on correctness, or inside a block keeps or drops the wrong
+    # arm, and every number still renders (test_numerics § 5).
+    # +1: a verifier-graded miss reaching the generator as nothing leaves it editing blind to which
+    # cells failed, why and at what token bill, while every panel renders (test_integrity § 5).
+    # +1: a CAPO round keeping its population by the wrong rule, racing offspring without it, or
+    # drawing a parent from outside it still elects a winner (test_numerics § 4).
+    # +1: an ablation arm declared unframed that still renders the committed framing measures the
+    # framed prompt, and the ablation reads as no effect (test_integrity § 1).
+    # +1: a first mint that derives its id before committing the decomposition, or bills it on no
+    # run's ledger, names a prompt nobody scores or spends money no meter sees (test_integrity § 7).
+    # +1: a bench pass filed under another bucket, or clocked outside every phase, prices one
+    # optimizer's headline as its search while every total still sums (test_integrity § 7).
+    # +1: a crossover read against its worse parent, or a parent re-measured beyond the child's
+    # cells, still prints a lift and an interval (test_numerics § 7).
+    # +1: a LEVI round walking the whole pool instead of its proxy, routing more than one call per
+    # period to the large model, or keeping an elite by correctness over the campaign's objective
+    # still selects a winner (test_numerics § 4).
+    # +1: a bench that picks its selection by comparing rounds' composites read on different rows
+    # grades the origin in place of the pick the optimizer declared, and serves lift 0 while every
+    # number renders (test_numerics § 4).
+    # +1: a GEPA child admitted on a minibatch tie, or a parent drawn off the best aggregate rather
+    # than in proportion to the cells each survivor leads, still selects a winner (test_numerics § 4).
+    # +1: a head-to-head pairing two optimizers' selections across bench sets another seed drew,
+    # across a backend that moved under one shared origin, or off a headline one arm kept under its
+    # own formula, still prints an interval and a winner (test_numerics § 7).
+    # +2: walks of one configuration in separate processes each buying the cells the others
+    # measured, and a dead claimer's cell held forever, still score every arm (test_integrity § 2).
+    # +1: a terminal `--set optimizer=…` and the browser's pick-then-edit planning two different
+    # check-in configs for one intent, or the switch keeping the old manifest's overlay, starts a
+    # run on knobs nobody chose (test_integrity § 4).
+    # +1: an installed optimizer whose campaign ends without the bench pass leaves the head-to-head
+    # with no headline while every round renders; driven through `scripts/offline_run.py`, the one
+    # end-to-end run of every optimizer that spends nothing (test_numerics § 4).
+    # +1: a GEPA pool member lacking a verdict on a Pareto-set cell — the seat included — is
+    # refused on the record, or its aggregate ranks it on cells it skipped (test_numerics § 4).
+    # -1: the frozen-ceiling and seed-narrowing cases fold into one: `campaign.json` now holds the
+    # whole config, so a resume that reads the dataset file at all runs an optimizer or a ceiling
+    # the campaign never declared, every surface rendering (test_integrity § 4).
+    # +1: a denominator dropping the cells a prompt refused or broke pays it accuracy for failing
+    # exactly where it could not answer, and every rate renders (test_numerics § 2).
+    # +1: a held-out row in the check-in model's preview is the bench read by the one authoring
+    # the origin — every number renders, only higher, and no rerun unreads it (test_security).
+    # +1: a knob edit folded into the call digests forks every resume for a policy change, and one
+    # left out of the treatment pools two knob settings as one arm; both run on (test_integrity § 1).
+    # +1: grades leave the archive. -1 the stamped-archive-row ruler case (no row can carry a
+    # stamp now), +2 its replacements: a banked grade served to a reader under another formula,
+    # and rows banked under one formula read under another unlike a fresh run (test_integrity § 1).
+    # +1: bench passes read under a second formula unlike passes taken fresh under it — a headline
+    # kept from the first, read in its place, is paired as the second's (test_numerics § 4).
+    # +1: a resumed campaign clocked off its last launch with the origin gate counted as work, and
+    # its origin's bench pass re-sent per launch — both priced into a head-to-head (test_resume).
+    # +1: a controlled arm's δ ruler, axis digest or sample fold drawn from another campaign's runs
+    # — every number renders, steered by measurements its rival never had (test_integrity § 3).
+    # +1: a controlled arm's ceiling on the bill, stretched by a sibling's replays, or eaten by its
+    # own bench pass — each arm halts at its number on a different search (test_security).
+    # +1: a resumed arm charged twice for cells its ledger already priced, or its bench pass held
+    # to its spent search ceiling — the selection is never graded (test_integrity § 7).
+    "test_functions": 231,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -497,7 +794,81 @@ LEDGER_BASELINE = {
     # `/pipeline` read is too heavy per row while the frozen `config` is a delta the browser may not
     # merge (I9). A second transport of that resolver's answer, so it folds into no neighbour.
     # (`CycleListEntry.n_rounds` → `rounds_closed` is a rename in the same change and moves nothing.)
-    "served_fields": 600,
+    # +3: `QuotaStatus.spend_unreported_usd` and `CampaignSummary.spend_unreported_usd` (counted
+    # twice through `CampaignDetailResponse`) — what sends that ended with no bill may have cost.
+    # It was folded INTO the spend figure as if billed; served apart, "spent" is the providers'
+    # bills alone, and the ceiling's other input is still on screen rather than hidden in it.
+    # +42: the cell read (`GET /datasets/{name}/cells` + `/cells/{run_id}/{sample_id}`) —
+    # `CellsResponse`, `CellCandidate`, `CellRow`, `Cell`, `CellSpan`, `DatasetItem`'s three
+    # per-sample aggregates and `DashboardCandidate.run_id`, NET of the deleted
+    # `DatasetPreviewResponse` / `MeasurementSeriesResponse` / `SampleSeries` / `MeasurementDot`:
+    # two reads that had to be kept aligned by index become one.
+    # -1: `CellsResponse.split_test` — a declared fold size nothing materialized, served only to
+    # print a footer. The bank's real partition is `bank_partition.json`, per cycle.
+    # +16: `CycleListEntry.bench_score` with `BenchScore` and `BenchReading` — the headline on the
+    # read the sidebar already makes. `best_accuracy` beside it is the optimizer's own reading on
+    # the rows that chose it, so one field cannot carry both without grading a search by itself.
+    # +3: `GET /optimizers/{name}/knobs` (`OptimizerKnobsResponse`, `NodeKnobs`, `KnobRow`, 12) NET
+    # of the deleted mechanism schema (9): one menu for every optimizer's node knobs replaces a
+    # descriptor of two potter toggle groups.
+    # +1: `LineageNode.stamps_theta` — whether the optimizer that elected THIS node's round fits θ,
+    # read off its election record. `/tree` spans campaigns and optimizers, so the viewed cycle's
+    # `LiveDashboardState.stamps_theta` cannot answer for a node; `theta: null` already means "not
+    # fit yet", and a second meaning in that null is what drew CAPO nodes as a cold ruler.
+    # +53: `Evidence.head_to_head` (1), `HeadToHead` (5), `HeadToHeadRow` (9), `SelectionPair` (8),
+    # `BenchSet` (7), `DatasetSplit` (3), and `SpendRollup` (9) with `SpendBucket` (11), which reach
+    # the contract through this read for the first time. The head-to-head is M13's comparison:
+    # each row's price by bucket beside its headline, and the guard naming the field that differs.
+    # -1: `BenchSet.cell_formula` — the resolved text reads `fitness` for a defaulted and a declared
+    # composite that grade a miss differently; `scorer_id`, stamped by the run, names both apart.
+    # +6: `HeadToHeadRow`'s three ratios, `lift_per_incurred_usd` and `concurrent_with`, and
+    # `HeadToHead.ratio_reference` — cost and speed compared across arms by the backend, on
+    # INCURRED spend, with the shared-cache confound named per row; no surface divides.
+    # +7: `GET /optimizers` (`OptimizerRoster` 2, `OptimizerEntry` 3) — the picker's menu, derived
+    # from the runtime registry so a webapp list cannot drift from what `optimizer:` accepts — and
+    # `optimizer` on `CampaignPipelineResponse` and `CampaignRunsWith`: which manifest a course runs,
+    # served once so no surface draws potter's graph, knobs or θ copy for a peer's campaign.
+    # +1: `BenchScore.missing_reason` — an aborted pass served a 0.0 read off its one errored row;
+    # it now yields no reading, and every surface reads the reason instead of composing one.
+    # +1: `PipelineViewNode.description` — the node's own declared explainer, served on the view so
+    # the graph's tooltip is every manifest's and no webapp table keys one by potter's node ids.
+    # +2: `RunStanding` (3) replaces `LineageNode.hearts` / `.lives_cap` (-2, +1 `run_standing`) —
+    # one neutral standing every optimizer fills, carrying the rounds-without-advance count the
+    # tree never served, read off the ledger rather than a projection of it.
+    # +4: `KnobRow.minimum` / `exclusive_minimum` / `maximum` / `exclusive_maximum` — a member's
+    # own bounds, so the knob editor refuses the value the run would refuse instead of sending it;
+    # JSON Schema's four keywords, because an inclusive and an exclusive bound are different answers.
+    # +1: `CampaignPipelineResponse.optimizer_knobs` — the knob values a course's optimizer RUNS,
+    # seed included; the knobs dialog laid `campaign.json`'s overlay over the manifest instead and
+    # showed the manifest's defaults for every knob the dataset file had set.
+    # +1: `OptimizerEntry.origin` — the package that registered an optimizer, so the picker stops
+    # calling every paperless one "PromptPotter's own".
+    # +1: `HeadToHeadRow.bench_reads` — how many individuals were ever graded on a held-out set;
+    # a holdout is spent by reuse, and no other field can say when a fresh split is due.
+    # +1: `BenchScore.scorer_id` and `HeadToHead.scorer_id` NET of `BenchReading.run_id`. A served
+    # headline is a cache of one reading of the passes' facts, so it names the grader it was read
+    # under, and the head-to-head names the ONE grader every arm was read under. The run id is a
+    # fact, and moved to the banked `BenchPass`, which no browser reads.
+    # +2: `CampaignSummary.bench` (and its `CampaignDetailResponse` twin) and `HeadToHeadRow.calls`,
+    # NET of `CycleListEntry.bench_score`. The headline is the CAMPAIGN's, read off `result.json`,
+    # so a line a rebase ended on a fork keeps it; a per-cycle copy served the retired root's none.
+    # `wall_clock_*` became `worked_*`: the line's launches less gate and unworked time.
+    # -1: `LineageNode.evaluators` — the round map a `score:` lens re-scored; a lens now re-grades
+    # the arm's rows per cell (`mask/load.py`), so no browser or fold reads the map off the tree.
+    # +16: the controlled comparison. `CampaignSummary.arm` and its detail twin (2) over `Arm`'s
+    # three fields; `Instrument.origin`, so two origins can no longer share an instrument; on
+    # `HeadToHeadRow`, `arm`, `controlled`, `treatment_digest`, `human_intervened`, `replay_share`
+    # and `budget` over `ArmBudget`'s three; `HeadToHead.head_to_head_id`. Each is a fact the
+    # guard decides on, served so no surface re-derives whether a pair is one quantity.
+    # +2: `HeadToHead.note` split into `verdict_line`, `uncontrolled_note` and `notes`, so a surface
+    # places each part (the reason a row is uncontrolled on that row) without parsing one paragraph.
+    # +1: `LineageNode.changes_description` — what each step of a compared campaign's main line
+    # changed, as the optimizer worded it at mint; the tree is the one read the Compare column holds.
+    # +9: `MeteredSpend` (6) on `CampaignSummary` and its detail twin (2) and `HeadToHeadRow` (1) —
+    # what a spend cap COUNTS, by bucket, beside the bill. A controlled arm's cap meters its search's
+    # incurred USD, so every surface read the bill beside it; picking the meter or the buckets in the
+    # browser is the arithmetic `webapp/CLAUDE.md` forbids, and `SpendRollup` names no meter.
+    "served_fields": 770,
 }
 
 

@@ -10,19 +10,13 @@ import {
   type CyclePath,
 } from "@/lib/ids";
 
-// CyclePath is the single viewed-cycle address (root → leaf hops). Encode/decode
-// is URL glue + the `?descend=` wire param, so lock the round-trip, the malformed
-// guard, and the root/leaf/descend derivations here.
 describe("CyclePath", () => {
   const outer = { campaignId: "justlogic__ab12cd", cycleId: "cycle_9f3a1b" };
   const inner = { campaignId: "justlogic__ff00aa", cycleId: "cycle_1122ab_s3" };
   const depth1: CyclePath = [outer];
   const depth2: CyclePath = [outer, inner];
 
-  // The PROPERTY, not the literal. The separators are generated from
-  // `domain/cycle_paths.py` now, so asserting the encoded string here would re-declare the
-  // grammar in a third place: a deliberate change on the Python side would regenerate
-  // cleanly, pass tsc, and fail this file on a string nobody edited.
+  // The PROPERTY, not the literal: the separators are generated from `domain/cycle_paths.py`.
   it("round-trips a top-level (1-hop) path", () => {
     expect(decodeCyclePath(encodeCyclePath(depth1))).toEqual(depth1);
   });
@@ -54,12 +48,7 @@ describe("CyclePath", () => {
     expect(encodeDescend(depth2)).toBe("justlogic__ff00aa::cycle_1122ab_s3");
   });
 
-  // A sidebar node address is a path plus an optional in-course id, and `ownerOfNodeAddress`
-  // names the view-memory record it files under. Silent when wrong: a null owner makes
-  // `toggle` a no-op and pins the row at its default — the twist renders, the click does
-  // nothing, nothing logs. That is exactly what feeding a suffixed address to
-  // `decodeCyclePath` produced (`|` is not a legal id char, so the whole parse answered
-  // null) and every candidate and origin row in the tree went inert.
+  // A null owner silently makes `toggle` a no-op, so a suffixed address must still resolve.
   describe("node addresses", () => {
     it("owns a course address by its root-hop campaign, at any depth", () => {
       expect(ownerOfNodeAddress(nodeAddress(depth1))).toBe("justlogic__ab12cd");
@@ -76,9 +65,7 @@ describe("CyclePath", () => {
     });
 
     it("owns an origin address by the origin id — it names no campaign", () => {
-      // The tier groups the runs of ONE declaration across campaigns, so there is no path
-      // and no campaign to file it under. `cycle_<hash>` and `{dataset}__{rand6}` cannot
-      // collide, so the two owner shapes share one store safely.
+      // An origin has no campaign; `cycle_<hash>` and `{dataset}__{rand6}` owners cannot collide.
       expect(ownerOfNodeAddress(nodeAddress([], "cycle_47d99f21ef84"))).toBe(
         "cycle_47d99f21ef84",
       );

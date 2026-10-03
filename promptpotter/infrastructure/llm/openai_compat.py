@@ -33,7 +33,7 @@ from promptpotter.infrastructure.llm.spend_book import Billed, CallLabel
 from promptpotter.shared import truncate
 from promptpotter.shared.errors import (
     ErrorCategory,
-    WalletExhaustedError,
+    SendRefusedError,
     is_provider_credit_refusal,
 )
 
@@ -54,7 +54,7 @@ def _strip_titles(node: object) -> object:
     return node
 
 
-def _attempt_usage(response: ChatCompletion) -> TokenAccount:
+def reply_usage(response: ChatCompletion) -> TokenAccount:
     """Usage for ONE round-trip, per-attempt on purpose. ``reasoning`` is the tell — a reasoning model can spend its
     whole budget thinking and emit nothing — but only if read off the attempt that actually failed.
 
@@ -74,7 +74,7 @@ def _attempt_usage(response: ChatCompletion) -> TokenAccount:
     )
 
 
-def _attempt_cost(response: ChatCompletion) -> float | None:
+def reply_cost(response: ChatCompletion) -> float | None:
     """What the provider says this ONE round-trip cost. OpenRouter reports it as an extra on the usage object (the SDK's models
     are ``extra="allow"``); Groq and OpenAI report nothing, and ``None`` sends the reader to the rate table rather than
     quoting a zero it never measured."""
@@ -91,7 +91,7 @@ def _billed_cost(first: float | None, second: float | None) -> float | None:
     return (first or 0.0) + (second or 0.0)
 
 
-def _served_by(response: ChatCompletion) -> str | None:
+def reply_served_by(response: ChatCompletion) -> str | None:
     """The upstream host the gateway routed to. OpenRouter reports it on the response root (the
     SDK's models are ``extra="allow"``); a provider that IS the host reports nothing, and ``None``
     says we do not know rather than naming the gateway a second time."""
@@ -111,7 +111,7 @@ def _failure_diagnostics(response: ChatCompletion, first: TokenAccount) -> dict[
     return {
         "model": getattr(response, "model", None),
         "finish_reason": _finish_reason(response),
-        "usage": _attempt_usage(response) + first,
+        "usage": reply_usage(response) + first,
         "reasoning_chars": len(getattr(message, "reasoning", None) or "" if message else ""),
     }
 
@@ -139,6 +139,13 @@ PROVIDER_DEFAULT_EFFORT = "default"
 """The rung that OMITS the field — ours, and the only one. Every other rung is a value the provider
 defines, ``none`` included, which means reasoning genuinely OFF rather than absent. Declared beside
 the sender because it is a wire fact: stated anywhere else, it goes out as a literal string."""
+
+
+def _validation_summary(err: ValidationError, content: str) -> str:
+    """Which schema rules one attempt broke, and what it emitted — kept on the response so a
+    paid retry's cause is on disk, even when a later rung rescued the call."""
+    broke = "; ".join(f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in err.errors()[:5])
+    return f"{broke} || emitted: {truncate(content, 1500)}"
 
 
 class OpenAICompatibleClient(LLMClientBase):
@@ -286,7 +293,7 @@ class OpenAICompatibleClient(LLMClientBase):
             # Groq json_validate_failed salvage — already typed.
             return result
         response, content, validation_err, parsed = result
-        schema_repair_attempts = 0
+        repair_errors: list[str] = []
         # The failed first attempt still burned tokens; carry them so the returned usage
         # counts BOTH round-trips, as each one's own usage record already did. Zero unless a
         # repair fires below.
@@ -298,8 +305,8 @@ class OpenAICompatibleClient(LLMClientBase):
             # rejected — `finish_reason="length"` here is the difference between "the
             # optimizer prompt outgrew max_tokens" and "the provider degraded", which classify
             # to opposite owners and opposite fixes (`OptimizerPromptParseError.is_empty`).
-            first = _attempt_usage(response)
-            first_cost = _attempt_cost(response)
+            first = reply_usage(response)
+            first_cost = reply_cost(response)
             first_finish_reason = _finish_reason(response)
             schema_name = response_model.__name__ if response_model else "<schema>"
             content_len = len(content.strip())
@@ -371,9 +378,10 @@ class OpenAICompatibleClient(LLMClientBase):
                 ]
             )
             for attempt_no, (retry_kind, retry_params) in enumerate(ladder, start=1):
+                repair_errors.append(_validation_summary(validation_err, content))
                 logger.warning(
                     "%s: %s parse failed (%d errors, %d content chars, finish=%s) on %s — %s. "
-                    "Retrying via %s (rung %d of %d; each is a full call).",
+                    "Retrying via %s (rung %d of %d; each is a full call). Errors: %s",
                     self._provider_name,
                     schema_name,
                     validation_err.error_count(),
@@ -384,13 +392,13 @@ class OpenAICompatibleClient(LLMClientBase):
                     retry_kind,
                     attempt_no,
                     len(ladder),
+                    truncate(repair_errors[-1], 900),
                 )
                 result = await self._one_attempt(
                     client, retry_params, response_model, response_schema, label
                 )
-                schema_repair_attempts = attempt_no
                 if isinstance(result, LLMResponse):
-                    result.schema_repair_attempts = schema_repair_attempts
+                    result.schema_repair_errors = list(repair_errors)
                     # Fold every failed attempt's tokens onto the salvaged response; the account
                     # owns the summing rule, so no field can be forgotten here.
                     result.usage = result.usage + first
@@ -429,10 +437,10 @@ class OpenAICompatibleClient(LLMClientBase):
                     )
                     raise err from validation_err
                 # This rung is spent; carry its account so the next one's billing still sums.
-                first = first + _attempt_usage(response)
-                first_cost = _billed_cost(first_cost, _attempt_cost(response))
+                first = first + reply_usage(response)
+                first_cost = _billed_cost(first_cost, reply_cost(response))
 
-        billed = _attempt_usage(response) + first
+        billed = reply_usage(response) + first
         # ``reasoning_tokens`` is a SUBSET of ``completion_tokens``, not a fourth total — the
         # provider bills the thinking as output. It rides the success path because that is the
         # only path on which the share is worth anything: until now it survived only on
@@ -450,10 +458,10 @@ class OpenAICompatibleClient(LLMClientBase):
             ),
             model=response.model,
             usage=billed,
-            cost_usd=_billed_cost(first_cost, _attempt_cost(response)),
-            served_by=_served_by(response),
+            cost_usd=_billed_cost(first_cost, reply_cost(response)),
+            served_by=reply_served_by(response),
             parsed=parsed,
-            schema_repair_attempts=schema_repair_attempts,
+            schema_repair_errors=repair_errors,
         )
 
     async def _one_attempt(
@@ -484,9 +492,9 @@ class OpenAICompatibleClient(LLMClientBase):
                 return None
             response = reply[1]
             return Billed(
-                _attempt_usage(response),
-                _attempt_cost(response),
-                _served_by(response),
+                reply_usage(response),
+                reply_cost(response),
+                reply_served_by(response),
                 response.model,
             )
 
@@ -534,7 +542,7 @@ class OpenAICompatibleClient(LLMClientBase):
         raise_if_request_too_large(exc, self._provider_name)
         status = getattr(exc, "status_code", None)
         if status in (402, 403) and is_provider_credit_refusal(str(exc)):
-            raise WalletExhaustedError(
+            raise SendRefusedError(
                 f"{self._provider_name} refused the call for lack of credit: {str(exc)[:300]}",
                 category=ErrorCategory.PROVIDER_CREDIT,
             ) from exc
@@ -543,7 +551,7 @@ class OpenAICompatibleClient(LLMClientBase):
             raise ValueError(
                 f"Model '{model_name}' not found on {self._provider_name}. "
                 f"Update the optimizer node `model` in "
-                f"promptpotter/assets/optimizer/pipeline.yaml (or the dataset's pipeline "
+                f"promptpotter/assets/optimizers/potter/pipeline.yaml (or the dataset's pipeline "
                 f"overlay for a backend node)."
             ) from exc
         return try_groq_json_validate_repair(
@@ -551,4 +559,11 @@ class OpenAICompatibleClient(LLMClientBase):
         )
 
 
-__all__ = ["PROVIDER_DEFAULT_EFFORT", "PROVIDER_REQUEST_PARAMS", "OpenAICompatibleClient"]
+__all__ = [
+    "PROVIDER_DEFAULT_EFFORT",
+    "PROVIDER_REQUEST_PARAMS",
+    "OpenAICompatibleClient",
+    "reply_cost",
+    "reply_served_by",
+    "reply_usage",
+]

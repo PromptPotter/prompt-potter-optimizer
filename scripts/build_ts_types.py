@@ -38,6 +38,11 @@ from promptpotter.application.evidence.grid import (
     FactorLevel,
     FactorReading,
 )
+from promptpotter.application.evidence.head_to_head import (
+    HeadToHead,
+    HeadToHeadRow,
+    SelectionPair,
+)
 from promptpotter.application.evidence.metric_catalogue import MetricSpec
 from promptpotter.application.evidence.read import (
     EditSpread,
@@ -52,30 +57,48 @@ from promptpotter.application.evidence.subjects import (
     WinnerChainPoint,
 )
 from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
+from promptpotter.application.optimizer_manifest import (
+    KnobRow,
+    NodeKnobs,
+    OptimizerEntry,
+    OptimizerKnobsResponse,
+    OptimizerRoster,
+)
 from promptpotter.application.pipeline_resolve import (
     CampaignPipelineResponse,
     CampaignRunsWith,
     RunsWithParam,
 )
+from promptpotter.domain.backend import BackpressureReading
+from promptpotter.domain.bench import BenchReading, BenchScore, DatasetSplit
+from promptpotter.domain.campaign import Arm, ArmBudget, Instrument
+from promptpotter.domain.cells import (
+    Cell,
+    CellCandidate,
+    CellRow,
+    CellSpan,
+    CellsResponse,
+    DatasetItem,
+)
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import (
     DashboardCandidate,
     DashboardSample,
+    LiveCandidate,
+    OptimizerLimit,
     RoundSummary,
     RoundSummaryCandidate,
+    RunStanding,
 )
-from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
-from promptpotter.domain.l1_layout import L1Layout
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.opt_search_point import (
     EvidenceGrounding,
-    FewShotExample,
     IndividualLineage,
-    L2L3Memory,
     OptSearchPoint,
-    WoundChannels,
 )
+from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.pipeline_schema import (
+    ManifestNodeOverlay,
     ModelCapability,
     NestedPipelineRef,
     NodeConfigParam,
@@ -90,6 +113,7 @@ from promptpotter.domain.projection_envelope import ProjectionEnvelope
 from promptpotter.domain.results import (
     DegradationHealth,
     DiagnosticRunRecord,
+    OptimizerFact,
     OverlapMember,
     OverlapReading,
     RoundResult,
@@ -98,15 +122,16 @@ from promptpotter.domain.results import (
 )
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
-from promptpotter.domain.spend import SpendBucket, SpendRollup
+from promptpotter.domain.spend import MeteredSpend, SpendBucket, SpendRollup
+from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     BackendWarning,
-    BackfillLogEntry,
+    CatchUpLogEntry,
     CurrentRound,
     DashboardError,
     LiveDashboardState,
     LoopWarning,
-    PobbBlock,
+    RacingBlock,
     RunLimits,
 )
 from promptpotter.infrastructure.store.family_ray_queries import RayItem, RayResponse
@@ -150,9 +175,6 @@ from promptpotter.presentation.api.routers.campaigns.manifests import (
     ConfigKnob,
     ConfigMapResponse,
     ForkPreviewResponse,
-    MechanismGroup,
-    MechanismSchemaResponse,
-    MechanismToggle,
 )
 from promptpotter.presentation.api.routers.campaigns.storage import (
     CampaignStorageResponse,
@@ -165,13 +187,6 @@ from promptpotter.presentation.api.routers.datasets.index import (
     DatasetIndexEntry,
     DatasetIndexResponse,
     DatasetPipelineResponse,
-)
-from promptpotter.presentation.api.routers.datasets.leaderboard import (
-    DatasetItem,
-    DatasetPreviewResponse,
-    MeasurementDot,
-    MeasurementSeriesResponse,
-    SampleSeries,
 )
 from promptpotter.presentation.api.routers.origins import OriginEntry, OriginListResponse
 from promptpotter.presentation.api.routers.verify import DiagnosticRunListResponse
@@ -187,6 +202,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     PanelPrecision,
     OverlapMember,
     OverlapReading,
+    OptimizerFact,
     RoundSummary,
     DiagnosticRunRecord,
     # --- the round document (`rounds/round_NNNN.json` IS `RoundResult.model_dump()`,
@@ -195,32 +211,35 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     RuntimeFailure,
     ScoredCandidate,
     ScoreboardRow,
-    FewShotExample,
     EvidenceGrounding,
     IndividualLineage,
-    WoundChannels,
-    L1Layout,
-    L2L3Memory,
+    OptimizerState,
     OptSearchPoint,
     RoundResult,
     SpendBucket,
     SpendRollup,
+    MeteredSpend,
     # --- dashboard.json IS `LiveDashboardState` (the webapp polls it every 2s). It was
     # hand-declared webapp-side with an index signature that typechecked anything. ---
+    BackpressureReading,
     BackendWarning,
     LoopWarning,
     DashboardError,
+    OptimizerLimit,
     RunLimits,
-    BackfillLogEntry,
-    PobbBlock,
+    RunStanding,
+    CatchUpLogEntry,
+    RacingBlock,
+    LiveCandidate,
     CurrentRound,
     LiveDashboardState,
     # --- datasets router ---
     DatasetItem,
-    DatasetPreviewResponse,
-    MeasurementDot,
-    SampleSeries,
-    MeasurementSeriesResponse,
+    CellCandidate,
+    CellRow,
+    CellsResponse,
+    CellSpan,
+    Cell,
     ModelCapability,
     NodeConfigParam,
     NodeOutputSchema,
@@ -233,6 +252,8 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     # --- active router ---
     ActiveSessionResponse,
     SpawnedBy,  # nested in CycleListEntry — the emitter does not recurse, so register it
+    BenchReading,  # nested in BenchScore, which nests in CampaignSummary
+    BenchScore,
     CycleListEntry,
     CyclesResponse,
     # --- commands middleware ---
@@ -243,6 +264,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     # --- campaigns/manifests router ---
     RunsWithParam,  # nested in CampaignRunsWith — the emitter does not recurse
     CampaignRunsWith,  # nested in CampaignSummary
+    Arm,  # nested in CampaignSummary and HeadToHeadRow
     CampaignSummary,
     CampaignListResponse,
     # What ONE campaign runs at one searchpoint (`frontend-surface-contract.md::I9`).
@@ -269,6 +291,12 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     SubjectReading,
     PairwiseComparison,
     MetricReading,
+    DatasetSplit,  # nested in Instrument
+    Instrument,
+    ArmBudget,  # nested in HeadToHeadRow
+    HeadToHeadRow,
+    SelectionPair,
+    HeadToHead,
     Evidence,
     # --- campaigns/files router ---
     FileEntry,
@@ -319,9 +347,11 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     DatasetStorageResponse,
     # --- campaign manifest detail + the two self-describing schemas the panels render ---
     CampaignDetailResponse,
-    MechanismToggle,
-    MechanismGroup,
-    MechanismSchemaResponse,
+    OptimizerKnobsResponse,
+    NodeKnobs,
+    KnobRow,
+    OptimizerRoster,
+    OptimizerEntry,
     ConfigKnob,
     ConfigEstimandGroup,
     ConfigCoupling,
@@ -330,6 +360,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     # these in `commands.ts` is what lets a wire field go unrepresented and a closed set be
     # re-spelled by hand. ---
     ConfigOverrides,
+    ManifestNodeOverlay,  # nested in ConfigOverrides.nodes — the emitter does not recurse
     NodeSearchNarrowing,  # nested in CycleSeed.optimizer_narrowing — the emitter does not recurse
     CycleSeed,
     OriginGateDecisionPayload,
@@ -390,7 +421,8 @@ def _emit_type(annotation: typing.Any) -> str:
         return f"Record<string, {_emit_type(v_type)}>"
 
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-        return annotation.__name__
+        # A model declaring no field is a base whose registered subclass fills the wire.
+        return annotation.__name__ if annotation.model_fields else "Record<string, unknown>"
 
     return "unknown"
 
@@ -454,6 +486,18 @@ def _emit_enum_union(enum_cls: type[enum.Enum], note: str) -> str:
     """
     members = " | ".join(repr(m.value) for m in enum_cls)
     return f"// {note}\nexport type {enum_cls.__name__} = {members};"
+
+
+def _emit_arm_outcomes_ended_early() -> str:
+    """Emit ``ArmOutcome.ended_early`` as the member list the webapp's stopped-walk badge reads."""
+    from promptpotter.domain.results import ArmOutcome
+
+    members = ", ".join(repr(o.value) for o in ArmOutcome if o.ended_early)
+    return (
+        "// The outcomes whose walk stopped before its panel "
+        "(domain/results.py::ArmOutcome.ended_early).\n"
+        f"export const ARM_OUTCOMES_ENDED_EARLY: readonly ArmOutcome[] = [{members}];"
+    )
 
 
 def _emit_command_kinds() -> str:
@@ -536,19 +580,14 @@ def _emit_stop_reason_tables() -> str:
 
 
 def _emit_abort_lens_labels() -> str:
-    """Emit ``ABORT_LENS_LABELS`` (domain/results.py) as the browser's abort-lens picklist.
-
-    Hand-authored twice before — ``CandidatesCard::LENS_OPTIONS`` and ``lib/lineage::LENS_LABELS``
-    — three members each against the four the API edge accepts, with two different words for the
-    ε one. Emitting it in ORDER matters: this is a picklist, and the dict's order is the order the
-    operator reads.
-    """
-    from promptpotter.domain.results import ABORT_LENS_LABELS
+    """Emit ``ABORT_LENS_LABELS`` (``pobb/checks.py``) as the browser's abort-lens picklist, IN
+    ORDER: the dict's order is the order the operator reads."""
+    from promptpotter.application.optimizers.potter.pobb.checks import ABORT_LENS_LABELS
 
     rows = "\n".join(f"  {variant!r}: {label!r}," for variant, label in ABORT_LENS_LABELS.items())
     return (
         "// Abort-lens variant -> operator label, in picklist order. Mirror of\n"
-        "// domain/results.py::ABORT_LENS_LABELS, whose keys are asserted against the API edge's\n"
+        "// pobb/checks.py::ABORT_LENS_LABELS, whose keys are asserted against the API edge's\n"
         "// own `_ABORT_SUPPRESS` at import. Don't hand-list these.\n"
         "export const ABORT_LENS_LABELS: Record<string, string> = {\n"
         f"{rows}\n"
@@ -556,35 +595,24 @@ def _emit_abort_lens_labels() -> str:
     )
 
 
-def _emit_evaluator_meta() -> str:
-    """Emit the evaluator registry (``application/scoring/evaluators.py``) as a TS const.
-
-    The What-If panel hand-copied it. The copy listed 13 of the registry's 16
-    evaluators and described two of them wrongly — a name-set the compiler didn't
-    derive, gone stale in silence, exactly as the ``run_phase`` union did.
-    """
-    from promptpotter.application.scoring.evaluators import evaluators_meta
+def _emit_cell_term_meta() -> str:
+    """Emit what a ``per_cell`` formula can name (``evaluators.py::cell_terms_meta``) as a TS const —
+    the scoring-mask editor's vocabulary, so a hand copy cannot go stale beside the compiler's."""
+    from promptpotter.application.scoring.evaluators import cell_terms_meta
 
     rows = "\n".join(
-        f"  {{ name: {m['name']!r}, scope: {m['scope']!r}, direction: {m['direction']!r},"
-        # Through ``str`` first: a StrEnum member's ``repr`` is ``<NodeType.RANKER: 'ranker'>``,
-        # which emits as TS the compiler cannot parse. Every other emitter here renders ``.value``.
-        f" node_type: {repr(str(m['node_type'])) if m['node_type'] else 'null'},"
-        f" from_rows: {'true' if m['from_rows'] else 'false'},"
+        f"  {{ name: {m['name']!r}, direction: {m['direction']!r},"
         f" description: {m['description']!r} }},"
-        for m in evaluators_meta()
+        for m in cell_terms_meta()
     )
     return (
-        "export interface EvaluatorMeta {\n"
+        "export interface CellTermMeta {\n"
         "  name: string;\n"
-        '  scope: "per_round" | "per_sample";\n'
         '  direction: "high" | "low";\n'
-        "  node_type: string | null;\n"
-        "  from_rows: boolean;\n"
         "  description: string;\n"
         "}\n\n"
-        "// The evaluator registry, mirrored from application/scoring/evaluators.py.\n"
-        "export const EVALUATOR_META: EvaluatorMeta[] = [\n"
+        "// What a per_cell formula can name, mirrored from application/scoring/evaluators.py.\n"
+        "export const CELL_TERM_META: CellTermMeta[] = [\n"
         f"{rows}\n"
         "];"
     )
@@ -708,8 +736,15 @@ _HEADER = """\
 
 def main() -> int:
     from promptpotter.domain.phases import DashboardState, RunPhase
+    from promptpotter.domain.results import ArmOutcome
 
     blocks = [_emit_interface(model) for model in EXPORTED_MODELS]
+    blocks.append(
+        _emit_enum_union(
+            ArmOutcome, "How an arm's measurement ended (domain/results.py::ArmOutcome)."
+        )
+    )
+    blocks.append(_emit_arm_outcomes_ended_early())
     blocks.append(
         _emit_enum_union(RunPhase, "The coarse run-state axis (domain/phases.py::RunPhase).")
     )
@@ -724,7 +759,7 @@ def main() -> int:
     blocks.append(_emit_non_activity_kinds())
     blocks.append(_emit_stop_reason_tables())
     blocks.append(_emit_abort_lens_labels())
-    blocks.append(_emit_evaluator_meta())
+    blocks.append(_emit_cell_term_meta())
     blocks.append(_emit_run_freshness())
     blocks.append(_emit_cycle_path_grammar())
     blocks.append(_emit_prompt_string_fields())

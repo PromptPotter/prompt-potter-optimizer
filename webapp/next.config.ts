@@ -1,52 +1,27 @@
 import path from "node:path";
 import type { NextConfig } from "next";
 
-// `next build` has two audiences: the operator's local rebuild→reload preview
-// loop (bare `npm run build`) and the shipped artifact (CI + the deploy box,
-// `npm run build:deploy`, which sets DEPLOY_BUILD=1). Only the deploy artifact
-// needs the React Compiler pass + full-bundle source maps; folding them into
-// every build is what turned the ~5s preview build into ~20s.
+// DEPLOY_BUILD=1 (`npm run build:deploy`, the gate) alone pays for the React Compiler and source
+// maps; a bare `npm run build` is the fast preview loop.
 const deployBuild = process.env.DEPLOY_BUILD === "1";
-// `scripts/gate.py` exports its per-check slice of the machine. Turbopack otherwise
-// claims every core while three other checks run beside it, and that contention —
-// not the compiler — is what the build's gate timing mostly measures. Unset for the
-// operator's own build, which owns the box and keeps every core.
+// `scripts/gate.py` exports its per-check CPU slice; unset, Turbopack claims every core.
 const gateJobs = Number(process.env.GATE_JOBS) || 0;
 
 const nextConfig: NextConfig = {
   output: "export",
-  // Type-checking is owned by a dedicated CI gate (`npx tsc --noEmit`; see
-  // webapp/CLAUDE.md § Testing posture). `next build`'s own pass only duplicates
-  // it — and doesn't even hard-fail — so re-running it in the build is redundant
-  // work at the wrong layer. Authority lives upstream; the build just compiles.
-  // (This is the ~8s "Finished TypeScript".) ESLint isn't configured here at all
-  // — Next 16 dropped build-time linting; `npm run lint` is its sole gate.
+  // Type-checking is its own gate (`npx tsc --noEmit`); `next build`'s pass does not hard-fail.
   typescript: { ignoreBuildErrors: true },
-  // Auto-memoize components + hooks. Lets us drop the manual React.memo /
-  // useMemo / useCallback wrappers in a follow-up audit; the FitnessChart /
-  // TrendChart / TopStrip / candidates-card render-cost guards still hold. Changes
-  // runtime behaviour, so it's validated on the shipped artifact only.
+  // Deploy-only, yet it changes runtime behaviour — so only the shipped build exercises it.
   reactCompiler: deployBuild,
-  // Emit .map files alongside minified .js in the static export so a live
-  // DevTools session on a deployed dashboard resolves React errors to
-  // component + line. Without this, production stacks read like a bare
-  // "Minified React error" code with no actionable frame. Deploy-only.
   productionBrowserSourceMaps: deployBuild,
-  // Served at the domain root by FastAPI's StaticFiles mount in production —
-  // the app owns `/`, the API is the carved-out `/api/v1` namespace. No
-  // basePath: asset URLs emit at /_next/... (the claude.ai serving shape).
-  // Trailing slashes match StaticFiles(html=True) behavior — /files/
-  // resolves to <dir>/files/index.html.
+  // Matches FastAPI's StaticFiles(html=True): /files/ resolves to files/index.html.
   trailingSlash: true,
   images: { unoptimized: true },
-  // Pin the workspace root so a stray ~/package-lock.json doesn't confuse
-  // Turbopack's workspace inference.
+  // Pinned so a stray ~/package-lock.json cannot move Turbopack's inferred workspace root.
   turbopack: { root: path.resolve(__dirname) },
   ...(gateJobs ? { experimental: { cpus: gateJobs } } : {}),
   async rewrites() {
-    // Dev-mode only — `next build` with `output: "export"` strips rewrites.
-    // In production we serve at the root on the same FastAPI origin as /api,
-    // so no proxy is needed.
+    // Dev-mode only: `output: "export"` strips rewrites, and production shares the API's origin.
     return [
       { source: "/api/:path*", destination: "http://127.0.0.1:8001/api/:path*" },
     ];

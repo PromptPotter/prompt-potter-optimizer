@@ -18,7 +18,8 @@ from promptpotter.domain.ruler import (
     anchor_id_of,
     ruler_entry,
 )
-from promptpotter.shared.errors import RulerCoverageError, is_error_result
+from promptpotter.domain.scoring import is_graded
+from promptpotter.shared.errors import RulerCoverageError
 
 if TYPE_CHECKING:
     from promptpotter.domain.results import RoundResult
@@ -78,8 +79,7 @@ def graded_response(result: Mapping[str, Any]) -> float:
 
     A row with no ``objective`` RAISES rather than defaulting — absence means the row never went
     through ``rescore_results``, and a default reads that as a cell the arm got WRONG, which is
-    what fits a ruler on an all-zeros matrix. Archive rows are graded by the READING campaign's
-    scorer instead (``hard_sample_archive.py::build_archive_observations``)."""
+    what fits a ruler on an all-zeros matrix."""
     if "objective" not in result:
         raise KeyError(
             "graded_response: row carries no 'objective'. Only rows stamped by "
@@ -732,14 +732,13 @@ def graduate_ruler_model(
 def observations_from_results(
     results_by_id: Mapping[str, Sequence[Mapping[str, Any]]],
 ) -> list[Observation]:
-    """The ONE walk from ``{candidate_id: rows}`` to observations, skipping unscored and errored
-    cells. Four inline copies of it existed; two fits that skip different sets disagree about the
-    scale, and nothing anywhere would have said so."""
+    """The ONE walk from ``{candidate_id: rows}`` to observations, over the rows carrying a verdict
+    (``is_graded``): two fits that skip different sets disagree about the scale in silence."""
     return [
         Observation(candidate_id=cid, sample_id=int(sid), response=graded_response(r))
         for cid, results in results_by_id.items()
         for r in results
-        if (sid := r.get("sample_id")) is not None and not is_error_result(r)
+        if (sid := r.get("sample_id")) is not None and is_graded(r)
     ]
 
 
@@ -821,7 +820,7 @@ def select_round_subset(
 
     Never ``fit_rasch`` here: a fresh re-anchoring per round makes the δ that CHOOSES the samples
     a different scale from the δ that SCORES them. The L1 panel is already forbidden that
-    (``optimization/CLAUDE.md``); selection is bound by the same rule.
+    (``optimizers/potter/CLAUDE.md``); selection is bound by the same rule.
 
     Cold ruler ⇒ the deterministic bank prefix, unchanged: a δ fit needs at least TWO arms or
     selecting on it is a difficulty ratchet, and freezing the subset is what lets the ruler warm.

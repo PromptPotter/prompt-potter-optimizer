@@ -1,5 +1,3 @@
-// The account panes' shared layout: a titled section, a designed empty state that names what is
-// missing and what to do about it, and the one failure note. A pane is a stack of these.
 
 import type { ReactNode } from "react";
 import type { FailureKind } from "@/lib/api";

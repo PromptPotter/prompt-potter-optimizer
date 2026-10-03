@@ -9,7 +9,6 @@ from pydantic import Field
 
 from promptpotter.application.campaign_config import (
     Estimand,
-    MechanismConfig,
     estimand_doc,
     knob_label,
 )
@@ -17,8 +16,8 @@ from promptpotter.application.datasets.draft_campaign import load_checkin_draft
 from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
 from promptpotter.application.jobs.launcher.draft_build import draft_wire
 from promptpotter.application.knobs import (
-    COUPLINGS,
     check_couplings,
+    declared_couplings,
     resolve_knob_states,
 )
 from promptpotter.application.pipeline_resolve import (
@@ -28,11 +27,14 @@ from promptpotter.application.pipeline_resolve import (
     resolve_pipeline_for_campaign,
     resolve_root_config,
 )
-from promptpotter.domain.campaign import Campaign
+from promptpotter.application.runner.campaign_result import read_campaign_bench, read_line_spend
+from promptpotter.domain.bench import BenchScore
+from promptpotter.domain.campaign import Arm, Campaign, ceiling_meter
 from promptpotter.domain.pipeline_overlay import (
     permitted_models_for_campaign,
     steers_disallowed_model,
 )
+from promptpotter.domain.spend import MeteredSpend
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.account_spend import campaign_spend
 from promptpotter.infrastructure.store.stores import Stores, descend_store
@@ -66,10 +68,9 @@ class CampaignSummary(StrictModel):
         description=(
             "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN "
             "on the manifest at mint. The webapp's ONE test for a self-optimizing (L4) campaign — "
-            "it renders the 'inner loops' disclosure and the pp-self panel variants on it. It no "
-            "longer goes stale when the dataset is re-pointed, and no longer empties when the "
-            "dataset dir is deleted: a campaign outlives its dataset dir, and what it RAN is a "
-            "fact about the campaign. Empty only on a manifest `restamp` has not reached."
+            "it renders the 'inner loops' disclosure and the pp-self panel variants on it. "
+            "Re-pointing or deleting the dataset dir never changes it: a campaign outlives its "
+            "dataset dir, and what it RAN is a fact about the campaign."
         ),
     )
     owner_user_id: str = Field(
@@ -100,12 +101,43 @@ class CampaignSummary(StrictModel):
             "means the dollar figure is complete."
         )
     )
+    spend_unreported_usd: float = Field(
+        description=(
+            "The most that this campaign's sends which ended with no bill may have cost, at the "
+            "bounds they were admitted on — unknown, never spent. Its share of "
+            "`QuotaStatus.spend_unreported_usd`."
+        )
+    )
+    spend_metered: MeteredSpend = Field(
+        description=(
+            "What the campaign's spend cap counts along its LINE — the root and every cycle a "
+            "rebase handed it to — by bucket: the bill, or the search's incurred USD for a "
+            "controlled arm. The number a surface sets beside a cap, live."
+        )
+    )
+    bench: BenchScore | None = Field(
+        description=(
+            "The headline (`architecture.md` § The bench score is not an optimizer's selection), "
+            "read off the campaign's result (`result.json`) under the formula its line runs — "
+            "whichever cycle rebases handed the line to. `selected` is null until the line grades "
+            "its pick. Null until the line first banks one, and where the split holds nothing out "
+            "it says so in `missing_reason`."
+        )
+    )
     runs_with: CampaignRunsWith | None = Field(
         description=(
             "What the ROOT course runs with — a second transport of the answer "
             "`GET /campaigns/{id}/pipeline` gives at the root, never a second source. Null when "
             "the root pipeline did not resolve. `max_rounds` is the DECLARED rounds cap; 0 means "
             "origin only."
+        )
+    )
+    arm: Arm | None = Field(
+        description=(
+            "The head-to-head this campaign runs as a CONTROLLED arm of (`campaign.json::arm`, "
+            "frozen at mint): it reads no other campaign's measurements, refuses a steer and "
+            "spends its declared budget. Null for an ordinary campaign, which optimizes with "
+            "everything that helps."
         )
     )
 
@@ -138,72 +170,14 @@ def _campaign_summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
         lifecycle_reason=campaign.lifecycle_reason,
         spend_used_usd=round(spent.used_usd, 6),
         spend_unpriced_tokens=spent.unpriced_tokens,
+        spend_unreported_usd=round(spent.unreported_usd, 6),
+        spend_metered=MeteredSpend.of(
+            read_line_spend(stores, campaign), ceiling_meter(campaign.arm)
+        ),
+        bench=read_campaign_bench(stores, campaign),
         runs_with=campaign_runs_with(stores, campaign),
+        arm=campaign.arm,
     )
-
-
-class MechanismToggle(StrictModel):
-    key: str = Field(description="Field key under its group (e.g. 'epsilon_elimination')")
-    label: str = Field(description="Human-readable toggle name")
-    description: str = Field(description="What the mechanism does, on vs off")
-    default: bool = Field(description="Default value (preserves stock loop behavior)")
-
-
-class MechanismGroup(StrictModel):
-    key: str = Field(description="Group key under optimization.mechanisms (e.g. 'elimination')")
-    label: str = Field(description="Human-readable group name")
-    description: str = Field(description="What this group of mechanisms governs")
-    toggles: list[MechanismToggle] = Field(description="Toggles in this group, in declared order")
-
-
-class MechanismSchemaResponse(StrictModel):
-    """Self-describing descriptor for the campaign-config mechanism toggles.
-
-    Derived live from ``MechanismConfig``'s JSON schema, so a new toggle (a bool
-    added to a group model) surfaces here — and in the webapp — with no edit.
-    Pair the active value off the campaign's frozen ``config`` snapshot
-    (``optimization.mechanisms.{group}.{key}``).
-    """
-
-    groups: list[MechanismGroup] = Field(description="Mechanism groups, in declared order")
-
-
-def _ref_name(prop: dict[str, Any]) -> str:
-    """Resolve a property's ``$ref`` def name (Pydantic may wrap it in ``allOf``)."""
-    ref = prop.get("$ref") or prop["allOf"][0]["$ref"]
-    return str(ref).rsplit("/", 1)[-1]
-
-
-@campaigns_router.get("/campaigns/mechanisms-schema", response_model=MechanismSchemaResponse)
-async def get_mechanisms_schema() -> MechanismSchemaResponse:
-    """The mechanism-toggle descriptor — groups, labels, descriptions, defaults.
-
-    Read-only and campaign-independent: the webapp zips this with a campaign's
-    frozen ``config`` to render the active toggle states.
-    """
-    schema = MechanismConfig.model_json_schema()
-    defs = schema["$defs"]
-    groups: list[MechanismGroup] = []
-    for group_key, group_prop in schema["properties"].items():
-        gdef = defs[_ref_name(group_prop)]
-        toggles = [
-            MechanismToggle(
-                key=tk,
-                label=tprop.get("title", tk),
-                description=tprop.get("description", ""),
-                default=bool(tprop.get("default", False)),
-            )
-            for tk, tprop in gdef["properties"].items()
-        ]
-        groups.append(
-            MechanismGroup(
-                key=group_key,
-                label=group_key.replace("_", " ").title(),
-                description=gdef.get("description", ""),
-                toggles=toggles,
-            )
-        )
-    return MechanismSchemaResponse(groups=groups)
 
 
 _LIFECYCLE_FILTERS = ("active", "archived", "deleted", "checkin", "all")
@@ -313,12 +287,12 @@ def get_campaign_pipeline(
     campaign = leaf.campaigns.load_owned(campaign_id, str(leaf.identity.user_id))
     if campaign is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
-    return resolve_pipeline_for_campaign(leaf, campaign, at=spec, workspace=leaf.base_dir)
+    return resolve_pipeline_for_campaign(leaf, campaign, at=spec)
 
 
 class ForkPreviewRequest(StrictModel):
     pipeline_overlay: dict[str, Any] = Field(
-        description="The `nodes.*.config` overlay the fork would carry, as `OperatorForkOverride` sends it"
+        description="The `nodes.*.config` overlay the fork would carry, as its `CycleSeed` sends it"
     )
 
 
@@ -393,7 +367,8 @@ class ConfigKnob(StrictModel):
     label: str = Field(description="Short display name (prefix-stripped)")
     value: Any = Field(description="Effective value in this campaign's frozen config")
     source: str = Field(
-        description="Where the value came from: default | campaign (operator-set) | required | constant"
+        description="Where the value came from: default | campaign (operator-set) | required | "
+        "manifest (an optimizer node's knob, as its manifest declares it)"
     )
 
 
@@ -478,6 +453,6 @@ def get_campaign_config_map(stores: StoresDep, campaign_id: str) -> ConfigMapRes
             severity=c.severity,
             active=c.name in active,
         )
-        for c in COUPLINGS
+        for c in declared_couplings(config)
     ]
     return ConfigMapResponse(groups=groups, couplings=couplings)

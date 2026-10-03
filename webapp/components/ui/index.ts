@@ -1,6 +1,3 @@
-// The `@/components/ui` surface — shared presentational primitives.
-// Hand-roll nothing new outside here; co-located *.module.css + *.test.* stay internal.
-
 export * from "./Badge";
 export * from "./Button";
 export * from "./Card";
@@ -22,3 +19,6 @@ export * from "./Switch";
 export * from "./Term";
 export * from "./Toolbar";
 export * from "./ValueList";
+export * from "./VendorLogo";
+export * from "./DataTable";
+export * from "./SidePanel";

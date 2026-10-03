@@ -13,13 +13,18 @@ const round = (r: number, selection: number[]): RoundSummary =>
     round: r,
     accuracy: 0,
     composite_fitness: 0,
+    total: 0,
     ability: null,
+    best_so_far: null,
+    bench: null,
     improved: null,
     electable_count: null,
     verdict_reason: null,
     separable: null,
+    stamps_theta: true,
     overlap: null,
     panel_precision: null,
+    optimizer_facts: [],
     candidates: [],
     selection,
     health: null,
@@ -55,11 +60,7 @@ describe("orderAtStep / seedFromOrder", () => {
     expect(orderAtStep([9, 4, 7], 7, 3)).toEqual({ computed: [9, 4], current: 7, planned: [] });
   });
 
-  // The regression this replaced: the round's FIRST cell used to be the only one a
-  // one-step `sample_order_timeline` matched, so it seeded from the round's INTENDED
-  // order (including samples elimination never reached) while every other cell seeded
-  // from the MEASURED order. One gesture, two different sample sets. Position 1 must
-  // now derive the same way as any other position.
+  // Position 1 derives from the MEASURED order like every other, never the intended one.
   it("treats the first cell like every other cell", () => {
     expect(orderAtStep([9, 4, 7], 9, 1)).toEqual({ computed: [], current: 9, planned: [4, 7] });
     const first = orderAtStep([9, 4, 7], 9, 1);

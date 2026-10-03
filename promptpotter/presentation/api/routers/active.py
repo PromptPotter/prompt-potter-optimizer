@@ -9,12 +9,15 @@ from typing import Any
 from fastapi import APIRouter, Query
 from pydantic import Field
 
+from promptpotter.application.campaign_config import OptimizationConfig
 from promptpotter.application.jobs.capacity import resolve_run_capacity
-from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-    get_optimizer_schema,
-    optimizer_manifest,
+from promptpotter.application.optimizer_manifest import (
+    OptimizerKnobsResponse,
+    OptimizerRoster,
+    optimizer_knobs,
+    optimizer_roster,
+    resolve_optimizer,
 )
-from promptpotter.application.optimization.dispatch.schemas import L2_NODE_AXES
 from promptpotter.config.settings import settings
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_schema import (
@@ -41,21 +44,25 @@ active_router = APIRouter()
 
 
 class ActiveSessionResponse(StrictModel):
+    """The tenant's latest launch — not the set of live runs, which is `run_phase` on `/cycles`."""
+
     tenant_id: str = Field(
         description="Tenant the pointer belongs to — the caller's own, always known"
     )
     session_id: str | None = Field(description="Active session id; null when no session is active.")
     campaign_id: str | None = Field(
-        description="Active campaign id (pinned by the webapp); null when no session is active."
+        description="Campaign of the latest launch; null when no session is active."
     )
     cycle_id: str | None = Field(
-        description="Active cycle id within the campaign; null when no session is active."
+        description="Cycle of the latest launch; null when no session is active."
     )
 
 
 @active_router.get("/sessions/active", response_model=ActiveSessionResponse, tags=["Sessions"])
 def get_active_session(stores: StoresDep) -> ActiveSessionResponse:
-    """The caller-tenant's active-session pointer, null-valued while nothing runs.
+    """The caller-tenant's active-session pointer: its LATEST launch from any entry point, the
+    terminal's default ``resume`` target and what an unpinned webapp follows. Several runs can be
+    live at once, and each is a ``/cycles`` entry whose ``run_phase`` says so — never this route.
 
     **"No active session" is a STEADY STATE, not a missing resource** — nothing has
     been launched yet, or the workspace was cleared — so it answers 200 with null ids
@@ -134,7 +141,11 @@ class CycleListEntry(StrictModel):
         default=RunPhase.DETACHED,
         description="The single run-state value (RunPhase). Computed once by derive_run_phase from lifecycle + control flags + freshness; every picker dot and badge reads this, none re-derive it. 'checkin' wins first (the campaign hasn't run); 'terminal' pairs with `status` for the reason label.",
     )
-    best_accuracy: float | None = None
+    best_accuracy: float | None = Field(
+        default=None,
+        description="The optimizer's own selection score — what it KEPT, read on the rows that "
+        "chose it. Never the headline; the campaign's `CampaignSummary.bench` is.",
+    )
     origin_accuracy: float | None = Field(
         default=None,
         description="Round 0's accuracy — the origin's measurement, derived from rounds[] (no stored copy). Null until round 0 lands.",
@@ -341,20 +352,27 @@ class OptimizerPipelineResponse(StrictModel):
 @active_router.get(
     "/optimizer-pipeline", tags=["Optimizer"], response_model=OptimizerPipelineResponse
 )
-def get_optimizer_pipeline(stores: StoresDep) -> OptimizerPipelineResponse:
-    """Bundled ``promptpotter/assets/optimizer/pipeline.yaml`` + its generated
-    ``resolved_schemas.json`` sibling — the ``view`` topology plus the per-node typed config
-    surface, so the canvas node-detail renders the optimizer's own knobs (model / provider /
-    reasoning_effort / temperature / …) through the same canonical config element the steer panel
-    uses. Read-only: the install-global ``_optimizer`` pipeline is operator-owned — a hand-edit,
-    never a fork and never a write path from here (``evidence`` names a winner and writes
-    nothing); model/provider are always optimizer-locked."""
+def get_optimizer_pipeline(
+    stores: StoresDep,
+    optimizer: str = Query(
+        default=OptimizationConfig.model_fields["optimizer"].default,
+        description="The registered optimizer whose manifest to read",
+    ),
+) -> OptimizerPipelineResponse:
+    """One optimizer manifest (the ``pipeline.yaml`` its runtime ships) + its generated
+    ``resolved_schemas.json`` sibling — the ``view`` topology plus the per-node
+    typed config surface, so the canvas node-detail renders the optimizer's own knobs through the
+    same canonical config element the steer panel uses. Read-only: the manifest is operator-owned —
+    a hand-edit, never a fork and never a write path from here; a campaign's changes ride its own
+    ``optimization.nodes``. model/provider are always optimizer-locked."""
     # The engine's own parse: a second one here had the browser and the engine disagree on menus.
-    schema = get_optimizer_schema()
-    prompts = optimizer_manifest().get("resolved_prompts") or {}
-    # This is the OPTIMIZER's own manifest, so it is the one route that names L2's axes — and the
-    # reach below must sum the SAME rows it serves, or the glyph and the padlock disagree.
-    rows = schema.node_config_schema(L2_NODE_AXES)
+    selected = resolve_optimizer(optimizer, {})
+    schema = selected.schema
+    prompts = selected.document.get("resolved_prompts") or {}
+    # This is the OPTIMIZER's own manifest, so it is the one route that names the axes it moves on
+    # itself — and the reach below must sum the SAME rows it serves, or the glyph and the padlock
+    # disagree.
+    rows = schema.node_config_schema(selected.runtime.own_axes)
     return OptimizerPipelineResponse(
         view=schema.view,
         node_config_schema=rows,
@@ -365,6 +383,23 @@ def get_optimizer_pipeline(stores: StoresDep) -> OptimizerPipelineResponse:
         model_capabilities=resolve_schema_menu(schema, workspace=Path(stores.base_dir)),
         resolved_prompts={str(k): dict(v) for k, v in prompts.items()},
     )
+
+
+@active_router.get("/optimizers", tags=["Optimizer"], response_model=OptimizerRoster)
+def get_optimizers() -> OptimizerRoster:
+    """The optimizers this install can run — one per registered runtime, each resolved through the
+    manifest a run would read — so a picker offers what ``optimization.optimizer`` accepts."""
+    return optimizer_roster()
+
+
+@active_router.get(
+    "/optimizers/{name}/knobs", tags=["Optimizer"], response_model=OptimizerKnobsResponse
+)
+def get_optimizer_knobs(name: str) -> OptimizerKnobsResponse:
+    """Every knob the manifest's nodes take — type, closed options, bounds, the value the manifest
+    declares — so a settings surface draws one control per knob and writes a campaign's
+    ``optimization.nodes.{node}.config.{key}``. 404 when no such optimizer is registered."""
+    return optimizer_knobs(name)
 
 
 __all__ = [

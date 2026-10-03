@@ -28,7 +28,7 @@ CycleScopedKind = Literal[
     "pause-cycle",
     "set-sample-lookahead",
     "origin-gate-decision",
-    "change-spend-budget",
+    "change-run-limits",
     "start-run",
     "step-cycle",
     "verify-candidate",

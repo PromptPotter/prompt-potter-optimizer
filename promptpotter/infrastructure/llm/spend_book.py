@@ -1,27 +1,42 @@
-"""The spend book — where a paid request is ADMITTED, before it is sent.
+"""The spend book — where a paid send is ADMITTED, before it leaves, and what a run has spent.
 
-A ceiling compared against spend already recorded is a guess about the calls still out: every call
-in flight, every retry, and every call whose record a cancel lost lands past it. The book instead
-HOLDS each send's worst case from admission until its usage record lands, and refuses a send whose
-worst case does not fit beside everything already held — so recorded spend plus every call still
-out never passes the cap, however much runs at once.
+Three facts, one record each, and none is ever written as another:
 
-Four rules, each the shape of an overshoot it replaced:
+- **A bill** (``TokenUsageRecord``) is what a provider REPORTED one response cost, written at the
+  send that incurred it. It is the only thing any surface calls spent.
+- **A hold** (``SpendHoldRecord``) is a send admitted at the most it may cost, written before it
+  leaves. Its bill closes it.
+- **An unreported send** is a hold no bill closed: the request left and nobody learned its price —
+  cancelled, timed out, killed. It writes NOTHING. It binds the ceiling at its bound, like a send
+  still out, and no reader sums it as spent.
+
+Four rules, each the shape of an overshoot or a fiction it replaced:
 
 - **A send is admitted or refused, never queued** (:meth:`SpendBook.hold`). A wait inside a cell
   spends the cell's wall clock, and a halt would come to depend on budget pressure.
-- **The book counts every usage record its cycle ledger carries** — it subscribes to it — whoever
-  wrote the record. One that reached another ledger, or none, it counts itself.
-- **A send that ended without reporting is charged its whole bound** (:func:`admitted`), as an
-  ``unsettled`` record on the ledger: cancelled, timed out, failed after the request left. Whatever
-  sums the ledger, a resumed run included, never under-reads what the provider may have billed.
-- **A send the provider provably never billed is released** — a 429, a connection never made, a
-  request refused before any generation.
+- **The book counts every bill its cycle ledger carries** — it subscribes to it — whoever wrote
+  it. A bill that reached another ledger, or none, it counts itself.
+- **A ceiling reads spent + unreported + held** — so recorded bills plus every send whose bill is
+  still unknown never pass the cap, however much runs at once, and a resumed run starts holding
+  every send its ledger left open (:func:`unreported_on`).
+- **A send the provider provably never billed is released** — closed with a bill of nothing: a
+  429, a connection never made, a request refused before any generation.
+
+A cell whose sends are each admitted where they are made RESERVES the run it DECLARES instead
+(:func:`reserved`): it starts only where that fits, and every send inside draws its hold from the
+reservation rather than from the room left — so the episode it declared cannot be refused halfway
+through. **Not its worst case.** A reservation covering every retry that could ever fire, all at
+once, prices one agent cell at three orders of magnitude over what such cells measure, and a
+ceiling then affords exactly one of them at a time: the run goes serial with every other reading
+saying it should not. What the reservation does not cover is admitted against the ceiling like any
+other send, so the thing that stops a cell mid-way is the money running out, never the estimate
+being wrong.
 """
 
 from __future__ import annotations
 
 import logging
+import ssl
 import sys
 import time
 import uuid
@@ -29,20 +44,22 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import httpx
 
 from promptpotter.domain.run_records import TokenUsageRecord
-from promptpotter.domain.spend import TokenAccount, TokenUsageKind
+from promptpotter.domain.spend import SEARCH_KINDS, CeilingMeter, TokenAccount, TokenUsageKind
 from promptpotter.infrastructure.llm.telemetry import (
     active_cycle_ledger,
+    bill_usd,
     emit_spend_hold,
     emit_token_usage,
+    filed_kind,
 )
 from promptpotter.infrastructure.projections.base import Projection
-from promptpotter.infrastructure.store.read_model import iter_jsonl
-from promptpotter.shared.errors import ErrorCategory, WalletExhaustedError
+from promptpotter.infrastructure.store.read_model import HOLD_TRAIL, iter_jsonl, open_holds
+from promptpotter.shared.errors import ErrorCategory, SendRefusedError
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -56,15 +73,20 @@ __all__ = [
     "CallLabel",
     "SendBound",
     "SpendBook",
+    "Unreported",
     "admitted",
     "bind_spend_book",
     "bound_spend_book",
-    "charge_open_holds",
+    "connection_broke",
+    "filed",
     "may_have_billed",
     "never_sent",
+    "reservation_left",
+    "reserved",
     "reset_spend_book",
     "spending_under",
     "unbounded_spend_book",
+    "unreported_on",
 ]
 
 
@@ -106,6 +128,26 @@ def never_sent(exc: BaseException) -> bool:
     return False
 
 
+def connection_broke(exc: BaseException) -> bool:
+    """Whether a request that left lost its connection before any reply — a reset, a TLS record
+    fault, a protocol break. Never a timeout: there the provider may still be generating."""
+    seen: BaseException | None = exc
+    while seen is not None:
+        if isinstance(seen, httpx.TimeoutException | TimeoutError):
+            return False
+        if isinstance(
+            seen,
+            httpx.ReadError
+            | httpx.WriteError
+            | httpx.RemoteProtocolError
+            | ssl.SSLError
+            | ConnectionError,
+        ):
+            return True
+        seen = seen.__cause__ or seen.__context__
+    return False
+
+
 def may_have_billed(status: int | None, exc: BaseException | None = None) -> bool:
     """Whether a failed send may have cost anything. One refused before generation — any 4xx but a
     timeout — and one that never left did not; a timeout, a 5xx, or a connection lost once the
@@ -125,28 +167,38 @@ def _times(left: float, each: float | None) -> int:
 
 
 class SpendBook(Projection):
-    """One run's spend and what its calls out hold against its ceilings. The caps are re-read on
-    every question, so a ceiling moved mid-run binds the next send."""
+    """One run's bills, its unreported sends, and what its sends out hold against its ceilings.
+    The caps are re-read on every question, so a ceiling moved mid-run binds the next send."""
 
     def __init__(
         self,
         *,
         usd_cap: Callable[[], float | None],
         tokens_cap: Callable[[], int | None],
+        meters: CeilingMeter,
         usd_spent: float = 0.0,
         tokens_spent: int = 0,
     ) -> None:
         self.usd_cap = usd_cap
         self.tokens_cap = tokens_cap
+        self.meters = meters
         self.usd_spent = usd_spent
         self.tokens_spent = tokens_spent
-        # What the calls out hold, by who holds it — a scheduler counts its own cells itself.
+        # Sends that ended with no bill, at the bound each was admitted on — see the module header.
+        self.usd_unreported = 0.0
+        self.tokens_unreported = 0
+        # What the sends out and the cells reserved hold, by who holds it — a scheduler counts its
+        # own cells itself.
         self._held_usd: dict[TokenUsageKind, float] = {}
         self._held_tokens: dict[TokenUsageKind, int] = {}
+        # What the run keeps back for the bench's pass after the search, so the search stops short
+        # of the ceiling by that much and the pass still fits under it.
+        self.set_aside_usd = 0.0
+        self.set_aside_tokens = 0
         self._seen: TokenUsageRecord | None = None
         # The run's own ledger and round, where a run armed this book. A nested run spends under
-        # its ROOT's book — every level of the recursion against one ceiling — and its charges are
-        # carried onto this ledger as they settle (:meth:`mirror`), holds included.
+        # its ROOT's book — every level of the recursion against one ceiling — and its bills are
+        # carried onto this ledger as they land (:meth:`mirror`), holds included.
         self.ledger: CycleEventLog | None = None
         self.round_now: Callable[[], int | None] = lambda: None
 
@@ -154,10 +206,29 @@ class SpendBook(Projection):
         self._seen = record
         self.count(record)
 
+    def binds(self, kind: TokenUsageKind) -> bool:
+        """Whether a send of ``kind`` spends against these ceilings; a bench pass under a
+        ``search_incurred`` book is metered beside them."""
+        return self.meters == "bill" or kind in SEARCH_KINDS
+
     def count(self, record: TokenUsageRecord) -> None:
-        if not record.cached:
-            self.usd_spent += record.cost_usd or 0.0
-            self.tokens_spent += record.input_tokens + record.output_tokens
+        # A replay is priced into the USD arm only where the ceiling is the search's incurred cost.
+        replay_usd = self.meters == "search_incurred"
+        self._spend(
+            record.kind,
+            record.cost_usd if not record.cached or replay_usd else None,
+            0 if record.cached else record.input_tokens + record.output_tokens,
+        )
+
+    def _spend(self, kind: TokenUsageKind, usd: float | None, tokens: int) -> None:
+        if not self.binds(kind):
+            return
+        self.usd_spent += usd or 0.0
+        self.tokens_spent += tokens
+
+    def set_aside(self, usd: float, tokens: int) -> None:
+        self.set_aside_usd = usd
+        self.set_aside_tokens = tokens
 
     def saw(self, record: TokenUsageRecord) -> bool:
         """Whether ``record`` reached this book through its ledger — asked right after the append."""
@@ -168,8 +239,8 @@ class SpendBook(Projection):
         return self.ledger is not None and ledger is not self.ledger
 
     def mirror(self, record: TokenUsageRecord, *, hold_id: str) -> bool:
-        """Carry a nested run's settled call onto this book's ledger — the backend spend of the run
-        that measured with it, in that run's round — and say whether it landed there."""
+        """Carry a nested run's bill onto this book's ledger — the backend spend of the run that
+        measured with it, in that run's round — and say whether it landed there."""
         if self.ledger is None:
             return False
         copy = record.model_copy(
@@ -189,10 +260,14 @@ class SpendBook(Projection):
         return self.saw(copy)
 
     def exhausted(self) -> ErrorCategory | None:
-        """The ceiling already reached, if any."""
-        if (cap := self.usd_cap()) is not None and self.usd_spent >= cap:
+        """The ceiling already reached, if any — by bills, by sends whose bill never came, or by
+        what is set aside."""
+        usd_used = self.usd_spent + self.usd_unreported + self.set_aside_usd
+        if (cap := self.usd_cap()) is not None and usd_used >= cap:
             return ErrorCategory.SPEND_CEILING
-        if (cap_t := self.tokens_cap()) is not None and self.tokens_spent >= cap_t:
+        tokens_used = self.tokens_spent + self.tokens_unreported + self.set_aside_tokens
+        cap_t = self.tokens_cap()
+        if cap_t is not None and tokens_used >= cap_t:
             return ErrorCategory.TOKEN_CEILING
         return None
 
@@ -200,14 +275,14 @@ class SpendBook(Projection):
         self, bound: SendBound, beside: TokenUsageKind | None
     ) -> Iterator[tuple[ErrorCategory, int]]:
         if (cap := self.usd_cap()) is not None:
-            held = sum(v for k, v in self._held_usd.items() if k != beside)
-            yield ErrorCategory.SPEND_CEILING, _times(cap - self.usd_spent - held, bound.usd)
+            held = sum(v for k, v in self._held_usd.items() if k != beside) + self.set_aside_usd
+            left = cap - self.usd_spent - self.usd_unreported - held
+            yield ErrorCategory.SPEND_CEILING, _times(left, bound.usd)
         if (cap_t := self.tokens_cap()) is not None:
             held_t = sum(v for k, v in self._held_tokens.items() if k != beside)
-            yield (
-                ErrorCategory.TOKEN_CEILING,
-                _times(cap_t - self.tokens_spent - held_t, bound.tokens),
-            )
+            left_t = cap_t - self.tokens_spent - self.tokens_unreported - held_t
+            left_t -= self.set_aside_tokens
+            yield ErrorCategory.TOKEN_CEILING, _times(left_t, bound.tokens)
 
     def fits(self, bound: SendBound, *, beside: TokenUsageKind | None = None) -> int:
         """How many more sends of ``bound`` the ceilings admit beside everything already held —
@@ -215,44 +290,78 @@ class SpendBook(Projection):
         its own calls out itself."""
         return min((n for _, n in self._room(bound, beside)), default=sys.maxsize)
 
-    def hold(self, bound: SendBound, kind: TokenUsageKind, *, what: str) -> None:
-        for category, n in self._room(bound, None):
-            if n < 1:
-                raise WalletExhaustedError(self._refusal(category, bound, what), category=category)
+    def hold(
+        self,
+        bound: SendBound,
+        kind: TokenUsageKind,
+        *,
+        what: str,
+        drawn_from: _Reservation | None = None,
+    ) -> None:
+        """Hold ``bound`` — out of the room left, refusing a send that does not fit, or out of
+        ``drawn_from``, the reservation of the cell the send is part of, which already fit. What
+        that reservation cannot cover is refused here like any other send."""
+        if not self.binds(kind):
+            return
+        if drawn_from is None:
+            self.refuse_unless_room(bound, what)
+        else:
+            drawn_from.draw(bound, what)
         self._held_usd[kind] = self._held_usd.get(kind, 0.0) + (bound.usd or 0.0)
         self._held_tokens[kind] = self._held_tokens.get(kind, 0) + (bound.tokens or 0)
+
+    def refuse_unless_room(self, bound: SendBound, what: str) -> None:
+        """Raise unless every ceiling admits ``bound`` beside everything already held. The ONE
+        refusal, so a send out of the room left and a send past its cell's reservation cannot come
+        to disagree about what the ceiling permits."""
+        for category, n in self._room(bound, None):
+            if n < 1:
+                raise SendRefusedError(self._refusal(category, bound, what), category=category)
 
     def _refusal(self, category: ErrorCategory, bound: SendBound, what: str) -> str:
         if category is ErrorCategory.SPEND_CEILING:
             if bound.usd is None:
                 return f"{what}: no rate bounds what it may cost, so it cannot run under a ceiling"
+            unreported = (
+                f", ${self.usd_unreported:.4f} unreported (sends whose bill never came)"
+                if self.usd_unreported
+                else ""
+            )
             return (
                 f"{what} may cost up to ${bound.usd:.4f}, and the ${self.usd_cap():.4f} ceiling "
-                f"holds ${self.usd_spent:.4f} spent and ${sum(self._held_usd.values()):.4f} for "
-                "calls out"
+                f"holds ${self.usd_spent:.4f} spent{unreported}, "
+                f"${sum(self._held_usd.values()):.4f} for calls out and "
+                f"${self.set_aside_usd:.4f} set aside for the bench"
             )
         if bound.tokens is None:
             return f"{what}: nothing caps its reply, so it cannot run under a token ceiling"
         return (
             f"{what} may use up to {bound.tokens:,} tokens, and the {self.tokens_cap():,}-token "
-            f"ceiling holds {self.tokens_spent:,} spent and {sum(self._held_tokens.values()):,} "
-            "for calls out"
+            f"ceiling holds {self.tokens_spent:,} spent, {self.tokens_unreported:,} unreported, "
+            f"{sum(self._held_tokens.values()):,} for calls out and "
+            f"{self.set_aside_tokens:,} set aside for the bench"
         )
 
     def release(self, bound: SendBound, kind: TokenUsageKind) -> None:
+        if not self.binds(kind):
+            return
         self._held_usd[kind] -= bound.usd or 0.0
         self._held_tokens[kind] -= bound.tokens or 0
 
-    def charge(self, bound: SendBound) -> None:
-        """Count a whole bound as spent — the call's usage reached no ledger this book reads."""
-        self.usd_spent += bound.usd or 0.0
-        self.tokens_spent += bound.tokens or 0
+    def unreported(self, bound: SendBound, kind: TokenUsageKind) -> None:
+        """A send out ended with no bill: its hold stops being a send out and stays held as one
+        whose price nobody learned."""
+        if not self.binds(kind):
+            return
+        self.release(bound, kind)
+        self.usd_unreported += bound.usd or 0.0
+        self.tokens_unreported += bound.tokens or 0
 
 
 def unbounded_spend_book() -> SpendBook:
-    """A book for a call path no ceiling binds yet — it refuses nothing and still charges a send
-    that never reported."""
-    return SpendBook(usd_cap=lambda: None, tokens_cap=lambda: None)
+    """A book for a call path no ceiling binds yet — it refuses nothing and still counts every
+    bill and every unreported send."""
+    return SpendBook(usd_cap=lambda: None, tokens_cap=lambda: None, meters="bill")
 
 
 _BOOK: ContextVar[SpendBook | None] = ContextVar("spend_book", default=None)
@@ -280,9 +389,85 @@ def spending_under(book: SpendBook) -> Iterator[SpendBook]:
         _BOOK.reset(token)
 
 
+def filed(label: CallLabel) -> CallLabel:
+    """``label`` under the kind its block files it as (``telemetry.filed_as``) — so a send is
+    admitted in the bucket its bill will land in, and a bench pass is never held as search."""
+    return CallLabel(label.node, filed_kind(label.kind))
+
+
+def _bound_book(what: str) -> SpendBook:
+    book = _BOOK.get()
+    if book is None:
+        raise RuntimeError(
+            f"{what}: no spend book is bound, and a paid call is never sent unadmitted"
+        )
+    return book
+
+
+class _Reservation:
+    """A cell's worst case, held in memory for as long as the cell runs — no ledger record, since
+    the cell is not a send. Each send inside draws its hold from what is left of it."""
+
+    def __init__(self, book: SpendBook, kind: TokenUsageKind, bound: SendBound) -> None:
+        self.book = book
+        self.kind = kind
+        self.usd = bound.usd or 0.0
+        self.tokens = bound.tokens or 0
+
+    def draw(self, bound: SendBound, what: str = "a send") -> None:
+        """Take what the reservation covers; admit the REST against the ceiling like any other
+        send. A cell that outruns its estimate is stopped by the ceiling, never by the estimate —
+        which is what lets a reservation be the episode as DECLARED rather than every retry it
+        could ever need multiplied together."""
+        usd, tokens = min(self.usd, bound.usd or 0.0), min(self.tokens, bound.tokens or 0)
+        short = SendBound(
+            input_tokens=0,
+            output_tokens=(bound.tokens or 0) - tokens,
+            usd=(bound.usd or 0.0) - usd,
+        )
+        if (short.usd or short.tokens) and self.book.binds(self.kind):
+            self.book.refuse_unless_room(short, f"{what}, past its cell's reservation")
+        self.usd -= usd
+        self.tokens -= tokens
+        self.book.release(SendBound(input_tokens=0, output_tokens=tokens, usd=usd), self.kind)
+
+
+_RESERVATION: ContextVar[_Reservation | None] = ContextVar("spend_reservation", default=None)
+
+
+def reservation_left() -> SendBound:
+    """What the open reservation has left, as one send's bound — for a send inside a cell that
+    nothing in this process can see into, whose worst case is therefore the cell's."""
+    reservation = _RESERVATION.get()
+    if reservation is None:
+        raise RuntimeError("no cell reservation is open to bound this send")
+    return SendBound(input_tokens=0, output_tokens=reservation.tokens, usd=reservation.usd)
+
+
+@contextmanager
+def reserved(label: CallLabel, bound: SendBound) -> Iterator[None]:
+    """Reserve what one cell DECLARES it will run, or refuse the cell with
+    :class:`SendRefusedError`. Every send admitted inside the block, in this task or one it starts,
+    draws from the reservation; what is left of it is released when the block ends, however it
+    ends, and what it cannot cover is admitted against the ceiling (:meth:`_Reservation.draw`)."""
+    label = filed(label)
+    book = _bound_book(label.node)
+    book.hold(bound, label.kind, what=label.node)
+    reservation = _Reservation(book, label.kind, bound)
+    token = _RESERVATION.set(reservation)
+    try:
+        yield
+    finally:
+        _RESERVATION.reset(token)
+        book.release(
+            SendBound(input_tokens=0, output_tokens=reservation.tokens, usd=reservation.usd),
+            label.kind,
+        )
+
+
 class Billed(NamedTuple):
-    """What a reply says one billed part of its send used — the usage record that settles it. A
-    call billed in parts (one node of a cell each) names each part's own node and provider."""
+    """What a reply says one billed part of its send used — the bill that closes it. A call billed
+    in parts (one node of a cell each) names each part's own node and provider."""
 
     usage: TokenAccount
     cost_usd: float | None
@@ -293,10 +478,15 @@ class Billed(NamedTuple):
     duration_s: float | None = None
 
 
+# Every hold a send of THIS process has out — so a scan of the ledger never reads one still
+# waiting on its bill as one that ended without it.
+_OUT: set[str] = set()
+
+
 class Admission:
-    """One admitted send, its hold already on the ledger. :meth:`settle` closes it with what the
-    call used; :meth:`release` when the provider provably billed nothing. Left open,
-    :func:`admitted` charges it in full."""
+    """One admitted send, its hold already on the ledger. :meth:`settle` closes it with its bill;
+    :meth:`release` when the provider provably billed nothing. Left open, :func:`admitted` closes
+    it :meth:`unreported`."""
 
     def __init__(
         self,
@@ -315,9 +505,10 @@ class Admission:
         self._started = time.monotonic()
         self._hold_id = uuid.uuid4().hex
         self._foreign = book.foreign(active_cycle_ledger())
-        self._missing = False
         self._unseen: list[TokenUsageRecord] = []
+        self._unlanded: list[tuple[float | None, int]] = []
         self.closed = False
+        _OUT.add(self._hold_id)
         emit_spend_hold(
             hold_id=self._hold_id,
             node=label.node,
@@ -330,7 +521,9 @@ class Admission:
             ledger=book.ledger,
         )
 
-    def _emit(self, part: Billed, *, unsettled: bool = False) -> None:
+    def _emit(self, part: Billed) -> None:
+        model = part.model or self._model
+        provider = part.provider or self._provider
         record = emit_token_usage(
             node=part.node or self._label.node,
             kind=self._label.kind,
@@ -338,16 +531,23 @@ class Admission:
             duration_s=(
                 time.monotonic() - self._started if part.duration_s is None else part.duration_s
             ),
-            model=part.model or self._model,
-            provider=part.provider or self._provider,
+            model=model,
+            provider=provider,
             served_by=part.served_by,
             cost_usd=part.cost_usd,
-            unsettled=unsettled,
             hold_id=self._hold_id,
             mirrored=self._foreign,
         )
         if record is None:
-            self._missing = True
+            # The bill is in hand; only its line is missing. It is counted here, at its price —
+            # and said, since money on no ledger is money no account or campaign ever shows.
+            usd = bill_usd(part.usage, model=model, provider=provider, cost_usd=part.cost_usd)
+            self._unlanded.append((usd, part.usage.input + part.usage.output))
+            logger.warning(
+                "%s: a bill of $%s reached no ledger; only this run's book counts it",
+                part.node or self._label.node,
+                "?" if usd is None else f"{usd:.6f}",
+            )
         elif self._foreign:
             if not self._book.mirror(record, hold_id=self._hold_id):
                 self._unseen.append(record)
@@ -356,80 +556,78 @@ class Admission:
 
     def settle(self, *parts: Billed) -> None:
         """Close with what each billed part of the call used; a call that reports no part billed
-        nothing, and says so on the record that settles its hold."""
+        nothing, and says so on the bill that closes its hold."""
         for part in parts or (Billed(TokenAccount(), 0.0),):
             self._emit(part)
-        self._close()
+        self._finish()
+        self._book.release(self._bound, self._label.kind)
+        for record in self._unseen:
+            self._book.count(record)
+        for usd, tokens in self._unlanded:
+            self._book._spend(self._label.kind, usd, tokens)
 
     def release(self) -> None:
-        # Settled at nothing, so a resumed run does not charge the hold as one a kill left open.
-        self._emit(Billed(TokenAccount(), 0.0))
+        # A bill of nothing, so no later scan reads the hold as a send that ended unreported.
+        self.settle()
+
+    def unreported(self) -> None:
+        """Close with no bill — the send left and nothing reported what it cost. Nothing is
+        written: its hold stays open on the ledger, and the book keeps holding its bound."""
+        self._finish()
+        self._book.unreported(self._bound, self._label.kind)
+
+    def _finish(self) -> None:
         self.closed = True
-        self._book.release(self._bound, self._label.kind)
-
-    def charge_in_full(self) -> None:
-        bound = self._bound
-        usage = TokenAccount(input=bound.input_tokens, output=bound.output_tokens or 0)
-        self._emit(Billed(usage, bound.usd), unsettled=True)
-        self._close()
-
-    def _close(self) -> None:
-        self.closed = True
-        self._book.release(self._bound, self._label.kind)
-        if self._missing:
-            # A part reached no ledger, so its cost is known nowhere: the whole bound is charged.
-            self._book.charge(self._bound)
-        else:
-            for record in self._unseen:
-                self._book.count(record)
-
-
-def charge_open_holds(ledger: CycleEventLog) -> int:
-    """Charge, in full, every hold this ledger opened and nothing settled — a run killed with its
-    calls out — and say how many. Its own lines only: an inherited prefix is its owner's."""
-    open_holds: dict[str, dict[str, Any]] = {}
-    for rec in iter_jsonl(ledger.path, record_types=_HOLD_TRAIL):
-        if rec.get("record_type") == "spend_hold":
-            open_holds[str(rec.get("hold_id"))] = rec
-        elif (hold_id := rec.get("hold_id")) is not None:
-            open_holds.pop(str(hold_id), None)
-    for hold_id, rec in open_holds.items():
-        ledger.append(
-            TokenUsageRecord(
-                kind=rec["kind"],
-                node=rec["node"],
-                model=rec.get("model"),
-                provider=rec.get("provider"),
-                input_tokens=int(rec.get("input_tokens", 0)),
-                output_tokens=int(rec.get("output_tokens", 0)),
-                cost_usd=rec.get("cost_usd"),
-                unsettled=True,
-                hold_id=hold_id,
-                round=rec.get("round"),
-            )
-        )
-    return len(open_holds)
-
-
-_HOLD_TRAIL = frozenset({"spend_hold", "token_usage"})
+        _OUT.discard(self._hold_id)
 
 
 @contextmanager
 def admitted(
     label: CallLabel, bound: SendBound, *, model: str | None, provider: str | None
 ) -> Iterator[Admission]:
-    """Hold ``bound`` for one send, or refuse it with :class:`WalletExhaustedError`. The block
-    closes the admission; one it leaves open — the send raised or was cancelled — is charged in
-    full."""
-    book = _BOOK.get()
-    if book is None:
-        raise RuntimeError(
-            f"{label.node}: no spend book is bound, and a paid call is never sent unadmitted"
-        )
-    book.hold(bound, label.kind, what=f"{label.node} on {model}" if model else label.node)
+    """Hold ``bound`` for one send — drawn from the reservation of the cell it is part of, else
+    refused with :class:`SendRefusedError` where it does not fit. The block closes the admission;
+    one it leaves open — the send raised or was cancelled before its bill came back — is
+    unreported."""
+    label = filed(label)
+    book = _bound_book(label.node)
+    reservation = _RESERVATION.get()
+    drawn_from = (
+        reservation
+        if reservation is not None and reservation.book is book and reservation.kind == label.kind
+        else None
+    )
+    what = f"{label.node} on {model}" if model else label.node
+    book.hold(bound, label.kind, what=what, drawn_from=drawn_from)
     admission = Admission(book, label, bound, model=model, provider=provider)
     try:
         yield admission
     finally:
         if not admission.closed:
-            admission.charge_in_full()
+            admission.unreported()
+
+
+class Unreported(NamedTuple):
+    """Sends a ledger holds open that no send of this process still has out, at their bounds."""
+
+    usd: float
+    tokens: int
+    sends: int
+
+
+def unreported_on(ledger: CycleEventLog) -> Unreported:
+    """What the sends this ledger left open may have cost — a run killed with its calls out, or
+    one that ended them unreported. Its own lines only: an inherited prefix is its owner's.
+
+    The LIVENESS half is this scope's own: a hold whose send this process still has out is not
+    unreported, it is in flight. An account reading the same ledgers from outside cannot see
+    ``_OUT`` and asks the run's phase instead (``store/account_spend.py``); the fold under both is
+    one (:func:`~promptpotter.infrastructure.store.read_model.open_holds`)."""
+    usd, tokens, sends = 0.0, 0, 0
+    for hold_id, rec in open_holds(iter_jsonl(ledger.path, record_types=HOLD_TRAIL)).items():
+        if hold_id in _OUT:
+            continue
+        usd += float(rec.get("cost_usd") or 0.0)
+        tokens += int(rec.get("input_tokens", 0)) + int(rec.get("output_tokens", 0))
+        sends += 1
+    return Unreported(usd, tokens, sends)

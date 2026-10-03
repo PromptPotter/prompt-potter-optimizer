@@ -6,16 +6,14 @@
 # file commits is the NAME, the VERSION and which tasks we take. The version is the pin that
 # matters: "latest" would put a moving roster behind a fixed dataset name, and upstream moving a
 # commit under this version lands as a NEW measurement identity rather than as stale rows
-# re-served, because the resolved pins are folded into the instrument fingerprint
-# (`connectors/harbor.py::_identity_config`).
+# re-served, because each resolved pin is folded into its own sample's content address
+# (`connectors/harbor.py::_task_pin`).
 harbor_dataset: spreadsheetbench-verified
 harbor_dataset_version: "1.0"
 
-# TEN of the published four hundred, and the count is in the DATASET NAME because it is part of
-# what was measured: a `sample_id` is scoped by dataset name and the row text is not in the key,
-# so scoring a wider panel under this name would serve these ten rows for tasks they never ran
-# (`datasets/CLAUDE.md` § Re-cutting a dataset needs a NEW name). Widening is `spreadsheetbench-s50`,
-# never an edit here.
+# TEN of the published four hundred, and the count is in the DATASET NAME, so a wider panel is a
+# new name — `spreadsheetbench-s20`, whose ten shared cells replay what was measured here
+# (`datasets/CLAUDE.md` § Re-cutting a dataset needs a NEW name).
 #
 # The first ten of the roster in published order. Arbitrary, and said out loud rather than
 # dressed up as a sample: the order is upstream's, we did not draw it, and ten cells put ~0.16 SE

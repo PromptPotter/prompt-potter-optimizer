@@ -11,15 +11,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.campaign_config import load_campaign_config
-from promptpotter.application.datasets.authored import (
-    dataset_campaign_path,
-    read_campaign_config_file,
-)
 from promptpotter.application.diagnostics.seed_screen import class_floor, draw_bank
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.mint import prepare_fresh_cycle, resolve_cycle_plan
-from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
-from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+from promptpotter.application.jobs.quota import unadmitted_limits
+from promptpotter.application.optimizer_manifest import (
     resolved_overrides,
     set_optimizer_prompt_overrides,
 )
@@ -30,6 +26,7 @@ from promptpotter.application.runner.inner.spawn_context import (
     inner_spawn_context,
 )
 from promptpotter.application.runner.inner.tasks import (
+    InnerCells,
     InnerTaskSpec,
     inner_instrument_config,
     resolve_inner_task,
@@ -46,9 +43,10 @@ from promptpotter.domain.l4.proxies import (
     parent_level_series,
 )
 from promptpotter.domain.launch_limits import LaunchLimits
-from promptpotter.domain.phases import WALLET_STOPS, RunPhase, StopReason
+from promptpotter.domain.phases import REFUSAL_STOPS, RunPhase, StopReason
 from promptpotter.domain.pipeline_schema import stable_hash
-from promptpotter.domain.results import candidate_label
+from promptpotter.domain.results import ArmOutcome, candidate_label, invariant_collapses
+from promptpotter.infrastructure.llm.heartbeat import heartbeat
 from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND, _CYCLE_LEDGER
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.archive_queries import capture_evidence_epoch
@@ -57,8 +55,8 @@ from promptpotter.infrastructure.store.layout import CycleLayout, sandbox_owner_
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.shared.errors import (
+    CellSendRefusedError,
     CellUnscoreableError,
-    CellWalletExhaustedError,
     ErrorCategory,
 )
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -84,9 +82,9 @@ logger = logging.getLogger(__name__)
 # truncated trajectory indistinguishable from "this optimizer prompt found nothing". The cost
 # ceiling is the OUTER campaign's spend budget, which every inner dollar rolls up onto.
 
-# The stop an inner run ends on when a wallet refused it, back to the hole category that says so.
-_WALLET_REFUSALS: dict[StopReason | None, ErrorCategory] = {
-    stop: category for category, stop in WALLET_STOPS.items()
+# The stop an inner run ends on when a send was refused, back to the hole category that says so.
+_REFUSALS: dict[StopReason | None, ErrorCategory] = {
+    stop: category for category, stop in REFUSAL_STOPS.items()
 }
 
 # Per-round wall-clock allowance for ONE inner cell — the rate `inner_cell_envelope_s` multiplies
@@ -157,7 +155,7 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
     # otherwise). No `or 0.0`: an origin that was never scored has no level to narrate.
     assert result.origin_level is not None
     origin = result.origin_level
-    levels = result.round_parent_levels
+    levels = result.round_levels
     # Lead with `mean_round_delta`, the term the outer formula scores — a headline the generator
     # is not graded on teaches the wrong lesson, so this line moves whenever the measurand does.
     # `parent_level_series`, not `levels`: the law averages over the round BUDGET, and dividing by
@@ -168,15 +166,16 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
         f"INNER {spec.inner_dataset} seed-{spec.seed}: origin {origin:+.2f}"
         f" -> mean-over-rounds D{mean - origin:+.3f} (the scored lift)"
         f", ended {levels[-1]:+.2f} (D{levels[-1] - origin:+.3f}), peak {max(levels):+.2f}"
-        f" over {result.n_l1_rounds} of {len(series)} rounds; stop={result.stop_reason}.",
+        f" over {result.n_rounds_after_origin} of {len(series)} rounds; stop={result.stop_reason}.",
         _lift_shape(result),
     ]
     by_round = {rnd.round: rnd for rnd in result.rounds}
+    critiques = {r: rnd.optimizer_state.payload.feedback() for r, rnd in by_round.items()}
     highlight = next(
         (
             h
             for r in sorted(by_round)
-            if (c := by_round[r].critique)
+            if (c := critiques.get(r))
             for h in c.get("failure_highlights") or []
             if h.strip()
         ),
@@ -191,10 +190,10 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
         parts = []
         if 0 <= r - 1 < len(levels):
             parts.append(f"level {levels[r - 1]:.3f} (D{levels[r - 1] - origin:+.3f})")
-        prior = by_round.get(r - 1)
-        if prior is not None and prior.critique and prior.critique.get("priority_fix"):
-            parts.append(f"steer: {_clip(prior.critique['priority_fix'], 130)}")
-        scored = [c for c in rnd.candidate_scores if not c.invalid]
+        steer = critiques.get(r - 1)
+        if steer and steer.get("priority_fix"):
+            parts.append(f"steer: {_clip(steer['priority_fix'], 130)}")
+        scored = [c for c in rnd.candidate_scores if c.outcome is not ArmOutcome.INVALID]
         if scored:
             # Rank by lift over the MATCHED parent, and never invent the comparison where there
             # is none: `accuracy - 0.0` hands an arm that never covered the parent's panel its
@@ -203,8 +202,8 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
             top = max(
                 scored,
                 key=lambda c: (
-                    c.accuracy - c.matched_parent_accuracy
-                    if c.matched_parent_accuracy is not None and c.accuracy is not None
+                    c.accuracy - c.reference_accuracy
+                    if c.reference_accuracy is not None and c.accuracy is not None
                     else float("-inf"),
                     c.composite_fitness,
                 ),
@@ -215,8 +214,8 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
                 else ""
             )
             versus = (
-                f" vs matched-parent {top.matched_parent_accuracy:.3f}"
-                if top.matched_parent_accuracy is not None
+                f" vs matched-parent {top.reference_accuracy:.3f}"
+                if top.reference_accuracy is not None
                 else " (stopped before it covered the origin's samples, so nothing to compare)"
             )
             parts.append(
@@ -225,14 +224,15 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
             )
         else:
             parts.append("no scored candidates")
+        collapses = invariant_collapses(rnd.candidate_scores)
         anomalies = [
             f"{tag} x{n}"
             # `repeat` is the anomaly the OUTER generator most needs: the inner loop stopped
             # forming new hypotheses, which is an optimizer prompt defect, not task difficulty.
             for tag, n in (
-                ("no-op", rnd.l1_n_no_op),
-                ("dup", rnd.l1_n_duplicate),
-                ("repeat", rnd.l1_n_repeat),
+                ("no-op", collapses.get("no_op_variant", 0)),
+                ("dup", collapses.get("duplicate_variant", 0)),
+                ("repeat", collapses.get("repeat_variant", 0)),
             )
             if n
         ]
@@ -317,18 +317,27 @@ def _open_inner_campaign(
 
     plan = resolve_cycle_plan(session, campaign_config, train_data)
     store = session.store.campaigns
-    existing = store.load(CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id))
-    if existing is None:
-        prepare_fresh_cycle(session, campaign_config, train_data, campaign_id=campaign_id)
+    root = CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id)
+    if store.load(root) is None:
+        prepare_fresh_cycle(session, campaign_config, train_data, campaign_id=campaign_id, arm=None)
         return 0
 
+    # A rebase retires the root under `superseded_by`; the banked trajectory is its successor's.
+    hop = store.line_holder(root)
+    existing = store.load(hop)
+    if existing is None:
+        raise CellUnscoreableError(
+            f"its campaign {campaign_id} names successor {hop.cycle_id}, which has no index",
+            spent={},
+            step_timings={},
+        )
     phase = derive_run_phase(
-        store.cycle_dir(CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id)),
+        store.cycle_dir(hop),
         is_terminal=bool(existing.get("finished_at")),
     )
     if phase in (RunPhase.RUNNING, RunPhase.GATE, RunPhase.CHECKIN):
         raise CellUnscoreableError(
-            f"its campaign {campaign_id}/{plan.cycle_id} reads {phase} — another producer "
+            f"its campaign {campaign_id}/{hop.cycle_id} reads {phase} — another producer "
             "owns it, and two runs writing one cycle is not a measurement",
             spent={},
             step_timings={},
@@ -336,7 +345,7 @@ def _open_inner_campaign(
     session_id = str(existing.get("parent_session_id") or "")
     if not session_id:
         raise CellUnscoreableError(
-            f"its campaign {campaign_id}/{plan.cycle_id} names no parent session, so there "
+            f"its campaign {campaign_id}/{hop.cycle_id} names no parent session, so there "
             "is no session record to continue under",
             spent={},
             step_timings={},
@@ -344,21 +353,22 @@ def _open_inner_campaign(
 
     session.session_id = session_id
     session.campaign_id = campaign_id
-    session.state.cycle_id = plan.cycle_id
-    save_active_pointer(
-        session.store.base_dir,
-        session_id,
-        CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id),
-    )
+    session.state.cycle_id = hop.cycle_id
+    save_active_pointer(session.store.base_dir, session_id, hop)
     banked = len(existing.get("rounds") or [])
     logger.info(
         "inner campaign %s/%s CONTINUES from %d banked round record(s) (was %s)",
         campaign_id,
-        plan.cycle_id,
+        hop.cycle_id,
         banked,
         phase,
     )
     return banked
+
+
+def _cells(ctx: InnerSpawnContext) -> InnerCells:
+    assert ctx.cells is not None, "resolve_inner_task refuses a context carrying no panel"
+    return ctx.cells
 
 
 async def _run_inner_campaign(
@@ -426,14 +436,9 @@ async def _run_inner_campaign(
     # the disqualifier but is hand-run, so nothing recomputes it for the seats actually seated.
     bank_floor = class_floor(train_data)
 
-    file_config: dict[str, Any] = {}
-    if session.dataset_config_dir is not None:
-        cfg_path = dataset_campaign_path(session.dataset_config_dir)
-        if cfg_path.exists():
-            file_config = read_campaign_config_file(cfg_path)
     campaign_config = inner_instrument_config(
         spec,
-        load_campaign_config(file_config),
+        load_campaign_config(dict(_cells(ctx).by_dataset[spec.inner_dataset].campaign_config)),
         llm_node=session.llm_node_name(),
         n_scored=len(train_data),
     )
@@ -446,15 +451,13 @@ async def _run_inner_campaign(
         campaign_id=inner_campaign_id(spec, optimizer_prompt_overrides, spawn_role),
     )
     if session.campaign_id and session.state.cycle_id:
-        # An L4-only fact, so it stays out of the generic mint seam every campaign shares. The
-        # cycle index is a raw dict, so an older cycle simply has no `spawned_by`.
+        # An L4-only fact, so it stays out of the generic mint seam every campaign shares.
         session.store.campaigns.update(session.hop, {"spawned_by": spawned_by})
         # Publish the minted dir so the outer heartbeat's detail_fn can tail this dashboard.
         cycle_dir_box["dir"] = session.store.campaigns.cycle_dir(session.hop)
     observers = build_run_observers(
         session=session,
         campaign_config=campaign_config,
-        dataset=train_data,
         display=None,
         resumed_from_round=None,
         origin_accuracy=0.0,
@@ -465,9 +468,14 @@ async def _run_inner_campaign(
             campaign_config,
             session=session,
             observers=observers,
-            # Declares none: restating the config's own cap here would be a second spelling of
-            # it, so the inner cycle binds on `campaign_config.optimization` alone.
-            limits=LaunchLimits(),
+            # Declares nothing of its own: the inner cycle holds what its config declares (none —
+            # `inner_instrument_config` clears both arms) and spends under the ROOT's book.
+            limits=unadmitted_limits(
+                campaign_config,
+                stores=session.store,
+                hop=session.hop if session.state.cycle_id else None,
+                requested=LaunchLimits(),
+            ),
             mode=RunMode(),
         )
     finally:
@@ -564,16 +572,12 @@ async def _measure_inner_cell(
         rnd = dash.get("round")
         best = dash.get("best")
         max_rounds = (dash.get("run_limits") or {}).get("max_rounds")
-        # The SERVED ``ability_delta``, the same number the webapp headline reads, so the two
-        # surfaces cannot disagree. It is LOGITS, not a fraction — printed as `%` it read
-        # `Δ+19%` off a cell whose ability never moved.
-        delta = dash.get("ability_delta")
-        if isinstance(delta, int | float) and isinstance(best, int | float):
-            lift = f"Δθ{delta:+.2f} (best measured {best:.0%})"
-        elif isinstance(best, int | float):
-            lift = f"best measured {best:.0%}"
-        else:
-            lift = "best —"
+        # The SERVED bench lift, the webapp's headline too, once the inner pass has graded its
+        # pick; until then only the inner optimizer's own search-pool reading exists.
+        bench = (dash.get("bench_score") or {}).get("lift")
+        lift = f"best measured {best:.0%}" if isinstance(best, int | float) else "best —"
+        if isinstance(bench, int | float):
+            lift += f" · bench lift {bench:+.3f}"
         return f"inner r{rnd if rnd is not None else '?'}/{max_rounds or '?'} · {lift}"
 
     # Awaiting `inner_task` DIRECTLY makes it this coroutine's `_fut_waiter`, so the envelope's
@@ -621,11 +625,10 @@ async def _measure_inner_cell(
         with contextlib.suppress(asyncio.CancelledError):
             await heartbeat_task
     elapsed = time.monotonic() - start
-    if (refused := _WALLET_REFUSALS.get(result.stop_reason)) is not None:
-        # The inner run spends the outer run's wallets — its provider key and its ceiling — so the
-        # refusal is every later cell's: a hole that halts the walk, never an excluded cell the walk
-        # steps past.
-        raise CellWalletExhaustedError(
+    if (refused := _REFUSALS.get(result.stop_reason)) is not None:
+        # The inner run spends the outer run's provider key and ceiling, so the refusal is every
+        # later cell's: a hole that halts the walk, never an excluded cell the walk steps past.
+        raise CellSendRefusedError(
             f"its inner campaign {campaign_id} stopped on {result.stop_reason}",
             category=refused,
             spent={},
@@ -635,6 +638,7 @@ async def _measure_inner_cell(
     # `CellUnscoreableError`, which `measure_sample` resolves to this cell's UNSCOREABLE row.
     proxies = compute_outer_proxies(result)
     facts = inner_cell_facts(result, campaign_id)
+    terminal = _cells(ctx).terminal
 
     data: dict[str, Any] = {
         # A summary line for the reader, not an answer to be matched: this cell carries no label
@@ -655,11 +659,10 @@ async def _measure_inner_cell(
         **(facts.model_dump() if facts is not None else {}),
         # The archive's reuse contract: a named node means "this outcome depends on config only
         # UP TO that node". An inner campaign consumes the ENTIRE outer config at once, so the
-        # only honest stamp is the LAST node of the outer chain — anything earlier lets a
-        # candidate editing a later node silently replay the origin's rows.
-        "terminal_node": "l3_plan",
+        # only honest stamp is `InnerCells.terminal`.
+        "terminal_node": terminal,
         "total_time": elapsed,
-        "step_timings": {"l1_critique": elapsed},
+        "step_timings": {terminal: elapsed},
         # No `step_tokens`: every call the campaign made was billed as it settled
         # (`spend_book.py::SpendBook.mirror`). Returning it HERE would bill the cell twice, a
         # continued cell's whole history again, and the lot whenever the archive replays this row.

@@ -1,13 +1,7 @@
 import path from "node:path";
 import { defineConfig } from "vitest/config";
 
-// Two test classes share this scope:
-//   .test.ts  — pure data → data derivations (node env, the default).
-//   .test.tsx — UI-primitive render/interaction tests. Each opts into jsdom
-//               with a `// @vitest-environment jsdom` docblock at its top, so
-//               the fast node default stays for the derivation suite.
-// See webapp/CLAUDE.md § Testing posture for how to freeze a new cycle
-// fixture under ../tests/fixtures/cycles/.
+// A `.test.tsx` opts into jsdom with a `// @vitest-environment jsdom` docblock; node is the default.
 export default defineConfig({
   resolve: {
     alias: {
@@ -22,11 +16,7 @@ export default defineConfig({
       "components/**/__tests__/**/*.test.{ts,tsx}",
     ],
     environment: "node",
-    // `scripts/gate.py` runs four checks at once, so this suite must not size its pool to
-    // the whole machine: unbounded it forks `availableParallelism() - 1` workers, each
-    // paying jsdom setup, and one starved its own startup mid-gate. Four is the gate's own
-    // concurrency. Costs ~8s standalone and nothing in the gate, where eslint is the
-    // critical path and this check finishes inside its shadow.
+    // `scripts/gate.py` runs four checks at once; an unbounded pool starves its own startup.
     maxWorkers: 4,
   },
 });

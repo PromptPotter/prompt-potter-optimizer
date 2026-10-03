@@ -26,13 +26,11 @@ export type ReadResult<T> =
   | { status: "failed"; failure: ReadFailure; kept: T | null };
 
 export interface ReadOptions {
-  // Diagnostics surface name for the incident ring.
   surface: string;
   // Idle until the session is confirmed (`frontend-surface-contract.md::I5`); a 401 re-probes it.
   auth?: boolean;
   // A rejected query is the operator's own input, so `kept` then carries the prior key's read.
   survive?: "invalid";
-  // Present ⇒ the key is re-read on this cadence through `usePoll`, which pauses a hidden tab.
   intervalMs?: number;
   revalidateOn?: number;
 }
@@ -53,7 +51,6 @@ export function readyData<T>(read: ReadResult<T>): T | null {
 export function useRead<T>(spec: ReadSpec<T> | null, opts: ReadOptions): ReadResult<T> {
   const { surface, auth = false, survive, intervalMs, revalidateOn = 0 } = opts;
   const { authed, onAuthError } = useAuthGate();
-  // One value claims the read and issues it.
   const activeKey = spec !== null && (!auth || authed) ? spec.key : null;
 
   const [generation, setGeneration] = useState({ key: activeKey, n: 0 });

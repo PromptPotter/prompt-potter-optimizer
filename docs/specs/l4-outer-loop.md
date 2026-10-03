@@ -13,9 +13,10 @@ its own prompts, at bounded and visible cost.
 ## The measurand
 
 `mean_round_delta` — the MEAN, over the inner rounds, of the parent each round **adopted**, minus the
-origin, in logits on one ability ruler (`exploration.py::parent_level_trajectory`). `campaign.yaml::scoring`
+origin, in logits on one ability ruler (`exploration.py::parent_level_trajectory`). `campaign.yaml::scoring.per_sample`
 re-anchors it `(x+1)/3`: linear, clipping nothing in the banked range, so the paired estimator's effect × 3
-IS the mean logit lift — a number to read, not merely to order by.
+IS the mean logit lift — a number to read, not merely to order by. `scoring.per_cell` then weighs each cell
+by its wall clock against a fixed anchor; the reason is the comment beside it in `campaign.yaml`.
 
 - **Adopted, not proposed.** A round's value is what it *crowns*; the arms it discards are the price of
   finding that. For any mutation operator with mass below the parent (all of them — that is why selection
@@ -28,7 +29,7 @@ IS the mean logit lift — a number to read, not merely to order by.
   reaching the same place in the last round.
 - **The denominator is the round BUDGET**, holding the last adopted level forward across rounds a cell
   never ran (`domain/l4/proxies.py::parent_level_series`). Dividing by the series length makes the denominator a
-  per-cell quantity, and since `inner_lives` stops a *stalling* cell, the short series is the one that
+  per-cell quantity, and since a panel's `lives` (`inner_depth_nodes`) stops a *stalling* cell, the short series is the one that
   lifted early and went quiet — it would be divided by its own brake.
 - **No difficulty denominator.** Every level is a θ on ONE δ ruler shared by every cell of the panel, so two
   levels already sit on one interval scale across seeds of different origin strength. Per-cell difficulty is
@@ -54,7 +55,7 @@ IS the mean logit lift — a number to read, not merely to order by.
   `rounds_improved_frac` flipped nothing. Each was a *multiplier*, so each held authority over an ordering it
   could not justify, and together they roughly doubled apparent significance by compressing the scale.
   **A term that cannot move with the candidate does not get a vote.**
-- **No term divides by cost, and this is the argument any proposal to add one must answer.** Both caches are
+- **No term divides by dollar cost, and this is the argument any proposal to add one must answer.** Both caches are
   content-addressed and tenant-shared — which is what makes the inner origin identical across every arm, and
   therefore what lets the paired verdict cancel the inner loop's noise. But the arm that replays is the
   *origin* arm; a variant writes different prompts, so every hash is new and it pays full freight. A cost
@@ -95,14 +96,23 @@ exposed to.
   shared ruler above is the same θ. Manufacturing a noise term measures how noisy an LLM is on an identical
   request, which is not a quantity the loop can act on. Depth on a specific candidate is `verify`'s job — it
   re-scores on MORE samples without touching the cycle.
-- **A cell that failed is not a cell that scored zero** (`scoring/selection.py::_scoreable`). The election
-  grades an errored row 0.0 on purpose — the overlap guard needs that — but a published interval may not: at
-  L4 a floored cell does not read as "scored nothing", it reads as "drove the inner loop maximally down".
+- **A cell that failed is not a cell that scored zero** (`domain/scoring.py::is_graded`). An outer cell carries no
+  label, so an errored one has no verdict. The election grades it 0.0 on purpose — the overlap guard needs that —
+  but a published interval may not: at L4 a floored cell reads as "drove the inner loop maximally down".
 - **Absolute outer numbers never travel across runs.** Only a candidate's delta against its OWN run's origin
   is meaningful; within a run, comparisons are paired by seed under CRN, so draw difficulty cancels.
 
 ## Invariants — break one and the corpus is void, silently
 
+- **The inner scorer, formula, seeds and held-out cells are unreachable by the outer loop**, and none can
+  ever be a `pipeline_param` — no adoption, self-adopt included, carries the instrument. [DGM](https://arxiv.org/abs/2505.22954)
+  rewrote its own checker's logging to fake a pass when it could see it, and
+  [Auditing Harness Tampering](https://arxiv.org/abs/2609.00069) found tampering in five self-improving
+  systems (ADAS 84.6%, HyperAgents 73.6%, DGM 63.1%, ScientistOne 29.6%, AFlow 18.3%), persisting in the
+  best-scoring agent's lineage ([`../research/external-constraints.md`](../research/external-constraints.md)
+  § Ranked, item 1). Keeping the instrument out of reach is cheap and works: the
+  [Reward Hacking Benchmark](https://arxiv.org/abs/2605.02964) found exploit rates of 0–13.9% across 13
+  frontier models, cut by 87.7% relative by simple environment hardening, without hurting task success.
 - **`connectors/promptpotter.py::_identity_config` enumerates the inner-origin fingerprint.** Read it before
   assuming a file is safe to touch: a dispatch *renderer* and an *estimator* move it exactly as an inner
   node's prompt body does. It resolves once per init, so a mid-flight edit is invisible to the RUNNING cycle
@@ -116,10 +126,11 @@ exposed to.
 - **Inner-task count > `elimination_n_min`, and ≥ 6** — below that θ_se exceeds the point-lift and the
   election correctly refuses to crown.
 - **CRN is the variance control, and the only one.** No replication knob beside it; an identical cell replays.
-- **`terminal_node` is the LAST outer node (`l3_plan`).** An inner campaign consumes the ENTIRE outer config
-  at once, so a mid-chain stamp lets prefix-trust replay serve the ORIGIN's rows to a candidate that edits a
-  later node. It is not a health signal and nothing may tally it — one panel counted it and the critique spent
-  an arm fixing a stall that never happened.
+- **`terminal_node` is the outer chain's last llm node (`runner/inner/tasks.py::InnerCells.terminal`).** An
+  inner campaign consumes the ENTIRE outer config at once, and off-chain nodes lead `node_configs`, so only
+  a stamp at the chain's end limits prefix-trust replay to a full match; any earlier one serves the ORIGIN's
+  rows to a candidate that edits a later node. It is not a health signal and nothing may tally it — one panel
+  counted it and the critique spent an arm fixing a stall that never happened.
 - **A HIT/MISS panel stays silent at L4** (`panels._no_labels`). The cell is verifier-graded, so
   `Sample.ground_truth` is `None` and no cell can ever be a hit; rendered as misses, the critique
   diagnosed the artifact and steered the inner loop off its only objective. A prompt clause telling the model
@@ -156,4 +167,63 @@ quotes no figure; re-measure before quoting a price to anyone.
    `TokenUsageRecord.round`). Panel aggregation `mean lift − λ·std`, where `std` is cross-seed **outcome
    dispersion** and never the θ estimation SE — penalizing `theta_se` resurrects the wide-posterior-discards-
    good-candidates pathology — routed through the P3 post-aggregate formula, never the election rank key.
-   PoBB-decisive promotion over inner-campaign arms (`metrics.py::elimination_p_best`).
+   PoBB-decisive promotion over inner-campaign arms (`scoring/selection.py::elimination_p_best`).
+7. **Self-adopt mode — the SIFT / Darwin Gödel Machine loop, with our statistics in its gates.** Proposal,
+   unbuilt, off by default. [SIFT](../research/landscape.md#sift--self-improvement-via-fast-tree-search-paper)
+   and DGM let the improved agent write the next improvement; ours keeps the outer optimizer fixed. Prior art
+   beside them: [STOP](https://arxiv.org/abs/2310.02304) is the closest, an improver improving its own code
+   with weights frozen; [Gödel Agent](https://arxiv.org/abs/2410.04444) and
+   [ADAS](https://arxiv.org/abs/2408.08435) keep an archive of past designs, as our content-addressed archive
+   does; and [SICA](https://arxiv.org/abs/2504.15228) runs an asynchronous LLM overseer that steers or cancels
+   a drifting run — a runtime monitor shaped like our heartbeat and pause contract, not a gate on a self-edit,
+   so a pre-landing review gate here would be our own addition. The mode:
+   when an outer election is **decisive**, the winner's overrides become the outer campaign's own
+   `optimization.nodes` overlay and the outer cycle forks onto it — the improved optimizer proposes the next
+   round. The overlay already binds per task (`runner/entry.py::run_optimization`, task-isolated from the
+   inner binding), and inner cell
+   identity keys on the candidate's overrides, not the outer's own set, so banked cells survive an adoption.
+   What is new is the trigger and the fork. **What is never adopted is the instrument** (§ Invariants, first
+   bullet; the shared ruler with it) — which is what makes a degraded optimizer visible instead of silent.
+
+   Every gate they set by hand maps onto a mechanism we already run:
+
+   | SIFT / DGM | Here | Why ours is the stronger form |
+   |---|---|---|
+   | fixed 4-task easy gate before the 50-task evaluation | PoBB over the shared hard-first order, from `elimination_n_min` | cut on a posterior, not a pass count; hard samples first, because an easy cell carries no information about which arm is better (fishtest's lesson, [`../methods/candidate-elimination.md`](../methods/candidate-elimination.md)) |
+   | Bradley-Terry over an LLM judge's pairwise opinions | the Rasch θ/δ fit over measured outcomes | Rasch *is* a Bradley-Terry of arm against item — on outcomes, difficulty-adjusted, with an SE |
+   | unevaluated node inherits its parent's accuracy | excluded, never filled | an inherited score is a measurement nobody made |
+   | rank + visit-penalty parent sampling | UCB1 over backpropagated θ (`mask/backprop.py`), [`roadmap.md`](roadmap.md) § Selector members | same role; see *take* below |
+   | 50-task subset → 225-task full run | sequential measurement to decisiveness; `verify` for depth on the winner | the stop is a statistic, not a subset size |
+   | adopt the best node | decisive election + the held-out gate below + anchor + rollback by fork | an adoption compounds, so it is the decision that most needs an interval — and the round's best is not the best lineage: the [Huxley-Gödel Machine](https://arxiv.org/abs/2510.21614) found a round's top scorer often has unproductive descendants, and scores clades instead ([`../research/external-constraints.md`](../research/external-constraints.md) § Ranked, item 2) |
+
+   **Take from them.** (a) The judge as a *zero-sample prior on measurement order* — which arm PoBB walks
+   first — never as a score; gated on the predicted-vs-realized reading [`roadmap.md`](roadmap.md)
+   § Selector members already asks for, with their ρ≈0.68 as the bar. At L4 it pays most: here one measurement is a whole
+   inner campaign. (b) Rank-based rather than value-based parent sampling: a rank needs no min-max
+   normalization across forks, which is that spec's open *Normalization across forks* item.
+   [ShinkaEvolve](https://arxiv.org/abs/2509.19349) reached a state-of-the-art circle-packing result in 150
+   samples by spending on selection, not only on proposers — exploration-balanced parent sampling, novelty
+   rejection-sampling and a bandit over LLM mutators — so read its sampling policy before designing this. (c) Expansion
+   overlapping measurement ("disaggregated"), once run admission and concurrency land. (d) Their cost split —
+   expansion vs judge vs evaluation per step, plus wall clock — as a reading `SpendRollup` should serve.
+
+   **Generality is the precondition, and today the panel cannot supply it.** The panel is one benchmark
+   (`inner_tasks.yaml::inner_benchmark`), its seeds different row draws of it, so a winner is an optimizer for
+   that task, and adopting it compounds the specialization. The mode does not ship before these hold:
+   - **A held-out panel of other task families**, scored only by the adoption gate, never by the search, and
+     reaching no outer evidence panel — the moment the proposer sees it, it is training data.
+   - **Worst-case, not mean:** decisive on the search panel AND non-inferior within a margin on EVERY held-out
+     family. A mean lets one large in-family win hide a regression.
+   - **Anchor to C0, not to the parent.** Each generation within margin of its parent still drifts; every
+     generation is re-read against the default set on the held-out panel, and one that falls behind rolls back
+     to the last generation that did not — a resume on an earlier fork.
+   - **A leakage lint on the adopted set**: reject text carrying dataset-specific material (label values,
+     sample strings, the dataset's name). Deterministic and free, before any paid gate.
+   - **The self-referential claim, tested directly and rarely:** every N generations a short L4 with the
+     adopted set as the OUTER optimizer against one with C0. The only reading that says "better at
+     self-improvement" rather than "better at improving this benchmark".
+
+   **The experiment it enables** is the SIFT comparison run in our own measurand, with no reimplementation of
+   their code: L4 default vs L4 self-adopt, one budget, one panel, one ruler, outer lift per round. It
+   inherits #3 and #4 — until the outer election is measured and arms separate, no adoption can be decisive,
+   and the mode correctly does nothing.

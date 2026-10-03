@@ -1,9 +1,5 @@
-/* Chip primitive — a small pressable toggle. */
-
 @layer ui {
 .chip {
-  /* Never shrink. A toolbar that squeezes its buttons to fit is lying about how
-     much room it has; better to overflow visibly and be fixed. */
   flex: 0 0 auto;
   font-family: inherit;
   font-size:var(--text-xs);
@@ -17,8 +13,6 @@
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
-/* Icon-only: square, so a row of them reads as a toolbar rather than a row of
-   pills. The glyph inherits `currentColor`, so the on/hover states just work. */
 .icon {
   display: inline-flex;
   align-items: center;
@@ -52,17 +46,11 @@
   flex: 0 0 auto;
 }
 
-/* The group's name on screen, for chips that are bare numbers. `aria-hidden`: the
-   group already carries the same word as its accessible name. */
 .groupLabel {
   font-size: var(--text-xs);
   color: var(--color-text-tertiary);
 }
 
-/* Joined: facets of ONE concept, so one frame around the set and no borders
-   between them — three separately outlined pills would read as three unrelated
-   buttons. Square, deliberately: a rounded box reads as a button, and this is a
-   field of choices, not a thing you press. */
 .joined {
   gap: 0;
   border: 0.5px solid var(--color-border);
@@ -74,8 +62,7 @@
   border: 0;
   border-radius: 0;
   background: transparent;
-  /* Reserve the underline's height on every chip, so nothing shifts when one
-     lights up. */
+  /* Reserved on every chip, so nothing shifts when one lights up. */
   border-bottom: 2px solid transparent;
   padding-bottom: 1px;
 }
@@ -85,11 +72,7 @@
   border-bottom-color: var(--color-border);
 }
 
-/* On = an inset frame plus a fat underline. No fill swap: the chips sit in one
-   box, and repainting a cell's background inside it reads as a stray button.
-   The underline takes the chip's own `ink` where it has one, which is what lets a
-   group of chips BE the legend for what they switch — a separate swatch row
-   restating the same three names is the duplication that bought. */
+/* The underline takes the chip's own `ink`, so a group of chips IS the legend for what it draws. */
 .joined .on {
   background: var(--color-background-tint-active);
   color: var(--color-accent);

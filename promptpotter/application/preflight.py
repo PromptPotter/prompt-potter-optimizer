@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.knobs import check_couplings
-from promptpotter.application.optimization.dispatch.llm_call.prompts import optimizer_model
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.domain.search_point import has_framing
 from promptpotter.infrastructure.llm.registry import model_profile
 
@@ -32,24 +32,21 @@ class PreflightWarning:
 def _check_sp_budget_vs_dataset(
     config: CampaignConfig, dataset: list[Sample]
 ) -> PreflightWarning | None:
-    # Only the PER-ROUND budget is checked against the bank. An origin budget above the
-    # bank is not a misconfiguration: `sp_budget_origin` defaults ABOVE `sp_budget_round`
-    # (DEFAULT_ORIGIN_BUDGET), `sample_dataset` is a prefix slice, and "score the origin
-    # on everything there is" is exactly what a wide-origin default wants on a small bank.
-    # Warning on it told every small-bank dataset to lower a knob nobody set, on every run.
-    # `sp_budget_round > bank` IS a real finding — it means the adaptive queue mechanism
-    # has no bank to select from and every round re-scores the same full set.
-    n = config.sp_budget_round
+    # Only the PER-ROUND draw is checked against the bank. An origin budget above the bank is
+    # not a misconfiguration: `sample_dataset` is a prefix slice, and "score the origin on
+    # everything there is" is exactly what a wide-origin default wants on a small bank.
+    # A round asking more cells than the bank holds IS a finding: its sampler has nothing to
+    # select from and every round re-scores the same full set.
     m = len(dataset)
+    n = select_optimizer(config.optimization).round_cells(m)
     if m > 0 and n > m:
         return PreflightWarning(
             code="sp_budget_exceeds_dataset",
             title=f"per-round eval budget ({n}) exceeds bank size ({m})",
             detail=(
                 f"The bank (full train split) has only {m} samples, so every round "
-                f"scores on all {m} and `select_round_subset` has nothing to select "
-                f"from — the adaptive queue mechanism is inert. Lower sp_budget_round "
-                f"to below {m}, or grow the dataset."
+                f"scores on all {m} and the sampler has nothing to select from. Lower "
+                f"its per-round budget to below {m}, or grow the dataset."
             ),
         )
     return None
@@ -64,11 +61,12 @@ def _model_params_b(model_id: str) -> float | None:
     return float(match.group(1)) if match else None
 
 
-def _check_optimizer_below_target(target_models: tuple[str, ...]) -> PreflightWarning | None:
+def _check_optimizer_below_target(
+    opt_model: str, target_models: tuple[str, ...]
+) -> PreflightWarning | None:
     """An optimizer smaller than the target it optimizes is almost always an accidental inversion.
-    Its model is the install-global optimizer node config, never a per-campaign copy."""
+    Its model is the selected manifest's proposing node's."""
 
-    opt_model = optimizer_model()
     opt_b = _model_params_b(opt_model)
     if opt_b is None:
         return None
@@ -83,8 +81,9 @@ def _check_optimizer_below_target(target_models: tuple[str, ...]) -> PreflightWa
         detail=(
             "The optimizer is the strong model that improves the pipeline; running "
             "it on a model smaller than the target it optimizes is usually an "
-            "accidental inversion. Raise the optimizer node `model` in "
-            "`promptpotter/assets/optimizer/pipeline.yaml` to a larger tier."
+            "accidental inversion. Raise the proposing node's `model` — in the manifest under "
+            "`promptpotter/assets/optimizers/`, or this campaign's `optimization.nodes` — to a "
+            "larger tier."
         ),
     )
 
@@ -103,11 +102,23 @@ def _check_config_couplings(config: CampaignConfig) -> list[PreflightWarning]:
     ]
 
 
-def _check_task_context_present(framing: Mapping[str, Any] | None) -> PreflightWarning | None:
+def _check_task_context_present(
+    config: CampaignConfig, framing: Mapping[str, Any] | None
+) -> PreflightWarning | None:
     """The operator's frozen framing is the SOLE source of l1_generate's ``task_intent`` slot, and
     an empty one renders as nothing at all — no header, no placeholder — so the slot falls back to
-    the static template and the wire schema drops ``task_context_updates`` with it. Decidable
-    before a cell is bought, and afterwards visible only as ``review.md``'s ``_(empty)_``."""
+    the static template. Decidable before a cell is bought, and afterwards visible only as
+    ``review.md``'s ``_(empty)_``."""
+    if config.task_framing == "off":
+        return PreflightWarning(
+            code="task_framing_off",
+            title="running UNFRAMED on purpose — `task_framing: off`",
+            detail=(
+                "The framing ablation: no target render splices the dataset's task framing and "
+                "l1_generate's task_intent slot renders as the static template alone. Compare "
+                "this run only against framed runs of the same dataset, never pool with them."
+            ),
+        )
     if has_framing(framing):
         return None
     return PreflightWarning(
@@ -117,9 +128,8 @@ def _check_task_context_present(framing: Mapping[str, Any] | None) -> PreflightW
             "`task_context` carries every field the operator wrote about the task, and it is the "
             "only panel feeding l1_generate's task_intent slot. Empty, that slot renders as the "
             "static template alone: the generator proposes edits knowing the failing samples and "
-            "nothing about what the pipeline is for. Ship a `task_context.yaml` beside the "
-            "dataset, or pass `--task-file` / `--task-text` so the decomposition runs — `new "
-            "<name>` with neither never calls it."
+            "nothing about what the pipeline is for. Ship a `task_description.md` beside the "
+            "dataset — the first mint decomposes it — or pass `--task-file` / `--task-text`."
         ),
     )
 
@@ -135,35 +145,13 @@ def run_preflight_checks(
     warnings: list[PreflightWarning] = []
     if (w := _check_sp_budget_vs_dataset(config, dataset)) is not None:
         warnings.append(w)
-    if (w := _check_optimizer_below_target(target_models)) is not None:
+    opt_model = select_optimizer(config.optimization).model()
+    if (w := _check_optimizer_below_target(opt_model, target_models)) is not None:
         warnings.append(w)
-    if (w := _check_lives_have_headroom(config)) is not None:
-        warnings.append(w)
-    if (w := _check_task_context_present(task_context)) is not None:
+    if (w := _check_task_context_present(config, task_context)) is not None:
         warnings.append(w)
     warnings.extend(_check_config_couplings(config))
     return warnings
-
-
-def _check_lives_have_headroom(config: CampaignConfig) -> PreflightWarning | None:
-    """``lives`` that cannot run out before ``max_rounds`` is an inert brake — and when the two
-    coincide the stop reason no longer says which fact stopped the run."""
-    lives = config.optimization.lives
-    max_rounds = config.optimization.max_rounds
-    # `max_rounds=None` is the unbounded case — there is no calendar for hearts to race.
-    if lives is None or max_rounds is None or lives.start < max_rounds:
-        return None
-    return PreflightWarning(
-        code="config.lives_no_headroom",
-        title="the stall brake cannot fire before the calendar cap",
-        detail=(
-            f"optimization.lives.start={lives.start} >= max_rounds="
-            f"{max_rounds}, so hearts can never run out first: the run "
-            "stops on the calendar and reports `lives_exhausted` for it. Lower lives.start "
-            "to brake a stalling run early, or raise max_rounds to give it room — leaving "
-            "both equal makes the stop reason unreadable."
-        ),
-    )
 
 
 def check_model_reasoning_floors(

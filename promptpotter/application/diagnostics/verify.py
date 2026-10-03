@@ -7,27 +7,29 @@ from __future__ import annotations
 
 import logging
 import random
-from collections.abc import Callable, Iterator, Sequence
-from contextlib import contextmanager
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.campaign_config import (
-    load_campaign_config as validate_campaign_config,
-)
+from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.initialization.loop_start import (
     arm_diagnostic_scoring,
     diagnostic_pass,
+    diagnostic_trace,
 )
 from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.optimization.l1.population import merge_pipeline_params
-from promptpotter.application.optimization.task_context import committed_task_context
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.origin import resolve_origin_opt_search_point
+from promptpotter.application.pipeline_resolve import (
+    merge_pipeline_params,
+    resolve_campaign_config,
+)
 from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.search_point_scorer import score_search_point
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import (
     DiagnosticRunRecord,
@@ -35,21 +37,12 @@ from promptpotter.domain.results import (
     parse_candidate_label,
     resolved_fitness,
 )
-from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.spend_book import bound_spend_book
-from promptpotter.infrastructure.llm.telemetry import (
-    active_cycle_ledger,
-    diagnostic_spend,
-    reset_cycle_ledger,
-    set_cycle_ledger,
-)
 from promptpotter.infrastructure.store import archive_queries
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
-    from promptpotter.domain.sample import Measurement
     from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.infrastructure.store.stores import Stores
     from promptpotter.shared.identity import IdentityContext
@@ -93,34 +86,6 @@ def rounds_since_verified(
         if r.source_cycle == cycle_id and r.source_label
     ]
     return round_num - max(verified_at) if verified_at else round_num
-
-
-@contextmanager
-def _diagnostic_trace(stores: Stores, hop: CycleHop) -> Iterator[None]:
-    """A verify's spend joins the campaign's OWN trace, in the ``diagnostic`` bucket.
-
-    Inside every ceiling, always: the bucket is folded into ``SpendRollup``'s totals like any other
-    (``TOKEN_KIND_BUCKET``), so the budget gate sees this money. It is banked APART because it
-    answers a question about the search rather than advancing it — folded into ``backend``, an
-    operator reads re-measuring a candidate as the cost of finding one.
-
-    The ledger is opened only when none is bound. In the loop and behind the API one already is
-    (the round's, and the dispatcher's), and a second handle on one file is a second appender."""
-    if active_cycle_ledger() is not None:
-        with diagnostic_spend():
-            yield
-        return
-    ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
-    # The verb's own book files here too, so what an L4 cell spends beneath it lands on this
-    # ledger rather than only on the sandbox's.
-    if (book := bound_spend_book()) is not None and book.ledger is None:
-        book.ledger = ledger
-    token = set_cycle_ledger(ledger)
-    try:
-        with diagnostic_spend():
-            yield
-    finally:
-        reset_cycle_ledger(token)
 
 
 class VerifyError(ConflictError):
@@ -167,26 +132,10 @@ def _resolve_origin_searchpoint(
     opt_sp = resolve_origin_opt_search_point(
         prompt_node_names=session.pipeline_schema.prompt_node_names(),
         dataset_dir=session.dataset_config_dir,
-        task_context=committed_task_context(stores, session.dataset_name),
         seed=seed,
     )
     # C0's overlay is the seed's, read where the runner reads it; an L1 proposal carries its own.
     return opt_sp, dict(seed.pipeline_overlay) if seed is not None else {}
-
-
-def _archive_measurement_to_qm(m: Measurement) -> QueryMeasurement:
-    return cast(
-        "QueryMeasurement",
-        {
-            "sample_id": m.sample_id,
-            "query": m.query,
-            "ground_truth": m.ground_truth,
-            "predicted": m.predicted,
-            "fitness": m.fitness,
-            "error": None,
-            "pipeline_data": m.pipeline_data,
-        },
-    )
 
 
 async def verify_candidate(
@@ -234,10 +183,10 @@ async def verify_candidate(
     session.campaign_id = hop.campaign_id
     session.state.cycle_id = hop.cycle_id
 
-    campaign_config = validate_campaign_config(campaign.config)
+    campaign_config = resolve_campaign_config(stores, campaign, hop)
     log_fn = log or (lambda *_a, **_k: None)
     pipeline_params = arm_diagnostic_scoring(
-        session, campaign_config, source=f"verify:{hop.campaign_id}:{label}", log=log_fn
+        session, campaign_config, source=RunSource.VERIFY, log=log_fn
     )
 
     opt_sp, pipeline_overlay = (
@@ -252,7 +201,12 @@ async def verify_candidate(
     effective_pipeline_params = (
         merge_pipeline_params(pipeline_params, pipeline_overlay, schema) or {}
     )
-    jsp = opt_sp.to_job_search_point(effective_pipeline_params, schema=schema)
+    jsp = opt_sp.to_job_search_point(
+        effective_pipeline_params,
+        schema=schema,
+        framing=campaign_framing(stores, campaign_config, session.dataset_name),
+        demo=session.scoring.require_partition().demo,
+    )
     node_configs = schema.node_configs(effective_pipeline_params)
     predicate: dict[str, dict[str, Any]] = dict(node_configs)
     config_hash = schema.sp_hash(effective_pipeline_params)
@@ -264,12 +218,16 @@ async def verify_candidate(
         dataset_name=campaign.dataset_name,
     )
     measured_ids = {m.sample_id for m in prior}
-    unmeasured = [s for s in session.samples if s.id not in measured_ids]
+    # The search pool alone: `verify_on_saturation` runs inside the loop, so a bench row it
+    # measured would be a bench row the loop decided on.
+    search = session.scoring.require_partition().search
+    unmeasured = [s for s in search if s.id not in measured_ids]
+    round_cells = select_optimizer(campaign_config.optimization).round_cells(len(search))
     if not unmeasured:
         return VerifyOutcome(dataset_name=campaign.dataset_name, already_measured=len(measured_ids))
 
     budget = derive_verify_samples(
-        round_cell_budget=campaign_config.sp_budget_round,
+        round_cell_budget=round_cells,
         rounds_unverified=rounds_since_verified(
             stores.diagnostic_runs.list(campaign.dataset_name),
             cycle_id=hop.cycle_id,
@@ -280,7 +238,7 @@ async def verify_candidate(
     if samples is not None and samples > budget:
         raise VerifyError(
             f"--samples {samples} is above this candidate's verify budget of {budget} "
-            f"({campaign_config.sp_budget_round} cells per candidate per round, lifted by the "
+            f"({round_cells} cells per candidate per round, lifted by the "
             f"rounds run since the last verification, capped at {len(unmeasured)} unmeasured). "
             f"Pass {budget} or fewer, or verify again after more rounds."
         )
@@ -296,7 +254,7 @@ async def verify_candidate(
         n_to_pick,
         len(measured_ids),
     )
-    with _diagnostic_trace(stores, hop):
+    with diagnostic_trace(stores, hop):
         await diagnostic_pass(
             VerifyError,
             score_search_point(
@@ -304,14 +262,9 @@ async def verify_candidate(
                 picked,
                 session,
                 label="verify",
-                # `verify` replays a RECORDED config against fresh samples; the optimizer state
-                # that produced it is not in scope here, and the workspace side it is compared
-                # against (`compute_composite_fitness` below) has none either.
-                opt_sp=None,
                 measured=None,
                 on_sample_scored=lambda *_a, **_k: None,
                 on_sample_starting=lambda *_a, **_k: None,
-                source=f"verify:{hop.campaign_id}:{label}",
             ),
         )
 
@@ -321,21 +274,12 @@ async def verify_candidate(
         predicate=predicate,
         dataset_name=campaign.dataset_name,
     )
-    by_sample: dict[int, QueryMeasurement] = {}
-    for m in workspace_measurements:
-        by_sample[m.sample_id] = _archive_measurement_to_qm(m)
-    workspace_qms = list(by_sample.values())
-
-    if session.scoring.scorer is not None:
-        rescore_results(cast("list[dict[str, Any]]", workspace_qms), session.scoring.scorer)
-    workspace_scores = compute_composite_fitness(
-        workspace_qms,
-        schema,
-        # The source campaign's side of this comparison has no opt_sp either (see the
-        # `score_search_point` call above) — a lift read across two different bases is not
-        # a lift.
-        opt_sp=None,
+    by_sample = {m.sample_id: dict(m.row) for m in workspace_measurements}
+    workspace_qms = cast(
+        "list[QueryMeasurement]",
+        rescore_results(list(by_sample.values()), session.scoring.require_scorer()),
     )
+    workspace_scores = compute_composite_fitness(workspace_qms, schema)
 
     workspace_n = len(workspace_qms)
     # Same rule as the source side above: `compute_accuracy` returns None on no scoreable rows,

@@ -134,7 +134,7 @@ The umbrella term **algorithm configuration** is borrowed from AutoML, where it 
 
 ### Where PromptPotter sits
 
-PromptPotter's sequential elimination (Bayesian Posterior-of-Being-Best with an ε futility threshold and a minimum-queries floor — knobs `pobb_epsilon` / `elimination_n_min`) **is** a racing procedure. The mapping to the algorithm-configuration framing is direct:
+PromptPotter's sequential elimination (Bayesian Posterior-of-Being-Best with an ε futility threshold and a minimum-queries floor — knobs PoBB's `epsilon` / `elimination_n_min`) **is** a racing procedure. The mapping to the algorithm-configuration framing is direct:
 
 | Algorithm configuration | PromptPotter |
 |-------------------------|--------------|

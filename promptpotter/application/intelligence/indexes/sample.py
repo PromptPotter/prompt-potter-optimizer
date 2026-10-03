@@ -1,14 +1,36 @@
 from __future__ import annotations
 
+import logging
 from collections import Counter, defaultdict
 from collections.abc import KeysView
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
+from promptpotter.application.scoring.formula import rescore_results
+from promptpotter.application.scoring.metrics import fold_cells
+from promptpotter.domain.measurement_provenance import entry_grade
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import is_hit
+from promptpotter.domain.scoring import CellScorer, QueryMeasurement, is_hit, is_unscored
+from promptpotter.infrastructure.store import archive_queries
 from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.hashing import shapes_optimizer_prompt
+from promptpotter.shared.instrument import MeasurementRole
+
+if TYPE_CHECKING:
+    from promptpotter.infrastructure.store.stores import Stores
+
+logger = logging.getLogger(__name__)
+
+
+def _graded_reading(
+    detail: dict[str, Any], scorer: CellScorer
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Grade *detail*'s rows IN PLACE — the sample index reads them next — and fold them; ``None``
+    and the reason where one row cannot be graded under *scorer*."""
+    rows = rescore_results(detail.get("measurements") or [], scorer)
+    if unscored := next((r for r in rows if is_unscored(r)), None):
+        return None, unscored.get("unscored")
+    return fold_cells(cast("list[QueryMeasurement]", rows)), None
 
 
 @dataclass
@@ -27,19 +49,40 @@ class FailureCluster:
 
 
 class SampleIndex:
-    """Per-sample derived view over the archive. ``_seen_runs`` is a delta cursor that SURVIVES the process — the per-run derivation is
-    persisted and replayed — and both paths mutate through :meth:`replay_row` so they cannot drift."""
+    """Per-sample and per-run derived view over the archive — the bench's: the scoring gateway
+    reads each cell's degradation history off it, and an optimizer may read it as evidence.
+    ``_seen_runs`` is a delta cursor that SURVIVES the process — the per-run derivation is
+    persisted and replayed — and both paths mutate through :meth:`replay_row` so they cannot drift.
 
-    def __init__(self) -> None:
+    *sample_ids* is the reading campaign's search pool, applied at replay so the persisted fold
+    stays whole for every reader: a bench-set row must reach no panel. ``None`` admits all."""
+
+    def __init__(self, *, sample_ids: frozenset[int] | None) -> None:
+        self._admitted = sample_ids
+        # Every id a replayed row introduced, admitted or not — what `ingest_run` derives
+        # `new_samples` against, so the persisted fold does not depend on who wrote it.
+        self._introduced: set[int] = set()
         self._samples: dict[int, Sample] = {}
         self._seen_runs: set[str] = set()
         self._hits: dict[int, list[bool]] = defaultdict(list)
         self._hit_run_ids: dict[int, list[str]] = defaultdict(list)
         self._failure_modes: dict[int, list[str]] = defaultdict(list)
         self._degradation_counts: dict[int, int] = defaultdict(int)
-        self._flips: list[dict[str, Any]] = []
         # Cache for derived query records; cleared on ingest.
         self._cache_records: list[SampleRecord] | None = None
+        # Archived runs this formula cannot score (they predate a term it names). Bound once,
+        # read by BOTH halves of `refresh` — the per-sample ingest and the run snapshot.
+        self._unscoreable_runs: set[str] = set()
+        # run_id -> (the detail signature it was read at, ``fold_cells`` over the run's rows graded
+        # under the refreshing scorer).
+        self._readings: dict[str, tuple[list[int], dict[str, Any]]] = {}
+        # Whether the persisted per-run fold was replayed instead of re-derived. Decides
+        # append-vs-replace when this refresh writes back; `None` until the first refresh.
+        self._fold_seeded: bool | None = None
+        # `(archive entry, its reading)` for every run an optimizer may learn from, as of the last
+        # refresh, and how many refreshes that has been — so a reader folds each one once.
+        self.runs: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        self.generation = 0
 
     def register(self, sample: Sample) -> None:
         self._samples[sample.id] = sample
@@ -63,7 +106,7 @@ class SampleIndex:
             sid = item.get("sample_id")
             if sid is None:
                 continue
-            if sid not in self._samples and sid not in seen_new:
+            if sid not in self._introduced and sid not in seen_new:
                 seen_new.add(sid)
                 new_samples.append([sid, item.get("query", ""), item.get("ground_truth", "")])
 
@@ -85,12 +128,16 @@ class SampleIndex:
         """Apply one derived row — the SOLE mutation path, so the live derivation above and
         the on-disk replay cannot drift into disagreeing about what a run contributed."""
         run_id = row.get("run_id") or ""
+        admitted = self._admitted
 
         for sid, query, ground_truth in row.get("new_samples") or []:
-            if sid not in self._samples:
+            self._introduced.add(sid)
+            if sid not in self._samples and (admitted is None or sid in admitted):
                 self.register(Sample(id=sid, query=query, ground_truth=ground_truth))
 
         for sid, hit, degraded, failure_mode in row.get("cells") or []:
+            if admitted is not None and sid not in admitted:
+                continue
             self._hits[sid].append(hit)
             if hit and run_id:
                 self._hit_run_ids[sid].append(run_id)
@@ -103,40 +150,6 @@ class SampleIndex:
                 sample.run_ids.append(run_id)
 
         self._cache_records = None
-
-    def record_flips(
-        self,
-        round_num: int,
-        changes_description: str,
-        prev_results: list[dict[str, Any]],
-        new_results: list[dict[str, Any]],
-    ) -> int:
-        prev_hits: dict[int, bool] = {}
-        for r in prev_results:
-            sid = r.get("sample_id")
-            if sid is not None:
-                prev_hits[sid] = is_hit(r.get("fitness"))
-
-        count = 0
-        for r in new_results:
-            sid = r.get("sample_id")
-            if sid is None or sid not in prev_hits:
-                continue
-            new_hit = is_hit(r.get("fitness"))
-            old_hit = prev_hits[sid]
-            if new_hit != old_hit:
-                self._flips.append(
-                    {
-                        "sample_id": sid,
-                        "query": r.get("query", ""),
-                        "round": round_num,
-                        "changes_description": changes_description[:80],
-                        "old_hit": old_hit,
-                        "new_hit": new_hit,
-                    }
-                )
-                count += 1
-        return count
 
     def hits(self, sample_id: int) -> list[bool]:
         return self._hits.get(sample_id, [])
@@ -152,15 +165,6 @@ class SampleIndex:
         if n == 0:
             return 0.0
         return self._degradation_counts.get(sample_id, 0) / n
-
-    def flips(self, sample_id: int | None = None, limit: int = 20) -> list[dict[str, Any]]:
-        flips = self._flips
-        if sample_id is not None:
-            flips = [f for f in flips if f.get("sample_id") == sample_id]
-        return flips[-limit:]
-
-    def all_flips(self) -> list[dict[str, Any]]:
-        return self._flips
 
     def records(self) -> list[SampleRecord]:
         """Build per-sample SampleRecord list, cached until next ingest."""
@@ -271,6 +275,149 @@ class SampleIndex:
 
     def mark_seen(self, run_id: str) -> None:
         self._seen_runs.add(run_id)
+
+    # ----- ingest / refresh -----
+
+    def _seed_from_fold(self, stores: Stores, dataset_name: str | None, formula_key: str) -> bool:
+        """Replay the persisted per-run fold; ``True`` if it was whole enough to trust. Validation is
+        all-or-nothing so the replay ORDER matches ingest — ``persistent_failures`` reads a tail streak."""
+        if not dataset_name:
+            return False
+        rows = archive_queries.sample_fold_rows(stores, dataset_name=dataset_name)
+        if not rows:
+            return False
+
+        signatures = archive_queries.run_signatures(stores)
+        for row in rows:
+            run_id = row.get("run_id") or ""
+            if row.get("fk") != formula_key:
+                return False
+            if list(signatures.get(run_id) or ()) != list(row.get("sig") or ()):
+                return False
+
+        for row in rows:
+            run_id = row["run_id"]
+            if row.get("unscoreable"):
+                self._unscoreable_runs.add(run_id)
+            else:
+                self.replay_row(row)
+                self._readings[run_id] = (row["sig"], row["reading"])
+            self.mark_seen(run_id)
+        logger.debug("SampleIndex seeded %d run(s) from the persisted fold", len(rows))
+        return True
+
+    def refresh(
+        self,
+        stores: Stores,
+        *,
+        scorer: CellScorer,
+        scorer_id: str,
+        dataset_name: str | None,
+    ) -> None:
+        """Incremental archive refresh, dataset-scoped. A row this formula cannot score is SKIPPED, counted
+        and logged — never 0.0, which would poison every reading — and the skip binds BOTH halves below.
+
+        The fold is stamped with ``scorer_id`` alone: it hashes both formulas
+        (`compiler.py::auto_scorer_id`), so a second spelling here could only disagree with it."""
+        if self._fold_seeded is None:
+            self._fold_seeded = self._seed_from_fold(stores, dataset_name, scorer_id)
+
+        # Captured BEFORE the details are read, never after: a run whose log grows between the
+        # two must end up stamped with the OLDER signature, so the next process re-derives it.
+        # Stamping the newer one would leave a fold that silently omits the rows it gained.
+        signatures = archive_queries.run_signatures(stores)
+
+        added = 0
+        skipped: list[str] = []
+        folded: list[dict[str, Any]] = []
+        for run_id, detail in archive_queries.runs_since(
+            stores, self._seen_runs, dataset_name=dataset_name
+        ):
+            sig = list(signatures.get(run_id) or ())
+            stamp = {"fk": scorer_id, "sig": sig}
+            reading, unscored = _graded_reading(detail, scorer)
+            # The WHOLE run goes, on the first row that could not be graded. A per-row skip
+            # would fold a partial run under a `scorer_id` claiming it scored entire, and no
+            # reader can tell one from the other afterwards.
+            if reading is None:
+                skipped.append(run_id)
+                self._unscoreable_runs.add(run_id)
+                self.mark_seen(run_id)
+                folded.append({"run_id": run_id, "unscoreable": True, **stamp})
+                logger.warning(
+                    "sample refresh: archived run %r is unscoreable under the active formula "
+                    "— skipping it (it predates the current observation vocabulary). %s",
+                    run_id,
+                    unscored,
+                )
+                continue
+            self._readings[run_id] = (sig, reading)
+            folded.append({**self.ingest_run(detail), "reading": reading, **stamp})
+            self.mark_seen(run_id)
+            added += 1
+
+        # A run seen earlier that has GROWN since is read again, so every reader ranks a run on
+        # what it holds now; the per-sample ingest keeps first sight.
+        for run_id, (sig, _) in list(self._readings.items()):
+            if sig == (now := list(signatures.get(run_id) or ())):
+                continue
+            grown = archive_queries.load_run(stores, run_id)
+            regraded = None if grown is None else _graded_reading(grown, scorer)[0]
+            if regraded is None:
+                del self._readings[run_id]
+            else:
+                self._readings[run_id] = (now, regraded)
+
+        # Replace rather than append whenever the seed was rejected: what this process just
+        # derived IS the whole fold, and appending would leave the rejected rows in front of it.
+        if dataset_name and (folded or not self._fold_seeded):
+            archive_queries.write_sample_fold(
+                stores, dataset_name=dataset_name, rows=folded, append=self._fold_seeded
+            )
+            self._fold_seeded = True
+        if skipped:
+            logger.warning(
+                "sample refresh: %d archived run(s) skipped as unscoreable under the active "
+                "formula (%s) — the index is built from the %d that scored.",
+                len(skipped),
+                ", ".join(skipped[:5]),
+                added,
+            )
+
+        # Grade-C runs (incidental connector-retrieval short-circuits) are dropped here so the
+        # cross-cycle evidence an optimizer reads reflects the deliberately-explored datapoints,
+        # not whichever connector replayed most. Unscoreable runs are dropped for the same
+        # reason: a fitness from a dead vocabulary is not comparable to one from this run's.
+        # A bench pass goes whole: its accuracy is a reading on rows no optimizer may learn from.
+        self.runs = [
+            (entry, self._readings[run_id][1])
+            for entry in archive_queries.list_runs(stores, dataset_name=dataset_name)
+            if entry_grade(entry) != "C"
+            and (run_id := entry.get("run_id", "")) in self._readings
+            and entry.get("name") != MeasurementRole.BENCH
+        ]
+        self.generation += 1
+
+        if added:
+            logger.debug(
+                "SampleIndex refreshed: %d new runs (total seen: %d)", added, len(self._seen_runs)
+            )
+
+    @classmethod
+    def ensure_for(
+        cls,
+        stores: Stores | None,
+        *,
+        scorer: CellScorer,
+        scorer_id: str,
+        dataset_name: str | None,
+        sample_ids: frozenset[int] | None,
+    ) -> SampleIndex | None:
+        if stores is None:
+            return None
+        idx = cls(sample_ids=sample_ids)
+        idx.refresh(stores, scorer=scorer, scorer_id=scorer_id, dataset_name=dataset_name)
+        return idx
 
 
 __all__ = ["FailureCluster", "SampleIndex", "SampleRecord"]

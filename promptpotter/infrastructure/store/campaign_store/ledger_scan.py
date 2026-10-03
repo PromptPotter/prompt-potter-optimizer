@@ -16,12 +16,15 @@ during an admissibility check.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
 
+from promptpotter.domain.dashboard_rows import RunStanding
 from promptpotter.domain.phases import CampaignPhase, RunPhase
+from promptpotter.domain.results import ArmOutcome
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler
 from promptpotter.domain.run_records import (
     CandidateMintedRecord,
@@ -29,9 +32,11 @@ from promptpotter.domain.run_records import (
     ElectionRecord,
     LedgerCandidate,
     LedgerRoundClose,
+    RunLimitsRecord,
+    TokenUsageRecord,
     WallClock,
 )
-from promptpotter.domain.spend import TOKEN_KIND_BUCKET
+from promptpotter.domain.spend import TOKEN_KIND_BUCKET, SpendRollup
 from promptpotter.infrastructure.store.read_model import iter_jsonl
 from promptpotter.shared.clock import epoch_seconds
 
@@ -43,7 +48,7 @@ from promptpotter.shared.clock import epoch_seconds
 _SCORED_INCLUDE = frozenset(LedgerCandidate.model_fields) - {
     "round",
     "idx",
-    "parent_id",
+    "parent_ids",
     "source",
     "state",
 }
@@ -62,6 +67,20 @@ def scan_ledger_cycle_seed(ledger_path: Path) -> CycleSeed | None:
                 found = CycleSeed.model_validate(seed_data)
             except ValidationError:
                 continue
+    return found
+
+
+def scan_ledger_run_limits(ledger_path: Path) -> RunLimitsRecord:
+    """The cycle's standing operator ceiling — the LAST ``RunLimitsRecord`` on its OWN ledger,
+    so a fork never reads its parent's. Every arm ``None`` where the operator never set one."""
+    found = RunLimitsRecord()
+    for rec in iter_jsonl(ledger_path, record_types=frozenset({"run_limits"})):
+        if rec.get("record_type") != "run_limits":
+            continue
+        try:
+            found = RunLimitsRecord.model_validate(rec)
+        except ValidationError:
+            continue
     return found
 
 
@@ -103,7 +122,7 @@ def scan_ledger_candidates(ledger_path: Path) -> list[LedgerCandidate]:
             _merge(
                 (minted.round, minted.idx),
                 candidate_id=minted.candidate_id,
-                parent_id=minted.parent_id,
+                parent_ids=minted.parent_ids,
                 label=minted.label,
                 changes_description=minted.changes_description,
                 source=minted.source,
@@ -129,7 +148,7 @@ def scan_ledger_candidates(ledger_path: Path) -> list[LedgerCandidate]:
                 fields["composite_fitness"] = None
             _merge(
                 (rnd, idx),
-                state="invalid" if scores.get("invalid") else "measured",
+                state="invalid" if scores.get("outcome") == ArmOutcome.INVALID else "measured",
                 **fields,
             )
 
@@ -212,16 +231,32 @@ def scan_ledger_round_closes(ledger_path: Path) -> dict[int, LedgerRoundClose]:
     return out
 
 
-def _phase_seconds(rows: list[dict[str, Any]]) -> dict[str, float]:
-    """Bracketed clock per :class:`CampaignPhase`, paired on ``(phase, round)``.
+def scan_ledger_run_standing(ledger_path: Path) -> RunStanding | None:
+    """The optimizer's standing as the LAST displayed round left it, or ``None`` before round 0
+    has closed — a finished run's answer as much as a live one's."""
+    standing: RunStanding | None = None
+    for rec in iter_jsonl(ledger_path, record_types=frozenset({"phase"})):
+        if rec.get("phase") == "round" and rec.get("event") == "display":
+            standing = RunStanding.model_validate(rec["payload"]["run_standing"])
+    return standing
 
-    The roster is the ENUM, never a hand-listed set: ``round`` is an open marker with no exit,
+
+_Span = tuple[float, float]
+_CallSpan = tuple[str, str, float, float]
+
+
+def _phase_spans(
+    rows: list[dict[str, Any]], optimizer_phases: frozenset[str]
+) -> list[tuple[str, float, float]]:
+    """Bracketed spans per phase, the bench's and the optimizer's, paired on ``(phase, round)``.
+
+    The roster is DECLARED, never a hand-listed set: ``round`` is an open marker with no exit,
     ``control`` is the run-phase channel and ``backend`` a warning channel, and each would read as
     a bracket that never closes. An unpaired enter contributes nothing — a phase the run died
     inside measured no span, and inventing one would close it at a moment nothing recorded."""
-    brackets = {p.value for p in CampaignPhase}
+    brackets = {p.value for p in CampaignPhase} | optimizer_phases
     open_at: dict[tuple[str, object], float] = {}
-    out: dict[str, float] = {}
+    out: list[tuple[str, float, float]] = []
     for rec in rows:
         phase = rec.get("phase")
         if rec.get("record_type") != "phase" or phase not in brackets:
@@ -232,37 +267,39 @@ def _phase_seconds(rows: list[dict[str, Any]]) -> dict[str, float]:
         if rec.get("event") == "enter":
             open_at[key] = at
         elif rec.get("event") == "exit" and (entered := open_at.pop(key, None)) is not None:
-            out[str(phase)] = out.get(str(phase), 0.0) + max(0.0, at - entered)
+            out.append((str(phase), entered, max(entered, at)))
     return out
 
 
-def _gate_seconds(rows: list[dict[str, Any]], *, until: float | None) -> float:
-    """Seconds held at the origin gate, off the ``control`` channel ``declare_run_phase`` owns.
+def _gate_spans(rows: list[dict[str, Any]], *, until: float | None) -> list[_Span]:
+    """Spans held at the origin gate, off the ``control`` channel ``declare_run_phase`` owns.
 
     A rescore re-declares ``gate``, so a second one CLOSES the first: the wait and the re-measure
     both happened inside it, and nothing else brackets the re-measure, so it is counted here. An
     abandoned gate — abort, or a producer that vanished — closes at *until*, because the operator
     held it that long."""
-    total, opened = 0.0, None
+    out: list[_Span] = []
+    opened: float | None = None
     for rec in rows:
         if rec.get("record_type") != "phase" or rec.get("phase") != "control":
             continue
         if (at := epoch_seconds(rec.get("timestamp"))) is None:
             continue
         if opened is not None:
-            total += max(0.0, at - opened)
+            out.append((opened, max(opened, at)))
             opened = None
         if rec.get("event") == RunPhase.GATE.value:
             opened = at
     if opened is not None and until is not None:
-        total += max(0.0, until - opened)
-    return total
+        out.append((opened, max(opened, until)))
+    return out
 
 
-def _worked_seconds(rows: list[dict[str, Any]]) -> dict[str, float]:
-    """Summed call time per spend bucket. Cached calls are excluded for the reason the BILL
-    excludes them — a replay reached no wire and occupied no clock."""
-    out: dict[str, float] = {}
+def _call_spans(rows: list[dict[str, Any]], *, opened: float | None) -> list[_CallSpan]:
+    """Every fresh call as ``(bucket, node, start, end)`` — a replay reached no wire and held no
+    clock. A bill is stamped when it LANDS, so a span ends at its record: a cell's nodes at its
+    reply."""
+    out: list[_CallSpan] = []
     for rec in rows:
         if rec.get("record_type") != "token_usage" or rec.get("cached"):
             continue
@@ -270,7 +307,53 @@ def _worked_seconds(rows: list[dict[str, Any]]) -> dict[str, float]:
         seconds = rec.get("duration_s")
         if bucket is None or not isinstance(seconds, (int, float)) or isinstance(seconds, bool):
             continue
-        out[bucket] = out.get(bucket, 0.0) + max(0.0, float(seconds))
+        if (at := epoch_seconds(rec.get("timestamp"))) is None:
+            continue
+        start = at - float(seconds) if opened is None else max(at - float(seconds), opened)
+        if start < at:
+            out.append((bucket, str(rec.get("node")), start, at))
+    return out
+
+
+def _merged(spans: list[_Span]) -> list[_Span]:
+    out: list[_Span] = []
+    for start, end in sorted(spans):
+        if out and start <= out[-1][1]:
+            out[-1] = (out[-1][0], max(out[-1][1], end))
+        else:
+            out.append((start, end))
+    return out
+
+
+def _unbracketed_call_seconds(
+    calls: list[_CallSpan], covered: list[_Span]
+) -> dict[str, dict[str, float]]:
+    """CLOCK each node's calls held outside every *covered* span, decided on spans and never on the
+    node's name; an instant several calls share is split evenly, so the legs sum to the clock."""
+    events = sorted(
+        [(start, 1, (bucket, node)) for bucket, node, start, _ in calls]
+        + [(end, -1, (bucket, node)) for bucket, node, _, end in calls]
+    )
+    active: dict[tuple[str, str], int] = {}
+    out: dict[str, dict[str, float]] = {}
+    cursor, prev = 0, None
+    for at, delta, key in events:
+        running = sum(active.values())
+        if prev is not None and running and at > prev:
+            # `prev` only grows, so a bracket ending before it can never cover a later slice.
+            while cursor < len(covered) and covered[cursor][1] <= prev:
+                cursor += 1
+            free, j = at - prev, cursor
+            while j < len(covered) and covered[j][0] < at:
+                free -= min(covered[j][1], at) - max(covered[j][0], prev)
+                j += 1
+            for (bucket, node), n in active.items() if free > 0 else ():
+                by_node = out.setdefault(bucket, {})
+                by_node[node] = by_node.get(node, 0.0) + free * n / running
+        active[key] = active.get(key, 0) + delta
+        if not active[key]:
+            del active[key]
+        prev = at
     return out
 
 
@@ -313,8 +396,56 @@ def _unworked_seconds(rows: list[dict[str, Any]]) -> float | None:
     return total
 
 
-def scan_ledger_wall_clock(ledger_path: Path, *, started_at: str, finished_at: str) -> WallClock:
-    """Where this cycle's wall clock went — ONE screened pass, four folds, banked by ``_finalize_run``.
+def scan_ledger_run_ids(ledger_paths: Iterable[Path]) -> set[str]:
+    """Every archive run these ledgers' scored samples landed in — what a line filed, which no
+    run in the archive can say, since none names a campaign."""
+    return _scan_scored(ledger_paths, "run_id")
+
+
+def scan_ledger_cell_keys(ledger_paths: Iterable[Path]) -> set[str]:
+    """Every cell these ledgers' scored samples measured or replayed — each one already priced."""
+    return _scan_scored(ledger_paths, "cell_key")
+
+
+def _scan_scored(ledger_paths: Iterable[Path], key: str) -> set[str]:
+    found: set[str] = set()
+    for path in ledger_paths:
+        for rec in iter_jsonl(path, record_types=frozenset({"sample_scored"})):
+            if rec.get("record_type") != "snapshot" or rec.get("event") != "sample_scored":
+                continue
+            value = ((rec.get("payload") or {}).get("result") or {}).get(key)
+            if isinstance(value, str):
+                found.add(value)
+    return found
+
+
+def scan_ledger_spend(ledger_paths: Iterable[Path]) -> tuple[SpendRollup, int]:
+    """The spend these ledgers' own rows record, folded as a cycle's dashboard folds its own, and
+    how many of those calls reached a provider. Physical, so a fork never re-counts its parent."""
+    spend = SpendRollup()
+    calls = 0
+    for ledger_path in ledger_paths:
+        for rec in iter_jsonl(ledger_path, record_types=frozenset({"token_usage"})):
+            if rec.get("record_type") != "token_usage":
+                continue
+            try:
+                usage = TokenUsageRecord.model_validate(rec)
+            except ValidationError:
+                continue
+            spend.bank(usage)
+            calls += not usage.cached
+    return spend, calls
+
+
+def scan_ledger_wall_clock(
+    ledger_paths: Sequence[Path],
+    *,
+    started_at: str,
+    finished_at: str,
+    optimizer_phases: frozenset[str],
+) -> WallClock:
+    """Where one launch's wall clock went across the ledgers it wrote — ONE screened pass per file.
+    ``optimizer_phases`` are the phases the cycle's optimizer declares for itself.
 
     Physical like its neighbours, so a fork answers for its OWN clock and not its parent's history.
     The endpoints are the RUNNER's, because the ledger's first record is already past
@@ -322,31 +453,48 @@ def scan_ledger_wall_clock(ledger_path: Path, *, started_at: str, finished_at: s
 
     ``sample_scored`` is an event and not a record type, but the screen is a raw-line substring
     probe, so naming it there is what keeps the per-cell rows in and every other snapshot out."""
-    rows = iter_jsonl(
-        ledger_path, record_types=frozenset({"phase", "token_usage", "sample_scored"})
-    )
+    rows = [
+        row
+        for ledger_path in ledger_paths
+        for row in iter_jsonl(
+            ledger_path, record_types=frozenset({"phase", "token_usage", "sample_scored"})
+        )
+    ]
     opened, closed = epoch_seconds(started_at), epoch_seconds(finished_at)
     # A resumed cycle's ledger holds every earlier launch, while both endpoints are THIS launch's —
     # so the folds read this launch alone, and a round an earlier one closed reports no clock
-    # rather than an instant one.
+    # rather than an instant one. The cycles one launch ran write one after another, so time
+    # order is the order each fold pairs its brackets in.
     if opened is not None:
-        rows = [
-            r
+        dated = [
+            (at, r)
             for r in rows
             if (at := epoch_seconds(r.get("timestamp"))) is not None and at >= opened
         ]
+        rows = [r for _, r in sorted(dated, key=lambda pair: pair[0])]
     elapsed = None if opened is None or closed is None else max(0.0, closed - opened)
-    phase_s = _phase_seconds(rows)
-    gate_s = _gate_seconds(rows, until=closed)
+    phases = _phase_spans(rows, optimizer_phases)
+    gates = _gate_spans(rows, until=closed)
+    calls = _call_spans(rows, opened=opened)
+    covered = _merged([(start, end) for _, start, end in phases] + gates)
+    phase_s: dict[str, float] = {}
+    for phase, start, end in phases:
+        phase_s[phase] = phase_s.get(phase, 0.0) + end - start
+    worked_s: dict[str, dict[str, float]] = {}
+    for bucket, node, start, end in calls:
+        by_node = worked_s.setdefault(bucket, {})
+        by_node[node] = by_node.get(node, 0.0) + end - start
+    unbracketed = _unbracketed_call_seconds(calls, covered)
+    held = sum(end - start for start, end in covered)
+    held += sum(s for by_node in unbracketed.values() for s in by_node.values())
     return WallClock(
         elapsed_s=elapsed,
         phase_s=phase_s,
-        worked_s=_worked_seconds(rows),
+        worked_s=worked_s,
+        unbracketed_call_s=unbracketed,
         round_ended_s=_round_ended_seconds(rows, opened=opened),
-        gate_s=gate_s,
-        unattributed_s=(
-            None if elapsed is None else max(0.0, elapsed - sum(phase_s.values()) - gate_s)
-        ),
+        gate_s=sum(end - start for start, end in gates),
+        unattributed_s=None if elapsed is None else max(0.0, elapsed - held),
         unworked_s=_unworked_seconds(rows),
     )
 
@@ -357,5 +505,7 @@ __all__ = [
     "scan_ledger_decisions",
     "scan_ledger_elections",
     "scan_ledger_round_closes",
+    "scan_ledger_run_standing",
+    "scan_ledger_spend",
     "scan_ledger_wall_clock",
 ]

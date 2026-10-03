@@ -17,6 +17,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.campaign_config import load_campaign_config
 from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
@@ -25,11 +26,12 @@ from promptpotter.application.datasets.authored import (
 from promptpotter.application.initialization.loop_start import (
     arm_diagnostic_scoring,
     diagnostic_pass,
+    diagnostic_trace,
 )
 from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.optimization.task_context import committed_task_context
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.scoring.search_point_scorer import score_search_point
+from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.scoring import (
     all_verifier_graded,
     is_hit,
@@ -245,7 +247,7 @@ async def screen_inner_seeds(
             file_config = read_campaign_config_file(cfg_path)
     campaign_config = load_campaign_config(file_config)
     pipeline_params = arm_diagnostic_scoring(
-        session, campaign_config, source=f"seed_screen:{dataset_name}", log=log_fn
+        session, campaign_config, source=RunSource.SEED_SCREEN, log=log_fn
     )
     # The screen's whole concurrency story, and it reuses the shipped window rather than adding a
     # second way to run things at once: `run_walks` re-reads this at every launch boundary and
@@ -271,10 +273,13 @@ async def screen_inner_seeds(
     # prompt the campaign will actually score. Without it the screen's `reasoning_margin` grades a
     # prompt no run ever sends, and stops predicting the origin it exists to choose seats for.
     origin_sp = resolve_origin_opt_search_point(
-        [session.llm_node_name()],
-        session.dataset_config_dir,
-        task_context=committed_task_context(stores, dataset_name),
-    ).to_job_search_point(pipeline_params, schema=session.pipeline_schema)
+        [session.llm_node_name()], session.dataset_config_dir
+    ).to_job_search_point(
+        pipeline_params,
+        schema=session.pipeline_schema,
+        framing=campaign_framing(stores, campaign_config, dataset_name),
+        demo=session.scoring.require_partition().demo,
+    )
 
     readings: list[SeedReading] = []
     for seed in seeds:
@@ -289,29 +294,25 @@ async def screen_inner_seeds(
         cost_usd: float | None = None
         n_scored = 0
         for i in range(max(1, repeat)):
-            passed = await diagnostic_pass(
-                SeedScreenError,
-                score_search_point(
-                    origin_sp,
-                    bank,
-                    session,
-                    # Distinct per pass: `force_fresh` truncates its run's detail log first, so a
-                    # shared label would have each pass overwrite the last.
-                    label=f"seed{seed}_origin_{i}",
-                    # A screen measures the BANK, not an individual's own report, so every seed
-                    # sits on the same vacuous fallback — otherwise the readings would partly
-                    # carry prompt length rather than the bank (the gateway's contract for
-                    # `opt_sp`).
-                    opt_sp=None,
-                    measured=None,
-                    # No per-sample callbacks, declared rather than defaulted: a screen has no
-                    # live display to report a row to.
-                    on_sample_scored=None,
-                    on_sample_starting=None,
-                    source=f"seed_screen:{dataset_name}:seed{seed}:{i}",
-                    force_fresh=repeat > 1,
-                ),
-            )
+            # A screen answers for no campaign, so its bills land on the workspace's ledger.
+            with diagnostic_trace(stores, None):
+                passed = await diagnostic_pass(
+                    SeedScreenError,
+                    score_search_point(
+                        origin_sp,
+                        bank,
+                        session,
+                        # Distinct per pass: `force_fresh` truncates its run's detail log first, so a
+                        # shared label would have each pass overwrite the last.
+                        label=f"seed{seed}_origin_{i}",
+                        measured=None,
+                        # No per-sample callbacks, declared rather than defaulted: a screen has no
+                        # live display to report a row to.
+                        on_sample_scored=None,
+                        on_sample_starting=None,
+                        force_fresh=repeat > 1,
+                    ),
+                )
             rows = passed.results
             # `is_hit` is the ONE definition of "this configuration solved the row" — re-deriving
             # it from predicted-vs-ground_truth would be a second answer to a question the scorer

@@ -6,24 +6,12 @@ that silently shadowed the first, so the file's one externally-called function w
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.l1.stats import L1Stats, compute_l1_stats
-from promptpotter.application.optimization.validators.behavior_base import (
-    CheckResult,
-    ValidatorContext,
-)
-from promptpotter.application.optimization.validators.l1_behavior import (
-    CHECK_REGISTRY,
-    extract_l1_variants,
-    run_all_checks,
-)
-from promptpotter.application.optimization.validators.l2_behavior import run_all_l2_checks
-from promptpotter.application.views.render.optimizer_prompt_text import (
-    fmt_pct,
-    format_l1_critique_for_prompt,
-)
-from promptpotter.domain.escalation_signals import exploration_budget
+from promptpotter.application.optimizers.nodes import CheckResult, ReviewReading, ReviewStat
+from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
+from promptpotter.domain.bench import BenchReading, BenchScore
 from promptpotter.domain.phases import STOP_REASON_INFO, StopReason
 from promptpotter.domain.results import (
     CEILING_FRACTION,
@@ -32,10 +20,12 @@ from promptpotter.domain.results import (
     RoundResult,
     ScoredCandidate,
     candidate_label,
-    is_round_winner,
     overlap_series,
     round_clocks,
 )
+
+if TYPE_CHECKING:
+    from promptpotter.application.optimizer_manifest import SelectedOptimizer
 
 __all__ = ["render_review_md"]
 
@@ -47,43 +37,46 @@ def render_review_md(
     round_audits: list[dict[str, Any] | None] | None = None,
     context_object: list[str] | None = None,
     accuracy_ceiling: float | None,
-    l1_patience: int,
+    optimizer: SelectedOptimizer,
+    bench: BenchScore | None,
 ) -> str:
+    """*bench* is the campaign's headline where this cycle answers for its result."""
     audits = list(round_audits or [None] * len(rounds))
     if len(audits) < len(rounds):
         audits.extend([None] * (len(rounds) - len(audits)))
     ctx_items = [c for c in (context_object or []) if isinstance(c, str) and c.strip()]
 
-    behavior_per_round, l2_behavior_per_round = _compute_behavior_per_round(
-        rounds, audits, ctx_items, l1_patience
-    )
     final = index.get("final") or {}
     # Absent means the origin was never scored, which is not the same as scoring 0.0 — `_top_lifts`
     # drops round 0's lift rather than measuring it against a bar nothing established.
     origin_cf = final.get("origin_composite_fitness")
-    origin_composite_fitness = float(origin_cf) if isinstance(origin_cf, int | float) else None
-    clock = final.get("wall_clock") or {}
-    stats = compute_l1_stats(
+    # An optimizer's own readings — its statistics, behaviour scorers and feedback — exist only
+    # where its runtime keeps them; any other optimizer's review says so rather than printing 0%.
+    review = optimizer.runtime.review(
+        optimizer,
         list(rounds),
-        origin_composite_fitness=origin_composite_fitness,
-        behavior_results=behavior_per_round,
-        l2_behavior_results=l2_behavior_per_round,
+        audits,
+        context_object=ctx_items,
+        origin_composite_fitness=float(origin_cf) if isinstance(origin_cf, int | float) else None,
     )
+    clock = final.get("wall_clock") or {}
+    stats = review.stats if review is not None else None
 
     repairs_per_round = [_schema_repair_count(a) for a in audits]
     calls_per_round = [_optimizer_call_count(a) for a in audits]
     halt = _halt_info(index, rounds)
     parts: list[str] = []
-    parts += _render_header(index, final, stats, halt)
+    parts += _render_header(index, final, review.verdict if review is not None else None, halt)
+    parts += _render_bench(final, bench)
     # Counted here and not read off `final`: this renders at every round close, long before
     # finalize banks a `final` block. Only the minutes need the banked clock.
     clocks = round_clocks(rounds, accuracy_ceiling=accuracy_ceiling)
     round_ended_s = _float_map(clock.get("round_ended_s"))
     parts += _render_stats_block(
-        clocks, round_ended_s, stats, repairs_per_round, calls_per_round, halt
+        clocks, round_ended_s, stats, repairs_per_round, calls_per_round, halt, optimizer.name
     )
     parts += _render_wall_clock(clock)
-    parts += _render_behavior_summary(behavior_per_round)
+    parts += _render_behavior_summary(review)
     parts += ["## Rounds", ""]
 
     last_idx = len(rounds) - 1
@@ -91,8 +84,8 @@ def render_review_md(
         is_peek = i == last_idx and _is_generation_only(round_data)
         parts += _render_round(
             round_data,
-            audits[i],
-            behavior_per_round[i] if i < len(behavior_per_round) else [],
+            review,
+            i,
             is_peek=is_peek,
             schema_repair_retries=repairs_per_round[i],
         )
@@ -101,7 +94,7 @@ def render_review_md(
 
 
 def _schema_repair_count(audit: dict[str, Any] | None) -> int:
-    """Sum ``schema_repair_attempts`` across optimizer nodes; non-zero ⇒ a second round-trip was paid.
+    """Count ``schema_repair_errors`` across optimizer nodes; non-zero ⇒ a second round-trip was paid.
     Cycle-wide rate is the cleanest single-number quality signal for an L1 optimizer prompt."""
     if not audit:
         return 0
@@ -109,74 +102,34 @@ def _schema_repair_count(audit: dict[str, Any] | None) -> int:
     if not isinstance(nodes, dict):
         return 0
     return sum(
-        int(block.get("schema_repair_attempts") or 0)
+        len(block.get("schema_repair_errors") or ())
         for block in nodes.values()
         if isinstance(block, dict)
     )
 
 
 def _optimizer_call_count(audit: dict[str, Any] | None) -> int:
-    """Count optimizer LLM nodes in this round's audit (excludes ``l1_score``)."""
     if not audit:
         return 0
     nodes = audit.get("nodes") or {}
     if not isinstance(nodes, dict):
         return 0
-    return sum(1 for k, v in nodes.items() if k != "l1_score" and isinstance(v, dict))
-
-
-# --- behaviour-check evaluation -------------------------------------------
-
-
-def _compute_behavior_per_round(
-    rounds: list[RoundResult],
-    audits: list[dict[str, Any] | None],
-    context_object: list[str],
-    l1_patience: int,
-) -> tuple[list[list[CheckResult]], list[list[CheckResult]]]:
-    """Per-round L1 + L2 behaviour-check results (same length as ``rounds``).
-    L2 returns ``[]`` for rounds where L2 didn't fire — absent fire ≠ conformance failure."""
-    l1_out: list[list[CheckResult]] = []
-    l2_out: list[list[CheckResult]] = []
-    prior_audits: list[dict[str, Any]] = []
-    # Stall depth entering each round, reconstructed from the persisted ``improved``
-    # flags (the round file doesn't carry the live l1_stall_count). Same recurrence as
-    # ``EscalationFSM.observe_round``: reset to 0 on improvement, else +1. Read BEFORE
-    # the update so each round's exploration_budget matches what its L1 generation saw.
-    stall = 0
-    for i, round_data in enumerate(rounds):
-        round_num = round_data.round
-        budget = exploration_budget(stall, l1_patience).value if round_num >= 1 else None
-        audit = audits[i] if i < len(audits) else None
-        if round_num >= 1:
-            stall = 0 if round_data.improved else stall + 1
-        if audit is None:
-            l1_out.append([])
-            l2_out.append([])
-            continue
-        opt_sp = round_data.opt_sp
-        ctx = ValidatorContext(
-            round_num=round_num,
-            prior_rounds=list(prior_audits),
-            opt_sp=opt_sp.model_dump() if opt_sp else {},
-            context_object=context_object,
-            exploration_budget=budget,
-            peaked_axes=frozenset(round_data.axis_memory_peaked),
-        )
-        l1_out.append(run_all_checks(audit, ctx))
-        l2_out.append(run_all_l2_checks(audit, ctx))
-        prior_audits.append(audit)
-    return l1_out, l2_out
+    return sum(1 for v in nodes.values() if isinstance(v, dict))
 
 
 # --- rendering helpers ----------------------------------------------------
+
+
+def _stat(stat: ReviewStat) -> str:
+    """An unmeasured reading renders as ``—``, never as a number the cycle never produced."""
+    return "—" if stat.value is None else format(stat.value, stat.spec)
 
 
 def _halt_info(index: dict[str, Any], rounds: list[RoundResult]) -> dict[str, str] | None:
     """The cycle's terminal health story, or ``None`` when it ended cleanly. Gated on the cycle's
     TERMINAL state, never on a critical round in history that L2 then self-healed away."""
     stop_reason = (index.get("stop_reason") or "").strip()
-    terminated = "yes" if stop_reason == StopReason.ABORT else ""
+    terminated = "yes" if stop_reason == StopReason.OPTIMIZER_ABORT else ""
     last_health: DegradationHealth | None = None
     last_critical: DegradationHealth | None = None
     for r in rounds:
@@ -197,7 +150,7 @@ def _halt_info(index: dict[str, Any], rounds: list[RoundResult]) -> dict[str, st
             "action": (last_critical.suggested_action or "").strip(),
             "terminated": terminated,
         }
-    return {"tag": "terminate_proposal", "node": "", "action": "", "terminated": terminated}
+    return {"tag": StopReason.OPTIMIZER_ABORT, "node": "", "action": "", "terminated": terminated}
 
 
 def _stop_next_step(index: dict[str, Any]) -> str:
@@ -210,14 +163,18 @@ def _stop_next_step(index: dict[str, Any]) -> str:
 
 
 def _render_header(
-    index: dict[str, Any], final: dict[str, Any], stats: L1Stats, halt: dict[str, str] | None
+    index: dict[str, Any],
+    final: dict[str, Any],
+    verdict: ReviewStat | None,
+    halt: dict[str, str] | None,
 ) -> list[str]:
     cycle_id = index.get("cycle_id") or "(unknown cycle)"
     mode = (final.get("mode") or "full").strip() or "full"
+    said = "" if verdict is None else f" · {verdict.name}: **{_stat(verdict)}**"
     parts: list[str] = [
         f"# Review — {cycle_id}",
         "",
-        f"_mode: **{mode}** · round-1 conformance: **{stats.round_1_verdict}**_",
+        f"_mode: **{mode}**{said}_",
         "",
     ]
     if halt is not None:
@@ -246,18 +203,68 @@ def _render_header(
     return parts
 
 
+def _bench_line(name: str, reading: BenchReading | None, bench: BenchScore) -> str:
+    if reading is None:
+        return f"- {name}: no reading — {bench.missing_reason}"
+    bench_size = bench.bench_size
+    band = (
+        ""
+        if reading.ci_lo is None or reading.ci_hi is None
+        else f" (95% {reading.ci_lo:.3f} to {reading.ci_hi:.3f})"
+    )
+    value = "—" if reading.composite_fitness is None else f"{reading.composite_fitness:.3f}"
+    return (
+        f"- {name} (round {reading.round}): **{value}**{band} · accuracy "
+        f"{fmt_pct(reading.accuracy)} · {reading.n_scored}/{bench_size} rows"
+    )
+
+
+def _render_bench(final: dict[str, Any], bench: BenchScore | None) -> list[str]:
+    """The headline, above everything the optimizer measured on the rows that chose its winner.
+    Silent while the cycle runs; once it ends, an absent score is said rather than left blank."""
+    if not final:
+        return []
+    if bench is None:
+        return [
+            "## Bench score — the headline",
+            "",
+            "None: the cycle stopped before its selection was graded, or it ran beside the "
+            "campaign's line, whose result is the one graded.",
+            "",
+        ]
+    lift = (
+        "—"
+        if bench.lift is None
+        else f"{bench.lift:+.3f}"
+        + (
+            ""
+            if bench.lift_ci_lo is None or bench.lift_ci_hi is None
+            else f" (95% {bench.lift_ci_lo:+.3f} to {bench.lift_ci_hi:+.3f})"
+        )
+    )
+    return [
+        "## Bench score — the headline",
+        "",
+        f"On {bench.bench_size} held-out rows no optimizer node read, graded by "
+        f"`{bench.scorer_id}`. Every number below this section is the optimizer's own, read on the "
+        "rows that chose its winner.",
+        "",
+        _bench_line("selected", bench.selected, bench),
+        _bench_line("origin", bench.origin, bench),
+        f"- lift, paired per row: **{lift}**",
+        "",
+    ]
+
+
 def _render_stats_block(
     clocks: RoundClocks,
     round_ended_s: dict[str, float],
-    stats: L1Stats,
+    stats: tuple[ReviewStat, ...] | None,
     repairs_per_round: list[int],
     calls_per_round: list[int],
     halt: dict[str, str] | None,
+    optimizer_name: str,
 ) -> list[str]:
-    def _rate(value: float | None, spec: str = ".2f") -> str:
-        """An unmeasured rate renders as ``—``, never as a number the cycle never produced."""
-        return "—" if value is None else format(value, spec)
-
     def _clock(rounds: int | None) -> str:
         """A round count and the minute it landed at, joined on the round number. The rounds are
         what a peer reports; the minutes are what a reader outside this project can price, because
@@ -274,23 +281,21 @@ def _render_stats_block(
         else f"{CEILING_FRACTION:.0%} of {clocks.accuracy_ceiling:.2f}"
     )
     lines = [
-        "## L1Stats",
+        "## Round statistics",
         "",
         f"- **rounds_to_separable**: {_clock(clocks.rounds_to_separable)}",
-        f"- rounds_to_improved (promotion, no interval): {_clock(clocks.rounds_to_improved)}",
+        f"- rounds_to_improved (a new best selected, no interval): "
+        f"{_clock(clocks.rounds_to_improved)}",
         f"- rounds_to_ceiling ({basis}): {_clock(clocks.rounds_to_ceiling)}",
-        f"- yield_rate: {_rate(stats.yield_rate)}",
-        f"- top_lift_mean: {_rate(stats.top_lift_mean, '+.4f')}",
-        f"- behavior_pass_rate: {_rate(stats.behavior_pass_rate)}",
-        f"- l2_behavior_pass_rate: {_rate(stats.l2_behavior_pass_rate)}",
-        f"- stagnation_max: {stats.stagnation_max}",
-        f"- l2_fires: {stats.l2_fires}",
     ]
-    # A terminate is an L2 fire that produces no l2-sourced round, so `l2_fires`
-    # alone reads 0 — name it explicitly so an L2 halt isn't invisible.
+    if stats is None:
+        lines.append(f"- the optimizer's own stats: N/A — `{optimizer_name}` keeps none")
+    else:
+        lines += [f"- {s.name}: {_stat(s)}" for s in stats]
+    # An abort closes no round of its own, so no statistic above counts it.
     if halt is not None and halt["terminated"]:
         node = f" ({halt['node']})" if halt["node"] else ""
-        lines.append(f"- l2_terminated: {halt['tag']}{node}")
+        lines.append(f"- optimizer_abort: {halt['tag']}{node}")
     repairs_total = sum(repairs_per_round)
     calls_total = sum(calls_per_round)
     if calls_total:
@@ -336,10 +341,10 @@ def _render_wall_clock(clock: dict[str, Any]) -> list[str]:
     for phase, seconds in sorted(_float_map(clock.get("phase_s")).items(), key=lambda kv: -kv[1]):
         lines.append(f"- {phase}: {_minutes(seconds)}")
     lines.append(f"- origin gate (a human waiting): {_minutes(clock['gate_s'])}")
-    # Named by what is IN it, not as a remainder: the round's tail holds the overlap series (real
-    # backend cells) and the critique call (real optimizer time), and neither has a bracket.
+    for bucket, node, seconds in _node_rows(clock.get("unbracketed_call_s")):
+        lines.append(f"- `{node}` calls outside every phase ({bucket}): {_minutes(seconds)}")
     lines.append(
-        f"- unattributed — the overlap series, the election, the critique call, the persist: "
+        f"- unattributed — no phase, gate or fresh call held it: "
         f"{_minutes(clock['unattributed_s'])}"
     )
     # Rendered as a state, never suppressed on truthiness: no envelope observed a wait and every
@@ -349,27 +354,38 @@ def _render_wall_clock(clock: dict[str, Any]) -> list[str]:
         f"- cells not ALLOWED to spend: "
         f"{'no envelope observed one' if unworked is None else _minutes(unworked)}"
     )
-    worked = _float_map(clock.get("worked_s"))
+    worked = _node_rows(clock.get("worked_s"))
     if worked:
         lines += [
             "",
-            "_Summed CALL time per spend bucket, not a share of the clock above: concurrent cells"
+            "_Summed CALL time per node, not a share of the clock above: concurrent cells"
             " overshoot it, and replayed calls are excluded._",
             "",
         ]
-        for bucket, seconds in sorted(worked.items(), key=lambda kv: -kv[1]):
-            lines.append(f"- {bucket}: {_minutes(seconds)}")
+        for bucket, node, seconds in worked:
+            lines.append(f"- `{node}` ({bucket}): {_minutes(seconds)}")
     lines.append("")
     return lines
 
 
-def _render_behavior_summary(
-    behavior_per_round: list[list[CheckResult]],
-) -> list[str]:
+def _node_rows(raw: object) -> list[tuple[str, str, float]]:
+    if not isinstance(raw, dict):
+        return []
+    rows = [
+        (str(bucket), node, seconds)
+        for bucket, by_node in raw.items()
+        for node, seconds in _float_map(by_node).items()
+    ]
+    return sorted(rows, key=lambda row: -row[2])
+
+
+def _render_behavior_summary(review: ReviewReading | None) -> list[str]:
+    behavior_per_round = review.checks if review is not None else []
     if not behavior_per_round or not any(behavior_per_round):
         return []
+    assert review is not None
     parts: list[str] = ["## Behaviour-check summary", ""]
-    for check_id in CHECK_REGISTRY:
+    for check_id in review.check_ids:
         fails = sum(
             1
             for round_res in behavior_per_round
@@ -387,12 +403,14 @@ def _render_behavior_summary(
 
 def _render_round(
     round_data: RoundResult,
-    audit: dict[str, Any] | None,
-    checks: list[CheckResult],
+    review: ReviewReading | None,
+    index: int,
     *,
     is_peek: bool,
     schema_repair_retries: int = 0,
 ) -> list[str]:
+    """``review`` is ``None`` on a cycle whose optimizer keeps no reading of its own: its behaviour
+    checks, variant table and critique do not exist."""
     opt_sp = round_data.opt_sp.model_dump() if round_data.opt_sp else {}
     lineage = opt_sp.get("lineage") or {}
     suffix = " (next-gen peek)" if is_peek else ""
@@ -409,26 +427,21 @@ def _render_round(
         if series := overlap_series(round_data.overlap):
             parts.append(f"- overlap: {series}")
         if round_data.verdict_reason:
-            # The round is won on θ-lift, so `improved` above names the outcome and nothing on
-            # this page named the number behind it.
+            # `improved` above names the outcome; this is the selector's own reading behind it.
             parts.append(f"- verdict: {round_data.verdict_reason}")
     if schema_repair_retries:
         parts.append(f"- schema_repair_retries: {schema_repair_retries}")
-    parts += _render_l1_inputs(opt_sp, lineage)
-    parts += _render_check_checklist(checks)
-    parts += _render_variants_table(audit, round_data, scored=not is_peek)
-    parts += _render_critique(round_data)
+    parts += _render_lineage(lineage)
+    if review is None:
+        return parts
+    parts += _render_check_checklist(review.checks[index])
+    parts += _render_variants_table(review.variants[index], round_data, scored=not is_peek)
+    parts += _render_critique(review.feedback[index])
     return parts
 
 
-def _render_l1_inputs(opt_sp: dict[str, Any], lineage: dict[str, Any]) -> list[str]:
-    parts: list[str] = ["", "**L1 inputs**", ""]
-    tc = (opt_sp.get("memory") or {}).get("task_context") or {}
-    if isinstance(tc, dict) and tc:
-        keys = ", ".join(sorted(k for k, v in tc.items() if v))
-        parts.append(f"- task_context fields: {keys or '_(empty)_'}")
-    else:
-        parts.append("- task_context: _(empty)_")
+def _render_lineage(lineage: dict[str, Any]) -> list[str]:
+    parts: list[str] = ["", "**Lineage**", ""]
     src = (lineage.get("source") or "").strip()
     if src:
         parts.append(f"- lineage source: `{src}`")
@@ -451,14 +464,13 @@ def _render_check_checklist(checks: list[CheckResult]) -> list[str]:
 
 
 def _render_variants_table(
-    audit: dict[str, Any] | None,
+    variants: list[dict[str, Any]],
     round_data: RoundResult,
     *,
     scored: bool,
 ) -> list[str]:
     """Per-variant row: the audit dict carries what L1 PROPOSED, ``round_data`` what it MEASURED,
     joined on :func:`candidate_label`. Join on anything else and every score column prints ``—``."""
-    variants = extract_l1_variants(audit)
     if not variants:
         return []
     parts: list[str] = ["**Variants**", ""]
@@ -472,7 +484,7 @@ def _render_variants_table(
             changes = (v.get("changes_description") or "").replace("|", "\\|").strip()[:80]
             evidence = _fmt_evidence_cell(v.get("evidence_grounding"))
             label = candidate_label(round_data.round, i)
-            cells = _score_cells(by_label.get(label), round_data.winner_id)
+            cells = _score_cells(by_label.get(label), round_data.selected_labels)
             parts.append(f"| `{label}` | {cells} | {evidence} | {changes} |")
     else:
         parts.append("| cand_id | changes | derived_axes | evidence |")
@@ -486,24 +498,23 @@ def _render_variants_table(
     return parts
 
 
-def _score_cells(c: ScoredCandidate | None, winner_id: str) -> str:
+def _score_cells(c: ScoredCandidate | None, selected_labels: Sequence[str]) -> str:
     """``—`` only where there genuinely is no number — a variant the round never scored, one
     outside the election fit, or one sharing under two cells with its parent, where ``None`` is
     deliberate: a 0.0 there reads as a measurement.
 
-    The ``won`` column is the ELECTED id, and the margin beside it is the θ-lift with its
-    interval. Both replace a composite Δ and a ``✓`` derived from it — which is not the election
-    rule and carried no interval, so the glyph read as a verdict the round had not made."""
+    The ``won`` column is the round's SELECTION, and the margin beside it is the paired accuracy
+    lift over the parent with its interval."""
     if c is None:
         return "— | — | — | — | —"
     theta = "—" if c.theta is None else f"{c.theta:+.3f}"
-    lo, hi = c.matched_parent_lift_ci_lo, c.matched_parent_lift_ci_hi
+    lo, hi = c.reference_lift_ci_lo, c.reference_lift_ci_hi
     lift = (
-        f"{c.matched_parent_lift:+.3f} [{lo:+.3f}, {hi:+.3f}]"
-        if c.matched_parent_lift is not None and lo is not None and hi is not None
+        f"{c.reference_lift:+.3f} [{lo:+.3f}, {hi:+.3f}]"
+        if c.reference_lift is not None and lo is not None and hi is not None
         else "—"
     )
-    won = "✓" if is_round_winner(c.candidate_id, winner_id) else "·"
+    won = "✓" if c.label in selected_labels else "·"
     return f"`{c.composite_fitness:.4f}` | {fmt_pct(c.accuracy)} | {theta} | {lift} | {won}"
 
 
@@ -519,8 +530,7 @@ def _fmt_evidence_cell(raw: object) -> str:
     return f"`{field_name}` _(no citation)_"
 
 
-def _render_critique(round_data: RoundResult) -> list[str]:
-    critique = format_l1_critique_for_prompt(round_data.critique).strip()
+def _render_critique(critique: str) -> list[str]:
     if not critique:
         return []
     quoted = critique.replace("\n", "\n> ")

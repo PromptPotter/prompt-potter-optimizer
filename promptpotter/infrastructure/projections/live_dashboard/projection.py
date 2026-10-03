@@ -3,13 +3,15 @@ from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, assert_never, cast
 
+from promptpotter.domain.backend import BackpressureReading
+from promptpotter.domain.bench import BenchReading, BenchScore
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop, WorkspaceDir
-from promptpotter.domain.dashboard_rows import RoundSummary
+from promptpotter.domain.dashboard_rows import RoundSummary, RunStanding
 from promptpotter.domain.phases import CampaignPhase, DashboardState, PhaseEvent, RunPhase
 from promptpotter.domain.results import (
-    HeadlineMetric,
+    DisplayMetric,
     best_round_on_shared_cells,
     candidate_label,
     overlap_row,
@@ -34,7 +36,7 @@ from promptpotter.domain.scoring import (
     recorded_elapsed_s,
     weighted_sum_weights,
 )
-from promptpotter.domain.spend import TOKEN_KIND_BUCKET, SpendBucket, SpendRollup
+from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup
 from promptpotter.infrastructure.ledger import open_with_history
 from promptpotter.infrastructure.projections.audit_trail import (
     audit_rounds_dir,
@@ -44,8 +46,7 @@ from promptpotter.infrastructure.projections.audit_trail import (
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.live_dashboard.blocks import (
     build_candidate_rows,
-    build_l1_score_block,
-    build_pobb_block,
+    build_racing_block,
 )
 from promptpotter.infrastructure.projections.live_dashboard.round_buffer import RoundBuffer
 from promptpotter.infrastructure.projections.live_dashboard.round_summary import (
@@ -55,7 +56,7 @@ from promptpotter.infrastructure.projections.live_dashboard.round_summary import
 )
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     BackendWarning,
-    BackfillLogEntry,
+    CatchUpLogEntry,
     CurrentRound,
     DashboardError,
     LiveDashboardState,
@@ -64,14 +65,14 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
 )
 from promptpotter.infrastructure.projections.live_state import (
     LiveStateCore,
-    apply_p_best_update,
     apply_phase,
+    apply_race_standing,
     roll_p_best_at_round_complete,
 )
 from promptpotter.infrastructure.runtime_flags import (
+    armed_run_limits,
     effective_lookahead,
     read_sample_lookahead,
-    read_spend_caps,
     sample_lookahead_auto,
 )
 from promptpotter.infrastructure.store.io import write_json
@@ -87,7 +88,6 @@ from promptpotter.shared.instrument import NO_ROUND_SLOT
 
 if TYPE_CHECKING:
     from promptpotter.domain.connector import MeasuredUnit
-    from promptpotter.infrastructure.projections.audit_trail import AuditTrailProjection
 
 logger = logging.getLogger(__name__)
 
@@ -97,102 +97,18 @@ logger = logging.getLogger(__name__)
 _DASHBOARD_DEBOUNCE_S = 0.25
 
 
-# L1_SCORE absent: driven by sample_started / sample_scored.
-# The VALUES are the sole declaration of the `dashboard.json::state` vocabulary — keep them
-# typed, or the webapp mirrors bare strings against no source. The key stays `str` because
-# `PhaseEvent.phase` is wider than `CampaignPhase`.
+# MEASURE absent: driven by sample_started / sample_scored. An optimizer's own phase is absent
+# too: its enter view names its node and activity (`OptimizerStepEnterView`), so it maps itself.
 _PHASE_TO_STATE: dict[str, DashboardState] = {
     CampaignPhase.INIT: DashboardState.INIT,
     CampaignPhase.ORIGIN: DashboardState.ORIGIN,
-    CampaignPhase.L1_GENERATE: DashboardState.L1_GENERATE,
-    CampaignPhase.REFINE_STRATEGY: DashboardState.L2_REFINING,
-    CampaignPhase.MODIFY_PLAN: DashboardState.L3_REPLANNING,
-    CampaignPhase.ESCALATION: DashboardState.ESCALATION,
+    CampaignPhase.PROPOSE: DashboardState.PROPOSING,
+    CampaignPhase.BENCH: DashboardState.BENCH,
 }
 
 
-# Which optimizer node each activity state is the work OF — the served `active_node`. TOTAL
-# over `DashboardState`, asserted below: an omitted member reads as "nothing running" rather
-# than failing, so a new state must name its node here instead of silently meaning idle.
-_STATE_TO_NODE: dict[DashboardState, str | None] = {
-    DashboardState.INIT: "checkin",
-    DashboardState.ORIGIN: "checkin",
-    DashboardState.SCORING: "l1_score",
-    DashboardState.BETWEEN_SAMPLES: "l1_score",
-    DashboardState.BETWEEN_CANDIDATES: "l1_score",
-    DashboardState.L1_GENERATE: "l1_generate",
-    DashboardState.L2_REFINING: "l2_context",
-    DashboardState.L3_REPLANNING: "l3_plan",
-    # The post-round escalation gate is the critique's own work.
-    DashboardState.ESCALATION: "l1_critique",
-    # The one honest `None`: a stopped cycle is running nothing.
-    DashboardState.STOPPED: None,
-}
-
-if set(_STATE_TO_NODE) != set(DashboardState):
-    raise RuntimeError(
-        "_STATE_TO_NODE must cover every DashboardState — a missing member reads as "
-        f"'nothing running': {set(DashboardState) - set(_STATE_TO_NODE)}"
-    )
-
-
-def _bank_call(spend: SpendRollup, record: TokenUsageRecord, usd: float | None) -> None:
-    """One priced call into one rollup — the cycle total and the per-round map are this same
-    arithmetic, called twice, so the split cannot disagree with the total the budget gate reads."""
-    # Through the declared mapping, never a branch here: a two-way `if kind == "optimizer"`
-    # does not fail when a third kind appears, it files it under `backend` in silence.
-    bucket: SpendBucket = getattr(spend, TOKEN_KIND_BUCKET[record.kind])
-    in_tok = int(record.input_tokens)
-    out_tok = int(record.output_tokens)
-    if record.model and not bucket.model:
-        bucket.model = record.model
-
-    if usd is not None:
-        bucket.incurred_usd = round(bucket.incurred_usd + usd, 6)
-    elif in_tok or out_tok:
-        bucket.incurred_unpriced_tokens += in_tok + out_tok
-
-    if not record.cached:
-        bucket.input_tokens += in_tok
-        bucket.output_tokens += out_tok
-        bucket.reasoning_tokens += int(record.reasoning_tokens)
-        # Only the billed side: a reuse-cache hit reached no provider, so counting its
-        # replayed cache tokens would report a prefix holding on calls never made.
-        bucket.cache_read_tokens += int(record.cache_read_tokens)
-        bucket.cache_write_tokens += int(record.cache_write_tokens)
-        if usd is not None:
-            bucket.used_usd = round(bucket.used_usd + usd, 6)
-            bucket.rate_known = True
-        elif in_tok or out_tok:
-            # Billed but with no resolvable cost, so the USD cap cannot see this spend.
-            # Tracked so the dashboard flags the cap as inactive.
-            bucket.unpriced_tokens += in_tok + out_tok
-
-    # Over `spend.buckets`, never a hand-named pair: the budget gate reads `total_used_usd`,
-    # so a bucket left out of this fold is spend the cap cannot see.
-    spend.total_used_usd = round(sum(b.used_usd for b in spend.buckets), 6)
-    spend.total_incurred_usd = round(sum(b.incurred_usd for b in spend.buckets), 6)
-    spend.total_tokens_used = sum(b.input_tokens + b.output_tokens for b in spend.buckets)
-    spend.unpriced_tokens = sum(b.unpriced_tokens for b in spend.buckets)
-
-
-def _ability_delta(rounds: list[RoundSummary]) -> float | None:
-    """Latest round carrying an ability, over the origin — never the max (winner's curse in logit
-    space). Skipping only unfit rounds is ``parent_level_trajectory``'s own carry-forward rule."""
-    origin = next((r.ability for r in rounds if r.round == 0 and r.ability is not None), None)
-    if origin is None:
-        return None
-    latest = next(
-        (
-            r.ability
-            for r in sorted(rounds, key=lambda r: r.round, reverse=True)
-            if r.ability is not None
-        ),
-        None,
-    )
-    if latest is None or not latest.comparable_to(origin):
-        return None
-    return round(latest.theta - origin.theta, 4)
+# The bench's own check-in node, which runs around every optimizer's loop.
+_CHECKIN_NODE = "checkin"
 
 
 class LiveDashboardProjection(Projection):
@@ -205,13 +121,11 @@ class LiveDashboardProjection(Projection):
         state_path: Path | None,
         hop: CycleHop,
         session_id: str,
-        l1_patience: int,
-        n_variants: int,
+        arms_per_round: int | None,
         sp_budget_round: int,
-        headline_metric: HeadlineMetric,
+        display_metric: DisplayMetric,
         langfuse_trace_url: str | None = None,
         resume_from: LiveDashboardState | None = None,
-        recorder: AuditTrailProjection | None = None,
         initial_llm_nodes: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         cycle_path = Path(cycle_dir)
@@ -221,19 +135,16 @@ class LiveDashboardProjection(Projection):
         # Spelled by the caller rather than derived from `cycle_dir`, because both modes read
         # that same directory and only the write target tells them apart.
         self.state_path = state_path
-        self._recorder = recorder
-        self.patience_max = l1_patience
         # The schema IS the on-disk shape (`_persist` dumps this instance), so it also owns
         # which fields a resume inherits and which this process stamps fresh.
         self.state = LiveDashboardState.for_run(
             resume_from,
             hop=hop,
             session_id=session_id,
-            l1_patience=l1_patience,
-            n_variants=n_variants,
+            arms_per_round=arms_per_round,
             sp_budget_round=sp_budget_round,
             langfuse_trace_url=langfuse_trace_url,
-            headline_metric=headline_metric,
+            display_metric=display_metric,
         )
         self.short_formula_template: str | None = None
         self._buffer = RoundBuffer()
@@ -243,9 +154,12 @@ class LiveDashboardProjection(Projection):
         # The depth it LAUNCHED at is what separates look-ahead cost from a plain failure.
         self._open_samples: dict[int, tuple[str, int, int, int]] = {}
         # The last `flight` reading (out, allowed, most); all zero while nothing is scoring. And the
-        # call a decision waits on, as (sample_id, launched at).
+        # call a decision waits on, as (sample_id, launched at), and the provider holding calls.
         self._flight: tuple[int, int, int] = (0, 0, 0)
+        self._affordable: int | None = None
+        self._cell_reserve_usd: float | None = None
         self._waiting: tuple[int, float] | None = None
+        self._backpressure: BackpressureReading | None = None
         # Sticky LLM-call mirror for ``current_round.nodes`` — owned here, not on the
         # audit-trail, which records the same event independently into its round flush.
         self._sticky_llm_calls: dict[str, dict[str, Any]] = dict(initial_llm_nodes or {})
@@ -253,6 +167,10 @@ class LiveDashboardProjection(Projection):
         # thing it decides is which node ``_active_node`` lights. It was a served field for a
         # reader that never arrived.
         self._in_flight: tuple[str, str] | None = None
+        # The nodes the ledger named at `propose:enter`, `measure:enter` and an optimizer step's.
+        self._proposer_node: str | None = None
+        self._measurement_node: str | None = None
+        self._step_node: str | None = None
         self._core = LiveStateCore(
             round_num=self.state.round,
             # Origin anchor seeds from round 0 if it's already on disk (resume);
@@ -281,16 +199,15 @@ class LiveDashboardProjection(Projection):
         *,
         tenant_root: str,
         session_id: str,
-        l1_patience: int,
-        n_variants: int,
+        arms_per_round: int | None,
         sp_budget_round: int,
-        headline_metric: HeadlineMetric,
+        display_metric: DisplayMetric,
         langfuse_trace_url: str | None = None,
         resumed_from_round: int | None = None,
-        recorder: AuditTrailProjection | None = None,
         seed_from_cycle_id: str | None = None,
         max_cells_in_flight: int | None = None,
         measured_unit: MeasuredUnit | None = None,
+        stamps_theta: bool = False,
     ) -> LiveDashboardProjection | None:
         """``seed_from_cycle_id`` names the cycle to read the prior dashboard from — a fork inherits
         the parent's trajectory up to the cut while counting its own copied round files."""
@@ -317,22 +234,23 @@ class LiveDashboardProjection(Projection):
             state_path=CycleLayout(Path(cycle_dir)).dashboard,
             hop=hop,
             session_id=session_id,
-            l1_patience=l1_patience,
-            n_variants=n_variants,
+            arms_per_round=arms_per_round,
             sp_budget_round=sp_budget_round,
-            headline_metric=headline_metric,
+            display_metric=display_metric,
             langfuse_trace_url=langfuse_trace_url,
             resume_from=resume_from,
-            recorder=recorder,
             initial_llm_nodes=initial_llm_nodes,
         )
         # Stamped at WIRING, not on a phase event: origin scoring runs before INIT fires, and the
         # browser reads the `1` default as "this backend holds one sample" and disables the
-        # control. After `resume_from` — the live connector outranks a pair an older build wrote.
+        # control. After `resume_from` — the live connector outranks a pair the prior run wrote.
         if max_cells_in_flight is not None:
             view.state.max_cells_in_flight = max_cells_in_flight
         if measured_unit is not None:
             view.state.measured_unit = measured_unit
+        # Campaign-constant, unlike the two above: the same selector runs every round, so this
+        # is never left at the resumed prior's stamp.
+        view.state.stamps_theta = stamps_theta
         return view
 
     def stamp_run_limits(self, limits: RunLimits) -> None:
@@ -373,8 +291,9 @@ class LiveDashboardProjection(Projection):
 
     # -- State transitions ----------------------------------------------------
 
-    def _set_state(self, name: DashboardState) -> None:
+    def _set_state(self, name: DashboardState, *, step: str | None = None) -> None:
         self.state.state = name
+        self.state.optimizer_step = step
         self.state.state_since = utcnow_iso()
 
     # -- Write coalesce -------------------------------------------------------
@@ -431,9 +350,8 @@ class LiveDashboardProjection(Projection):
         if record.phase == "control":
             # The SOLE writer of `declared_phase` — and nothing here writes `run_phase`, which is
             # wire-only and derived at the read. Flushing bumps the mtime, so the 304-cached route
-            # re-derives immediately. TERMINAL arrives here like every other phase since the stop
-            # became a record; it used to be pushed in by `mark_stopped`, so a fold of the ledger
-            # reported a stopped cycle as still running.
+            # re-derives immediately. TERMINAL arrives here like every other phase, so a fold
+            # of the ledger reports a stopped cycle as stopped.
             event_phase = RunPhase(record.event)
             if self.state.declared_phase == event_phase:
                 return
@@ -441,8 +359,8 @@ class LiveDashboardProjection(Projection):
             if event_phase == RunPhase.TERMINAL:
                 self.state.stop_reason = str(record.payload.get("stop_reason") or "")
                 self._set_state(DashboardState.STOPPED)
-                # A stopped cycle is running nothing (the STOPPED half of `_STATE_TO_NODE`), so it
-                # is scoring no candidate: drop the marker rather than leave the final round's
+                # A stopped cycle is running nothing (`_active_node`'s STOPPED arm), so it is
+                # scoring no candidate: drop the marker rather than leave the final round's
                 # last candidate claiming the slot on every surface that outlives the run.
                 # Paused keeps it — it says where the run stopped.
                 self.state.candidate = ""
@@ -463,6 +381,7 @@ class LiveDashboardProjection(Projection):
                 status_code=payload.get("status_code"),
                 final=bool(payload.get("final", False)),
                 query=payload.get("query"),
+                detail=payload.get("detail"),
             )
             self.state.recent_backend_warnings = [*self.state.recent_backend_warnings, warning][
                 -10:
@@ -485,20 +404,30 @@ class LiveDashboardProjection(Projection):
                     self._restamp_ability(r, ability) if r.round == record.round else r
                     for r in self.state.rounds
                 ]
-                self.state.ability_delta = _ability_delta(self.state.rounds)
+            self._flush_pending_persist()
+            return
+
+        if record.phase == CampaignPhase.BENCH and record.event == "scored":
+            score = BenchScore.model_validate(view_fields(record)["bench"])
+            self.state.bench_score = score
+            self._place_bench(score.origin, score.selected)
+            self._flush_pending_persist()
+            return
+
+        if record.phase == CampaignPhase.BENCH and record.event == "graded":
+            raw = view_fields(record)["reading"]
+            self._place_bench(None if raw is None else BenchReading.model_validate(raw))
             self._flush_pending_persist()
             return
 
         if record.phase == "round" and record.event == "display":
             payload = record.payload
-            l1_stall = int(payload.get("l1_stall_count") or 0)
-            hearts_raw = payload.get("hearts")
-            hearts = None if hearts_raw is None else int(hearts_raw)
+            self.state.run_standing = RunStanding.model_validate(payload["run_standing"])
             # The headline scalars come off the PERSISTED lean form — the same numbers the full
             # result carries, so they fold whether or not a live producer is behind the record.
             accuracy = (payload.get("round_result") or {}).get("accuracy")
             if accuracy is not None:
-                self._absorb_round_complete(float(accuracy), l1_stall, hearts)
+                self._absorb_round_complete(float(accuracy))
             # The trajectory row needs the WHOLE `RoundResult`. It rides the in-memory-only field
             # for a live producer and comes off `rounds/round_NNNN.json` for a fold with none —
             # one document, two carriers, resolved HERE so no caller has to know which it got.
@@ -506,21 +435,17 @@ class LiveDashboardProjection(Projection):
             if round_result is None and record.round is not None:
                 round_result = round_result_from_disk(self.cycle_dir, record.round)
             if round_result is not None:
-                if self._recorder is not None:
-                    self._recorder.set_l1_score(self._l1_score_block())
                 # Append round summary; re-firing the same round (a replay) replaces in place.
                 origin_rows = (
                     [] if round_result.round == 0 else origin_rows_from_disk(self.cycle_dir)
                 )
-                summary = build_round_summary(round_result, origin_rows)
+                summary = build_round_summary(
+                    round_result, origin_rows, best_so_far=self.state.best
+                )
                 rounds_list = [r for r in self.state.rounds if r.round != round_result.round]
                 rounds_list.append(summary)
                 rounds_list.sort(key=lambda r: r.round)
                 self.state.rounds = rounds_list
-                # AFTER the append, so round 0's summary is present when it computes its first
-                # value. Both ends come off the subset-invariant `cumulative_theta`, so the
-                # difference is a real lift rather than the luckiest draw minus the fullest one.
-                self.state.ability_delta = _ability_delta(self.state.rounds)
                 self._flush_pending_persist()
             return
 
@@ -531,40 +456,32 @@ class LiveDashboardProjection(Projection):
         event = PhaseEvent(phase=record.phase, event=record.event, round=record.round)
         self._apply_phase(event, view)
         # The buffer belongs to ONE round, so it clears when the round NUMBER moves, not at
-        # `L1_GENERATE:enter` — `round:enter` advances the number first, which leaves the closed
-        # round's candidates standing under the new number for the whole generate call.
+        # `propose:enter` — `round:enter` advances the number first, which leaves the closed
+        # round's candidates standing under the new number for the whole proposal.
         if self._buffer.round_num != self.state.round:
             self._buffer.reset(self.state.round)
         self._flush_pending_persist()
 
     def _handle_election(self, record: ElectionRecord) -> None:
-        """The crown, from the record that IS the crown. It was read off ``L1_SCORE:exit``'s view
-        instead, which cannot reach round 0 — the origin is ADOPTED rather than elected, runs no
-        ``l1_score`` phase, and so folded with ``is_winner`` false on the one arm it has. The
-        election record fires for round 0 too, saying exactly that it adopted ``C0``.
-
-        Two channels for one fact, and this is the one with its own record. ``Projection`` had no
-        branch for it at all, so the crown reached no fold.
+        """The crown, from the record that IS the crown — never a measurement phase's view, which
+        cannot reach round 0: the origin is ADOPTED rather than elected, runs no measure phase, and
+        so would fold with ``is_selected`` false on the one arm it has. The election record fires
+        for round 0 too, saying exactly that it adopted ``C0``.
 
         Everything the election stamps rides this record — the per-arm fit and the round's own
         readings — because the alternative carrier is ``rounds[]`` at the close, two LLM calls
         later. The round-level stamp is guarded on the live handle: a REPLAY carries none, and the
         round file it would fall back on does not exist yet at this offset."""
-        self._buffer.mark_winner(record.winner_label)
+        self._buffer.mark_selected(record.selected_labels)
         self._buffer.stamp_fit(record.fit)
         if (rr := record.live_round_result) is not None:
             self._buffer.stamp_overlap(rr.overlap)
         self._flush_pending_persist()
 
     def _handle_candidate_minted(self, record: CandidateMintedRecord) -> None:
-        """A candidate exists the moment ``l1_generate`` mints it — and this fold learned of one
-        only at ``candidate_started``, a snapshot ``l1_score`` fires one whole node later.
-
-        So ``dashboard.json`` — the surface every reader polls — showed an empty round for the
-        length of the generate call, while the ledger had recorded each candidate as it landed and
-        the ray was already serving them. The record had no arm anywhere: ``_handle_candidate_minted``
-        was the base no-op in EVERY projection, which is a writer with no reader rather than a
-        state. Seeding here is what makes the round's shape appear as it is decided.
+        """A candidate exists the moment its proposer mints it, a whole node before the
+        measurement's ``candidate_started`` — seeding here makes the round's shape appear in
+        ``dashboard.json`` as it is decided rather than after the generate call.
 
         The mint carries no candidate TOTAL — nothing knows it until generation returns — so the
         slot opens at the buffer's default and ``candidate_started`` stamps it later. Flushed
@@ -583,14 +500,22 @@ class LiveDashboardProjection(Projection):
         self._buffer.slot(record.idx)["changes_description"] = record.changes_description
         self._flush_pending_persist()
 
+    def _place_bench(self, *readings: BenchReading | None) -> None:
+        """Each bench reading onto the round whose selection it graded."""
+        by_round = {r.round: r for r in readings if r is not None}
+        self.state.rounds = [
+            r.model_copy(update={"bench": by_round[r.round]}) if r.round in by_round else r
+            for r in self.state.rounds
+        ]
+
     @staticmethod
     def _restamp_ability(r: RoundSummary, ability: AbilityReading) -> RoundSummary:
         """The warm-ruler correction, applied to the round AND to round 0's candidate row.
 
         Round 0 holds no election fit of its own, so the round's θ IS its one candidate's; later
-        rounds stamp per candidate at ``l1_score`` and are left alone. Only the frontier was
-        patched here before, so ``rounds[0].candidates[0].theta`` stayed null forever while the
-        round file carried the warm value."""
+        rounds stamp per candidate at the election and are left alone."""
+        if not r.stamps_theta:
+            return r
         candidates = (
             [
                 c.model_copy(update={"theta": ability.theta, "theta_se": ability.se})
@@ -621,7 +546,9 @@ class LiveDashboardProjection(Projection):
                     launched_at,
                 )
             self._refresh_open_sample_markers()
-            self._set_state(DashboardState.SCORING)
+            # The bench pass keeps its state through its cells, as no round's measurement runs it.
+            if self.state.state is not DashboardState.BENCH:
+                self._set_state(DashboardState.SCORING)
         elif ev == "sample_scored":
             result = payload.get("result") or {}
             # `is not None`, never `or`: sample_id 0 is falsy, and coercing it to a sentinel
@@ -661,32 +588,42 @@ class LiveDashboardProjection(Projection):
             order = payload.get("sample_order")
             if isinstance(order, list):
                 self.state.declared_sample_order = [int(sid) for sid in order]
-        elif ev == "p_best_update":
+        elif ev == "race_standing":
             current_id = payload.get("current_id") or ""
             n_samples = int(payload.get("n_samples") or 0)
             p_best = float(payload.get("p_best") or 0.0)
             self._buffer.update_p_best(ci, ct, current_id, n_samples, p_best)
             # Mirrored into the shared core so LiveDisplay sees the same round-wide state.
-            apply_p_best_update(self._core, current_id, n_samples, p_best)
+            apply_race_standing(self._core, str(payload["member"]), current_id, n_samples, p_best)
         elif ev == "flight":
             self._flight = (
                 int(payload.get("out") or 0),
                 int(payload.get("allowed") or 0),
                 int(payload.get("most") or 0),
             )
+            afford, reserve = payload.get("affordable"), payload.get("cell_usd")
+            self._affordable = None if afford is None else int(afford)
+            self._cell_reserve_usd = None if reserve is None else float(reserve)
             waiting = payload.get("waiting")
             self._waiting = (
                 (int(waiting["sample_id"]), float(waiting["since"]))
                 if isinstance(waiting, dict)
                 else None
             )
-        elif ev == "pobb_backfill":
-            self._append_backfill(
-                int(record.round or 0),
-                ci,
-                ct,
-                int(payload.get("sample_id") or 0),
-                [str(p) for p in (payload.get("prior_ids") or [])],
+            held = payload.get("backpressure")
+            self._backpressure = (
+                BackpressureReading.model_validate(held) if isinstance(held, dict) else None
+            )
+        elif ev == "race_catch_up":
+            self._append_catch_up(
+                CatchUpLogEntry(
+                    member=str(payload["member"]),
+                    round=int(record.round or 0),
+                    candidate_idx=ci,
+                    candidate_total=ct,
+                    sample_id=int(payload.get("sample_id") or 0),
+                    prior_ids=[str(p) for p in (payload.get("prior_ids") or [])],
+                )
             )
         # One flush for EVERY branch, so none can forget: a branch that does leaves a finished
         # candidate's scores unwritten until the next event.
@@ -698,11 +635,21 @@ class LiveDashboardProjection(Projection):
         s = self.state
         if event.round is not None:
             s.round = event.round
-        # L1_SCORE has no _PHASE_TO_STATE entry — sample_started/scored own its transitions.
+        # `activity` is what only an optimizer step's enter view declares.
+        activity = view.get("activity") if event.event == "enter" else None
         if event.event == "enter" and s.state != DashboardState.STOPPED:
             mapped = _PHASE_TO_STATE.get(event.phase)
             if mapped is not None:
                 self._set_state(mapped)
+            elif activity is not None:
+                self._set_state(DashboardState.OPTIMIZER_STEP, step=str(activity))
+        if event.event == "enter" and (node := view.get("node")):
+            if event.phase == CampaignPhase.PROPOSE:
+                self._proposer_node = str(node)
+            elif event.phase == CampaignPhase.MEASURE:
+                self._measurement_node = str(node)
+            elif activity is not None:
+                self._step_node = str(node)
 
         if event.phase == CampaignPhase.INIT and event.event == "enter" and view:
             # Everything INIT declares is stamped at ENTER, because origin scoring runs before
@@ -717,12 +664,7 @@ class LiveDashboardProjection(Projection):
             short = view.get("composite_fitness_formula_short")
             if short is not None:
                 self.short_formula_template = short
-            # Re-seats `patience_max`, so the "N/M" reading survives a fold that never got the
-            # constructor's copy — a replay off disk has only the ledger. The ceilings themselves
-            # are WIRING (`run_limits`): they were declared at launch, and this record arrives
-            # after the whole origin has already scored.
-            self.patience_max = int(view.get("patience") or 0)
-        elif event.phase == CampaignPhase.L1_GENERATE and event.event == "enter":
+        elif event.phase == CampaignPhase.PROPOSE and event.event == "enter":
             s.degraded_count = 0
             # Rewind/fork-in-place clamp: drop rounds this run will overwrite. Sole clamp
             # writer; `round:display` is the sole growth site.
@@ -745,7 +687,7 @@ class LiveDashboardProjection(Projection):
         s.current_query_payload = query_text
         s.current_sample_id = sid
         s.open_sample_ids = list(self._open_samples)
-        s.candidate = "parent" if ci == NO_ROUND_SLOT else f"{candidate_label(s.round, ci)}/{ct}"
+        s.candidate = "reference" if ci == NO_ROUND_SLOT else f"{candidate_label(s.round, ci)}/{ct}"
 
     def _absorb_sample_scored(self, result: dict[str, Any], *, last_in_candidate: bool) -> None:
         s = self.state
@@ -771,11 +713,12 @@ class LiveDashboardProjection(Projection):
         # one lands, and blanking the panel would report "nothing in flight" mid-request.
         self._refresh_open_sample_markers()
         s.last_query_elapsed_s = None if query_time is None else round(query_time, 2)
-        self._set_state(
-            DashboardState.BETWEEN_CANDIDATES
-            if last_in_candidate
-            else DashboardState.BETWEEN_SAMPLES
-        )
+        if s.state is not DashboardState.BENCH:
+            self._set_state(
+                DashboardState.BETWEEN_CANDIDATES
+                if last_in_candidate
+                else DashboardState.BETWEEN_SAMPLES
+            )
 
     def _handle_token_usage(self, record: TokenUsageRecord) -> None:
         """EVERY call lands in ``incurred``; only one that reached the wire lands in the bill. A
@@ -783,25 +726,19 @@ class LiveDashboardProjection(Projection):
 
         Banked TWICE from ONE price, the one the record carries — into the cycle's running total and
         into the round the call stamped itself with — so the two sides stay reconcilable."""
-        usd = record.cost_usd
-        _bank_call(self.state.spend, record, usd)
+        self.state.spend.bank(record)
         # A call carrying no round ran before any round closed (init, the origin score); banking it
         # at 0 rather than dropping it is what keeps the two sides reconcilable.
         key = str(record.round if record.round is not None else 0)
-        _bank_call(self.state.spend_by_round.setdefault(key, SpendRollup()), record, usd)
+        self.state.spend_by_round.setdefault(key, SpendRollup()).bank(record)
         self._schedule_persist()
 
-    @property
-    def spend_total_used_usd(self) -> float:
-        return self.state.spend.total_used_usd
-
-    @property
-    def spend_total_tokens(self) -> int:
-        return self.state.spend.total_tokens_used
+    def spend_metered(self, meters: CeilingMeter) -> MeteredSpend:
+        return MeteredSpend.of(self.state.spend, meters)
 
     def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None:
         """Lights the node of the optimizer call in progress — the multi-minute blind spot during a
-        reasoning-heavy critique, where no other record fires. Reaches the browser as
+        reasoning-heavy optimizer call, where no other record fires. Reaches the browser as
         ``active_node``, which is why the persist still fires here."""
         self._in_flight = (record.call_id, record.node)
         self._schedule_persist()
@@ -855,9 +792,7 @@ class LiveDashboardProjection(Projection):
         if acc is not None:
             self.state.current_acc = round(float(acc), 4)
 
-    def _absorb_round_complete(
-        self, round_accuracy: float, l1_stall_count: int, hearts: int | None = None
-    ) -> None:
+    def _absorb_round_complete(self, round_accuracy: float) -> None:
         """Never settle to ``cumulative_accuracy`` — nothing rescores it, so that pooled series can
         exceed everything the cycle measured. The round's own ``total`` is the answer beside it."""
         s = self.state
@@ -865,69 +800,53 @@ class LiveDashboardProjection(Projection):
         s.current_acc = acc
         if s.best is None or acc > s.best:
             s.best = acc
-        s.patience = f"{l1_stall_count}/{self.patience_max}"
-        s.hearts = hearts
 
     # -- Round-state mutations (snapshot-record fan-out) ----------------------
     # Per-candidate / per-sample / P(best) writes live on the ``RoundBuffer``;
-    # ``_append_backfill`` stays here because it writes scalar state instead.
+    # ``_append_catch_up`` stays here because it writes scalar state instead.
 
-    def _append_backfill(
-        self,
-        round_num: int,
-        idx: int,
-        total: int,
-        sample_id: int,
-        prior_ids: list[str],
-    ) -> None:
+    def _append_catch_up(self, entry: CatchUpLogEntry) -> None:
         """Absence of an entry for a sample means every prior was already cached for it. Capped at
         256 — per-sample events accumulate as samples × priors × candidates."""
-        log = list(self.state.backfill_log)
-        log.append(
-            BackfillLogEntry(
-                round=int(round_num),
-                candidate_idx=int(idx),
-                candidate_total=int(total),
-                sample_id=int(sample_id),
-                prior_ids=list(prior_ids),
-            )
-        )
-        self.state.backfill_log = log[-256:]
-
-    # -- Block builders (delegated to blocks.py) ------------------------------
-
-    def _l1_score_block(self) -> dict[str, Any]:
-        return build_l1_score_block(self._buffer, self.short_formula_template)
+        self.state.catch_up_log = [*self.state.catch_up_log, entry][-256:]
 
     # -- Internal --------------------------------------------------------------
 
     def _active_node(self) -> str | None:
-        """Which optimizer node is working. The in-flight LLM call names its node and wins;
-        otherwise the phase does, which is what keeps a node lit across the gap between two
-        calls in one phase."""
+        """Which node is working. The in-flight LLM call names its node and wins; otherwise the
+        state does, which is what keeps a node lit across the gap between two calls in one phase.
+        A new state is a type error here rather than a silent "nothing running"."""
         if self._in_flight is not None:
             return self._in_flight[1]
-        return _STATE_TO_NODE[self.state.state]
+        state = self.state.state
+        match state:
+            case DashboardState.INIT | DashboardState.ORIGIN:
+                return _CHECKIN_NODE
+            case DashboardState.PROPOSING:
+                return self._proposer_node
+            case (
+                DashboardState.SCORING
+                | DashboardState.BETWEEN_SAMPLES
+                | DashboardState.BETWEEN_CANDIDATES
+            ):
+                return self._measurement_node
+            case DashboardState.OPTIMIZER_STEP:
+                return self._step_node
+            # The held-out pass is the bench's own walk: no node of the optimizer's graph runs it.
+            case DashboardState.BENCH | DashboardState.STOPPED:
+                return None
+            case _:
+                assert_never(state)
 
     def _current_round_nodes(self) -> dict[str, dict[str, Any]]:
-        """THIS round's node blocks. ``_sticky_llm_calls`` is most-recent-fire-per-slot and
+        """THIS round's optimizer calls. ``_sticky_llm_calls`` is most-recent-fire-per-slot and
         survives round transitions, so it is filtered by each block's own ``round``: presence in
-        this map is the client's whole definition of "this node has fired", and unfiltered, a new
-        round opened showing the previous one's models as its own."""
-        blocks = {
+        this map is the client's whole definition of "this node has fired"."""
+        return {
             node: block
             for node, block in self._sticky_llm_calls.items()
             if block.get("round") == self.state.round
         }
-        if self._buffer.candidates:
-            blocks["l1_score"] = self._l1_score_block()
-        # Reading order, not execution order: generate and critique head the block because they
-        # are what an operator opens the file for.
-        ordered = {
-            k: blocks.pop(k) for k in ("l1_generate", "l1_critique", "l1_score") if k in blocks
-        }
-        ordered.update(blocks)
-        return ordered
 
     def _persist(self) -> None:
         """Compose, then swap atomically via ``write_json`` — polling readers never see a torn
@@ -963,26 +882,22 @@ class LiveDashboardProjection(Projection):
         s.at_offset = self.at_offset
         s.current_round = CurrentRound(
             # `state.round`, never the candidate buffer's, which only advances at
-            # `L1_GENERATE:enter` — one behind from `round:enter` onward, so every reader
+            # `propose:enter` — one behind from `round:enter` onward, so every reader
             # comparing the two concludes the round has already closed.
             round=s.round,
             active_node=self._active_node(),
-            candidates=build_candidate_rows(self._buffer),
+            measurement_node=self._measurement_node,
+            candidates=build_candidate_rows(self._buffer, self.short_formula_template),
             nodes=self._current_round_nodes(),
-            pobb=build_pobb_block(self._core, self._buffer.p_best_top),
+            racing=build_racing_block(self._core, self._buffer.p_best_top),
             overlap=self._buffer.overlap,
         )
         # The ARMED ceiling, never the one INIT declared. `_build_budget_gate` prefers
-        # `spend_cap.json` over the launch-composed cap, so serving the stamped value left every
+        # `run_limits.json` over the admitted cap, so serving the stamped value left every
         # reader — the budget control's prefill, the run strip — quoting a number nothing would
         # enforce. Overlaid at the single write, so no reader has to join two sources.
         if s.run_limits is not None:
-            armed_usd, armed_tokens = read_spend_caps(self.cycle_dir)
-            armed: dict[str, float | int] = {}
-            if armed_usd is not None:
-                armed["spend_budget_usd"] = armed_usd
-            if armed_tokens is not None:
-                armed["token_budget"] = armed_tokens
+            armed = armed_run_limits(self.cycle_dir)
             if armed:
                 s.run_limits = s.run_limits.model_copy(update=armed)
         # Same shape as the spend caps above, and for the same narrow purpose: keeping the FILE
@@ -998,23 +913,29 @@ class LiveDashboardProjection(Projection):
         s.sample_lookahead_auto = sample_lookahead_auto(self.cycle_dir)
         # Nothing scoring: the most the NEXT round could hold — every candidate's cells and one
         # catch-up per cell — so a press can be sized before the round it will apply to begins.
-        s.in_flight, s.lookahead_allowed, s.lookahead_most = (
-            self._flight if any(self._flight) else (0, 0, (s.n_variants + 1) * s.sp_budget_round)
-        )
+        if any(self._flight):
+            s.in_flight, s.lookahead_allowed, s.lookahead_most = self._flight
+        else:
+            s.in_flight = s.lookahead_allowed = 0
+            s.lookahead_most = (
+                None if s.arms_per_round is None else (s.arms_per_round + 1) * s.sp_budget_round
+            )
+        # Kept whatever the phase state: between rounds these still say what the ceiling would
+        # afford the next one, which is when a press is sized.
+        s.lookahead_affordable = self._affordable
+        s.cell_reserve_usd = self._cell_reserve_usd
         # Named off the launch that opened the cell, the one record that says whose it is.
         opened = self._open_samples.get(self._waiting[0]) if self._waiting else None
         if self._waiting is None or opened is None:
             s.waiting_on, s.waiting_since = None, None
         else:
             ci = opened[1]
-            owner = "parent" if ci == NO_ROUND_SLOT else candidate_label(s.round, ci)
+            owner = "reference" if ci == NO_ROUND_SLOT else candidate_label(s.round, ci)
             s.waiting_on = f"{owner} · sample {self._waiting[0]}"
             s.waiting_since = self._waiting[1]
-        # Both inputs are already served and already settled by here — the fold is one division,
-        # and it is here so that no reader performs it against a different poll of either.
-        used = s.spend.total_used_usd
-        s.ability_delta_per_usd = (
-            None if s.ability_delta is None or used <= 0 else round(s.ability_delta / used, 4)
+        s.backpressure = self._backpressure
+        s.bench_lift_per_incurred_usd = (
+            None if s.bench_score is None else s.bench_score.lift_per_usd(s.spend)
         )
         s.wallclock_serialized_at = utcnow_iso()
         # The typed model IS the on-disk shape, and `extra="forbid"` rejects an undeclared
@@ -1071,10 +992,9 @@ def fold_at(cut: Cut) -> LiveDashboardState:
         hop=cut.hop,
         # The wiring, at the model's own defaults — `WIRING_FIELDS` names what the caller stamps.
         session_id="",
-        l1_patience=0,
-        n_variants=0,
+        arms_per_round=0,
         sp_budget_round=0,
-        headline_metric="accuracy",
+        display_metric="accuracy",
     )
     limit = None if cut.offset is None else cut.offset + 1
     for offset, record in open_with_history(cut.cycle).iter(limit):

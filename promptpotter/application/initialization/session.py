@@ -7,17 +7,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.campaign_config import freeze_campaign_config
-from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-    combined_optimizer_prompt_hash,
-)
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import resolved_dataset_name
 from promptpotter.application.run_observers import build_campaign_emitter
 from promptpotter.application.runner.campaign_ids import mint_campaign_id, mint_checkin_cycle_id
 from promptpotter.config.settings import APP_VERSION
-from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.bench import BankPartition
+from promptpotter.domain.campaign import Arm, Campaign
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.phases import StopReason
-from promptpotter.domain.results import HeadlineMetric
+from promptpotter.domain.results import DisplayMetric
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellScorer
 from promptpotter.infrastructure.backend import BackendClient
@@ -28,7 +28,6 @@ from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.session_pointer import mint_session_id, save_active_pointer
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import graceful
 from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
@@ -52,13 +51,13 @@ class ScorerSetup:
     scorer: CellScorer | None = None
     scorer_id: str = "none"
     scorer_cell_formula: str | None = None
-    # WHICH number the operator's surfaces headline. Here rather than only on
+    # WHICH number the operator's surfaces display first. Here rather than only on
     # `dashboard.json` because the terminal is an entry point too: served to the browser
     # alone, a campaign that declares `ability` still led every CLI line with the
     # subset-relative accuracy, which is the one reading `per_round_resubset` makes
-    # unsafe (`knobs.py::headline_subset_relative_under_resubset`).
-    headline_metric: HeadlineMetric = "accuracy"
-    scoring_set: list[Sample] = field(default_factory=list)
+    # unsafe (`couplings.py::display_subset_relative_under_resubset`).
+    display_metric: DisplayMetric = "accuracy"
+    partition: BankPartition | None = None
     degradation_checks: list[StopRule] = field(default_factory=list)
     judges: tuple[Evaluator, ...] = ()
     """The campaign's LLM-as-judge graders, already built into ``per_sample`` evaluators — one per
@@ -76,6 +75,13 @@ class ScorerSetup:
             )
         return self.scorer
 
+    def require_partition(self) -> BankPartition:
+        """``None`` means neither ``run_optimization`` nor ``arm_diagnostic_scoring`` split the
+        bank, so any draw here could reach the bench set."""
+        if self.partition is None:
+            raise RuntimeError("session.scoring.partition is unset — the bank was never split.")
+        return self.partition
+
 
 @dataclass
 class CycleSnapshot:
@@ -87,6 +93,9 @@ class CycleSnapshot:
     obs: ObservabilityBridge | None = None
     audit_projection: AuditTrailProjection | None = None
     ledger: CycleEventLog | None = None
+    # Every cell (`ReplayFeed.cell_key`) this campaign's search already priced, grown as a walk
+    # takes each: a replay of one is a re-read and costs nothing again (`QueryLoopState.counted`).
+    counted_cells: set[str] = field(default_factory=set)
     # Forensic traceback for ``index.json::crash_traceback`` written by
     # ``mark_finished``. Operator-facing summary (kind + message) is owned by
     # the canonical ``ErrorRecord`` on the ledger; this field is the in-process
@@ -127,11 +136,19 @@ class Session:
     state: CycleSnapshot = field(default_factory=CycleSnapshot)
     scoring: ScorerSetup = field(default_factory=ScorerSetup)
 
-    source: str = ""
+    source: RunSource | None = None
     # This cycle was babysat — an operator directly edited an engine-owned/locked
     # value (ADR-0005). Read from the cycle index at init; forces every run
     # this cycle scores to grade C (excluded from digest / reuse / L4).
     human_intervened: bool = False
+    # The head-to-head this campaign runs as an arm of (`Campaign.arm`), read at the runner seam.
+    arm: Arm | None = None
+
+    @property
+    def controlled(self) -> bool:
+        """An arm of a declared head-to-head — the one predicate every mechanism reading past the
+        declaration asks (`docs/architecture.md` § The controlled comparison)."""
+        return self.arm is not None
 
     @property
     def hop(self) -> CycleHop:
@@ -231,6 +248,7 @@ def auto_mint_session(
     pipeline_params: dict[str, Any] | None = None,
     active_steps: list[str] | None = None,
     label: str = "",
+    arm: Arm | None,
 ) -> tuple[str, str, str]:
     """Mint fresh campaign + session + root cycle; claim the active pointer. ``campaign_id`` comes from the CALLER, so an
     L4 inner spawn can hand in an id derived from the cell it measures and land back on a campaign it already ran."""
@@ -240,7 +258,6 @@ def auto_mint_session(
     session_id = mint_session_id()
     now = utcnow_iso()
     dataset_name = resolved_dataset_name(session, campaign_config)
-    optimizer_hash = combined_optimizer_prompt_hash()
     validate_path_component(hop.campaign_id)
     root_cycle = hop.cycle_id
 
@@ -269,7 +286,8 @@ def auto_mint_session(
             created_at=now,
             root_cycle_id=root_cycle,
             root_content_hash=target_hash,
-            optimizer_prompt_hash=optimizer_hash,
+            treatment=select_optimizer(campaign_config.optimization).treatment(),
+            arm=arm,
             backend_id=session.backend_id,
             backend_type=backend_type_of_dataset(session.store, dataset_name),
             owner_user_id=str(session.identity.user_id),
@@ -295,9 +313,7 @@ def auto_mint_session(
     save_active_pointer(session.store.base_dir, session_id, root_hop)
 
     # Pre-seed dashboard.json so the webapp doesn't 404 in the mint→loop-start window.
-
-    with graceful("Pre-seeding dashboard.json failed"):
-        build_campaign_emitter(session, campaign_config, origin_accuracy=origin_acc)
+    build_campaign_emitter(session, campaign_config, origin_accuracy=origin_acc)
 
     logger.info(
         "Minted fresh campaign %s — session %s, cycle %s",
@@ -393,7 +409,9 @@ def finalize_checkin_to_active(
         hop.campaign_id,
         {
             "root_content_hash": target_hash,
-            "optimizer_prompt_hash": combined_optimizer_prompt_hash(),
+            "treatment": select_optimizer(campaign_config.optimization)
+            .treatment()
+            .model_dump(mode="json"),
             "backend_id": session.backend_id,
             # Re-read rather than trusted from the skeleton: the check-in wrote the slug's
             # `pipeline.yaml` between the two, and the operator may have picked a different
@@ -427,8 +445,7 @@ def finalize_checkin_to_active(
     cycle_dir = session.store.campaigns.cycle_dir(hop)
     CycleLayout(cycle_dir).checkin_flag.unlink(missing_ok=True)
 
-    with graceful("Pre-seeding dashboard.json failed"):
-        build_campaign_emitter(session, campaign_config, origin_accuracy=0.0)
+    build_campaign_emitter(session, campaign_config, origin_accuracy=0.0)
 
     logger.info(
         "Check-in campaign %s started — session %s, cycle %s",

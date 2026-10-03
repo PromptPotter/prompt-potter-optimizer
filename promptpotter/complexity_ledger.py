@@ -5,6 +5,7 @@ Outside the layer tree because it counts every layer: inside one, an import woul
 from __future__ import annotations
 
 import ast
+import collections
 import json
 import types
 import typing
@@ -267,11 +268,8 @@ def _is_reexport_shim(init_file: Path) -> bool:
 
 
 def compute_ledger() -> dict[str, int]:
-    from promptpotter.application.knobs import KNOBS
-    from promptpotter.application.optimization.dispatch.injections.registry import (
-        injection_table,
-    )
-    from promptpotter.application.optimization.escalation.rules import DEFAULT_ESCALATION_RULES
+    from promptpotter.application import optimizers
+    from promptpotter.application.knobs import KNOBS, member_knob_count
     from promptpotter.config import settings as settings_mod
     from promptpotter.config.settings import PROMPT_STRING_FIELDS, Settings
     from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -279,12 +277,16 @@ def compute_ledger() -> dict[str, int]:
 
     py_files = _package_files("*.py")
     init_files = [p for p in py_files if p.name == "__init__.py"]
+    priced: collections.Counter[str] = collections.Counter()
+    for runtime in optimizers.runtimes().values():
+        priced.update(runtime.priced_surface)
 
     return {
         "modules": len(py_files),
         "init_files": len(init_files),
         "reexport_shims": sum(1 for p in init_files if _is_reexport_shim(p)),
-        "config_leaf_fields": len(KNOBS),
+        # The overlay leaf stands for the node knobs each member declares, counted instead.
+        "config_leaf_fields": len(KNOBS) - 1 + member_knob_count(),
         "settings_env": len(Settings.model_fields),
         "settings_const": sum(1 for name in settings_mod.__all__ if name.isupper()),
         "opt_search_point_fields": _count_leaves(OptSearchPoint),
@@ -295,8 +297,7 @@ def compute_ledger() -> dict[str, int]:
         "domain_any_maps": _count_domain_any_maps(py_files),
         "models_lax": _count_lax_models(py_files),
         "prompt_string_fields": len(PROMPT_STRING_FIELDS),
-        "injections": len(injection_table()),
-        "escalation_rules": len(DEFAULT_ESCALATION_RULES),
+        **priced,
         "deferred_imports": _count_deferred_imports(py_files),
         "claude_md": len(_package_files("CLAUDE.md")),
         "test_files": len(test_files := _test_files()),

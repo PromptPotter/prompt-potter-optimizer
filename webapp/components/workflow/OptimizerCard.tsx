@@ -14,37 +14,23 @@ import {
   ToolbarSpacer,
 } from "@/components/ui";
 import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
-import { MechanismsPanel } from "@/components/dashboard/control/MechanismsPanel";
+import { NodeKnobsPanel } from "@/components/dashboard/control/NodeKnobsPanel";
 import { RoundAxis } from "./RoundAxis";
 import type { PipelineDoc } from "./types";
 
-// The Optimizer card: the loop's own frame, round axis and liveness, around the SHARED
-// pipeline renderer. It draws no graph of its own — a hand-placed geometry here is a second
-// answer to a shape the manifest already declares (`webapp/CLAUDE.md` § Component
-// conventions).
-//
-// The mechanism toggles hang off this card rather than off the page, because they are
-// policy of THIS loop and nothing else: `per_round_resubset` decides whether the round
-// re-cuts its subset, the elimination toggles decide which arms PoBB kills. A page-level
-// lane said only where the values are stored. Read-only here — the editable mode is
-// ingest's, at authoring time.
-//
-// Their trigger is the header's last icon, never a word or a canvas sibling: the card sizes to
-// its graph, so anything beside the flow widens the frame the flow draws.
+// The Optimizer card: the loop's frame, round axis and liveness around the shared `PipelineFlow`;
+// it draws no graph of its own. The optimizer's knobs are read-only here and sit behind the header's last icon.
 
 interface Props {
   pipeline: PipelineDoc | null;
 }
 
 export function OptimizerCard({ pipeline }: Props) {
-  const [mechanismsOpen, setMechanismsOpen] = useState(false);
-  // Self-sourced liveness from the cycle stream (poll age), not `dash` truthiness — a
-  // frozen campaign still has a `dash` snapshot but is not live.
+  const [knobsOpen, setKnobsOpen] = useState(false);
+  // Liveness off the cycle stream's poll age: a frozen campaign still has a `dash`.
   const { dash, isLive } = useDashboard();
   const view = pipeline?.view ?? null;
   const activeId = dash?.current_round.active_node ?? null;
-  // The optimizer can only ever depict ONE round, so the round axis is this card's own
-  // scope. Node selection rides the shared SelectionContext so `NodeDetail` opens below.
   const {
     nodes: roundNodes,
     round: viewedRound,
@@ -55,14 +41,10 @@ export function OptimizerCard({ pipeline }: Props) {
   const nodeLabel: Record<string, string> = Object.fromEntries(
     (view?.nodes ?? []).map((n) => [n.id, n.label]),
   );
-  // The active node's human label — the accessible, colour-independent echo of the pulse.
-  // Gated on `viewingLive`: on a historical round there is no live node to name.
   const activeLabel = isLive && viewingLive && activeId ? nodeLabel[activeId] : null;
-  // The card's own green: the RUN's state, not the connection's. Staleness is the
-  // connection banner's job; `isLive` still gates the pulse, which must not animate stale data.
+  // The RUN's state, not the connection's; `isLive` still gates the pulse on stale data.
   const runIsRunning = viewingLive && dash?.run_phase === "running";
-  // The phase the SERVER declares, never a local "idle" — that one word covers a paused
-  // run, a run held at the origin gate and a dead producer alike.
+  // The SERVER's phase, never a local "idle" — that word would cover paused, held and dead alike.
   const status = !dash
     ? "pending"
     : !viewingLive
@@ -73,8 +55,7 @@ export function OptimizerCard({ pipeline }: Props) {
           : "live"
         : runPhaseLabel(dash.run_phase, dash.stop_reason);
 
-  // What each node RAN this round, off the audit twin — the answer the config surface
-  // cannot give, since a node can be configured for one model and have not fired at all.
+  // Off the audit twin: a node can be configured for a model and not have fired at all.
   const models = {
     by: Object.fromEntries(
       (view?.nodes ?? []).map((n) => [n.id, roundNodes[n.id]?.model ?? null]),
@@ -95,8 +76,7 @@ export function OptimizerCard({ pipeline }: Props) {
           ● {status}
         </span>
         <ToolbarSpacer />
-        {/* Off while the round has no node yet — an empty `{}` on the clipboard reads as a
-            broken copy, not as "nothing has run". */}
+        {/* Off until a node has run — an empty `{}` copy reads as broken. */}
         <CopyButton
           data={roundNodes}
           disabled={Object.keys(roundNodes).length === 0}
@@ -110,10 +90,10 @@ export function OptimizerCard({ pipeline }: Props) {
           variant="ghost"
           className="workflow-mech"
           aria-haspopup="dialog"
-          aria-expanded={mechanismsOpen}
-          aria-label="Mechanisms"
-          title="Mechanisms — pluggable sorting + early-abort toggles"
-          onClick={() => setMechanismsOpen(true)}
+          aria-expanded={knobsOpen}
+          aria-label="Optimizer knobs"
+          title="Optimizer knobs — each node's configuration for this campaign"
+          onClick={() => setKnobsOpen(true)}
         >
           <IconSliders />
         </Button>
@@ -126,8 +106,7 @@ export function OptimizerCard({ pipeline }: Props) {
           connector={null}
           reach={pipeline?.reach ?? null}
           scope="optimizer"
-          // The card draws ONE level, so there is nothing to zoom into — but `l1_score`
-          // still runs the whole campaign pipeline, and saying so is the frame's job.
+          // One level drawn, yet the measurement node still runs the whole campaign pipeline.
           nestsNode={measurementNode(pipeline)}
           activeNode={isLive && viewingLive ? activeId : null}
           isLive={isLive}
@@ -136,14 +115,12 @@ export function OptimizerCard({ pipeline }: Props) {
         />
       </div>
       <Dialog
-        open={mechanismsOpen}
-        title="Mechanisms"
-        onClose={() => setMechanismsOpen(false)}
+        open={knobsOpen}
+        title="Optimizer knobs"
+        onClose={() => setKnobsOpen(false)}
       >
-        <p className="mech-lead">
-          Pluggable sorting + early-abort toggles (campaign.json)
-        </p>
-        <MechanismsPanel />
+        <p className="mech-lead">The manifest&apos;s values, with this campaign&apos;s overlay</p>
+        <NodeKnobsPanel />
       </Dialog>
     </div>
   );

@@ -1,30 +1,32 @@
 "use client";
 import { useMemo } from "react";
-import { Badge, CopyButton } from "@/components/ui";
+import { Badge, CopyButton, Term, VendorLogo } from "@/components/ui";
 import { CampaignSwitcher } from "@/components/shell/CampaignSwitcher";
+import { SpendBuckets } from "@/components/shell/SpendBuckets";
 import { ViewTabs } from "@/components/shell/ViewTabs";
 import {
+  METER_WORD,
+  benchReading,
   buildForest,
   campaignLineParts,
+  campaignModels,
   campaignTitle,
+  campaignVendors,
   fitnessTrend,
   headlineStats,
   readSpend,
 } from "@/lib/derivations";
-import { fmtPct0, fmtUsdCents } from "@/lib/format";
+import { fmtPct0, fmtUsdCents, shortModel } from "@/lib/format";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { pathLeaf } from "@/lib/ids";
+import { isMeasuring } from "@/lib/poll";
 import { cx } from "@/lib/cx";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { useWorkspace } from "@/lib/workspace";
 import type { Tab } from "@/lib/view-tab";
 
-// The unit's masthead — three rows and the view strip, ONE header over every tab (chrome), so
-// no two can grow different answers to "what am I looking at". Who this campaign is, what it
-// runs with, and how it is doing; the strip sits in `main` rather than inside a pane's scroller,
-// because it is the only way to switch views and one that scrolls out of reach is no nav. The
-// band is full-bleed; the inner box centres on --dash-narrow-max, the one method the chat column
-// and the dashboard spine also use (masthead.css).
+// ONE header over every tab, owning "where is this run": no pane below repeats a fact it shows
+// (webapp/CLAUDE.md § Component conventions).
 export function RunMasthead({
   tab,
   onSelectTab,
@@ -32,15 +34,12 @@ export function RunMasthead({
 }: {
   tab: Tab;
   onSelectTab: (t: Tab) => void;
-  // Called after the operator follows the active run, so the shell can switch to the Dashboard
-  // — same contract as the JobsDock's `onPicked`.
   onFollowed: () => void;
 }) {
   const { campaignId, leafCycleId, viewedPath, campaigns, cycles, following, followActive } =
     useWorkspace();
   const { dash, dashRound } = useDashboard();
 
-  // ONE forest for the header and its switcher, the same builder the sidebar reads.
   const origins = useMemo(() => buildForest(campaigns, cycles), [campaigns, cycles]);
   const run = useMemo(
     () =>
@@ -50,10 +49,8 @@ export function RunMasthead({
     [origins, campaignId],
   );
 
-  // Sparkline: running-best composite over rounds, read from the dashboard's per-round summary
-  // block. Keyed on `dash?.rounds` so a per-sample tick does not re-trace the path.
   const spark = useMemo(() => {
-    const { best: ys } = fitnessTrend(dash?.rounds, dash?.best);
+    const ys = fitnessTrend(dash?.rounds).best.filter((y): y is number => y != null);
     if (ys.length < 2) return null;
     const W = 120;
     const H = 26;
@@ -64,11 +61,10 @@ export function RunMasthead({
       .map((y, i) => `${i === 0 ? "M" : "L"}${toX(i).toFixed(1)},${toY(y).toFixed(1)}`)
       .join("");
     return { path, area: `${path} L${W},${H} L0,${H} Z`, W, H };
-  }, [dash?.rounds, dash?.best]);
+  }, [dash?.rounds]);
 
   const title = run ? campaignTitle(run.campaign) : null;
-  // Depth > 1 ⇒ viewing an inner descendant (an L4 inner loop). Backing out is the remote's
-  // drill button, which owns that navigation; this only says where the view is.
+  // Backing out is the remote's drill button; this only says where the view is.
   const innerLeaf = viewedPath && viewedPath.length > 1 ? pathLeaf(viewedPath) : null;
 
   const runPhase = dash?.run_phase ?? null;
@@ -81,18 +77,13 @@ export function RunMasthead({
   );
 
   const { best } = headlineStats(dash);
-  // The candidate currently being scored ("C3.2"). `dash.candidate` is "C3.2/4" and goes stale
-  // between rounds, so it stands in for the round only while the scorer is the active node.
-  const scoringCand =
-    dash?.current_round.active_node === "l1_score"
-      ? String(dash.candidate || "").split("/")[0]
-      : "";
+  const bench = benchReading(dash?.bench_score, dash?.run_phase);
+  // `dash.candidate` goes stale between rounds, so it stands in only while the measurement works.
+  const scoringCand = dash && isMeasuring(dash) ? String(dash.candidate || "").split("/")[0] : "";
   const roundsCap = dash?.run_limits?.max_rounds ?? null;
   const position = scoringCand || (dashRound != null ? `R${dashRound}` : "—");
 
-  // One parser for spend, ceilings included — `readSpend` reads the armed `run_limits` pair,
-  // which is the halt gate's own source.
-  const { usedUsd, budgetUsd, unpricedTokens } = readSpend(dash);
+  const { metered, budgetUsd, unpricedTokens } = readSpend(dash);
   const spendFloor = unpricedTokens > 0 ? "≥" : "";
 
   return (
@@ -120,7 +111,20 @@ export function RunMasthead({
             </span>
           )}
         </div>
-        {run && <div className="run-setup">{campaignLineParts(run).join(" · ")}</div>}
+        {run && (
+          <div className="run-setup">
+            <span className="run-setup-vendors">
+              {campaignVendors(run).map((v) => (
+                <VendorLogo key={v.vendor} vendor={v.vendor} models={v.models} />
+              ))}
+            </span>
+            {[
+              ...(run.campaign.runs_with ? [`${run.campaign.runs_with.optimizer} optimizer`] : []),
+              ...campaignModels(run).map(shortModel),
+              ...campaignLineParts(run),
+            ].join(" · ")}
+          </div>
+        )}
         {/* Every chip reads `dash` for the VIEWED LEAF, the one per-cycle source. */}
         <div className="run-chips">
           {following ? (
@@ -136,8 +140,8 @@ export function RunMasthead({
                 followActive();
                 onFollowed();
               }}
-              aria-label={`${phaseLabel} — pinned to this campaign. Follow the campaign the CLI is currently running.`}
-              title="Pinned to this campaign. Click to follow the campaign the CLI is currently running."
+              aria-label={`${phaseLabel} — pinned to this campaign. Follow the latest launch instead.`}
+              title="Pinned to this campaign; other launches leave it on screen. Click to follow the latest launch."
             >
               <span className="chip-lbl">Follow</span>
               {phaseBody}
@@ -157,6 +161,12 @@ export function RunMasthead({
               </svg>
             )}
           </span>
+          {/* The headline: the selection graded on held-out rows; BEST beside it is the optimizer's own. */}
+          <span className="chip">
+            <span className="chip-lbl">{bench.label}</span>
+            {bench.value}
+            {bench.sub && <span className="chip-of"> {bench.sub}</span>}
+          </span>
           <span className="chip">
             <span className="chip-lbl">Rounds</span>
             {position}
@@ -164,10 +174,17 @@ export function RunMasthead({
           </span>
           <span className={cx("chip", unpricedTokens > 0 && "chip-warn")}>
             <span className="chip-lbl">Spend</span>
-            {usedUsd != null ? `${spendFloor}${fmtUsdCents(usedUsd)}` : "—"}
+            {metered ? (
+              <Term content={<SpendBuckets metered={metered} />}>
+                {`${spendFloor}${fmtUsdCents(metered.usd)}`}
+              </Term>
+            ) : (
+              "—"
+            )}
             {budgetUsd != null && (
               <span className="chip-of"> / {fmtUsdCents(budgetUsd)} cap</span>
             )}
+            {metered && <span className="chip-of"> {METER_WORD[metered.meter]}</span>}
           </span>
         </div>
         <ViewTabs tab={tab} onSelect={onSelectTab} />

@@ -25,7 +25,7 @@ from promptpotter.application.intelligence.exploration import (
     theta_bounds_given_delta,
     theta_lift_over_parent,
 )
-from promptpotter.application.optimization.pobb.classification import scoreable_rows
+from promptpotter.application.scoring.classification import scoreable_rows
 from promptpotter.shared.statistics import (
     discordant_counts,
     mean_ci,
@@ -38,13 +38,14 @@ if TYPE_CHECKING:
     from promptpotter.application.intelligence.exploration import RaschPosterior
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.ruler import DeltaRuler
-    from promptpotter.domain.scoring import QueryMeasurement
+    from promptpotter.domain.scoring import CellGrade, QueryMeasurement
 
 __all__ = [
     "distinct_valid_cells",
     "elect_round_winner",
     "elimination_p_best",
     "elimination_p_best_bounds",
+    "lift_over_bar",
     "matched_parent_lift",
     "mean_fitness_ci",
     "paired_fitness",
@@ -53,14 +54,14 @@ __all__ = [
 ]
 
 
-def mean_fitness_ci(results: list[QueryMeasurement]) -> tuple[float | None, float | None]:
+def mean_fitness_ci(
+    results: list[QueryMeasurement], *, grade: CellGrade
+) -> tuple[float | None, float | None]:
     """Brackets the scoreable population, since that is the number it is drawn beside. A DECISION
     grades an errored row 0.0 (the arm was asked and produced nothing); an interval drawn beside a
     point estimate must bracket the population that estimate came from — hence the filter here and
     deliberately not inside ``_mean_fitness_by_cell``."""
-    # Lazy: scoring → optimization circular.
-
-    per_cell = list(_mean_fitness_by_cell(scoreable_rows(results)).values())
+    per_cell = list(_mean_fitness_by_cell(scoreable_rows(results), grade=grade).values())
     if not per_cell:
         return (None, None)
     _, ci_lo, ci_hi = mean_ci(per_cell)
@@ -82,14 +83,14 @@ def mean_fitness_ci(results: list[QueryMeasurement]) -> tuple[float | None, floa
 # ---------------------------------------------------------------------------
 
 
-def _mean_fitness_by_cell(rows: list[QueryMeasurement]) -> dict[Any, float]:
+def _mean_fitness_by_cell(rows: list[QueryMeasurement], *, grade: CellGrade) -> dict[Any, float]:
     """Un-predicated ON PURPOSE — this is the origin-overlap population, not the display one, and
     ``elect_round_winner`` relies on an errored row counting as a 0.0 cell. Do not add the filter."""
     acc: dict[Any, list[float]] = {}
     for r in rows:
         sid = r.get("sample_id")
         if sid is not None:
-            acc.setdefault(sid, []).append(float(r.get("fitness", 0.0) or 0.0))
+            acc.setdefault(sid, []).append(float(r.get(grade, 0.0) or 0.0))
     return {sid: sum(v) / len(v) for sid, v in acc.items()}
 
 
@@ -103,11 +104,13 @@ def distinct_valid_cells(results: list[QueryMeasurement]) -> int:
 def paired_fitness(
     candidate_results: list[QueryMeasurement],
     parent_results: list[QueryMeasurement],
+    *,
+    grade: CellGrade,
 ) -> tuple[list[float], list[float]]:
     """The matched pairs the round-significance test runs on. Sorted by ``sample_id`` so a replay
     is deterministic. Every caller pairs against the PARENT — the origin only at round 0."""
-    cand_by_sid = _mean_fitness_by_cell(candidate_results)
-    parent_by_sid = _mean_fitness_by_cell(parent_results)
+    cand_by_sid = _mean_fitness_by_cell(candidate_results, grade=grade)
+    parent_by_sid = _mean_fitness_by_cell(parent_results, grade=grade)
     cand_fit: list[float] = []
     parent_fit: list[float] = []
     for sid in sorted(cand_by_sid.keys() & parent_by_sid.keys(), key=lambda s: (s is None, s)):
@@ -119,6 +122,8 @@ def paired_fitness(
 def matched_parent_lift(
     candidate_results: list[QueryMeasurement],
     parent_results: list[QueryMeasurement],
+    *,
+    grade: CellGrade,
 ) -> tuple[float, float, float] | None:
     """``(lift, ci_lo, ci_hi)`` against the PARENT ON THE CELLS BOTH MEASURED — the blocked comparison,
     sharper than ``mean_fitness_ci`` on the same rows. The parent is the origin only at round 0 and the
@@ -129,7 +134,7 @@ def matched_parent_lift(
     # makes the panel a narrowed comparison rather than a smaller one; ``n_cells`` cannot say which.
 
     cand_fit, parent_fit = paired_fitness(
-        scoreable_rows(candidate_results), scoreable_rows(parent_results)
+        scoreable_rows(candidate_results), scoreable_rows(parent_results), grade=grade
     )
     lift, ci_lo, ci_hi, _p, _n = paired_reading(cand_fit, parent_fit)
     return None if ci_lo is None or ci_hi is None else (lift, ci_lo, ci_hi)
@@ -174,9 +179,9 @@ def parent_selection_bias(rounds: Sequence[RoundResult]) -> float:
     noise draw — and ``rescore_parent`` replays its cached rows, so the inflation never washes out.
     Corrects the BAR only: the challengers are unselected draws and carry no such term."""
     for rr in reversed(rounds):
-        if not rr.winner_id:
+        if not rr.selected_labels:
             continue
-        winner = next((c for c in rr.candidate_scores if c.candidate_id == rr.winner_id), None)
+        winner = next(iter(rr.selected_scores), None)
         se = winner.theta_se if winner else None
         if not se:
             return 0.0
@@ -188,6 +193,24 @@ def parent_selection_bias(rounds: Sequence[RoundResult]) -> float:
     return 0.0
 
 
+def lift_over_bar(
+    abilities: RaschPosterior, candidate_id: str, parent_bias: float
+) -> tuple[float, float] | None:
+    """What ADMISSION reads, as its two halves: θ over the parent's, and the share of the parent's
+    selection bias this arm has earned back. Split so a verdict can state both; admission needs the
+    first positive on its own. ``None`` where either arm was never fit.
+
+    The credit is EARNED, not granted: it corrects a bar read at the parent's SE, so an arm read
+    less precisely carries a wider draw of its own and a flat credit would be worth most to the
+    noisiest arm in the round — the one that needs it least."""
+    lift = theta_lift_over_parent(abilities, candidate_id)
+    if lift is None:
+        return None
+    se_parent = abilities.theta_se.get(PARENT_ABILITY_ID) or 0.0
+    se_cand = abilities.theta_se.get(candidate_id) or 0.0
+    return lift, parent_bias * (min(1.0, se_parent / se_cand) if se_parent and se_cand else 1.0)
+
+
 def elect_round_winner(
     candidate_ids: list[str],
     results_by_id: Mapping[str, list[QueryMeasurement]],
@@ -197,10 +220,10 @@ def elect_round_winner(
     *,
     parent_bias: float,
 ) -> tuple[str, RaschPosterior]:
-    """ADMISSION is the point-estimate lift — strictly above the parent. The RANK is ``P(θ_cand >
-    θ_parent)``, the same quantity ``elimination_p_best`` cuts on, so the two cannot disagree about
-    what better means. The overlap guard and the θ-lift guard cover different holes: one grades an
-    errored row 0.0, the fit drops it."""
+    """ADMISSION is the point-estimate lift — raw θ strictly above the parent's. The RANK is
+    ``P(θ_cand > θ_parent)``, the same quantity ``elimination_p_best`` cuts on, so the two cannot
+    disagree about what better means. The overlap guard and the θ-lift guard cover different holes:
+    one grades an errored row 0.0, the fit drops it."""
 
     abilities = candidate_abilities(
         {cid: list(results_by_id.get(cid) or []) for cid in candidate_ids},
@@ -223,20 +246,15 @@ def elect_round_winner(
         # cuts below its own `n_min`, which IS this floor, so no cut arm is stopped here.
         if n_cells < coverage_floor:
             continue
-        cand_fit, _ = paired_fitness(cand_results, parent_results)
+        cand_fit, _ = paired_fitness(cand_results, parent_results, grade="fitness")
         if not cand_fit:
             continue
         # ADMISSION is the bare point lift, no SE margin — subtracting one shrinks the estimate
         # itself, turning a wide-posterior gain negative. Uncertainty belongs in the RANK below.
-        lift = theta_lift_over_parent(abilities, cid)
-        if lift is None:
-            continue
-        # The credit is EARNED, not granted: it corrects a bar read at `se_parent`, so an arm read
-        # less precisely carries a wider draw of its own and a flat credit would be worth most to
-        # the noisiest arm in the round — the one that needs it least.
-        se_cand = abilities.theta_se.get(cid) or 0.0
-        lift += parent_bias * (min(1.0, se_parent / se_cand) if se_parent and se_cand else 1.0)
-        if lift <= 0.0:
+        # The raw lift alone admits: the earned credit (never negative) is reported, and never
+        # admits an arm that ties or trails the parent.
+        read = lift_over_bar(abilities, cid, parent_bias)
+        if read is None or read[0] <= 0.0:
             continue
         # RANK: the lift over the noise it cleared, because a bare gap cannot say whether the
         # round could TELL the arms apart — a thin arm out-points a full panel on a margin

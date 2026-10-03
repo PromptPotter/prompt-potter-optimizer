@@ -4,38 +4,21 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// A signed-in identity for the cold tier, without a real OIDC round trip.
-//
-// `PROMPTPOTTER_AUTH=off` — what both Playwright servers pass — makes `deps.py::auth_is_open`
-// return true unconditionally, so `resolve_identity` returns `registered_or_default_identity()`
-// and never even LOOKS at a session cookie. That is why `AccessGate` and `AllowanceSpent` were
-// unreachable: not a missing fixture, but auth staying open for the whole suite. So this spawns
-// `serve.mjs` — the SAME server script, with the same preflight, the same fault tee and the same
-// interpreter — and simply leaves that variable unset. `auth_is_open` also opens whenever
-// `ENVIRONMENT == "development"` and no OIDC provider is configured, so a dummy `oidc.json`
-// (never dialled: no login round trip is completed here) closes that second door too.
-//
-// With auth genuinely closed, `OIDCMiddleware` reads whatever session the cookie names — and a
-// session is nothing but a JSON file `OIDCSessionStore` will happily read back, so minting one
-// directly is the whole mechanism. Everything below writes a fixture; nothing below is a server.
+// A signed-in identity without an OIDC round trip: `serve.mjs` with PROMPTPOTTER_AUTH unset plus a
+// dummy `oidc.json` closes both doors of `deps.py::auth_is_open`; a session is a file minted directly.
 
-// `__dirname`, not `import.meta.url`: Playwright's test loader compiles this file to CommonJS
-// (`webapp/package.json` carries no `"type": "module"`, same as `harness.ts` beside it).
+// `__dirname`, not `import.meta.url`: Playwright's loader compiles this file to CommonJS.
 const WEBAPP = path.resolve(__dirname, "..");
 
 export type FakeIssuer = {
   baseURL: string;
-  /** Write a session file and return the cookie value that names it. */
   mintSession(opts: { tenantId: string; email: string | null }): string;
-  /** Pre-seed a per-tenant free-tier ceiling of `usd` — 0 puts the account at its cap with
-   * nothing spent, which is what `AllowanceSpent` reads without a campaign ever running. */
+  /** `0` puts the account at its cap with nothing spent, which is what `AllowanceSpent` reads. */
   seedSpendCeiling(tenantId: string, usd: number): void;
-  /** Replace the install's blocklist with exactly `emails`. */
   blockEmails(emails: string[]): void;
   stop(): Promise<void>;
 };
 
-/** Boot a throwaway API server with auth CLOSED, on its own workspace and port. */
 export async function startFakeIssuer(
   port = process.env.PP_E2E_FAKEAUTH_PORT || "8125",
 ): Promise<FakeIssuer> {
@@ -44,8 +27,7 @@ export async function startFakeIssuer(
   mkdirSync(path.join(identityDir, "sessions"), { recursive: true });
 
   const baseURL = `http://127.0.0.1:${port}`;
-  // Only its PRESENCE matters (`ProviderConfigBundle.configured`) — nothing here ever dials out
-  // to Google, since every test mints a session file directly.
+  // Only its PRESENCE matters (`ProviderConfigBundle.configured`); nothing dials out.
   writeFileSync(
     path.join(identityDir, "oidc.json"),
     JSON.stringify({
@@ -57,12 +39,9 @@ export async function startFakeIssuer(
     }),
   );
 
-  // Annotated, because the ambient `process.env` is narrowed to the keys the app declares and a
-  // spread of it therefore has no `delete`-able members.
+  // Annotated: the ambient `process.env` is narrowed, so its spread has no `delete`-able members.
   const env: NodeJS.ProcessEnv = { ...process.env, PP_E2E_PORT: port, PROMPTPOTTER_HOME: home };
-  // DELETED rather than left to inherit. `PROMPTPOTTER_AUTH` is what this harness exists to NOT
-  // set, and the runner's own shell may well carry it; `PP_E2E_RESET` would point `reset_world`
-  // at a workspace minted fresh two lines above, which has nothing to wipe.
+  // Deleted, not inherited: the runner's own shell may carry either.
   delete env.PROMPTPOTTER_AUTH;
   delete env.PP_E2E_RESET;
   const proc = spawn("node", [path.join(WEBAPP, "e2e", "serve.mjs")], {
@@ -71,8 +50,7 @@ export async function startFakeIssuer(
     env,
   });
 
-  // `serve.mjs` preflights the venv and the static export and exits 2 with the remedy. Catching
-  // that here reports it now instead of as a 60s health timeout that names neither.
+  // `serve.mjs` exits 2 with the remedy on a failed preflight; surface it before the health timeout.
   let died: number | null = null;
   proc.on("exit", (code) => (died = code ?? 1));
   await waitForHealth(`${baseURL}/api/v1/health`, () => died);
@@ -88,8 +66,7 @@ export async function startFakeIssuer(
         JSON.stringify({
           user_id: tenantId,
           tenant_id: tenantId,
-          // Any non-empty issuer works: nothing past the middleware dials out to it, and its
-          // sole load-bearing property is being non-null (`quota.py::_is_host`'s terminal check).
+          // Must be non-null (`quota.py::_is_host`); nothing dials out to it.
           issuer: "https://fake-issuer.e2e.test/",
           subject: `sub-${tenantId}`,
           email,
@@ -104,8 +81,7 @@ export async function startFakeIssuer(
     seedSpendCeiling(tenantId, usd) {
       const dir = path.join(home, "projects", tenantId);
       mkdirSync(dir, { recursive: true });
-      // Every field `User` (StrictModel, extra="forbid") declares — `get_or_create` returns
-      // this file as-is once it exists, so it must already be a whole, valid record.
+      // Every field `User` (extra="forbid") declares: `get_or_create` returns this file as-is.
       writeFileSync(
         path.join(dir, "user.json"),
         JSON.stringify({

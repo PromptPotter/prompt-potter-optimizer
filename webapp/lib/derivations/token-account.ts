@@ -1,10 +1,8 @@
-// The browser's half of `domain/spend.py::TokenAccount` — one reading of the provider's
-// prefix-cache discount, and one fold of the per-node `step_tokens` that carries it. One module
-// rather than a helper per renderer: five panes show this share and they have to agree.
+// The browser's half of `domain/spend.py::TokenAccount`: the one reading of the prefix-cache
+// discount and the one fold of `step_tokens`, so every pane showing the share agrees.
 
 import { fmtPct0 } from "@/lib/format";
 
-/** One `step_tokens` entry's counts, or a whole row's folded over its nodes. */
 export interface TokenAccount {
   input: number;
   output: number;
@@ -13,13 +11,8 @@ export interface TokenAccount {
   cacheRead: number | null;
 }
 
-/**
- * Fraction of `input` the PROVIDER served off its own prompt-prefix cache.
- *
- * `null` wherever that is unanswerable, `replayed` included: OUR archive served the call, so the
- * counts are the banked row's and a discount beside 📖 claims one this run never got — which is
- * why it is a required argument. `0` is a MEASUREMENT; a caller wanting silence tests `> 0`.
- */
+/** `null` when `replayed`: our archive served the call, so a discount would claim one this run
+ *  never got. `0` is a MEASUREMENT; a caller wanting silence tests `> 0`. */
 export function cacheShare(
   cacheRead: number | null | undefined,
   input: number | null | undefined,
@@ -50,13 +43,7 @@ const PREFIX_TITLE: Record<PrefixState, string> = {
   replayed: "Replayed from our own archive — no provider was reached, so there is no discount to report.",
 };
 
-/**
- * The ONE rendering of a prefix-cache share, so no surface invents its own threshold and
- * *unreported* ("never asked") cannot render as a cold *0%*.
- *
- * `replayed` is passed rather than inferred: `cacheShare` folds it into `null`, and every call
- * site already holds it beside the share.
- */
+/** The one rendering of a prefix-cache share, so *unreported* never renders as a cold 0%. */
 export function prefixReading(share: number | null, replayed: boolean): PrefixReading {
   if (replayed) return { state: "replayed", share: null, label: "", title: PREFIX_TITLE.replayed };
   if (share == null)
@@ -65,16 +52,8 @@ export function prefixReading(share: number | null, replayed: boolean): PrefixRe
   return { state, share, label: `c${fmtPct0(share)}`, title: PREFIX_TITLE[state] };
 }
 
-/**
- * A round document's per-sample account, folded over `pipeline_data.step_tokens`.
- *
- * The live half is served already folded (`TokenAccount.from_step_tokens`); a historical row comes
- * off the round file, which carries only the per-node entries. Two sources by design
- * (`webapp/CLAUDE.md` § Display-data sources), so this converts the second — it is not a second
- * definition of the fold, and it matches the Python one arm for arm, mixed rows included.
- *
- * `null` where the row has no entries at all, which stays distinct from a reported 0%.
- */
+/** Must match `TokenAccount.from_step_tokens` arm for arm — the round file carries only per-node
+ *  entries. `null` (no entries at all) stays distinct from a reported 0%. */
 export function foldStepTokens(stepTokens: unknown): TokenAccount | null {
   if (typeof stepTokens !== "object" || stepTokens === null) return null;
   const entries = Object.values(stepTokens as Record<string, unknown>).filter(

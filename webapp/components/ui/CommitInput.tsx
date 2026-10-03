@@ -6,48 +6,26 @@ import {
   type TextareaHTMLAttributes,
 } from "react";
 
-// A text control that commits on Enter or blur — on blur alone once `rows` makes it multi-line —
-// and never per keystroke.
-//
-// Behavioural rather than presentational, which is why it carries no stylesheet — the caller keeps
-// its own class. What it owns is the discipline three surfaces hand-rolled separately (the metric
-// expression, the scoring-mask criterion, a config cell in the compare table), each with its own draft
-// state and its own reset-or-not decision.
-//
-// The rule it enforces is `webapp/CLAUDE.md` § Component conventions: every half-typed value here
-// is a VALID but wrong request — a keystroke commit fires one fetch per character, 400s on every
-// half-written formula, and blanks the card under the cursor still typing.
+// Commits on Enter or blur (blur alone when multi-line), never per keystroke — the rule of
+// `webapp/CLAUDE.md` § Component conventions.
 
 type Own = {
   value: string;
   onCommit: (value: string) => void;
-  // A draft this returns false for is NOT committed and stays on screen — a half-typed JSON value
-  // must not reach a caller as a string, and losing what was typed is the failure `sent` exists to
-  // prevent. Named `validate`, not `accept`: that one is a DOM attribute and would merge silently.
+  // False keeps the draft on screen uncommitted. Not `accept`: a DOM attribute would merge silently.
   validate?: (draft: string) => boolean;
 };
 
 type Owned = "value" | "onChange" | "onBlur" | "onKeyDown";
 
-// `rows` picks the ELEMENT, so each arm carries that element's own attributes. A structured value
-// (a JSON schema, a layout) must be SEEN to be edited, and it cannot also be given `type` or any
-// other input-only attribute — the signature is what refuses that, so nothing is stripped at render.
 type OneLine = Own & Omit<InputHTMLAttributes<HTMLInputElement>, Owned>;
 type MultiLine = Own & { rows: number } & Omit<
     TextareaHTMLAttributes<HTMLTextAreaElement>,
     Owned | "rows"
   >;
 
-// Two latches, because "the prop moved" and "the prop is stale relative to what I sent" are
-// different facts and one slot cannot tell them apart. `seen` triggers the reset; `sent` is what
-// was last handed UP. A caller that REJECTS a commit keeps its old `value` on screen deliberately
-// (`useRead` `survive:"invalid"` — losing the form on a typo is the failure that rule prevents),
-// so a single latch either re-fires the rejected value on the blur after the Enter, or wipes what
-// the operator typed.
-//
-// The reset runs during RENDER: a committed value arriving from elsewhere (a channel re-pointed, a
-// cell restored, a cycle bound) must replace the draft in the same render, because a `useEffect`
-// reset paints one frame of the previous unit's text.
+// Two latches: `seen` triggers the reset, `sent` is what was last handed UP. A caller that rejects
+// a commit keeps its old `value`, so one latch would re-fire the rejected value on the next blur.
 function useCommitted(
   value: string,
   onCommit: (value: string) => void,
@@ -94,8 +72,6 @@ function Line({ value, onCommit, validate, ...rest }: OneLine) {
   );
 }
 
-// Enter is a newline in a multi-line value, so this arm commits on blur alone: a schema typed
-// across four lines cannot be a control whose first Return sends it.
 function Area({ value, onCommit, validate, rows, ...rest }: MultiLine) {
   const { field } = useCommitted(value, onCommit, validate);
   return <textarea {...rest} {...field} rows={rows} />;

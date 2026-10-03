@@ -1,59 +1,40 @@
 "use client";
-// The ONE scoring-mask form. It renders on the dashboard's candidates card and on a Compare
-// channel, so it is chrome (`webapp/CLAUDE.md` § Component conventions) rather than either
-// surface's.
-//
-// It replaced two editors for one idea: a slider grid that could only build a weighted sum, and a
-// free-text field that could only take one. Each was unreachable from the other surface, so an
-// operator who built a mask on the dashboard retyped it to compare it. Both forms survive here as
-// MODES of one value (`scoring-mask.ts::ScoringMask`) — the grid is the readable way to say the
-// common thing, the expression is the escape hatch for what a grid cannot spell, and switching is
-// a fact about the value rather than about which tab you are on.
-//
-// Text commits on Enter or blur, never per keystroke: on Compare the mask is part of the fetch key,
-// so a keystroke commit fires a request per character and 400s on every half-typed formula. The
-// grid commits per click, which is the same rule — a toggle is not a half-value.
+// The ONE scoring-mask form — chrome, rendered on the candidates card and on a Compare channel.
+// Text commits on Enter or blur: on Compare the mask is part of the fetch key.
 
 import type { ComponentType, ReactNode } from "react";
 import {
   CommitInput,
   IconArrowToBase,
   IconBolt,
-  IconChecklist,
   IconCirclePlus,
   IconCoin,
   IconDatabase,
   IconPulse,
-  IconSearch,
   IconTarget,
-  IconTrendUp,
   IconType,
   IconWarning,
   SegmentedControl,
   Term,
 } from "@/components/ui";
+import type { CellTermMeta } from "@/lib/api/types.generated";
 import { cx } from "@/lib/cx";
 import { TERMS } from "@/lib/terms";
-import { DEFAULT_MASK_WEIGHT, type Row, type ScoringMask } from "./scoring-mask";
+import { DEFAULT_MASK_WEIGHT, type ScoringMask } from "./scoring-mask";
 
-const EVALUATOR_GLYPHS: Record<string, ComponentType> = {
-  accuracy: IconTarget,
-  error_rate: IconWarning,
-  degraded_rate: IconPulse,
+const TERM_GLYPHS: Record<string, ComponentType> = {
+  fitness: IconTarget,
+  errored: IconWarning,
+  degraded: IconPulse,
   latency: IconBolt,
-  source_recall: IconSearch,
-  candidate_recall: IconChecklist,
-  cache_hit_rate: IconDatabase,
+  cached: IconDatabase,
   retrieval_shortfall: IconArrowToBase,
-  mean_retrieval_shortfall: IconTrendUp,
   tokens: IconType,
   cost: IconCoin,
 };
 
-// A namespaced display name (`fuzzy_matching_source_recall`) falls back to its registry stem,
-// so a node-bound metric wears its glyph whichever node owns it this round.
-function maskIconFor(displayName: string, registryName: string): ReactNode {
-  const Glyph = EVALUATOR_GLYPHS[displayName] ?? EVALUATOR_GLYPHS[registryName] ?? IconCirclePlus;
+function maskIconFor(name: string): ReactNode {
+  const Glyph = TERM_GLYPHS[name] ?? IconCirclePlus;
   return <Glyph />;
 }
 
@@ -61,7 +42,7 @@ const MODES = [
   {
     value: "weights" as const,
     label: "Weights",
-    title: "Build the criterion by picking evaluators and weighting them",
+    title: "Build the criterion by picking per-cell terms and weighting them",
   },
   {
     value: "expression" as const,
@@ -81,21 +62,14 @@ export function ScoringMaskEditor({
   invalid,
   summary,
 }: {
-  // Evaluator tiles in display order. The dashboard narrows these to what this cycle MEASURED;
-  // Compare has no such cycle and offers the whole served registry.
-  rows: readonly Row[];
-  // The evaluators the REALIZED composite names — the tile's "used in actual formula" state.
+  rows: readonly CellTermMeta[];
   inActive: ReadonlySet<string>;
   mask: ScoringMask;
   onMask: (mask: ScoringMask) => void;
-  // WHERE the weights started, which is the difference between reading them as the criterion in
-  // force and reading them as a starting point. `realized` = seeded from the served decomposition.
-  // `default` = the active formula is not a weighted sum, so no coefficient exists to seed from.
-  // `none` = there is no single active formula at all, which is every multi-campaign board.
+  // `default`: the active formula is not a weighted sum. `none`: no single active formula
+  // (a multi-campaign board).
   seeded: "realized" | "default" | "none";
-  // The sample subset, as the operator types it. Omitted where the surface already owns a richer
-  // editor of that same axis (the dashboard's chip strip) — two writers on one fact is what this
-  // module exists to avoid.
+  // Omit where the surface already owns a sample-subset editor (the dashboard's chip strip).
   samples?: string;
   onSamples?: (raw: string) => void;
   invalid?: string | null;
@@ -117,8 +91,9 @@ export function ScoringMaskEditor({
           ariaLabel="How to build the scoring mask"
         />
         <span className="l4-subtle">
-          Read this branch under a criterion it was not scored on. Every value left is one the run
-          recorded — the elections are re-decided, never re-run.
+          Read this branch under a per-cell criterion it was not scored on. Every cell the run
+          recorded is re-graded and folded, as a run under it would — the elections are
+          re-decided, never re-run.
         </span>
       </div>
 
@@ -130,7 +105,7 @@ export function ScoringMaskEditor({
           <CommitInput
             className={cx("cmp-expr-input", invalid && "cmp-expr-bad")}
             value={mask.lens}
-            placeholder="score:accuracy - 0.05 * latency"
+            placeholder="score:fitness * (1 - 0.1 * degraded)"
             aria-invalid={invalid ? true : undefined}
             onCommit={(lens) => onMask({ kind: "expression", lens })}
           />
@@ -162,7 +137,7 @@ function WeightGrid({
   onMask,
   seeded,
 }: {
-  rows: readonly Row[];
+  rows: readonly CellTermMeta[];
   inActive: ReadonlySet<string>;
   mask: Extract<ScoringMask, { kind: "weights" }>;
   onMask: (mask: ScoringMask) => void;
@@ -191,16 +166,13 @@ function WeightGrid({
           available, not in formula
         </span>
       </div>
-      {/* The weights are served, so "not seeded" is a fact about the active formula rather than a
-          parse that fell short — and saying it is what keeps a default from reading as the
-          criterion in force. */}
-      {seeded === "default" && rows.length > 0 && (
+      {seeded === "default" && (
         <p className="l4-subtle">
           The active formula is not a weighted sum, so these start from a default rather than from
           it. The lens they build is still applied to the record.
         </p>
       )}
-      {seeded === "none" && rows.length > 0 && (
+      {seeded === "none" && (
         <p className="l4-subtle">
           These channels can come from different campaigns, so there is no one active formula to
           start from. This builds a criterion from scratch and reads each channel under it.
@@ -208,23 +180,17 @@ function WeightGrid({
       )}
       <div className="mask-grid-wrap">
         <div className="mask-grid">
-          {rows.map((r, idx) => {
-            const enabled = mask.selected.has(r.displayName);
-            const weight = mask.weights[r.displayName] ?? DEFAULT_MASK_WEIGHT;
+          {rows.map((r) => {
+            const enabled = mask.selected.has(r.name);
+            const weight = mask.weights[r.name] ?? DEFAULT_MASK_WEIGHT;
             const down = r.direction === "low";
             return (
               <div
-                key={`${r.registryName}__${r.displayName}__${idx}`}
-                className={cx(
-                  "mask-sq",
-                  enabled && "on",
-                  inActive.has(r.displayName) && "in-active",
-                  !r.applicable && "disabled",
-                )}
+                key={r.name}
+                className={cx("mask-sq", enabled && "on", inActive.has(r.name) && "in-active")}
               >
-                {/* The direction glyph is the TILE's, beside the toggle: it is a `Term`, so inside
-                    the control reading it would press the control — and a `<button>` may hold no
-                    focusable descendant at all. */}
+                {/* Outside the toggle: a `Term` is focusable, and a `<button>` may hold no focusable
+                    descendant. */}
                 <Term
                   className={cx("mask-dir", down ? "down" : "up")}
                   content={down ? TERMS.mask_down : TERMS.mask_up}
@@ -233,13 +199,12 @@ function WeightGrid({
                 </Term>
                 <button
                   type="button"
-                  className={cx("mask-sq-toggle", !r.applicable && "mask-sq-toggle-disabled")}
+                  className="mask-sq-toggle"
                   role="checkbox"
                   aria-checked={enabled}
-                  aria-disabled={!r.applicable}
-                  aria-label={r.displayName}
-                  title={r.description || r.displayName}
-                  onClick={() => r.applicable && toggle(r.displayName)}
+                  aria-label={r.name}
+                  title={r.description || r.name}
+                  onClick={() => toggle(r.name)}
                 >
                   <span className="mask-tick" aria-hidden="true">
                     <svg
@@ -253,13 +218,11 @@ function WeightGrid({
                       <path d="M2.5 8.5 L6.5 12.5 L13.5 3.5" />
                     </svg>
                   </span>
-                  <span className="mask-ico">{maskIconFor(r.displayName, r.registryName)}</span>
-                  <span className="mask-name">{r.displayName}</span>
+                  <span className="mask-ico">{maskIconFor(r.name)}</span>
+                  <span className="mask-name">{r.name}</span>
                 </button>
-                {/* Weight thermometer — only where this evaluator counts. Seeded from the realized
-                    composite coefficient, served. */}
                 <div className="mask-weight" aria-hidden={!enabled || undefined}>
-                  {enabled && r.applicable && (
+                  {enabled && (
                     <>
                       <input
                         type="range"
@@ -268,9 +231,9 @@ function WeightGrid({
                         max={1}
                         step={0.05}
                         value={weight}
-                        aria-label={`${r.displayName} weight`}
-                        title={`Weight of ${r.displayName} in the masked score`}
-                        onChange={(e) => setWeight(r.displayName, parseFloat(e.target.value))}
+                        aria-label={`${r.name} weight`}
+                        title={`Weight of ${r.name} in the masked score`}
+                        onChange={(e) => setWeight(r.name, parseFloat(e.target.value))}
                       />
                       <span className="mask-weight-val">{weight.toFixed(2)}</span>
                     </>
@@ -279,11 +242,6 @@ function WeightGrid({
               </div>
             );
           })}
-          {rows.length === 0 && (
-            <div className="fitness-empty" style={{ gridColumn: "1 / -1" }}>
-              Evaluator registry loads once the optimizer publishes round 1.
-            </div>
-          )}
         </div>
       </div>
     </>

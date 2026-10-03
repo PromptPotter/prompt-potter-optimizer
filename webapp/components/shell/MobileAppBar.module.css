@@ -1,10 +1,6 @@
-/* The phone app bar's own look, and nothing viewport-dependent. Both the show/hide
-   gate and the two-screen flow swap live in app/styles/domains/shell.css: a @media
-   in here is invisible to lib/__tests__/css-breakpoints.test.ts, and a CSS Module's
+/* Nothing viewport-dependent: the show/hide gate lives in domains/shell.css, since a Module's
    order against the global barrel is not something `display` may rely on. */
-/* No bottom rule: the run header sits directly under this and the two are read as
-   one identity band — campaign on the first line, cycle on the second. That header
-   carries the hairline that closes both. */
+/* No bottom rule: the run header below carries the hairline closing both. */
 .bar {
   flex-shrink: 0;
   background: var(--color-background-primary);
@@ -41,8 +37,7 @@
   color: var(--color-text-primary);
 }
 
-/* Something is running on the other screen. Paired with the aria-label's count —
-   never colour alone (promptpotter-web/BRAND.md: accessibility is positioning). */
+/* Paired with the aria-label's count — never colour alone. */
 .dotted::after {
   content: "";
   position: absolute;
@@ -55,8 +50,6 @@
   border: 1.5px solid var(--color-background-primary);
 }
 
-/* Claims the slack so the trailing controls sit hard right, and truncates rather
-   than pushing them off a 375px screen. */
 .title {
   flex: 1 1 auto;
   min-width: 0;

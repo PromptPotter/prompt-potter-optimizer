@@ -4,7 +4,7 @@ from typing import Literal, NamedTuple
 
 from pydantic import Field
 
-from promptpotter.application.mask.load import parse_sample_ids
+from promptpotter.application.mask.record import parse_sample_ids
 from promptpotter.domain.cycle_paths import (
     CycleHop,
     CyclePath,
@@ -52,8 +52,8 @@ class SubjectSpec(NamedTuple):
     # works on it unchanged once the store has descended; without it the whole of a
     # `promptpotter-self` tree is unaddressable.
     inside: CyclePath = ()
-    # `score:<formula>`. Course-only: a campaign is an origin no election reaches, and a
-    # candidate is one point rather than a chain, so neither has an election to re-decide.
+    # `score:<formula>`, a `per_cell` composite. Course-only: a campaign is an origin no election
+    # reaches, and a candidate one point rather than a chain; neither has an election to re-decide.
     lens: str = ""
     samples: frozenset[int] | None = None
 
@@ -202,7 +202,7 @@ class SubjectReading(StrictModel):
     number reached two ways.
 
     ``values`` is keyed by the cell's QUERY, the identity that survives across campaigns; a cell the
-    metric cannot read is ABSENT from it and counted in ``n_unscorable`` rather than scored — the
+    metric cannot read is ABSENT from it and named in ``unscorable_cells`` rather than scored — the
     two absences are different facts and a surface renders them as different glyphs.
     ``ci_lo``/``ci_hi`` are ``None`` below two scored cells — one reading has no spread, and a
     bracket drawn from it is a fiction.
@@ -254,7 +254,7 @@ class SubjectReading(StrictModel):
     # searchpoints from different campaigns share no delta to line up.
     config: dict[str, str] | None
     # The configuration the subject's own CYCLE ran under, hashed off round 0's
-    # `optimizer_prompt_hashes`. Two campaigns sharing it are replicates of one arm however much
+    # `optimizer_state.prompt_hashes`. Two campaigns sharing it are replicates of one arm however much
     # else differs, which is the fact a roster listing campaigns cannot show. `None` where round 0
     # carries no hashes: the arm is UNKNOWN, which groups with nothing — least of all with every
     # other unstamped campaign.

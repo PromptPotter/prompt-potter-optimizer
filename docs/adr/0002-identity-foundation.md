@@ -88,7 +88,7 @@ Every request that crosses a trust boundary into the application carries an **OI
 - **Discovery** — `{issuer}/.well-known/openid-configuration` provides authorization / token / JWKS / userinfo endpoints; the client treats this URL as the only piece of provider config it hardcodes.
 - **Tokens never enter app code.** They're verified at the boundary (`presentation/api/middleware/`); past the boundary, the codebase sees `IdentityContext` only. PR rule: a JWT type appearing outside `presentation/api/middleware/` and `infrastructure/identity/` is a block.
 - **Session pattern** — first-party browser sessions are **server-side sessions keyed by HttpOnly cookie**, per [The Copenhagen Book](https://thecopenhagenbook.com/sessions) (Lucia Auth's author deprecated his library in favor of these patterns; framework-agnostic; OWASP-aligned). **ID Tokens are only for cross-trust-boundary** (callback from the provider, B2B SSO, service-to-service). The "stuff a JWT in a cookie" anti-pattern is an explicit gate violation.
-- **Code anchor (Stage 1+):** `promptpotter/infrastructure/identity/` (new) — `OIDCClient`, `IdTokenVerifier`, `JWKSCache`. ~200 LoC plus `cryptography` for signature verification.
+- **Code anchor (Stage 1+):** `promptpotter/infrastructure/identity/` — `google.py::GoogleProviderClient`, `github.py::GitHubProviderClient`, `verifier.py`, `jwks.py::JWKSCache`, with `cryptography` for signature verification.
 - **Code anchor (Stage 0, shipped):** `IdentityContext` constructed by `presentation/api/deps.py::resolve_identity` returning the auth-off default; CLI seam constructs it from `args.tenant` via `presentation/cli/commands/_shared.py::identity_from_args` and threads it through `init_services_cli(identity=…)`.
 
 ### Contract B — PostgreSQL RLS (data / storage isolation)
@@ -138,7 +138,7 @@ The **EnterpriseUser extension** (`urn:ietf:params:scim:schemas:extension:enterp
 - Microsoft Entra → `tid` claim → rename to `org_id` in the verifier.
 - Custom IdP / Stage-2 own-issuer → emit `org_id` directly.
 
-`IdentityContext.tenant_id` is populated from `org_id`; any serialized form of the context (logs, ledger events, audit trail) uses the field name `org_id`. **One internal name, one external claim name, one mapping rule per IdP.**
+At Stage 2: `IdentityContext.tenant_id` is populated from `org_id`; any serialized form of the context (logs, ledger events, audit trail) uses the field name `org_id`. **One internal name, one external claim name, one mapping rule per IdP.**
 
 #### Schema.org `Person` JSON-LD — output projection only
 
@@ -155,10 +155,10 @@ class IdentityContext:
     tenant_id: TenantId              # NewType[str]; storage scope
     issuer: Issuer | None            # NewType[str]; None in Stage-0 auth-off
     claims: Mapping[str, object]     # raw verified ID-Token claims; empty in Stage-0
-    capabilities: frozenset[str]     # flat capability set; RBAC is post-M13
+    capabilities: frozenset[str]     # flat capability set; RBAC rides Stage 2
 ```
 
-- **Stage 0** — `IdentityContext(user_id=UserId("default"), tenant_id=TenantId("default"), issuer=None, claims={}, capabilities=frozenset())`. Constructed once at init. The single-operator path is the auth-off branch — one branch, not a feature flag.
+- **Stage 0** — `shared/identity.py::default_identity`: user and tenant `"default"`, no issuer, no claims, and `OWNER_COMMAND_CAPABILITIES` — the terminal operator owns its workspace. Constructed once at init. The single-operator path is the auth-off branch — one branch, not a feature flag.
 - **Stage 1** — constructed by the OIDC middleware from a verified ID Token. `user_id` is `infrastructure/identity/user.py::derive_user_id` over `(issuer, sub)` — a hash, not a concatenation — and `tenant_id` is that same id (one tenant per user); `issuer` from `iss`. A provider-set B2B tenant claim waits for Stage 2.
 - **`TenantContext` collapsed into `IdentityContext`** (shipped). `Session.identity: IdentityContext` (`application/initialization/session.py`) replaces the deleted `Session.tenant`. The spend seam — and every consumer — takes `IdentityContext`, never bare `tenant_id` or bare `TenantContext`. Behavior change, no shim.
 
@@ -215,13 +215,13 @@ Stage-0 work (the `IdentityContext` seam — shipped) does **not** require the a
 
 - **Feature surface** — login screens, settings UI, profile pages, account-merge flows. Those land in [`../specs/roadmap.md`](../specs/roadmap.md) and live below this foundation.
 - **Provider choice for Stage 2** — Ory vs Zitadel vs Keycloak vs Authentik. The table above is pre-vetting; the decision is made when Stage 2 is imminent.
-- **Implementation timing.** This ADR doesn't schedule Stage 1 or Stage 2. The cluster's milestone specs (M12 / M13) own scheduling.
+- **Implementation timing.** This ADR doesn't schedule Stage 1 or Stage 2. Scheduling belongs to the roadmap's lanes (`C1`, `C6`), never to a milestone number.
 - **OAuth 2.1 / third-party access tokens for our API.** Stage 2+. First-party use case (a user signs into our webapp) doesn't need it.
 - **SCIM provisioning.** Enterprise-tier — Stage 2+ at earliest, defer until requested.
 - **SAML.** Enterprise B2B SSO — Stage 2+. Delegated to whichever IdP we front (Keycloak / Ory / Zitadel speak it; we don't implement SAML ourselves).
 - **WebAuthn / passkey *provider* mode.** Stage 2 or later. Stage 1 leverages Google / Apple / Microsoft's passkey implementations via OIDC federation — we get passkey UX for free without owning the ceremony.
 - **RBAC beyond a flat `frozenset[str]`.** The flat set itself is populated and enforced: `shared/identity.py` declares the `CAMPAIGN_*_CAP` ladder that `require_capability` checks, and a sub-principal's set resolves from the sealed file-backed grants of [`0005-delegated-principals-and-capability-scoping.md`](0005-delegated-principals-and-capability-scoping.md). Roles, groups and relations beyond that set stay out.
-- **Billing / quotas / per-tenant rate limiting.** Post-M13.
+- **Billing / quotas / per-tenant rate limiting.** Roadmap `C6`.
 
 ### Cross-refs
 

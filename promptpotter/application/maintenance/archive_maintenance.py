@@ -31,7 +31,7 @@ from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.scoring import (
     ABANDONED_ROW_KEYS,
     UNREAD_PIPELINE_KEYS,
-    UNREAD_ROW_KEYS,
+    measured_facts,
 )
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
@@ -53,6 +53,7 @@ from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.layout import CycleLayout, inner_sandboxes_dir
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import graceful
+from promptpotter.shared.instrument import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
@@ -123,22 +124,22 @@ def archive_writers(root: pathlib.Path) -> int:
 
 # WHICH keys are unread is `domain/scoring.py`'s to say — it declares the two types the answer is
 # about, and asserts each set against them at import. This module owns only the ACT of moving them.
-_MOVABLE_ROW_FIELDS: frozenset[str] = UNREAD_ROW_KEYS | ABANDONED_ROW_KEYS
+_MOVABLE_ROW_FIELDS: frozenset[str] = ABANDONED_ROW_KEYS
 
-_ELIGIBLE_LABEL_PREFIX = "candidate_"
-"""Only a candidate run compacts.
+_ELIGIBLE_LABEL = MeasurementRole.PANEL
+"""Only a candidate's own walk compacts.
 
-Measured over this workspace: ``round_parent`` replays 84.5% of its cells from the archive and
-``origin`` 78.6%, against 4.5% for a candidate — so 82% of all cache value sits in the two labels
-this prefix excludes, for a third of the bytes. A run whose label matches nothing is SKIPPED and
-counted by label, never compacted on a guess."""
+Measured over this workspace: the parent pass replays 84.5% of its cells from the archive and the
+origin 78.6%, against 4.5% for a candidate — so 82% of all cache value sits in the two labels this
+excludes, for a third of the bytes. A run whose label matches nothing is SKIPPED and counted by
+label, never compacted on a guess."""
 
 
 def _protected_pipeline_fields(row: Mapping[str, Any]) -> frozenset[str]:
     """Per-ROW protection, derived from the row itself rather than from a list of dataset names.
 
     An L4 row carrying ``mean_round_delta`` must keep its ``reasoning_trace``: the
-    ``_inner_narrated`` gate in ``optimization/dispatch/injections/panels.py`` requires BOTH, so a
+    ``_inner_narrated`` gate in ``optimizers/potter/dispatch/injections/panels.py`` requires BOTH, so a
     row holding one without the other silently drops out of ``inner_narratives`` — and
     ``sample_transcripts``, whose whole guard is that gate, picks it up instead. Two panels then
     each believe the other owns the row. Not a crash; a wrong panel."""
@@ -211,8 +212,8 @@ def _age_band(created_at: str, *, now: datetime) -> str:
 
 
 def _label_family(label: str) -> str:
-    """A trailing index is stripped and nothing else is: ``candidate_0`` and ``candidate_1`` are
-    one family, while ``round_parent``, ``pobb_backfill`` and ``line_overlap`` are each whole."""
+    """A trailing index is stripped and nothing else is: ``noise_floor_0`` and ``noise_floor_1``
+    are one family, while ``panel``, ``parent`` and ``backfill`` are each whole."""
     head, _, tail = label.rpartition("_")
     return head if head and tail.isdigit() else label
 
@@ -449,7 +450,7 @@ def compact_measurement_archive(
         label = str(entry.get("name") or "")
         if not run_id:
             continue
-        if not label.startswith(_ELIGIBLE_LABEL_PREFIX):
+        if label != _ELIGIBLE_LABEL:
             skipped += 1
             by_label[label or "<unlabelled>"] = by_label.get(label or "<unlabelled>", 0) + 1
             continue
@@ -511,7 +512,7 @@ def _plan_restore(lines: list[str], cold: list[dict[str, Any]]) -> tuple[list[st
             return None
         moved_row = entry.get("row")
         if isinstance(moved_row, dict):
-            row.update(moved_row)
+            row.update(measured_facts(moved_row))
         moved_pd = entry.get("pd")
         if isinstance(moved_pd, dict):
             pd = row.get("pipeline_data")
@@ -598,7 +599,7 @@ def restore_measurement_archive(
         cold = read_cold_payload(stores, run_id)
         if cold is None:
             # Only a candidate run can carry a purge stamp, so only those are worth opening.
-            if str(entry.get("name") or "").startswith(_ELIGIBLE_LABEL_PREFIX) and _is_purged(
+            if str(entry.get("name") or "") == _ELIGIBLE_LABEL and _is_purged(
                 load_run(stores, run_id)
             ):
                 purged += 1

@@ -3,10 +3,7 @@ import { useMemo, useRef } from "react";
 import { Bar } from "react-chartjs-2";
 import { barChartDefaults, ensureChartRegistered, getCss, useThemeVersion } from "@/lib/theme";
 import { TERMS } from "@/lib/terms";
-import {
-  liveL1Candidates,
-  type DashboardSnapshot,
-} from "@/lib/poll";
+import { liveCandidates, type DashboardSnapshot } from "@/lib/poll";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useEffectiveRound } from "@/lib/hooks/useEffectiveRound";
 import { useRoundRows } from "@/lib/hooks/useRoundRows";
@@ -15,9 +12,7 @@ import type { RawResultRow } from "@/lib/types";
 
 ensureChartRegistered();
 
-// Local alias kept to the one field FreqChart buckets: the per-sample
-// `fitness` the backend always serves (error rows floored to 0.0 by
-// `rescore_results`). Narrower view of the served row.
+// `rescore_results` floors error rows to 0.0, so `fitness` is always served.
 type ResultRow = Pick<RawResultRow, "fitness">;
 
 const LABELS = ["0", "", "", "", "", "", "", "", "", "1"];
@@ -32,13 +27,11 @@ function bucketScores(results: ResultRow[]): number[] {
   return buckets;
 }
 
-// The in-flight candidates' served sample rows as pseudo-results, so the chart can bucket
-// per-sample HIT/MISS without waiting for round completion. The live row carries a verdict,
-// not a fitness, so only the two graded marks become a bucket.
+// The live row carries a verdict, not a fitness, so only the two graded marks bucket.
 function liveResultsFrom(dash: DashboardSnapshot | null): ResultRow[] {
   const out: ResultRow[] = [];
-  for (const c of liveL1Candidates(dash)) {
-    for (const s of c.samples ?? []) {
+  for (const c of liveCandidates(dash)) {
+    for (const s of c.samples) {
       if (s.status === "HIT") out.push({ fitness: 1 });
       else if (s.status === "MISS") out.push({ fitness: 0 });
     }
@@ -50,13 +43,9 @@ export function FreqChart() {
   useThemeVersion();
   const chartRef = useRef(null);
   const { dash } = useDashboard();
-  // The active round, from the single resolver every round-scoped surface shares.
   const { round: effectiveRound, isLiveView } = useEffectiveRound();
 
-  // Source-of-truth split (no-stitch rule): live mode reads only
-  // `dashboard.json`'s in-flight sample lines; historical mode reads only
-  // `round_NNNN.json`'s `results[]`. `useRoundRows` owns the guard —
-  // it idles the fetch on the live round, so there's no fallback chain.
+  // No stitch: `useRoundRows` idles the round-file fetch on the live round.
   const { live, doc: roundDoc } = useRoundRows(effectiveRound);
 
   const results: ResultRow[] = useMemo(() => {

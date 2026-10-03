@@ -13,7 +13,12 @@ from collections.abc import Awaitable, Callable
 from typing import Any, NoReturn
 
 from promptpotter import connectors
-from promptpotter.application.jobs.quota import admit_launch, check_launch_quotas
+from promptpotter.application.campaign_config import CampaignConfig
+from promptpotter.application.jobs.quota import (
+    admit_launch,
+    check_launch_quotas,
+    declare_run_ceiling,
+)
 from promptpotter.application.jobs.registry import (
     UNRESOLVED_HOP,
     Job,
@@ -22,7 +27,7 @@ from promptpotter.application.jobs.registry import (
 )
 from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.launch_limits import LaunchLimits
+from promptpotter.domain.launch_limits import HeldLimits, LaunchLimits
 from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.user_store import User
@@ -234,9 +239,18 @@ async def admit_and_hold(
     backend_type: str,
     backend_url: str,
     requested: LaunchLimits,
-) -> LaunchLimits:
-    """Hold *job*'s slot through the irreversible half of a launch, and return the limits it HOLDS —
-    *requested*, budgets resolved against the account. A queued job waits here for its turn first.
+    config: Callable[[], CampaignConfig],
+    hop: CycleHop | None,
+) -> HeldLimits:
+    """Hold *job*'s slot through the irreversible half of a launch, and return what the run HOLDS —
+    its declaration (*config* → seed → standing ceiling → *requested*) admitted against the account.
+    A queued job waits here for its turn first.
+
+    *config* is resolved in here rather than handed in, so a campaign config that cannot load
+    releases the slot as not admitted instead of stranding it.
+
+    The held ceiling is the reservation, the run's config and the dashboard's number at once, so
+    the caller hands it to the runner and nothing downstream re-composes it.
 
     Nothing here touches a cycle, so a failure answers for the machine slot alone and leaves the
     campaign re-startable once the account has room again — which is why the whole prologue runs
@@ -249,23 +263,23 @@ async def admit_and_hold(
         t0 = time.perf_counter()
         await probe_backend(backend_type, backend_url)
         t_probe = time.perf_counter()
+        declared, operator = declare_run_ceiling(
+            config(), stores=stores, hop=hop, requested=requested
+        )
         # The wallet read globs + reads every cycle ledger — offload so the scan never blocks the
         # single event loop on the launch path.
-        held = requested.holding(
-            await asyncio.to_thread(
-                admit_launch,
-                requested=requested,
-                user=user,
-                stores=stores,
-                job_registry=job_registry,
-                job_id=job.job_id,
-            )
+        ceiling = await asyncio.to_thread(
+            admit_launch,
+            declared=declared,
+            user=user,
+            stores=stores,
+            job_registry=job_registry,
+            job_id=job.job_id,
         )
+        held = HeldLimits.admitted(requested, ceiling, operator)
         # Before the caller's first await, so a concurrent launch on this account reads a stamped
         # reservation rather than an unquotable one.
-        job_registry.set_caps(
-            job.job_id, cap_usd=held.spend_budget_usd, cap_tokens=held.token_budget
-        )
+        job_registry.set_caps(job.job_id, cap_usd=ceiling.usd, cap_tokens=ceiling.tokens)
         t_caps = time.perf_counter()
     except BaseException as exc:
         release_slot(job_registry, job.job_id, exc, admitted=False)

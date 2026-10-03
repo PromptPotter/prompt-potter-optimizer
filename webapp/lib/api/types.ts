@@ -1,13 +1,8 @@
-// Shapes of the FastAPI surface — request results and the domain objects
-// they carry. Mirrors the server's Pydantic models.
-//
-// Most shapes come from `types.generated.ts`, which `scripts/build_ts_types.py`
-// keeps in sync with the Pydantic source of truth. Edits to those shapes go
-// in the Python model + regenerate; hand-editing the generated file is
-// forbidden.
+// The wire types, re-exported from `types.generated.ts`: change the Pydantic model and regenerate.
 
 export type {
   AbilityReading,
+  ArmOutcome,
   ArchiveReport,
   ActiveSessionResponse,
   CampaignListResponse,
@@ -31,16 +26,24 @@ export type {
   MetricSpec,
   PairwiseComparison,
   MetricReading,
+  HeadToHead,
+  HeadToHeadRow,
   Evidence,
   CommandAcceptedBody,
   NodeSearchNarrowing,
   CycleHop,
+  BenchReading,
+  BenchScore,
   CycleListEntry,
   CyclesResponse,
   DatasetItem,
   DatasetPipelineResponse,
   NestedPipelineRef,
-  DatasetPreviewResponse,
+  Cell,
+  CellCandidate,
+  CellRow,
+  CellsResponse,
+  CellSpan,
   DegradationHealth,
   DiagnosticRunListResponse,
   DiagnosticRunRecord,
@@ -48,21 +51,23 @@ export type {
   FileEntry,
   FilesResponse,
   BackendWarning,
-  BackfillLogEntry,
+  CatchUpLogEntry,
+  BackpressureReading,
   DashboardError,
   LineageDivergence,
   LineageNode,
   LiveDashboardState,
   LoopWarning,
   RunLimits,
-  MeasurementDot,
   CurrentRound,
   DashboardCandidate,
-  MeasurementSeriesResponse,
+  LiveCandidate,
   ModelCapability,
   NodeConfigParam,
   NodeOutputSchema,
   NodeReach,
+  OptimizerFact,
+  OptimizerLimit,
   OptimizerPipelineResponse,
   PipelineView,
   PipelineViewEdge,
@@ -81,9 +86,9 @@ export type {
   ScoreboardRow,
   ScoredCandidate,
   ValidationFailure,
-  SampleSeries,
   SpendBucket,
   SpendRollup,
+  MeteredSpend,
   ActivityBucket,
   ActivityResponse,
   BackendHealthResponse,
@@ -103,9 +108,12 @@ export type {
   ForkPreviewResponse,
   MachineHolder,
   MachineStatusResponse,
-  MechanismGroup,
-  MechanismSchemaResponse,
-  MechanismToggle,
+  KnobRow,
+  ManifestNodeOverlay,
+  NodeKnobs,
+  OptimizerEntry,
+  OptimizerKnobsResponse,
+  OptimizerRoster,
   MeResponse,
   OriginEntry,
   OriginListResponse,
@@ -117,23 +125,11 @@ export type {
 
 import type { CycleListEntry, LiveDashboardState } from "./types.generated";
 
-// Three named data scopes — hand-maintained because `HeatmapScope` reaches the wire only as a
-// query param, so there is no response model to generate it from. Same vocabulary as the heatmap
-// artifacts and
-// the API's `scope` query param. `cycle` = one cycle's own Rasch fit;
-// `campaign` = the campaign's pooled fit; `dataset` = the cross-campaign
-// archive snapshot. A workspace-scope heatmap is meaningless (samples
-// differ per dataset), so the heatmap tier stops at `dataset`.
+// Hand-written: `HeatmapScope` reaches the wire only as a query param. No workspace scope, since
+// samples differ per dataset.
 export type HardSamplesScope = "cycle" | "campaign" | "dataset";
 
-// What minted this cycle, as the sidebar badges it — derived server-side from the cycle id's own
-// kind plus the fork trigger. READ BACK off the generated interface: `session` = the root run
-// (resume extends it); `divergent_resume` = a fork-on-divergence branch; `user_fork` = any
-// operator-initiated branch (HITL fork, diagnostic); `auto_rebase` = an automatic
-// layer-driven rebase branch (an L2/L3 `fork_proposal`, fork trigger `l2_rebase`/`l3_rebase`).
 export type MintKind = CycleListEntry["mint_kind"];
 
-// What ONE measured row is called (`Connector.measured_unit`) — `cell` on the recursion, where a
-// row is a whole inner campaign. READ BACK off the generated interface: the engine declares it.
 export type MeasuredUnit = LiveDashboardState["measured_unit"];
 

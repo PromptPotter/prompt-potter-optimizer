@@ -1,11 +1,19 @@
 campaign_config:
   dataset_name: bbeh
-  scoring: exact_match(predicted, ground_truth)
-  sp_budget_round: 5
+  scoring: label_match(predicted, ground_truth)
   exclude_nodes: []
   pipeline_overlay: {}
   optimization:
-    l1_patience: 1
     max_rounds: 1
-    n_variants: 1
     degradation_threshold: 0.0
+    # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
+    nodes:
+      adaptive_queue:
+        config:
+          sp_budget_round: 5
+      l1_generate:
+        config:
+          n_variants: 1
+      escalation:
+        config:
+          l1_patience: 1

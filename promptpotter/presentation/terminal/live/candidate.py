@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
-from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 from promptpotter.domain.candidate_diff import flatten_sp_summary
 from promptpotter.domain.connector import MeasuredUnit, unit_count
-from promptpotter.domain.results import EliminationGate
+from promptpotter.domain.results import ArmOutcome
 from promptpotter.presentation.terminal.primitives import (
     CYAN,
     DIM,
@@ -43,13 +42,12 @@ def fmt_individual_header(
     body = fmt_pipeline_overlay(pipeline_overlay)
     if not body and changes_description:
         body = truncate(changes_description.strip(), _HEADER_BODY_MAX)
-    body = f"{DIM}parent re-eval{RESET}" if not body else f"{CYAN}{body}{RESET}"
+    body = f"{DIM}no change described{RESET}" if not body else f"{CYAN}{body}{RESET}"
     return f"  {label}/{total}  {body}"
 
 
 @dataclass(frozen=True)
 class IndividualSummary:
-    status: Literal["ok", "invalid", "aborted", "eliminated"]
     tag: str
     body_line: str
     detail_lines: tuple[str, ...]
@@ -60,14 +58,15 @@ def individual_summary_from_dict(
     *,
     unit: MeasuredUnit = "sample",
 ) -> IndividualSummary:
-    """Classify a candidate score report and pre-format every display piece. Precedence: invalid > aborted > eliminated > ok.
+    """Pre-format every display piece of a candidate score report, off the outcome it names.
 
-    Takes no parent: the comparison against it is SERVED (``matched_parent_*``), never differenced
+    Takes no parent: the comparison against it is SERVED (``reference_*``), never differenced
     here. See the note on ``body_line`` below for why a view may not compute one."""
     mutations = fmt_pipeline_overlay(scores.get("pipeline_overlay"))
     mutations_chunk = f"{CYAN}{mutations}{RESET}  " if mutations else ""
 
-    if scores.get("invalid"):
+    outcome = scores.get("outcome")
+    if outcome == ArmOutcome.INVALID:
         out: list[str] = []
         for vf in scores["validation_failures"]:
             allowed = vf.get("allowed") or []
@@ -78,9 +77,8 @@ def individual_summary_from_dict(
                 f"{YELLOW}⚠{RESET} {vf.get('axis', '?')} = {vf.get('value', '?')!r}  "
                 f"∉ [{allowed_str}]"
             )
-            out.append("  ↳ scored 0 (no backend call); L2 brief will name this value")
+            out.append("  ↳ scored 0 (no backend call); the next l1_generate reads it in l1_wounds")
         return IndividualSummary(
-            status="invalid",
             tag=f"{YELLOW}INVALID{RESET}",
             body_line="",
             detail_lines=tuple(out),
@@ -88,71 +86,44 @@ def individual_summary_from_dict(
 
     acc = scores["accuracy"]
     n = scores.get("total", 0)
-    # The served composite interval, not a Wilson band re-derived here: this row draws
+    # The served accuracy interval, not a Wilson band re-derived here: this row draws
     # the candidate's own numbers, and the CI must bracket one of them.
     ci = fmt_ci(scores.get("mean_fitness_ci_lo"), scores.get("mean_fitness_ci_hi"), spec="{:.1%}")
     tag = f"{fmt_pct(acc)} {ci}"
 
-    aborted = bool(scores.get("escalation_aborted"))
-    status: Literal["ok", "aborted", "eliminated"]
-    if aborted:
-        status = "aborted"
-    elif scores.get("elimination_stopped"):
-        status = "eliminated"
-    else:
-        status = "ok"
-
-    if aborted:
+    if outcome is not None and ArmOutcome(outcome).cut_short:
         scored_q = scores.get("scored_samples", n)
         expected_q = scores.get("expected_samples", n)
-        n_str = f"{unit_count(scored_q, unit)} {YELLOW}⚠ aborted {scored_q}/{expected_q}{RESET}"
+        n_str = f"{unit_count(scored_q, unit)} {YELLOW}⚠ {outcome} {scored_q}/{expected_q}{RESET}"
     else:
         n_str = unit_count(n, unit)
     # 📖 is the per-sample tape's cache mark; this is its total for the candidate.
     n_cached = int(scores.get("cached_samples") or 0)
     if n_cached:
         n_str += f" ({n_cached}📖)"
-    # THE SERVED LIFT, never `acc - parent_acc` recomputed here: `matched_parent_lift` is the
-    # paired difference on the cells the arm and the parent BOTH measured, `None` until round
-    # close stamps it (`l1/score/winner.py`) or below two shared cells. Absent means absent —
-    # a cut arm's rate on its own prefix outruns the parent's on a fuller panel.
-    lift = scores.get("matched_parent_lift")
-    vs_parent = ""
+    # THE SERVED LIFT, never `acc - parent_acc` recomputed here: `reference_lift` is the
+    # paired difference on the cells the arm and its reference BOTH measured, `None` until round
+    # measurement stamps it (`runner/measurement.py`) or below two shared cells. Absent means absent —
+    # a cut arm's rate on its own prefix outruns the reference's on a fuller panel.
+    lift = scores.get("reference_lift")
+    vs_reference = ""
     if isinstance(lift, int | float):
         band = fmt_ci(
-            scores.get("matched_parent_lift_ci_lo"),
-            scores.get("matched_parent_lift_ci_hi"),
+            scores.get("reference_lift_ci_lo"),
+            scores.get("reference_lift_ci_hi"),
             spec="{:+.1%}",
         )
-        vs_parent = f"  vs parent: {_fmt_delta(float(lift))} {band}"
-    body_line = f"{mutations_chunk}{n_str}{vs_parent}"
+        vs_reference = f"  vs reference: {_fmt_delta(float(lift))} {band}"
+    body_line = f"{mutations_chunk}{n_str}{vs_reference}"
 
     detail_lines: list[str] = []
-    elim = scores.get("elimination_context") or {}
     degrad = scores.get("degradation_context") or {}
 
-    # One dispatch on the gate the PRODUCER named. Never on which keys survived: only ε and
-    # lock-in computed a posterior, so quoting one under any other gate invents it.
-    gate = elim.get("gate")
-    q = f"q{int(elim.get('queries_scored', 0))}/{int(elim.get('total_queries', 0))}"
-    n_priors = int(elim.get("n_priors", 0))
-    priors = f"(of {n_priors} prior{'' if n_priors == 1 else 's'})"
-    p_best = float(elim.get("p_best", 0.0))
-    if gate == EliminationGate.LOCK_IN:
-        detail_lines.append(f"{GREEN}✓ leader locked {q}{RESET}  p_best={p_best:.1%} {priors}")
-    elif gate == EliminationGate.COLLAPSED:
-        detail_lines.append(
-            f"{YELLOW}✂ answer collapsed {q}{RESET}  "
-            f"one label for every {unit} — no measurement of ability to score"
-        )
-    elif gate == EliminationGate.EPSILON:
-        leader = elim.get("leader_label") or (elim.get("leader_id", "?") or "?")[:8]
-        eps = float(elim.get("epsilon", POBB_DEFAULT_EPSILON))
-        detail_lines.append(
-            f"{YELLOW}✂ eliminated {q}{RESET}  p_best={p_best:.1%} < eps={eps:.0%}  "
-            f"vs {leader} {priors}"
-        )
-    elif scores.get("elimination_stopped") and degrad:
+    # The eliminator words its own stops; the terminal only marks which way it decided.
+    if reason := scores.get("elimination_reason"):
+        mark = f"{GREEN}✓" if outcome == ArmOutcome.LOCKED_IN else f"{YELLOW}✂"
+        detail_lines.append(f"{mark} {reason}{RESET}")
+    elif outcome == ArmOutcome.BROKEN and degrad:
         dc = int(degrad.get("degraded_count", 0))
         ts = int(degrad.get("total_scored", 0))
         rate = float(degrad.get("degraded_rate", 0.0))
@@ -160,22 +131,21 @@ def individual_summary_from_dict(
         reason = degrad.get("dominant_warning", "unknown")
         source = degrad.get("source", "degradation")
         tag = "fatal" if fatal else f"{rate:.0%} degraded"
-        detail_lines.append(f"{YELLOW}✂ {source} q{dc}/{ts}{RESET}  {tag}  ({reason})")
+        detail_lines.append(f"{YELLOW}✂ broken ({source}) q{dc}/{ts}{RESET}  {tag}  ({reason})")
 
     comp = scores.get("composite_fitness")
     degraded = scores.get("degraded_samples", 0)
 
     if comp is not None:
-        # Same rule, same source: the parent's composite ON THIS ARM'S CELLS, or no Δ at all.
+        # Same rule, same source: the reference's composite ON THIS ARM'S CELLS, or no Δ at all.
         # The cycle-wide `parent_composite_fitness` was read over the parent's own panel.
         detail_lines.append(
-            render_composite_fitness_oneliner(comp, parent=scores.get("matched_parent_composite"))
+            render_composite_fitness_oneliner(comp, reference=scores.get("reference_composite"))
         )
     if degraded:
         detail_lines.append(f"{YELLOW}⚠ {degraded}/{n} degraded{RESET}")
 
     return IndividualSummary(
-        status=status,
         tag=tag,
         body_line=body_line,
         detail_lines=tuple(detail_lines),

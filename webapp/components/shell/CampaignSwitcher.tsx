@@ -5,21 +5,20 @@ import { useAuth } from "@/lib/auth-context";
 import {
   campaignLineParts,
   campaignStatus,
-  campaignTitle,
+  campaignVendors,
+  phaseStatus,
   spendLabel,
   type OriginGroup,
   type RunGroup,
 } from "@/lib/derivations";
 import { campaignDisplayName, unitDisplayName } from "@/lib/names";
 import { useWorkspace } from "@/lib/workspace";
-import { CampaignRowLabel } from "./sidebar/CampaignRowLabel";
+import { CampaignRowLabel, PhaseMark } from "./sidebar/CampaignRowLabel";
 
-// The masthead's campaign switcher — the forest the sidebar draws, one click from the title.
-// It renders `CampaignRowLabel`, so a campaign cannot read one way here and another there;
-// picking a campaign selects its ROOT cycle, and a branch under it selects that branch.
+// The masthead's campaign switcher over the sidebar's own forest; it renders `CampaignRowLabel`
+// so a campaign cannot read one way here and another in the sidebar.
 
-// Dataset headings over the forest's own order. A HEADING, not a second grouping: the runs
-// inside keep the order `buildForest` gave them, and nothing here re-sorts or re-roots.
+// A HEADING, not a second grouping: runs keep `buildForest`'s order; nothing here re-sorts.
 function byDataset(origins: OriginGroup[]): [string, RunGroup[]][] {
   const out = new Map<string, RunGroup[]>();
   for (const origin of origins) {
@@ -41,8 +40,7 @@ export function CampaignSwitcher({ origins }: { origins: OriginGroup[] }) {
     return <span className="run-switch-err">campaigns: {cyclesError}</span>;
   }
   if (!cyclesLoaded) {
-    // Anon never loads the (auth-gated) workspace — a terminal label, not a perpetual
-    // "loading…" (frontend-surface-contract.md § I1).
+    // Anon never loads the workspace — a terminal label, not a perpetual "loading…" (I1).
     return (
       <span className="run-switch-note">{status === "unauthed" ? "No campaign" : "loading…"}</span>
     );
@@ -88,10 +86,10 @@ export function CampaignSwitcher({ origins }: { origins: OriginGroup[] }) {
                     <span className="run-switch-row">
                       <CampaignRowLabel
                         name={campaignDisplayName(run.campaign)}
-                        suffix={campaignTitle(run.campaign).suffix}
                         status={campaignStatus(run)}
                         spend={spendLabel(run.campaign)}
                         parts={campaignLineParts(run)}
+                        vendors={campaignVendors(run)}
                       />
                     </span>
                   </MenuItem>
@@ -103,7 +101,10 @@ export function CampaignSwitcher({ origins }: { origins: OriginGroup[] }) {
                         close();
                       }}
                     >
-                      <span className="run-switch-branch">{unitDisplayName(branch)}</span>
+                      <span className="run-switch-branch">
+                        <PhaseMark status={phaseStatus(branch.run_phase, branch.status)} />
+                        {unitDisplayName(branch)}
+                      </span>
                     </MenuItem>
                   ))}
                 </Fragment>

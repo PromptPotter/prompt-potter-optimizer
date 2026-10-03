@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.domain.pipeline_schema import NodeType
 from promptpotter.domain.scoring import extract_item_label, is_verifier_graded
 from promptpotter.shared import text_list_items, text_list_rank
-from promptpotter.shared.errors import has_pipeline_warnings
+from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 shapes_optimizer_prompt(__name__)
@@ -23,9 +23,11 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
 
 __all__ = [
+    "cell_feedback",
     "count_degraded_samples",
     "extract_sample_diagnostics",
     "find_rank",
+    "judge_readings",
     "rank_ground_truth",
 ]
 
@@ -57,6 +59,33 @@ def find_rank(items: list[Any], ground_truth: str) -> int | None:
 
 def count_degraded_samples(results: Sequence[Mapping[str, Any]]) -> int:
     return sum(1 for r in results if has_pipeline_warnings(r))
+
+
+def judge_readings(row: Mapping[str, Any]) -> list[tuple[str, str, str]]:
+    """``(term, label, why)`` per judge term that banked a reason on this cell, in banked order.
+    Keyed off ``_why``: a grading that failed carries a reason and no label."""
+    pd = row.get("pipeline_data") or {}
+    return [
+        (term, str(pd.get(f"{term}_label") or "NOT GRADED"), str(pd[key]))
+        for key in pd
+        if key.endswith("_why") and pd[key] and (term := key.removesuffix("_why"))
+    ]
+
+
+def cell_feedback(row: Mapping[str, Any]) -> str:
+    """What the scorer can say about one cell beyond its number: the failure, the verdict it was
+    graded to, the expected answer where one exists, and every judge's reason."""
+    if is_error_result(row):
+        return f"The run failed ({row['error_category']}): {row['error']}"
+    if "unscored" in row:
+        return f"Not graded: {row['unscored']}"
+    lines = [f"Score: {float(row['objective']):.3f}"]
+    if row["fitness"] != row["objective"]:
+        lines.append(f"Correctness: {float(row['fitness']):.3f}")
+    if not is_verifier_graded(row["ground_truth"]):
+        lines.append(f"Expected answer: {row['ground_truth']}")
+    lines += [f"Judge ({term}): {label} — {why}" for term, label, why in judge_readings(row)]
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------

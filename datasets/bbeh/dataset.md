@@ -13,6 +13,6 @@ split and evaluated per-task at test time — the export carries
 `optimized_prompts = {"__global__": winner}` beside a `per_task` accuracy map. Nothing here loops
 over the 23 tasks.
 
-The answer-format contract for `exact_match` is the live string
+The answer-format contract for `label_match` is the live string
 `matchers.py::EXTRACTION_NOTES`, which the origin resolver already feeds to the prompt — read it
 there rather than from a doc, because a prompt written against a paraphrase scores zero.

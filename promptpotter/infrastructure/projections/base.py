@@ -34,6 +34,7 @@ from promptpotter.domain.run_records import (
     ResumeCheckpointRecord,
     RoundWarningRecord,
     RulerRecord,
+    RunLimitsRecord,
     SnapshotRecord,
     SpendHoldRecord,
     SpendTombstoneRecord,
@@ -70,11 +71,14 @@ _ROUTES: dict[type, str | None] = {
     # continuously would hold a second copy of a fact one reader wants once.
     CycleSeedRecord: None,
     RulerRecord: None,
+    # The standing operator ceiling, read by a scan at launch (`scan_ledger_run_limits`); the
+    # running gate polls its mirror, `.runtime/run_limits.json`, written beside it.
+    RunLimitsRecord: None,
     # Banked by `store/account_spend.py` before a delete takes the rows it stands for — a fact
     # about a cycle that no longer exists, so no live view of one can hold it.
     SpendTombstoneRecord: None,
-    # A call's admission, paired with the usage record that settles it; money moves on the usage
-    # record, and a hold left open is charged as one (`spend_book.py::charge_open_holds`).
+    # A send's admission, paired with the bill that closes it. Money moves on the bill alone; a
+    # hold no bill closed is unreported, read off the ledger where it is asked (`spend_book.py`).
     SpendHoldRecord: None,
 }
 

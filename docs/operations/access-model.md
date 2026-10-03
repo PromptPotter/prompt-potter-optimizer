@@ -228,8 +228,8 @@ not backend-supplied.
   owns why — and holds that ceiling as a reservation
   while it runs — [ADR-0003](../adr/0003-spend-and-tenancy.md)'s D1 owns why, including the overrun
   the account never sees. Every path that sets a ceiling composes there,
-  `change-spend-budget` included: it writes the file `_usd_cap` prefers over the launch-composed
-  cap, so an unclamped one is the way around this whole section.
+  `change-run-limits` included: it writes the cycle's standing ceiling, whose mirror the run's
+  gate prefers over the admitted cap mid-flight, so an unclamped one is the way around this whole section.
   `oidc.py::resolve_access_state` (re-read live) answers
   `blocked` only for an email the operator has revoked; a `blocked` account resolves to an EMPTY
   capability set, so the authorization boundary's dispatcher gate refuses its every command with the same 404 a stranger
@@ -284,7 +284,8 @@ Waiting is bounded by `Settings.QUEUE_MAX_WAIT_S`, and a launch can be withdrawn
 a trap, and `pause-cycle` cannot serve one, since a queued mint has no cycle to write a flag into.
 
 **The one automatic signal is throttle stall, and it is gathered without configuration.** Every exit
-from the rate limiter reports how long that call sat blocked (`_report_throttle_stall`), summed
+from the rate limiter reports how long that call sat blocked (`report_throttle_stall`) — as does a
+cell waiting on a machine slot another run holds (`infrastructure/backend.py::MachineSlots`) — summed
 across all tasks into a rolling 60-second total; `resolve_run_capacity` reads it per admission and
 stops admitting while the box is oversubscribed. It is deliberately **lagging** — it rises only once
 the machine is already too busy — which is why it may only ever LOWER the operator's ceiling. That

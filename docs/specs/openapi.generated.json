@@ -113,6 +113,7 @@
       },
       "ActiveSessionResponse": {
         "additionalProperties": false,
+        "description": "The tenant's latest launch — not the set of live runs, which is `run_phase` on `/cycles`.",
         "properties": {
           "campaign_id": {
             "anyOf": [
@@ -123,7 +124,7 @@
                 "type": "null"
               }
             ],
-            "description": "Active campaign id (pinned by the webapp); null when no session is active.",
+            "description": "Campaign of the latest launch; null when no session is active.",
             "title": "Campaign Id"
           },
           "cycle_id": {
@@ -135,7 +136,7 @@
                 "type": "null"
               }
             ],
-            "description": "Active cycle id within the campaign; null when no session is active.",
+            "description": "Cycle of the latest launch; null when no session is active.",
             "title": "Cycle Id"
           },
           "session_id": {
@@ -366,6 +367,78 @@
         "title": "ArchiveReport",
         "type": "object"
       },
+      "Arm": {
+        "additionalProperties": false,
+        "description": "Which declared head-to-head a campaign runs as an arm of, frozen at mint. Its presence is\nwhat makes the campaign CONTROLLED.",
+        "properties": {
+          "arm_key": {
+            "title": "Arm Key",
+            "type": "string"
+          },
+          "head_to_head_id": {
+            "title": "Head To Head Id",
+            "type": "string"
+          },
+          "treatment_digest": {
+            "title": "Treatment Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "head_to_head_id",
+          "arm_key",
+          "treatment_digest"
+        ],
+        "title": "Arm",
+        "type": "object"
+      },
+      "ArmBudget": {
+        "additionalProperties": false,
+        "description": "What each arm of a head-to-head may spend, equal by declaration.",
+        "properties": {
+          "determinism": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Determinism"
+          },
+          "max_rounds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Rounds"
+          },
+          "usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usd"
+          }
+        },
+        "required": [
+          "usd",
+          "max_rounds",
+          "determinism"
+        ],
+        "title": "ArmBudget",
+        "type": "object"
+      },
       "ArmReplicate": {
         "additionalProperties": false,
         "description": "One arm — a CONFIGURATION identity, which is what the word keeps meaning here — that ran\nmore than once. Computed over ``campaign`` subjects only: a course and a candidate share their\ncampaign's round-0 hashes, so grouping them by it would report a branch as a replicate of the\ntrunk it grew out of. ``level_spread`` is the cheapest noise reading on the board — taken from\ncampaigns already paid for, and invisible to a roster that lists campaigns rather than arms.\n\nIt is a noise reading ONLY at ``n_instruments == 1``. Above that the arm was held constant while\nthe INSTRUMENT moved underneath it, so the spread measures the engine's own drift and is served\nas that — a replicate that was never one is the more useful finding, but it is not noise.",
@@ -488,6 +561,179 @@
         "title": "BackendResponse",
         "type": "object"
       },
+      "BenchReading": {
+        "additionalProperties": false,
+        "description": "One individual's bench pass, read under a named scorer.",
+        "properties": {
+          "accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy"
+          },
+          "ci_hi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Hi"
+          },
+          "ci_lo": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The 95% band on `composite_fitness`, drawn from the same per-row values.",
+            "title": "Ci Lo"
+          },
+          "composite_fitness": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Under the reading scorer's formula — the number the headline reads.",
+            "title": "Composite Fitness"
+          },
+          "n_scored": {
+            "description": "Bench rows carrying a verdict — a miss the prompt caused included — never fewer than the bench set less its split's `tolerance`.",
+            "title": "N Scored",
+            "type": "integer"
+          },
+          "round": {
+            "description": "The round whose selection this is; 0 is the origin.",
+            "title": "Round",
+            "type": "integer"
+          },
+          "sp_hash": {
+            "description": "The searchpoint scored — the archive's `prompt_fields_id`.",
+            "title": "Sp Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "round",
+          "sp_hash",
+          "accuracy",
+          "composite_fitness",
+          "ci_lo",
+          "ci_hi",
+          "n_scored"
+        ],
+        "title": "BenchReading",
+        "type": "object"
+      },
+      "BenchScore": {
+        "additionalProperties": false,
+        "description": "The headline: the selection and the origin, scored on a bench set no optimizer node read.",
+        "properties": {
+          "bench_size": {
+            "title": "Bench Size",
+            "type": "integer"
+          },
+          "lift": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`selected` over `origin` in `composite_fitness`, paired per bench row both scored; `None` below two shared rows, and 0.0 where the origin is the selection.",
+            "title": "Lift"
+          },
+          "lift_ci_hi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lift Ci Hi"
+          },
+          "lift_ci_lo": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lift Ci Lo"
+          },
+          "missing_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why a reading above is `None`: each pass that stopped before its last row, or ended past its split's `tolerance` of rows with no verdict. `None` when both read.",
+            "title": "Missing Reason"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BenchReading"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`None` where its pass read nothing; `missing_reason` says why."
+          },
+          "scorer_id": {
+            "description": "The grader every number here was read under. A stored copy is a cache of that reading: a reader under another grader reads the passes again, never this.",
+            "title": "Scorer Id",
+            "type": "string"
+          },
+          "selected": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BenchReading"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The headline. `None` where its pass read nothing; `missing_reason` says why."
+          }
+        },
+        "required": [
+          "bench_size",
+          "scorer_id",
+          "origin",
+          "selected",
+          "missing_reason",
+          "lift",
+          "lift_ci_lo",
+          "lift_ci_hi"
+        ],
+        "title": "BenchScore",
+        "type": "object"
+      },
       "Body_ingest_dataset_api_v1_datasets_ingest_post": {
         "properties": {
           "file": {
@@ -541,6 +787,17 @@
       "CampaignDetailResponse": {
         "additionalProperties": false,
         "properties": {
+          "arm": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Arm"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The head-to-head this campaign runs as a CONTROLLED arm of (`campaign.json::arm`, frozen at mint): it reads no other campaign's measurements, refuses a steer and spends its declared budget. Null for an ordinary campaign, which optimizes with everything that helps."
+          },
           "backend_id": {
             "default": "",
             "description": "Backend this campaign optimizes against",
@@ -549,9 +806,20 @@
           },
           "backend_type": {
             "default": "",
-            "description": "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN on the manifest at mint. The webapp's ONE test for a self-optimizing (L4) campaign — it renders the 'inner loops' disclosure and the pp-self panel variants on it. It no longer goes stale when the dataset is re-pointed, and no longer empties when the dataset dir is deleted: a campaign outlives its dataset dir, and what it RAN is a fact about the campaign. Empty only on a manifest `restamp` has not reached.",
+            "description": "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN on the manifest at mint. The webapp's ONE test for a self-optimizing (L4) campaign — it renders the 'inner loops' disclosure and the pp-self panel variants on it. Re-pointing or deleting the dataset dir never changes it: a campaign outlives its dataset dir, and what it RAN is a fact about the campaign.",
             "title": "Backend Type",
             "type": "string"
+          },
+          "bench": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BenchScore"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The headline (`architecture.md` § The bench score is not an optimizer's selection), read off the campaign's result (`result.json`) under the formula its line runs — whichever cycle rebases handed the line to. `selected` is null until the line grades its pick. Null until the line first banks one, and where the split holds nothing out it says so in `missing_reason`."
           },
           "campaign_id": {
             "description": "Campaign id ({dataset}__{rand6}) — one RUN of an origin",
@@ -626,10 +894,19 @@
             ],
             "description": "What the ROOT course runs with — a second transport of the answer `GET /campaigns/{id}/pipeline` gives at the root, never a second source. Null when the root pipeline did not resolve. `max_rounds` is the DECLARED rounds cap; 0 means origin only."
           },
+          "spend_metered": {
+            "$ref": "#/components/schemas/MeteredSpend",
+            "description": "What the campaign's spend cap counts along its LINE — the root and every cycle a rebase handed it to — by bucket: the bill, or the search's incurred USD for a controlled arm. The number a surface sets beside a cap, live."
+          },
           "spend_unpriced_tokens": {
             "description": "Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them. Zero means the dollar figure is complete.",
             "title": "Spend Unpriced Tokens",
             "type": "integer"
+          },
+          "spend_unreported_usd": {
+            "description": "The most that this campaign's sends which ended with no bill may have cost, at the bounds they were admitted on — unknown, never spent. Its share of `QuotaStatus.spend_unreported_usd`.",
+            "title": "Spend Unreported Usd",
+            "type": "number"
           },
           "spend_used_usd": {
             "description": "What this campaign has billed over its whole life — every cycle's ledger, forks and forwarded L4 inner spend included, plus spend banked when one of its cycles was deleted. Its share of `QuotaStatus.spend_used_total_usd`. A FLOOR while `spend_unpriced_tokens` is non-zero.",
@@ -644,7 +921,11 @@
           "root_cycle_id",
           "spend_used_usd",
           "spend_unpriced_tokens",
+          "spend_unreported_usd",
+          "spend_metered",
+          "bench",
           "runs_with",
+          "arm",
           "config"
         ],
         "title": "CampaignDetailResponse",
@@ -744,6 +1025,20 @@
             "title": "Node Output Schema",
             "type": "object"
           },
+          "optimizer": {
+            "description": "The optimizer manifest the addressed course runs — the one answer a surface reads which optimizer's graph, knobs and analytics apply by, a check-in's draft included",
+            "title": "Optimizer",
+            "type": "string"
+          },
+          "optimizer_knobs": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "description": "That optimizer's knob values per node as the addressed course runs them — the manifest's under the campaign's and the cycle seed's overlays",
+            "title": "Optimizer Knobs",
+            "type": "object"
+          },
           "params": {
             "additionalProperties": true,
             "description": "Resolved config as the engine holds it — the bytes a round document carries as `resolved_pipeline_params`, which makes that field this endpoint's check",
@@ -774,6 +1069,8 @@
           "dataset_name",
           "connector",
           "backend_type",
+          "optimizer",
+          "optimizer_knobs",
           "params",
           "node_config_schema",
           "view",
@@ -802,6 +1099,11 @@
             "description": "The DECLARED rounds cap, not the armed one: 0 = origin only, null = unlimited",
             "title": "Max Rounds"
           },
+          "optimizer": {
+            "description": "The optimizer manifest the root course runs",
+            "title": "Optimizer",
+            "type": "string"
+          },
           "params": {
             "description": "Scalar settings in active-step order, `model` included; no prompt text",
             "items": {
@@ -813,6 +1115,7 @@
         },
         "required": [
           "params",
+          "optimizer",
           "max_rounds"
         ],
         "title": "CampaignRunsWith",
@@ -878,6 +1181,17 @@
       "CampaignSummary": {
         "additionalProperties": false,
         "properties": {
+          "arm": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Arm"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The head-to-head this campaign runs as a CONTROLLED arm of (`campaign.json::arm`, frozen at mint): it reads no other campaign's measurements, refuses a steer and spends its declared budget. Null for an ordinary campaign, which optimizes with everything that helps."
+          },
           "backend_id": {
             "default": "",
             "description": "Backend this campaign optimizes against",
@@ -886,9 +1200,20 @@
           },
           "backend_type": {
             "default": "",
-            "description": "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN on the manifest at mint. The webapp's ONE test for a self-optimizing (L4) campaign — it renders the 'inner loops' disclosure and the pp-self panel variants on it. It no longer goes stale when the dataset is re-pointed, and no longer empties when the dataset dir is deleted: a campaign outlives its dataset dir, and what it RAN is a fact about the campaign. Empty only on a manifest `restamp` has not reached.",
+            "description": "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN on the manifest at mint. The webapp's ONE test for a self-optimizing (L4) campaign — it renders the 'inner loops' disclosure and the pp-self panel variants on it. Re-pointing or deleting the dataset dir never changes it: a campaign outlives its dataset dir, and what it RAN is a fact about the campaign.",
             "title": "Backend Type",
             "type": "string"
+          },
+          "bench": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BenchScore"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The headline (`architecture.md` § The bench score is not an optimizer's selection), read off the campaign's result (`result.json`) under the formula its line runs — whichever cycle rebases handed the line to. `selected` is null until the line grades its pick. Null until the line first banks one, and where the split holds nothing out it says so in `missing_reason`."
           },
           "campaign_id": {
             "description": "Campaign id ({dataset}__{rand6}) — one RUN of an origin",
@@ -951,10 +1276,19 @@
             ],
             "description": "What the ROOT course runs with — a second transport of the answer `GET /campaigns/{id}/pipeline` gives at the root, never a second source. Null when the root pipeline did not resolve. `max_rounds` is the DECLARED rounds cap; 0 means origin only."
           },
+          "spend_metered": {
+            "$ref": "#/components/schemas/MeteredSpend",
+            "description": "What the campaign's spend cap counts along its LINE — the root and every cycle a rebase handed it to — by bucket: the bill, or the search's incurred USD for a controlled arm. The number a surface sets beside a cap, live."
+          },
           "spend_unpriced_tokens": {
             "description": "Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them. Zero means the dollar figure is complete.",
             "title": "Spend Unpriced Tokens",
             "type": "integer"
+          },
+          "spend_unreported_usd": {
+            "description": "The most that this campaign's sends which ended with no bill may have cost, at the bounds they were admitted on — unknown, never spent. Its share of `QuotaStatus.spend_unreported_usd`.",
+            "title": "Spend Unreported Usd",
+            "type": "number"
           },
           "spend_used_usd": {
             "description": "What this campaign has billed over its whole life — every cycle's ledger, forks and forwarded L4 inner spend included, plus spend banked when one of its cycles was deleted. Its share of `QuotaStatus.spend_used_total_usd`. A FLOOR while `spend_unpriced_tokens` is non-zero.",
@@ -969,9 +1303,556 @@
           "root_cycle_id",
           "spend_used_usd",
           "spend_unpriced_tokens",
-          "runs_with"
+          "spend_unreported_usd",
+          "spend_metered",
+          "bench",
+          "runs_with",
+          "arm"
         ],
         "title": "CampaignSummary",
+        "type": "object"
+      },
+      "Cell": {
+        "additionalProperties": false,
+        "description": "One cell opened — the detail panel's whole read.",
+        "properties": {
+          "cached": {
+            "default": false,
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "dataset_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Name"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "fitness": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fitness"
+          },
+          "ground_truth": {
+            "title": "Ground Truth",
+            "type": "string"
+          },
+          "other_outputs": {
+            "additionalProperties": true,
+            "description": "Everything else the row banked — rankings, diagnostics, turns, evaluator values — keyed as stored. Attributed to no node because no node declares it.",
+            "title": "Other Outputs",
+            "type": "object"
+          },
+          "predicted": {
+            "title": "Predicted",
+            "type": "string"
+          },
+          "prompt_fields_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The configuration's address (`ScoredCandidate.sp_hash`).",
+            "title": "Prompt Fields Id"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "run_name": {
+            "default": "",
+            "description": "The run's own name (its measuring label).",
+            "title": "Run Name",
+            "type": "string"
+          },
+          "sample_id": {
+            "title": "Sample Id",
+            "type": "integer"
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seconds"
+          },
+          "spans": {
+            "description": "One per pipeline node, in chain order.",
+            "items": {
+              "$ref": "#/components/schemas/CellSpan"
+            },
+            "title": "Spans",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "HIT",
+              "MISS",
+              "ERR",
+              "UNSC"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "terminal_node": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal Node"
+          }
+        },
+        "required": [
+          "run_id",
+          "sample_id",
+          "query",
+          "ground_truth",
+          "predicted",
+          "status"
+        ],
+        "title": "Cell",
+        "type": "object"
+      },
+      "CellCandidate": {
+        "additionalProperties": false,
+        "description": "Who measured a cell — a round's candidate in cycle and campaign scope, an archive run in\ndataset scope, where no campaign names one. Served in chronological order, which is the order\na client lists them in.",
+        "properties": {
+          "candidate_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The individual's lineage id. Null in dataset scope.",
+            "title": "Candidate Id"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the run was banked — dataset scope only.",
+            "title": "Created At"
+          },
+          "cycle_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null in dataset scope.",
+            "title": "Cycle Id"
+          },
+          "key": {
+            "description": "What `CellRow.candidate` joins on. Opaque — never parse it; every field it was built from is served beside it.",
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "description": "`C{round}.{n}` in a campaign; the run's name in dataset scope.",
+            "title": "Label",
+            "type": "string"
+          },
+          "live": {
+            "default": false,
+            "description": "Read off the round still being measured (`dashboard.json`), whose round file lands only at its close.",
+            "title": "Live",
+            "type": "boolean"
+          },
+          "round": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null in dataset scope.",
+            "title": "Round"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The archive run its cells were filed under. Null where the candidate was never walked — rejected before it ran — so it holds no cells.",
+            "title": "Run Id"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "run_id"
+        ],
+        "title": "CellCandidate",
+        "type": "object"
+      },
+      "CellRow": {
+        "additionalProperties": false,
+        "description": "One cell as a table row — enough to scan, sort by the served order and open.",
+        "properties": {
+          "cached": {
+            "default": false,
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "candidate": {
+            "description": "`CellCandidate.key` of the candidate that measured it.",
+            "title": "Candidate",
+            "type": "string"
+          },
+          "fitness": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The graded per-cell score. Null on an ungraded row.",
+            "title": "Fitness"
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens"
+          },
+          "predicted": {
+            "default": "",
+            "description": "Trimmed for display.",
+            "title": "Predicted",
+            "type": "string"
+          },
+          "run_id": {
+            "description": "With `sample_id`, the cell's address. See `CellCandidate`.",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "sample_id": {
+            "title": "Sample Id",
+            "type": "integer"
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What producing the cell cost (`recorded_cost_s`) — the half that survives a cache replay. Null where no timing was recorded.",
+            "title": "Seconds"
+          },
+          "status": {
+            "enum": [
+              "HIT",
+              "MISS",
+              "ERR",
+              "UNSC"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sample_id",
+          "run_id",
+          "candidate",
+          "status"
+        ],
+        "title": "CellRow",
+        "type": "object"
+      },
+      "CellSpan": {
+        "additionalProperties": false,
+        "description": "One pipeline node's part in a cell — the span of the trace.",
+        "properties": {
+          "cache_read_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Tokens"
+          },
+          "config": {
+            "additionalProperties": true,
+            "description": "The node's config for this run, prompt excepted.",
+            "title": "Config",
+            "type": "object"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
+          "estimated": {
+            "default": false,
+            "description": "Token counts from the chars/4 fallback, not the provider.",
+            "title": "Estimated",
+            "type": "boolean"
+          },
+          "input": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The prompt this node was sent, RENDERED at read time from the run's own node config and this sample — exactly the interpolation the measurement made, so nothing is stored twice. Null on a node configured with no prompt.",
+            "title": "Input"
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tokens"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "node": {
+            "title": "Node",
+            "type": "string"
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens"
+          },
+          "outputs": {
+            "additionalProperties": true,
+            "description": "The observation keys this node emits, as the row banked them.",
+            "title": "Outputs",
+            "type": "object"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seconds"
+          }
+        },
+        "required": [
+          "node"
+        ],
+        "title": "CellSpan",
+        "type": "object"
+      },
+      "CellsResponse": {
+        "additionalProperties": false,
+        "description": "The measurement log of one scope, in served order: ``samples`` ranked (their\n``hard_sample_rank``), ``candidates`` chronological within a cycle, ``cells`` by candidate,\nthen in each candidate's walk order, so the flat list is the run's time series.\nA client GROUPS these — by sample, by candidate or not at all — by bucketing the served list\nunder a served key order, and never re-sorts: an ordering is a score.",
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/CellCandidate"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "cells": {
+            "items": {
+              "$ref": "#/components/schemas/CellRow"
+            },
+            "title": "Cells",
+            "type": "array"
+          },
+          "mean_fitness": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean graded fitness across those cells; null when the scope holds none.",
+            "title": "Mean Fitness"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "order": {
+            "description": "The key `samples` are ranked by — the request's `order` when it named one, else the dataset's `CampaignConfig.hard_sample_order`. Echoed so a client that sent no override can label what it is showing without guessing the default.",
+            "enum": [
+              "info_gain",
+              "difficulty"
+            ],
+            "title": "Order",
+            "type": "string"
+          },
+          "row_count": {
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "samples": {
+            "items": {
+              "$ref": "#/components/schemas/DatasetItem"
+            },
+            "title": "Samples",
+            "type": "array"
+          },
+          "scope": {
+            "enum": [
+              "cycle",
+              "campaign",
+              "dataset"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "total_hits": {
+            "title": "Total Hits",
+            "type": "integer"
+          },
+          "total_measurements": {
+            "description": "Graded cells across `samples` — the headline's denominator, served so the reader adds nothing up.",
+            "title": "Total Measurements",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "scope",
+          "row_count",
+          "order",
+          "samples",
+          "candidates",
+          "cells",
+          "total_measurements",
+          "total_hits",
+          "mean_fitness"
+        ],
+        "title": "CellsResponse",
         "type": "object"
       },
       "CommandAcceptedBody": {
@@ -1175,7 +2056,7 @@
             "type": "string"
           },
           "source": {
-            "description": "Where the value came from: default | campaign (operator-set) | required | constant",
+            "description": "Where the value came from: default | campaign (operator-set) | required | manifest (an optimizer node's knob, as its manifest declares it)",
             "title": "Source",
             "type": "string"
           },
@@ -1223,7 +2104,7 @@
       },
       "ConnectedAccount": {
         "additionalProperties": false,
-        "description": "One OIDC provider currently bound to the active session.\n\nStage-1 beta is single-account-per-user — the list is always length 1.\nThe Clerk-style \"connected accounts\" surface in the webapp displays this\nlist; multi-account linking ships post-M13.",
+        "description": "One OIDC provider currently bound to the active session.\n\nStage-1 beta is single-account-per-user — the list is always length 1.\nThe Clerk-style \"connected accounts\" surface in the webapp displays this\nlist; multi-account linking ships with ADR-0002 Stage 2.",
         "properties": {
           "email": {
             "anyOf": [
@@ -1285,6 +2166,7 @@
                 "type": "null"
               }
             ],
+            "description": "The optimizer's own selection score — what it KEPT, read on the rows that chose it. Never the headline; the campaign's `CampaignSummary.bench` is.",
             "title": "Best Accuracy"
           },
           "campaign_id": {
@@ -1568,6 +2450,30 @@
             "title": "Hard Sample Rank",
             "type": "integer"
           },
+          "mean_fitness": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean graded fitness over those cells; null when none.",
+            "title": "Mean Fitness"
+          },
+          "n_hits": {
+            "default": 0,
+            "description": "Of those, how many maxed out the active scorer (`domain.scoring.is_hit`). Structurally 0 on a graded scorer; read `mean_fitness` there.",
+            "title": "N Hits",
+            "type": "integer"
+          },
+          "n_measured": {
+            "default": 0,
+            "description": "GRADED cells of this sample in scope (errored and unscored cells excluded, as the Rasch fit excludes them) — the denominator of the two below.",
+            "title": "N Measured",
+            "type": "integer"
+          },
           "n_obs": {
             "anyOf": [
               {
@@ -1734,53 +2640,40 @@
         "title": "DatasetPipelineResponse",
         "type": "object"
       },
-      "DatasetPreviewResponse": {
+      "DatasetSplit": {
         "additionalProperties": false,
         "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/DatasetItem"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "order": {
-            "description": "The key `items` are ranked by — the request's `order` when it named one, else the dataset's `CampaignConfig.hard_sample_order`. Echoed so a client that sent no override can label what it is showing without guessing the default.",
-            "enum": [
-              "info_gain",
-              "difficulty"
-            ],
-            "title": "Order",
-            "type": "string"
-          },
-          "row_count": {
-            "title": "Row Count",
+          "bench": {
+            "description": "Distinct samples held out as the bench set, with every row that repeats one: no optimizer node ever reads one, and the headline is scored on them.",
+            "minimum": 0.0,
+            "title": "Bench",
             "type": "integer"
           },
-          "split_test": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Declared held-out test fold size (not materialized). The training-bank size is `row_count` above — the bank IS the preview, so a second field restated it.",
-            "title": "Split Test"
+          "demo": {
+            "default": 0,
+            "description": "Distinct samples reserved as the demo pool — the rows an individual's `shot_ids` name, rendered into its prompt as query and ground truth, never scored.",
+            "minimum": 0.0,
+            "title": "Demo",
+            "type": "integer"
+          },
+          "seed": {
+            "default": 0,
+            "description": "Seeds which rows fall where. Membership ranks each row by its content (`Sample.key`), never its slot, so a reordered bank holds out the same rows.",
+            "title": "Seed",
+            "type": "integer"
+          },
+          "tolerance": {
+            "default": 0,
+            "description": "Bench rows a pass may end with no verdict on — a provider fault, or a cell the formula cannot grade — and still be a reading. Past it the pass reads nothing: a headline over a population other than the one sent is not the bench score.",
+            "minimum": 0.0,
+            "title": "Tolerance",
+            "type": "integer"
           }
         },
         "required": [
-          "name",
-          "row_count",
-          "order",
-          "items"
+          "bench"
         ],
-        "title": "DatasetPreviewResponse",
+        "title": "DatasetSplit",
         "type": "object"
       },
       "DatasetStorageEntry": {
@@ -2126,6 +3019,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/FactorGridReading"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "head_to_head": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HeadToHead"
               },
               {
                 "type": "null"
@@ -2677,7 +3580,7 @@
         "properties": {
           "pipeline_overlay": {
             "additionalProperties": true,
-            "description": "The `nodes.*.config` overlay the fork would carry, as `OperatorForkOverride` sends it",
+            "description": "The `nodes.*.config` overlay the fork would carry, as its `CycleSeed` sends it",
             "title": "Pipeline Overlay",
             "type": "object"
           }
@@ -2727,6 +3630,501 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HeadToHead": {
+        "additionalProperties": false,
+        "description": "The campaigns' bench headlines side by side, and whether one instrument graded them all.",
+        "properties": {
+          "differs_on": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Differs On",
+            "type": "array"
+          },
+          "head_to_head_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Head To Head Id"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "pairs": {
+            "items": {
+              "$ref": "#/components/schemas/SelectionPair"
+            },
+            "title": "Pairs",
+            "type": "array"
+          },
+          "ratio_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ratio Reference"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/HeadToHeadRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "scorer_id": {
+            "title": "Scorer Id",
+            "type": "string"
+          },
+          "uncontrolled_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uncontrolled Note"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
+          },
+          "verdict_line": {
+            "title": "Verdict Line",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rows",
+          "head_to_head_id",
+          "scorer_id",
+          "verdict",
+          "differs_on",
+          "pairs",
+          "ratio_reference",
+          "verdict_line",
+          "uncontrolled_note",
+          "notes"
+        ],
+        "title": "HeadToHead",
+        "type": "object"
+      },
+      "HeadToHeadRow": {
+        "additionalProperties": false,
+        "description": "One campaign's bench headline beside what it cost to reach.",
+        "properties": {
+          "arm": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Arm"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "bench": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BenchScore"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "bench_reads": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bench Reads"
+          },
+          "bench_set": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Instrument"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "budget": {
+            "$ref": "#/components/schemas/ArmBudget"
+          },
+          "calls": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calls"
+          },
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "comparable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparable"
+          },
+          "concurrent_with": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Concurrent With",
+            "type": "array"
+          },
+          "controlled": {
+            "title": "Controlled",
+            "type": "boolean"
+          },
+          "human_intervened": {
+            "title": "Human Intervened",
+            "type": "boolean"
+          },
+          "incurred_usd_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incurred Usd Ratio"
+          },
+          "lift_per_incurred_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lift Per Incurred Usd"
+          },
+          "loop_incurred_usd_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loop Incurred Usd Ratio"
+          },
+          "optimizer": {
+            "title": "Optimizer",
+            "type": "string"
+          },
+          "replay_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replay Share"
+          },
+          "rounds": {
+            "title": "Rounds",
+            "type": "integer"
+          },
+          "spend": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpendRollup"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "spend_metered": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeteredSpend"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "treatment_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Treatment Digest"
+          },
+          "worked_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worked Ratio"
+          },
+          "worked_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worked S"
+          }
+        },
+        "required": [
+          "subject",
+          "campaign_id",
+          "optimizer",
+          "arm",
+          "controlled",
+          "treatment_digest",
+          "budget",
+          "spend_metered",
+          "human_intervened",
+          "bench",
+          "bench_set",
+          "comparable",
+          "spend",
+          "calls",
+          "worked_s",
+          "rounds",
+          "incurred_usd_ratio",
+          "loop_incurred_usd_ratio",
+          "worked_ratio",
+          "replay_share",
+          "lift_per_incurred_usd",
+          "concurrent_with",
+          "bench_reads"
+        ],
+        "title": "HeadToHeadRow",
+        "type": "object"
+      },
+      "Instrument": {
+        "additionalProperties": false,
+        "description": "What graded a bench headline: two are one quantity only where every field agrees.",
+        "properties": {
+          "bench_rows": {
+            "title": "Bench Rows",
+            "type": "string"
+          },
+          "dataset_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Hash"
+          },
+          "dataset_name": {
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "models": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "object"
+          },
+          "origin": {
+            "title": "Origin",
+            "type": "string"
+          },
+          "scorer_id": {
+            "title": "Scorer Id",
+            "type": "string"
+          },
+          "split": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DatasetSplit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "dataset_name",
+          "dataset_hash",
+          "split",
+          "bench_rows",
+          "scorer_id",
+          "models",
+          "origin"
+        ],
+        "title": "Instrument",
+        "type": "object"
+      },
+      "KnobRow": {
+        "additionalProperties": false,
+        "description": "One knob of one optimizer node, as a settings surface offers it.",
+        "properties": {
+          "description": {
+            "description": "What the knob does — its field description",
+            "title": "Description",
+            "type": "string"
+          },
+          "exclusive_maximum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A bound every legal value lies strictly below; null when none",
+            "title": "Exclusive Maximum"
+          },
+          "exclusive_minimum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A bound every legal value lies strictly above; null when none",
+            "title": "Exclusive Minimum"
+          },
+          "key": {
+            "description": "The knob's name under `nodes.{node}.config`",
+            "title": "Key",
+            "type": "string"
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The greatest legal value, itself legal; null when none",
+            "title": "Maximum"
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The least legal value, itself legal; null when none",
+            "title": "Minimum"
+          },
+          "nullable": {
+            "description": "Whether null is a legal value (an opt-in knob, off)",
+            "title": "Nullable",
+            "type": "boolean"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The closed set a string knob takes, in declared order; null when open",
+            "title": "Options"
+          },
+          "type": {
+            "description": "JSON Schema type the value takes: boolean | integer | number | string | object",
+            "title": "Type",
+            "type": "string"
+          },
+          "value": {
+            "description": "The value the manifest declares — a campaign's floor",
+            "title": "Value"
+          }
+        },
+        "required": [
+          "key",
+          "description",
+          "type",
+          "options",
+          "nullable",
+          "minimum",
+          "exclusive_minimum",
+          "maximum",
+          "exclusive_maximum",
+          "value"
+        ],
+        "title": "KnobRow",
         "type": "object"
       },
       "LineageDivergence": {
@@ -2786,6 +4184,12 @@
             ],
             "description": "Of `scored_samples`, how many were replayed from the MeasurementArchive rather than measured. `None` on a course and on any candidate never measured.",
             "title": "Cached Samples"
+          },
+          "changes_description": {
+            "default": "",
+            "description": "What the optimizer says this candidate changed against its parent, as it worded it at mint. Empty on a course.",
+            "title": "Changes Description",
+            "type": "string"
           },
           "children": {
             "items": {
@@ -2864,17 +4268,9 @@
           },
           "election_held": {
             "default": false,
-            "description": "This candidate's ROUND has held its election. The complement `is_winner` cannot supply: a round that HELD crowned nobody, so every bar in it reads `is_winner: false` exactly as a round still scoring does — and only this says whether an uncrowned bar lost or has not been judged yet. False on a course, which is not a round, and on a round halted before it stood (a holed panel).",
+            "description": "This candidate's ROUND has held its election. The complement `is_selected` cannot supply: a round that HELD crowned nobody, so every bar in it reads `is_selected: false` exactly as a round still scoring does — and only this says whether an uncrowned bar lost or has not been judged yet. False on a course, which is not a round, and on a round halted before it stood (a holed panel).",
             "title": "Election Held",
             "type": "boolean"
-          },
-          "evaluators": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "description": "The candidate's stored evaluator namespace — the measurement a `score:` lens re-scores against.",
-            "title": "Evaluators",
-            "type": "object"
           },
           "expected_samples": {
             "anyOf": [
@@ -2898,26 +4294,15 @@
             ],
             "description": "Which side of this cut the run CONTINUES on, derived from `trigger` (`FORK_DIRECTION`). `offshoot` = this branch hangs off a line that keeps running; `supersede` = this branch IS the line and the PARENT is what was left behind. Null for roots and inner runs, which were not cut from anything. Served, never derived in the client — the two read identically on disk and only this says them apart."
           },
-          "hearts": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Hearts"
-          },
           "id": {
             "description": "Course: the cycle_id. Candidate: the searchpoint id minted at L1/origin.",
             "title": "Id",
             "type": "string"
           },
-          "is_winner": {
+          "is_selected": {
             "default": false,
-            "description": "Elected this round. Stamped at the ELECTION, which is the last thing scoring does — so it lands a whole `l1_critique` call before the round closes, and a round still running its optimizer calls already reports its winner. False where no election has been held (still scoring, or halted on a holed panel) and on a round that held: those two are told apart by the election record, not by this flag.",
-            "title": "Is Winner",
+            "description": "Elected this round. Stamped at the ELECTION, which is the last thing scoring does — so it lands before the round's adapters run and the round closes, and a round still running its optimizer calls already reports its winner. False where no election has been held (still scoring, or halted on a holed panel) and on a round that held: those two are told apart by the election record, not by this flag.",
+            "title": "Is Selected",
             "type": "boolean"
           },
           "kind": {
@@ -2955,53 +4340,8 @@
                 "type": "null"
               }
             ],
-            "description": "This candidate's fitness under the request's `score:` lens, re-scored server-side from its stored evaluator namespace. Null without a lens, or when the namespace can't satisfy the formula.",
+            "description": "This candidate's composite fitness under the request's `score:` lens — its rows re-graded per cell under that `per_cell` formula and folded, the number a fresh run under it reports. Null without a lens, or where no row carries a verdict under it.",
             "title": "Lens Value"
-          },
-          "lives_cap": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lives Cap"
-          },
-          "matched_parent_lift": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The candidate's blocked lift over the floor it was JUDGED against — the origin restricted to the cells this candidate actually measured — with its 95% interval. The election's own verdict, and the only comparable answer to 'by how much': under `per_round_resubset` a bare difference of two accuracies is the luckiest draw minus the fullest one. An interval spanning 0 means the round could not separate this candidate from its parent. `None` below two shared cells, outside the election fit, and on any round that has not elected yet.",
-            "title": "Matched Parent Lift"
-          },
-          "matched_parent_lift_ci_hi": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Matched Parent Lift Ci Hi"
-          },
-          "matched_parent_lift_ci_lo": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Matched Parent Lift Ci Lo"
           },
           "mean_fitness_ci_hi": {
             "anyOf": [
@@ -3037,17 +4377,13 @@
             "description": "This course's round-0 score. A course that has only run its origin has this and no `best_accuracy`, so reading only `best` blanks its bar.",
             "title": "Origin Accuracy"
           },
-          "parent_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The candidate this node descends from; null only at the true root. A course carries the same edge its own C0 carries.",
-            "title": "Parent Id"
+          "parent_ids": {
+            "description": "Every candidate this node derives from — one for a mutation, several for a crossover; empty only at the true root. Lineage is a DAG; this tree hangs the node under `parent_ids[0]`. A course carries the same edge its own C0 carries.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Parent Ids",
+            "type": "array"
           },
           "path": {
             "description": "THE address, root → leaf: the course this node belongs to. A candidate a fork contributed carries the FORK's path, so selecting it re-roots onto that fork.",
@@ -3056,6 +4392,40 @@
             },
             "title": "Path",
             "type": "array"
+          },
+          "reference_lift": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The candidate's blocked lift over the floor it was JUDGED against — the origin restricted to the cells this candidate actually measured — with its 95% interval. The election's own verdict, and the only comparable answer to 'by how much': under `per_round_resubset` a bare difference of two accuracies is the luckiest draw minus the fullest one. An interval spanning 0 means the round could not separate this candidate from its parent. `None` below two shared cells, outside the election fit, and on any round that has not elected yet.",
+            "title": "Reference Lift"
+          },
+          "reference_lift_ci_hi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Lift Ci Hi"
+          },
+          "reference_lift_ci_lo": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Lift Ci Lo"
           },
           "round": {
             "anyOf": [
@@ -3079,6 +4449,17 @@
               }
             ],
             "description": "Courses only — the ONE server-owned run-state (`derive_run_phase`), the same value `/cycles` serves. Null on a candidate, which has no run of its own."
+          },
+          "run_standing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunStanding"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Courses only — the optimizer's standing as the course's last closed round left it, read off the course's own ledger. Null before round 0 closes."
           },
           "sample_set_accuracy": {
             "anyOf": [
@@ -3117,13 +4498,19 @@
           },
           "sp_hash": {
             "default": "",
-            "description": "THE address of this candidate's measurements — the searchpoint id the archive stores on every row it wrote, under its own spelling `prompt_fields_id`. Neither `id` (a per-individual `uuid4`) nor `label` joins to a row; this does. Served rather than derived: it hashes the node configs INCLUDING the rendered prompt, which no served field carries, so a client recomputing it would match nothing and see no error. Empty on a course, on a candidate minted before the stamp existed, and on one that measured nothing. NOT unique — one searchpoint scored on two subsets is one `sp_hash` over two runs, and a re-proposed configuration shares it across rounds.",
+            "description": "THE address of this candidate's measurements — the searchpoint id the archive stores on every row it wrote, under its own spelling `prompt_fields_id`. Neither `id` (a per-individual `uuid4`) nor `label` joins to a row; this does. Served rather than derived: it hashes the node configs INCLUDING the rendered prompt, which no served field carries, so a client recomputing it would match nothing and see no error. Empty on a course and on a candidate that measured nothing. NOT unique — one searchpoint scored on two subsets is one `sp_hash` over two runs, and a re-proposed configuration shares it across rounds.",
             "title": "Sp Hash",
             "type": "string"
           },
+          "stamps_theta": {
+            "default": false,
+            "description": "Whether the optimizer fits theta per arm at all. Candidate: the declaration its round's election carried (`RoundResult.stamps_theta`), false on a round that never elected. Course: the declaration its own elections carried, so a course says whether its rounds are won on theta. False: theta is not a column here, so a surface hides it rather than drawing a cold ruler's blank.",
+            "title": "Stamps Theta",
+            "type": "boolean"
+          },
           "status": {
             "default": "",
-            "description": "Candidate: minted | measured | invalid — never 'winner' (that rides `is_winner`). `invalid` was rejected before it cost a sample, so it carries no accuracy: its stored 0.0 is synthetic and reads as getting every answer wrong. Course: `index.json::status`, the same StopReason value `/cycles` serves under this same name. Not `dashboard.json::state`, which names the fine-grained ACTIVITY phase — a different axis, and one word may not serve both.",
+            "description": "Candidate: minted | measured | invalid — never 'winner' (that rides `is_selected`). `invalid` was rejected before it cost a sample, so it carries no accuracy: its stored 0.0 is synthetic and reads as getting every answer wrong. Course: `index.json::status`, the same StopReason value `/cycles` serves under this same name. Not `dashboard.json::state`, which names the fine-grained ACTIVITY phase — a different axis, and one word may not serve both.",
             "title": "Status",
             "type": "string"
           },
@@ -3456,186 +4843,54 @@
         "title": "MeResponse",
         "type": "object"
       },
-      "MeasurementDot": {
+      "MeteredSpend": {
         "additionalProperties": false,
+        "description": "What a run's spend caps have counted, in the units they meter, by bucket.\nEvery surface sets this beside a cap, so none picks the bill or the incurred total itself.",
         "properties": {
-          "fitness": {
-            "description": "Graded per-sample score in [0,1] under the active scorer. Binary scorers emit exactly 0.0 or 1.0; render a shade, not a HIT/MISS boolean.",
-            "title": "Fitness",
+          "beside": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Beside",
+            "type": "object"
+          },
+          "billed_usd": {
+            "title": "Billed Usd",
             "type": "number"
           },
-          "label": {
-            "description": "Short human label, e.g. 'R3 cand 2'.",
-            "title": "Label",
-            "type": "string"
-          },
-          "ord": {
-            "description": "Opaque ordinal for lex sort + uniqueness (encodes ts/run/idx or round/cand).",
-            "title": "Ord",
-            "type": "string"
-          }
-        },
-        "required": [
-          "ord",
-          "fitness",
-          "label"
-        ],
-        "title": "MeasurementDot",
-        "type": "object"
-      },
-      "MeasurementSeriesResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/SampleSeries"
+          "buckets": {
+            "additionalProperties": {
+              "type": "number"
             },
-            "title": "Items",
-            "type": "array"
+            "title": "Buckets",
+            "type": "object"
           },
-          "mean_fitness": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Mean graded fitness across every measurement in `items`; `None` when the scope holds none. The headline rate on any scorer, graded or binary.",
-            "title": "Mean Fitness"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "order": {
-            "description": "The key `items` are ranked by, resolved exactly as `/preview`'s. Echoed on BOTH responses because they are one page read twice: a client holding only one of them would otherwise have to name the order from the other, or guess the default.",
+          "meter": {
             "enum": [
-              "info_gain",
-              "difficulty"
+              "bill",
+              "search_incurred"
             ],
-            "title": "Order",
+            "title": "Meter",
             "type": "string"
           },
-          "scope": {
-            "enum": [
-              "cycle",
-              "campaign",
-              "dataset"
-            ],
-            "title": "Scope",
-            "type": "string"
-          },
-          "total_hits": {
-            "description": "`SampleSeries.n_hits` summed across `items`. Structurally 0 on a graded scorer; read `mean_fitness` there.",
-            "title": "Total Hits",
+          "tokens": {
+            "title": "Tokens",
             "type": "integer"
           },
-          "total_measurements": {
-            "description": "Measurements across every series in `items` — the denominator of the roster's headline, served so the reader adds nothing up.",
-            "title": "Total Measurements",
-            "type": "integer"
+          "usd": {
+            "title": "Usd",
+            "type": "number"
           }
         },
         "required": [
-          "name",
-          "scope",
-          "order",
-          "items",
-          "total_measurements",
-          "total_hits",
-          "mean_fitness"
+          "meter",
+          "usd",
+          "tokens",
+          "buckets",
+          "beside",
+          "billed_usd"
         ],
-        "title": "MeasurementSeriesResponse",
-        "type": "object"
-      },
-      "MechanismGroup": {
-        "additionalProperties": false,
-        "properties": {
-          "description": {
-            "description": "What this group of mechanisms governs",
-            "title": "Description",
-            "type": "string"
-          },
-          "key": {
-            "description": "Group key under optimization.mechanisms (e.g. 'elimination')",
-            "title": "Key",
-            "type": "string"
-          },
-          "label": {
-            "description": "Human-readable group name",
-            "title": "Label",
-            "type": "string"
-          },
-          "toggles": {
-            "description": "Toggles in this group, in declared order",
-            "items": {
-              "$ref": "#/components/schemas/MechanismToggle"
-            },
-            "title": "Toggles",
-            "type": "array"
-          }
-        },
-        "required": [
-          "key",
-          "label",
-          "description",
-          "toggles"
-        ],
-        "title": "MechanismGroup",
-        "type": "object"
-      },
-      "MechanismSchemaResponse": {
-        "additionalProperties": false,
-        "description": "Self-describing descriptor for the campaign-config mechanism toggles.\n\nDerived live from ``MechanismConfig``'s JSON schema, so a new toggle (a bool\nadded to a group model) surfaces here — and in the webapp — with no edit.\nPair the active value off the campaign's frozen ``config`` snapshot\n(``optimization.mechanisms.{group}.{key}``).",
-        "properties": {
-          "groups": {
-            "description": "Mechanism groups, in declared order",
-            "items": {
-              "$ref": "#/components/schemas/MechanismGroup"
-            },
-            "title": "Groups",
-            "type": "array"
-          }
-        },
-        "required": [
-          "groups"
-        ],
-        "title": "MechanismSchemaResponse",
-        "type": "object"
-      },
-      "MechanismToggle": {
-        "additionalProperties": false,
-        "properties": {
-          "default": {
-            "description": "Default value (preserves stock loop behavior)",
-            "title": "Default",
-            "type": "boolean"
-          },
-          "description": {
-            "description": "What the mechanism does, on vs off",
-            "title": "Description",
-            "type": "string"
-          },
-          "key": {
-            "description": "Field key under its group (e.g. 'epsilon_elimination')",
-            "title": "Key",
-            "type": "string"
-          },
-          "label": {
-            "description": "Human-readable toggle name",
-            "title": "Label",
-            "type": "string"
-          }
-        },
-        "required": [
-          "key",
-          "label",
-          "description",
-          "default"
-        ],
-        "title": "MechanismToggle",
+        "title": "MeteredSpend",
         "type": "object"
       },
       "MetricReading": {
@@ -3901,7 +5156,7 @@
       },
       "NestedPipelineRef": {
         "additionalProperties": false,
-        "description": "Which node of THIS pipeline runs another whole pipeline, and whose. Both halves are\nderived from ``inner_tasks.yaml``, never declared a second time. Null on an ordinary dataset.\n\nHere rather than in the router that used to declare it, because the CAMPAIGN resolution has to\ncarry it too and ``application/`` cannot import ``presentation/``. Its derivation lives beside\nthe resolution (``application/pipeline_resolve.py::nested_pipeline_ref``), which is what makes\nthe shape reachable from both doors without either owning the other.",
+        "description": "Which node of THIS pipeline runs another whole pipeline, and whose. Both halves are\nderived from ``inner_tasks.yaml``, never declared a second time. Null on an ordinary dataset.\n\nHere rather than in a router, because the CAMPAIGN resolution has to carry it too and\n``application/`` cannot import ``presentation/``. Its derivation lives beside\nthe resolution (``application/pipeline_resolve.py::nested_pipeline_ref``), which is what makes\nthe shape reachable from both doors without either owning the other.",
         "properties": {
           "dataset": {
             "description": "Slug of the pipeline that node runs; fetch it the same way.",
@@ -3987,6 +5242,7 @@
               "backend",
               "dataset",
               "campaign",
+              "model_floor",
               "seed",
               "evolved",
               "identity",
@@ -4004,6 +5260,36 @@
           "kind"
         ],
         "title": "NodeConfigParam",
+        "type": "object"
+      },
+      "NodeKnobs": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "description": "The node's type: sampler | eliminator | selector | …",
+            "title": "Kind",
+            "type": "string"
+          },
+          "knobs": {
+            "description": "Its knobs, in declared order",
+            "items": {
+              "$ref": "#/components/schemas/KnobRow"
+            },
+            "title": "Knobs",
+            "type": "array"
+          },
+          "node": {
+            "description": "The manifest node that owns these knobs",
+            "title": "Node",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node",
+          "kind",
+          "knobs"
+        ],
+        "title": "NodeKnobs",
         "type": "object"
       },
       "NodeOutputSchema": {
@@ -4074,6 +5360,85 @@
           "state"
         ],
         "title": "NodeReach",
+        "type": "object"
+      },
+      "OptimizerEntry": {
+        "additionalProperties": false,
+        "description": "One optimizer this install can run, as a picker offers it.",
+        "properties": {
+          "name": {
+            "description": "The manifest name, as `optimization.optimizer` names it",
+            "title": "Name",
+            "type": "string"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The installed package that registered it, as `<distribution>: <entry point>`; null for one shipped with PromptPotter",
+            "title": "Origin"
+          },
+          "paper": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The citation a paper preset reproduces; its declared knob values are that paper's configuration. Null for an optimizer reproducing none",
+            "title": "Paper"
+          },
+          "version": {
+            "description": "The manifest's own version",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "paper",
+          "origin"
+        ],
+        "title": "OptimizerEntry",
+        "type": "object"
+      },
+      "OptimizerKnobsResponse": {
+        "additionalProperties": false,
+        "description": "Every knob an optimizer manifest's nodes take, served so a settings surface draws a\ncontrol per knob and writes `optimization.nodes.{node}.config.{key}`.",
+        "properties": {
+          "nodes": {
+            "description": "Every node taking a knob, in declared order",
+            "items": {
+              "$ref": "#/components/schemas/NodeKnobs"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "optimizer": {
+            "description": "The manifest name, as `optimization.optimizer` names it",
+            "title": "Optimizer",
+            "type": "string"
+          },
+          "version": {
+            "description": "The manifest's own version",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "optimizer",
+          "version",
+          "nodes"
+        ],
+        "title": "OptimizerKnobsResponse",
         "type": "object"
       },
       "OptimizerPipelineResponse": {
@@ -4151,6 +5516,31 @@
           "resolved_prompts"
         ],
         "title": "OptimizerPipelineResponse",
+        "type": "object"
+      },
+      "OptimizerRoster": {
+        "additionalProperties": false,
+        "description": "The optimizers this install can run, the default first.\n\nOne per runtime the registry holds: the menu `optimization.optimizer` accepts, never a list.",
+        "properties": {
+          "default": {
+            "description": "What a campaign naming no `optimization.optimizer` runs",
+            "title": "Default",
+            "type": "string"
+          },
+          "optimizers": {
+            "description": "The roster, the default first",
+            "items": {
+              "$ref": "#/components/schemas/OptimizerEntry"
+            },
+            "title": "Optimizers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "default",
+          "optimizers"
+        ],
+        "title": "OptimizerRoster",
         "type": "object"
       },
       "OrderConfound": {
@@ -4292,7 +5682,7 @@
       },
       "PairwiseComparison": {
         "additionalProperties": false,
-        "description": "One unordered pair, blocked on the cells BOTH subjects scored — pairing removes cell\ndifficulty instead of carrying it as noise, which is the same reason ``matched_parent_lift``\npairs rather than differencing two means.\n\n``a`` precedes ``b`` in the roster's oldest-first order, so ``median_shift = b - a`` has one\nreading across the whole table. The interval and both p-values are ``None`` below two shared\ncells: nothing was tested there, which a ``1.0`` would misreport as a test that found nothing.\n\nThe test is EXACT (``exact_paired_reading``), never Student-t: at the widths a panel runs, a t\np can sit below what any exact test on that many pairs is able to return, which is resolution\ntaken from the assumed tail rather than from the cells. ``EvidencePower.exact_p_floor`` says\nwhich verdicts the width can reach at all, before a cell is spent.",
+        "description": "One unordered pair, blocked on the cells BOTH subjects scored — pairing removes cell\ndifficulty instead of carrying it as noise, which is the same reason ``reference_lift``\npairs rather than differencing two means.\n\n``a`` precedes ``b`` in the roster's oldest-first order, so ``median_shift = b - a`` has one\nreading across the whole table. The interval and both p-values are ``None`` below two shared\ncells: nothing was tested there, which a ``1.0`` would misreport as a test that found nothing.\n\nThe test is EXACT (``exact_paired_reading``), never Student-t: at the widths a panel runs, a t\np can sit below what any exact test on that many pairs is able to return, which is resolution\ntaken from the assumed tail rather than from the cells. ``EvidencePower.exact_p_floor`` says\nwhich verdicts the width can reach at all, before a cell is spent.",
         "properties": {
           "ci_hi": {
             "anyOf": [
@@ -4399,6 +5789,12 @@
           },
           "kind": {
             "default": "forward",
+            "enum": [
+              "forward",
+              "loop",
+              "directive",
+              "alternative"
+            ],
             "title": "Kind",
             "type": "string"
           },
@@ -4416,8 +5812,13 @@
       },
       "PipelineViewNode": {
         "additionalProperties": false,
-        "description": "One node's place in the flow, as a tier and a rank rather than as pixels.\n\nTier 0 is the chain a sample runs and tier n>0 is a node reached only by escalating n\nlevels; rank is the tier-0 position it acts on. A renderer maps them to rows and\ncolumns.",
+        "description": "One node's place in the flow, as a tier and a rank rather than as pixels.\n\nTier 0 is the chain a sample runs and tier n>0 is a node reached only through the n-th\nnested alternative pipeline; rank is the tier-0 position it acts on. A renderer maps them\nto rows and columns.",
         "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -4494,7 +5895,13 @@
             "title": "Spend Unpriced Tokens",
             "type": "integer"
           },
+          "spend_unreported_usd": {
+            "description": "The most that sends which ended with no bill (cancelled, timed out, killed with a run) may have cost, at the bounds they were admitted on. Not spent — unknown. It binds the ceiling beside `spend_used_total_usd`.",
+            "title": "Spend Unreported Usd",
+            "type": "number"
+          },
           "spend_used_total_usd": {
+            "description": "What the providers BILLED this account, over its whole life. Never an estimate: a send whose bill never came is `spend_unreported_usd`, not this.",
             "title": "Spend Used Total Usd",
             "type": "number"
           },
@@ -4518,6 +5925,7 @@
           "spend_used_total_usd",
           "spend_budget_usd_total",
           "spend_unpriced_tokens",
+          "spend_unreported_usd",
           "tokens_used_total",
           "token_budget_total",
           "concurrent_running",
@@ -4623,6 +6031,7 @@
               "round_warning",
               "ruler",
               "snapshot",
+              "run_limits",
               "spend_hold",
               "spend_tombstone",
               "token_usage",
@@ -4707,6 +6116,45 @@
         "title": "RunPhase",
         "type": "string"
       },
+      "RunStanding": {
+        "additionalProperties": false,
+        "description": "Where an optimizer stands after a round, whichever optimizer runs: the rounds since its\nselection last advanced, and the stalls it may still absorb out of its ceiling.",
+        "properties": {
+          "rounds_without_advance": {
+            "title": "Rounds Without Advance",
+            "type": "integer"
+          },
+          "stalls_left": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stalls Left"
+          },
+          "stalls_left_cap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stalls Left Cap"
+          }
+        },
+        "required": [
+          "rounds_without_advance",
+          "stalls_left",
+          "stalls_left_cap"
+        ],
+        "title": "RunStanding",
+        "type": "object"
+      },
       "RunsWithParam": {
         "additionalProperties": false,
         "description": "One setting a campaign's root course runs with, and the layer that chose it.",
@@ -4725,6 +6173,7 @@
               "backend",
               "dataset",
               "campaign",
+              "model_floor",
               "seed",
               "evolved",
               "identity",
@@ -4744,47 +6193,6 @@
           "source"
         ],
         "title": "RunsWithParam",
-        "type": "object"
-      },
-      "SampleSeries": {
-        "additionalProperties": false,
-        "properties": {
-          "mean_fitness": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Mean graded fitness over this series; `None` when it holds no measurement. The rate to read on a graded scorer, where `n_hits` is structurally 0.",
-            "title": "Mean Fitness"
-          },
-          "measurements": {
-            "items": {
-              "$ref": "#/components/schemas/MeasurementDot"
-            },
-            "title": "Measurements",
-            "type": "array"
-          },
-          "n_hits": {
-            "description": "How many of THIS series' measurements maxed out the active scorer (`domain.scoring.is_hit`, the one definition of that threshold). Served rather than counted client-side so the tally and the dots it summarises cannot disagree — and so a graded scorer, whose ceiling is unreachable, reports 0 against a mean that is not 0.",
-            "title": "N Hits",
-            "type": "integer"
-          },
-          "sample_id": {
-            "title": "Sample Id",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "sample_id",
-          "measurements",
-          "n_hits",
-          "mean_fitness"
-        ],
-        "title": "SampleSeries",
         "type": "object"
       },
       "ScenarioReading": {
@@ -4856,6 +6264,84 @@
           "note"
         ],
         "title": "ScenarioReading",
+        "type": "object"
+      },
+      "SelectionPair": {
+        "additionalProperties": false,
+        "description": "Two campaigns' selections paired on the bench rows both scored, in the headline composite.\n``shift = b - a``: ``BenchScore.lift``'s arithmetic with ``a`` where the origin stands.",
+        "properties": {
+          "campaign_a": {
+            "title": "Campaign A",
+            "type": "string"
+          },
+          "campaign_b": {
+            "title": "Campaign B",
+            "type": "string"
+          },
+          "ci_hi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Hi"
+          },
+          "ci_lo": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Lo"
+          },
+          "n_rows": {
+            "title": "N Rows",
+            "type": "integer"
+          },
+          "p_adjusted": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P Adjusted"
+          },
+          "p_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P Value"
+          },
+          "shift": {
+            "title": "Shift",
+            "type": "number"
+          }
+        },
+        "required": [
+          "campaign_a",
+          "campaign_b",
+          "shift",
+          "ci_lo",
+          "ci_hi",
+          "p_value",
+          "p_adjusted",
+          "n_rows"
+        ],
+        "title": "SelectionPair",
         "type": "object"
       },
       "SpawnedBy": {
@@ -4934,6 +6420,118 @@
         "title": "SpawnedBy",
         "type": "object"
       },
+      "SpendBucket": {
+        "additionalProperties": false,
+        "description": "One spend sub-bucket (backend, optimizer-loop, or judge). Mutated only by\n``SpendRollup.bank``. ``used_usd`` is the BILL; ``incurred_usd`` prices cache hits too.",
+        "properties": {
+          "cache_read_tokens": {
+            "default": 0,
+            "title": "Cache Read Tokens",
+            "type": "integer"
+          },
+          "cache_write_tokens": {
+            "default": 0,
+            "title": "Cache Write Tokens",
+            "type": "integer"
+          },
+          "incurred_unpriced_tokens": {
+            "default": 0,
+            "title": "Incurred Unpriced Tokens",
+            "type": "integer"
+          },
+          "incurred_usd": {
+            "default": 0.0,
+            "title": "Incurred Usd",
+            "type": "number"
+          },
+          "input_tokens": {
+            "default": 0,
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "output_tokens": {
+            "default": 0,
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "rate_known": {
+            "default": false,
+            "title": "Rate Known",
+            "type": "boolean"
+          },
+          "reasoning_tokens": {
+            "default": 0,
+            "title": "Reasoning Tokens",
+            "type": "integer"
+          },
+          "unpriced_tokens": {
+            "default": 0,
+            "title": "Unpriced Tokens",
+            "type": "integer"
+          },
+          "used_usd": {
+            "default": 0.0,
+            "title": "Used Usd",
+            "type": "number"
+          }
+        },
+        "title": "SpendBucket",
+        "type": "object"
+      },
+      "SpendRollup": {
+        "additionalProperties": false,
+        "description": "A cycle's spend: a bucket per spend kind, and the totals every consumer reads off them.\n``total_used_usd`` is the BILL a budget caps; ``total_incurred_usd`` prices cache hits too.",
+        "properties": {
+          "backend": {
+            "$ref": "#/components/schemas/SpendBucket"
+          },
+          "bench": {
+            "$ref": "#/components/schemas/SpendBucket"
+          },
+          "diagnostic": {
+            "$ref": "#/components/schemas/SpendBucket"
+          },
+          "judge": {
+            "$ref": "#/components/schemas/SpendBucket"
+          },
+          "loop": {
+            "$ref": "#/components/schemas/SpendBucket"
+          },
+          "total_incurred_usd": {
+            "default": 0.0,
+            "title": "Total Incurred Usd",
+            "type": "number"
+          },
+          "total_tokens_used": {
+            "default": 0,
+            "title": "Total Tokens Used",
+            "type": "integer"
+          },
+          "total_used_usd": {
+            "default": 0.0,
+            "title": "Total Used Usd",
+            "type": "number"
+          },
+          "unpriced_tokens": {
+            "default": 0,
+            "title": "Unpriced Tokens",
+            "type": "integer"
+          }
+        },
+        "title": "SpendRollup",
+        "type": "object"
+      },
       "SubjectMask": {
         "additionalProperties": false,
         "description": "The mask this channel is read under, echoed back. Served rather than left implicit in the\nkey, so a chart legend can say what a channel IS without re-splitting an address.",
@@ -4973,7 +6571,7 @@
       },
       "SubjectReading": {
         "additionalProperties": false,
-        "description": "One subject, read under the selected metric — its identity, its per-cell values and the one\nestimate they merge to. ONE row, because a roster row and a metric reading that live in separate\nlists can disagree about the same subject, and under the default metric they held the same\nnumber reached two ways.\n\n``values`` is keyed by the cell's QUERY, the identity that survives across campaigns; a cell the\nmetric cannot read is ABSENT from it and counted in ``n_unscorable`` rather than scored — the\ntwo absences are different facts and a surface renders them as different glyphs.\n``ci_lo``/``ci_hi`` are ``None`` below two scored cells — one reading has no spread, and a\nbracket drawn from it is a fiction.",
+        "description": "One subject, read under the selected metric — its identity, its per-cell values and the one\nestimate they merge to. ONE row, because a roster row and a metric reading that live in separate\nlists can disagree about the same subject, and under the default metric they held the same\nnumber reached two ways.\n\n``values`` is keyed by the cell's QUERY, the identity that survives across campaigns; a cell the\nmetric cannot read is ABSENT from it and named in ``unscorable_cells`` rather than scored — the\ntwo absences are different facts and a surface renders them as different glyphs.\n``ci_lo``/``ci_hi`` are ``None`` below two scored cells — one reading has no spread, and a\nbracket drawn from it is a fiction.",
         "properties": {
           "ability": {
             "anyOf": [
@@ -6012,28 +7610,6 @@
         ]
       }
     },
-    "/api/v1/campaigns/mechanisms-schema": {
-      "get": {
-        "description": "The mechanism-toggle descriptor — groups, labels, descriptions, defaults.\n\nRead-only and campaign-independent: the webapp zips this with a campaign's\nfrozen ``config`` to render the active toggle states.",
-        "operationId": "get_mechanisms_schema_api_v1_campaigns_mechanisms_schema_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MechanismSchemaResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Get Mechanisms Schema",
-        "tags": [
-          "Campaigns"
-        ]
-      }
-    },
     "/api/v1/campaigns/{campaign_id}": {
       "get": {
         "description": "Campaign manifest detail. 404 on cross-user reads.",
@@ -6570,7 +8146,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/tree": {
       "get": {
-        "description": "The lineage tree rooted at this cycle — the single served genealogy.\n\nNodes alternate ``course -> candidate -> (course | sample)`` forever, so an L4 inner\nrun is the same shape one level down rather than a special case, and L5+ needs no new\ntier. There is no ``depth`` parameter: one tree per campaign serves every consumer,\nand the recursion bound is ``lineage_queries._MAX_COURSE_DEPTH``.\n\nAn optional **lens** decorates the nodes with a counterfactual. ``lens=score:<formula>``\n= an alternative scoring formula (each candidate's ``lens_value``, plus a ``divergence``\nmarker where that criterion would have elected someone else); ``lens=abort:<variant>``,\nvariant ∈ ``_ABORT_SUPPRESS`` (one ``<gate>_off`` per ``EliminationGate``, plus\n``all_off``) = switch off a PoBB abort contributor. ``samples`` = a comma-separated sample-id list (the **sample-set mask**):\nre-score over only those samples. No lens + no samples ⇒ the tree is the raw read.\n\nA shell, deliberately: resolve the path, build the view, serve it. The assembly rules\nlive in ``store/lineage_queries.py``.",
+        "description": "The lineage tree rooted at this cycle — the single served genealogy.\n\nNodes alternate ``course -> candidate -> (course | sample)`` forever, so an L4 inner\nrun is the same shape one level down rather than a special case, and L5+ needs no new\ntier. There is no ``depth`` parameter: one tree per campaign serves every consumer,\nand the recursion bound is ``lineage_queries._MAX_COURSE_DEPTH``.\n\nAn optional **lens** decorates the nodes with a counterfactual. ``lens=score:<formula>``\n= an alternative ``per_cell`` composite, each candidate's rows re-graded under it and folded\n(its ``lens_value``, plus a ``divergence`` marker where that criterion would have elected\nsomeone else) — the number a fresh run under that formula reports; ``lens=abort:<variant>``,\nvariant ∈ the registered eliminators' abort lenses (one ``<gate>_off`` per gate, plus\n``all_off``) = switch off an elimination gate's abort contribution. ``samples`` = a comma-separated sample-id list (the **sample-set mask**):\nre-score over only those samples. No lens + no samples ⇒ the tree is the raw read.\n\nA shell, deliberately: resolve the path, build the view, serve it. The assembly rules\nlive in ``store/lineage_queries.py``.",
         "operationId": "get_lineage_tree_api_v1_campaigns__campaign_id__cycles__cycle_id__tree_get",
         "parameters": [
           {
@@ -7454,6 +9030,297 @@
         ]
       }
     },
+    "/api/v1/datasets/{name}/cells": {
+      "get": {
+        "description": "The measurement log. Under a filter, ``samples`` and ``candidates`` shrink to the ones\nholding a kept cell, so a preset (one candidate, one round) serves exactly its own rows.",
+        "operationId": "get_dataset_cells_api_v1_datasets__name__cells_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Samples per page.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Samples per page.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Cap on unmeasured samples kept in the ranking; None = no trim.",
+            "in": "query",
+            "name": "max_unmeasured",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 1000,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cap on unmeasured samples kept in the ranking; None = no trim.",
+              "title": "Max Unmeasured"
+            }
+          },
+          {
+            "description": "dataset=cross-campaign; campaign=pooled (needs campaign_id); cycle=one cycle (needs both ids).",
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "dataset",
+              "description": "dataset=cross-campaign; campaign=pooled (needs campaign_id); cycle=one cycle (needs both ids).",
+              "enum": [
+                "cycle",
+                "campaign",
+                "dataset"
+              ],
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Required when scope is campaign or cycle.",
+            "in": "query",
+            "name": "campaign_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Required when scope is campaign or cycle.",
+              "title": "Campaign Id"
+            }
+          },
+          {
+            "description": "Required when scope=cycle.",
+            "in": "query",
+            "name": "cycle_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Required when scope=cycle.",
+              "title": "Cycle Id"
+            }
+          },
+          {
+            "description": "L4 inner-cycle descent tail (`~`-joined `campaign::cycle` hops below the root, mirrors `?descend=` on the dashboard route). Present → read every scope from the inner `.inner/` sandbox; needs campaign_id + cycle_id (the root hop) to walk from.",
+            "in": "query",
+            "name": "descend",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "L4 inner-cycle descent tail (`~`-joined `campaign::cycle` hops below the root, mirrors `?descend=` on the dashboard route). Present → read every scope from the inner `.inner/` sandbox; needs campaign_id + cycle_id (the root hop) to walk from.",
+              "title": "Descend"
+            }
+          },
+          {
+            "description": "Override the ranking key for this read; unset ⇒ the dataset's `CampaignConfig.hard_sample_order`. The resolved value comes back on `order`.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "info_gain",
+                    "difficulty"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override the ranking key for this read; unset ⇒ the dataset's `CampaignConfig.hard_sample_order`. The resolved value comes back on `order`.",
+              "title": "Order"
+            }
+          },
+          {
+            "description": "Keep only this individual's cells (`CellCandidate.candidate_id`). A campaign's candidates carry one; dataset-scope runs do not, so there it keeps nothing.",
+            "in": "query",
+            "name": "candidate_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Keep only this individual's cells (`CellCandidate.candidate_id`). A campaign's candidates carry one; dataset-scope runs do not, so there it keeps nothing.",
+              "title": "Candidate Id"
+            }
+          },
+          {
+            "description": "Keep only this round's cells. Dataset-scope runs carry no round, so there it keeps nothing.",
+            "in": "query",
+            "name": "round",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Keep only this round's cells. Dataset-scope runs carry no round, so there it keeps nothing.",
+              "title": "Round"
+            }
+          },
+          {
+            "description": "Keep only cells with this mark.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "HIT",
+                    "MISS",
+                    "ERR",
+                    "UNSC"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Keep only cells with this mark.",
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CellsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Dataset Cells",
+        "tags": [
+          "Datasets"
+        ]
+      }
+    },
+    "/api/v1/datasets/{name}/cells/{run_id}/{sample_id}": {
+      "get": {
+        "description": "One cell opened — its row assembled into a trace (`application/scoring/cells.py`).",
+        "operationId": "get_dataset_cell_api_v1_datasets__name__cells__run_id___sample_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sample_id",
+            "required": true,
+            "schema": {
+              "title": "Sample Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Cell"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Dataset Cell",
+        "tags": [
+          "Datasets"
+        ]
+      }
+    },
     "/api/v1/datasets/{name}/draft": {
       "post": {
         "description": "Open an authored dataset's files as a durable check-in campaign.\n\nThe direct path behind \"open this dataset in the ingest panel\" — a demo /\nbenchmark / owned Origin becomes a prefilled check-in (``draft_id`` ==\n``campaign_id``) without a browser-side CSV round-trip. Identity-gated through\nthe same resolver as the other dataset reads; nothing runs until the operator\nstarts it via ``/commands/start-checkin``.",
@@ -7499,174 +9366,6 @@
         ]
       }
     },
-    "/api/v1/datasets/{name}/measurement-series": {
-      "get": {
-        "description": "Chronological per-sample series for the Meas heat-map column. Same page, same order as\n`/preview` — both resolve it through `_resolve_leaderboard_page`, so alignment is a shared\nfunction rather than two matching sort keys. `ord` is opaque (only row alignment).",
-        "operationId": "get_dataset_measurement_series_api_v1_datasets__name__measurement_series_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 1000,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Must match `/preview`'s value so the two responses align by index.",
-            "in": "query",
-            "name": "max_unmeasured",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 1000,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Must match `/preview`'s value so the two responses align by index.",
-              "title": "Max Unmeasured"
-            }
-          },
-          {
-            "description": "Same scopes as `/preview` (dataset/campaign/cycle).",
-            "in": "query",
-            "name": "scope",
-            "required": false,
-            "schema": {
-              "default": "dataset",
-              "description": "Same scopes as `/preview` (dataset/campaign/cycle).",
-              "enum": [
-                "cycle",
-                "campaign",
-                "dataset"
-              ],
-              "title": "Scope",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Required when scope is campaign or cycle.",
-            "in": "query",
-            "name": "campaign_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Required when scope is campaign or cycle.",
-              "title": "Campaign Id"
-            }
-          },
-          {
-            "description": "Required when scope=cycle; ignored otherwise.",
-            "in": "query",
-            "name": "cycle_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Required when scope=cycle; ignored otherwise.",
-              "title": "Cycle Id"
-            }
-          },
-          {
-            "description": "L4 inner-cycle descent tail — same seam as `/preview`'s `descend`.",
-            "in": "query",
-            "name": "descend",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "L4 inner-cycle descent tail — same seam as `/preview`'s `descend`.",
-              "title": "Descend"
-            }
-          },
-          {
-            "description": "Same override as `/preview`'s; send the same value to keep the two responses in one order.",
-            "in": "query",
-            "name": "order",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "info_gain",
-                    "difficulty"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Same override as `/preview`'s; send the same value to keep the two responses in one order.",
-              "title": "Order"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MeasurementSeriesResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Dataset Measurement Series",
-        "tags": [
-          "Datasets"
-        ]
-      }
-    },
     "/api/v1/datasets/{name}/pipeline": {
       "get": {
         "description": "Return the dataset overlay's parsed pipeline schema, graph view, and per-node\nconfig + output schema.\n\nIdentity-gated through the same resolver as the other dataset reads — there is\nno unauthenticated path to a benchmark's pipeline/overlay config.",
@@ -7705,174 +9404,6 @@
           }
         },
         "summary": "Get Dataset Pipeline",
-        "tags": [
-          "Datasets"
-        ]
-      }
-    },
-    "/api/v1/datasets/{name}/preview": {
-      "get": {
-        "description": "Hard-sample leaderboard, served in rank order — `items[i].hard_sample_rank == i + 1`.\n\nRows measured in this scope rank first by the `order` key, the rest trail by sample_id.\n*Measured* is dot presence in the companion `/measurement-series`, not a δ entry: the\nRasch ruler persists across rounds and inherits from parent fits, so it overcounts on its\nown. Both routes resolve the page through one function, so they cannot disagree.",
-        "operationId": "get_dataset_preview_api_v1_datasets__name__preview_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 1000,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Cap on unmeasured rows kept in Rasch-sorted output; None = no trim.",
-            "in": "query",
-            "name": "max_unmeasured",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 1000,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Cap on unmeasured rows kept in Rasch-sorted output; None = no trim.",
-              "title": "Max Unmeasured"
-            }
-          },
-          {
-            "description": "dataset=cross-campaign; campaign=pooled (needs campaign_id); cycle=one cycle (needs both ids).",
-            "in": "query",
-            "name": "scope",
-            "required": false,
-            "schema": {
-              "default": "dataset",
-              "description": "dataset=cross-campaign; campaign=pooled (needs campaign_id); cycle=one cycle (needs both ids).",
-              "enum": [
-                "cycle",
-                "campaign",
-                "dataset"
-              ],
-              "title": "Scope",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Required when scope is campaign or cycle.",
-            "in": "query",
-            "name": "campaign_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Required when scope is campaign or cycle.",
-              "title": "Campaign Id"
-            }
-          },
-          {
-            "description": "Required when scope=cycle; ignored otherwise.",
-            "in": "query",
-            "name": "cycle_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Required when scope=cycle; ignored otherwise.",
-              "title": "Cycle Id"
-            }
-          },
-          {
-            "description": "L4 inner-cycle descent tail (`~`-joined `campaign::cycle` hops below the root, mirrors `?descend=` on the dashboard route). Present → read every scope from the inner `.inner/` sandbox; needs campaign_id + cycle_id (the root hop) to walk from.",
-            "in": "query",
-            "name": "descend",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "L4 inner-cycle descent tail (`~`-joined `campaign::cycle` hops below the root, mirrors `?descend=` on the dashboard route). Present → read every scope from the inner `.inner/` sandbox; needs campaign_id + cycle_id (the root hop) to walk from.",
-              "title": "Descend"
-            }
-          },
-          {
-            "description": "Override the ranking key for this read; unset ⇒ the dataset's `CampaignConfig.hard_sample_order`. The resolved value comes back on `order`.",
-            "in": "query",
-            "name": "order",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "info_gain",
-                    "difficulty"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Override the ranking key for this read; unset ⇒ the dataset's `CampaignConfig.hard_sample_order`. The resolved value comes back on `order`.",
-              "title": "Order"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DatasetPreviewResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Dataset Preview",
         "tags": [
           "Datasets"
         ]
@@ -7932,7 +9463,7 @@
     },
     "/api/v1/evidence": {
       "get": {
-        "description": "Roster, comparability, replicates, the cell/subject/residual decomposition, what the\nselection can resolve, the run-order confound, and — under the selected metric — a merged\ninterval per subject with every pairwise test. Reduced fresh from disk on each fetch\n(on-demand, not the 2 s poll); zero LLM, nothing persisted.",
+        "description": "The campaign subjects' bench head-to-head, guarded by whether one bench set graded them;\nthen roster, comparability, replicates, the cell/subject/residual decomposition, what the\nselection can resolve, the run-order confound, and — under the selected metric — a merged\ninterval per subject with every pairwise test. Reduced fresh from disk on each fetch\n(on-demand, not the 2 s poll); zero LLM, nothing persisted.",
         "operationId": "get_evidence_api_v1_evidence_get",
         "parameters": [
           {
@@ -8100,8 +9631,22 @@
     },
     "/api/v1/optimizer-pipeline": {
       "get": {
-        "description": "Bundled ``promptpotter/assets/optimizer/pipeline.yaml`` + its generated\n``resolved_schemas.json`` sibling — the ``view`` topology plus the per-node typed config\nsurface, so the canvas node-detail renders the optimizer's own knobs (model / provider /\nreasoning_effort / temperature / …) through the same canonical config element the steer panel\nuses. Read-only: the install-global ``_optimizer`` pipeline is operator-owned — a hand-edit,\nnever a fork and never a write path from here (``evidence`` names a winner and writes\nnothing); model/provider are always optimizer-locked.",
+        "description": "One optimizer manifest (the ``pipeline.yaml`` its runtime ships) + its generated\n``resolved_schemas.json`` sibling — the ``view`` topology plus the per-node\ntyped config surface, so the canvas node-detail renders the optimizer's own knobs through the\nsame canonical config element the steer panel uses. Read-only: the manifest is operator-owned —\na hand-edit, never a fork and never a write path from here; a campaign's changes ride its own\n``optimization.nodes``. model/provider are always optimizer-locked.",
         "operationId": "get_optimizer_pipeline_api_v1_optimizer_pipeline_get",
+        "parameters": [
+          {
+            "description": "The registered optimizer whose manifest to read",
+            "in": "query",
+            "name": "optimizer",
+            "required": false,
+            "schema": {
+              "default": "potter",
+              "description": "The registered optimizer whose manifest to read",
+              "title": "Optimizer",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -8112,9 +9657,84 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Get Optimizer Pipeline",
+        "tags": [
+          "Optimizer"
+        ]
+      }
+    },
+    "/api/v1/optimizers": {
+      "get": {
+        "description": "The optimizers this install can run — one per registered runtime, each resolved through the\nmanifest a run would read — so a picker offers what ``optimization.optimizer`` accepts.",
+        "operationId": "get_optimizers_api_v1_optimizers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizerRoster"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Optimizers",
+        "tags": [
+          "Optimizer"
+        ]
+      }
+    },
+    "/api/v1/optimizers/{name}/knobs": {
+      "get": {
+        "description": "Every knob the manifest's nodes take — type, closed options, bounds, the value the manifest\ndeclares — so a settings surface draws one control per knob and writes a campaign's\n``optimization.nodes.{node}.config.{key}``. 404 when no such optimizer is registered.",
+        "operationId": "get_optimizer_knobs_api_v1_optimizers__name__knobs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizerKnobsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Optimizer Knobs",
         "tags": [
           "Optimizer"
         ]
@@ -8189,7 +9809,7 @@
     },
     "/api/v1/sessions/active": {
       "get": {
-        "description": "The caller-tenant's active-session pointer, null-valued while nothing runs.\n\n**\"No active session\" is a STEADY STATE, not a missing resource** — nothing has\nbeen launched yet, or the workspace was cleared — so it answers 200 with null ids\nexactly as :class:`CyclesResponse` does, and this route has no 404. The webapp\npolls it every 2 s from boot, and a 404 here is wrong twice over: it minted a\nwarning per tick for the whole idle life of the server, and 404 is the client's\n``gone`` classification, which means \"stop, this address is dead\". Pointers are\nper-tenant on disk; unauthed callers are rejected by ``resolve_identity`` before\n``StoresDep`` resolves.",
+        "description": "The caller-tenant's active-session pointer: its LATEST launch from any entry point, the\nterminal's default ``resume`` target and what an unpinned webapp follows. Several runs can be\nlive at once, and each is a ``/cycles`` entry whose ``run_phase`` says so — never this route.\n\n**\"No active session\" is a STEADY STATE, not a missing resource** — nothing has\nbeen launched yet, or the workspace was cleared — so it answers 200 with null ids\nexactly as :class:`CyclesResponse` does, and this route has no 404. The webapp\npolls it every 2 s from boot, and a 404 here is wrong twice over: it minted a\nwarning per tick for the whole idle life of the server, and 404 is the client's\n``gone`` classification, which means \"stop, this address is dead\". Pointers are\nper-tenant on disk; unauthed callers are rejected by ``resolve_identity`` before\n``StoresDep`` resolves.",
         "operationId": "get_active_session_api_v1_sessions_active_get",
         "responses": {
           "200": {

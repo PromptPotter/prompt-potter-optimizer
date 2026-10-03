@@ -4,14 +4,13 @@ import functools
 import importlib
 import pkgutil
 import typing
-from importlib.metadata import entry_points
-from types import MappingProxyType
 
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.connector import ConnectorExecution
+from promptpotter.shared.plugin_registry import BUILT_IN, load_registry, lookup
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterator, Mapping
 
 __all__ = [
     "DEFAULT_CONNECTOR",
@@ -55,57 +54,30 @@ def _validate(c: object, origin: str) -> Connector:
     # none, so a token declared on it is dead config that reads as protection.
     if c.execution == "in_process" and c.auth_token is not None:
         raise RuntimeError(f"{where}: execution='in_process' has no wire — drop auth_token.")
+    # A cell that holds THIS machine runs on it, and a remote one runs on its backend's.
+    if c.cells_hold_the_machine and c.execution != "in_process":
+        raise RuntimeError(f"{where}: cells_hold_the_machine needs execution='in_process'.")
+    # A remote backend answers `GET /pipeline` itself, so a second declaration would never be read.
+    if c.pipeline_declaration is not None and c.execution != "in_process":
+        raise RuntimeError(f"{where}: pipeline_declaration needs execution='in_process'.")
     return c
 
 
-def _add(
-    registry: dict[str, Connector], origins: dict[str, str], c: Connector, origin: str, label: str
-) -> None:
-    if c.name in registry:
-        raise RuntimeError(
-            f"connector {c.name!r} declared twice: [{origins[c.name]}] and [{origin}]."
-        )
-    registry[c.name] = c
-    origins[c.name] = label
+def _builtins() -> Iterator[tuple[str, object]]:
+    for m in pkgutil.iter_modules(__path__):
+        if m.name != "protocol":
+            module = importlib.import_module(f"{__name__}.{m.name}")
+            yield module.__name__, getattr(module, "CONNECTOR", None)
 
 
 @functools.cache
 def _load() -> tuple[Mapping[str, Connector], Mapping[str, str]]:
-    """Every module in this package but ``protocol`` is a built-in, then the plugins — each
-    through :func:`_validate`, once per process."""
-    registry: dict[str, Connector] = {}
-    origins: dict[str, str] = {}
-    for m in pkgutil.iter_modules(__path__):
-        if m.name != "protocol":
-            module = importlib.import_module(f"{__name__}.{m.name}")
-            origin = f"built-in: {module.__name__}"
-            builtin = _validate(getattr(module, "CONNECTOR", None), origin)
-            _add(registry, origins, builtin, origin, "built-in")
-    if DEFAULT_CONNECTOR not in registry:
+    """Every module in this package but ``protocol`` is a built-in, then the plugins — once per
+    process."""
+    loaded = load_registry(ENTRY_POINT_GROUP, _builtins(), _validate)
+    if loaded[1].get(DEFAULT_CONNECTOR) != BUILT_IN:
         raise RuntimeError(f"DEFAULT_CONNECTOR {DEFAULT_CONNECTOR!r} is not a built-in connector.")
-    builtins = frozenset(registry)
-
-    for ep in entry_points(group=ENTRY_POINT_GROUP):
-        dist = getattr(getattr(ep, "dist", None), "name", None) or "unknown distribution"
-        origin = f"{dist}: {ep.value}"
-        try:
-            obj = ep.load()
-        except Exception as exc:
-            raise RuntimeError(
-                f"connector entry point {ep.name!r} [{origin}] failed to import: {exc!r}. "
-                f"Uninstall or fix that package. PromptPotter does not start with a "
-                f"connector it cannot load, because a skipped one comes back later as an "
-                f"unexplained 'not registered'."
-            ) from exc
-        plugin = _validate(obj, origin)
-        if plugin.name in builtins:
-            raise RuntimeError(
-                f"connector entry point {ep.name!r} [{origin}] declares {plugin.name!r}, which "
-                f"ships with PromptPotter. A plugin may not replace a built-in: "
-                f"get({plugin.name!r}) is read by name inside the loop. Rename it."
-            )
-        _add(registry, origins, plugin, origin, origin)
-    return MappingProxyType(registry), MappingProxyType(origins)
+    return loaded
 
 
 def registered() -> Mapping[str, Connector]:
@@ -119,8 +91,4 @@ def connector_origins() -> Mapping[str, str]:
 
 
 def get(name: str) -> Connector:
-    table = registered()
-    if name not in table:
-        known = ", ".join(f"{k} [{connector_origins()[k]}]" for k in sorted(table)) or "(none)"
-        raise KeyError(f"connector {name!r} not registered. Known: {known}")
-    return table[name]
+    return lookup(ENTRY_POINT_GROUP, _load(), name)

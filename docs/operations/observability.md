@@ -4,7 +4,7 @@ Every optimizer LLM call, backend match, and escalation check emits a structured
 
 ## What's traced, and where
 
-Phase events (`init`, `l1_generate`, `l1_score`, `refine_strategy`, `modify_plan`, `escalation`) emit `enter`/`exit` pairs into the per-cycle ledger; the `escalation` phase emits `rule_fired` whenever a post-round rule matches. `langfuse/events.jsonl` is a pure mirror — nothing reads it for state reconstruction.
+Phase events (the bench's `CampaignPhase` in `domain/phases.py` — `init`, `origin`, `propose`, `measure`, `select`, `adapt` — and each optimizer's own, declared as `OptimizerRuntime.phases`, potter's being `refine_strategy` and `modify_plan`) emit `enter`/`exit` pairs into the per-cycle ledger. `langfuse/events.jsonl` is a pure mirror — nothing reads it for state reconstruction.
 
 | Source | Event | Payload |
 |--------|-------|---------|
@@ -13,28 +13,29 @@ Phase events (`init`, `l1_generate`, `l1_score`, `refine_strategy`, `modify_plan
 | L2 Refine | LLM call | refinement optimizer prompt (incl. the L1 field catalogue), parsed transition |
 | L3 Plan | LLM call | plan template (axes_digest + L2 history + pipeline + runtime failures), new plan |
 | Backend match | Span | query, params, result, `diagnostics.warnings` |
-| Escalation rule firing | `escalation/rule_fired` | `{layer, rule_name, rule_priority, next_action, reason, signal_inputs}` |
 | Stale-data protocol | Event | ladder step taken, resolution |
 
 ## The wall clock, and where the claim stops
 
-`index.json::final.wall_clock` is the cycle's own clock, folded from the ledger at finalize (`ledger_scan.py::scan_ledger_wall_clock`) and rendered by `review.md` § Wall clock. It is banked rather than derived on read because no round document carries a timestamp and the records it is folded from are compactable. **A resumed cycle's clock is its LAST launch's** — a round an earlier launch closed carries no seconds rather than a wrong number, so a result quoting a clock quotes an unbroken run.
+`index.json::final.wall_clock` is the cycle's own clock, folded from the ledger at finalize (`ledger_scan.py::scan_ledger_wall_clock`) and rendered by `review.md` § Wall clock. It is banked rather than derived on read because no round document carries a timestamp and the records it is folded from are compactable. **A resumed cycle's clock is its LAST launch's** — a round an earlier launch closed carries no seconds rather than a wrong number, so a result quoting a clock quotes an unbroken run. **A campaign's clock is its result's** (`campaigns/{id}/result.json::cost.launches`): one clock per launch, folded across every cycle that launch ran on the campaign's line, and `ArmCost.worked_s` sums them less each launch's origin gate and unworked time — the number a head-to-head prices a lift in.
 
-**Two denominators, and they are not interchangeable.** `phase_s` is CLOCK, keyed by `CampaignPhase`: the brackets do not nest, so the legs sum and each is a real share of `elapsed_s`. `worked_s` is summed CALL time per spend bucket, off `TokenUsageRecord.duration_s`: concurrent cells overshoot the clock and replayed calls are excluded, so it says what the search *worked*, never what share of the run a bucket held. Quote `phase_s` for a share; quote `worked_s` for a cost.
+**Two denominators, and they are not interchangeable.** `phase_s` is CLOCK, keyed by phase: the brackets do not nest, so the legs sum and each is a real share of `elapsed_s`. `worked_s` is summed CALL time per spend bucket and billing node, off `TokenUsageRecord.duration_s`: concurrent cells overshoot the clock and replayed calls are excluded, so it says what the search *worked*, never what share of the run a node held. Quote `phase_s` for a share; quote `worked_s` for a cost.
+
+**Every fresh call is a span on the clock, so no call needs a bracket to be counted.** A bill is stamped when it lands, so a call spans `[timestamp − duration_s, timestamp]`, and `unbracketed_call_s` is the CLOCK those spans held outside every phase bracket and gate, keyed like `worked_s`. It is decided by interval arithmetic and never by node name, so a node that runs between brackets — the round's critique, a non-escalating L2 — is attributed without joining the phase vocabulary, and a call inside its own bracket is not counted twice. `unattributed_s` is what no bracket, gate or fresh call held.
 
 **What we can publish is `ledger open → first improvement`, fully decomposed. What we cannot publish is `clean machine → first improvement`.** Installing the package, pulling an image, materializing a benchmark's rows and `init_services` all run before the ledger's first record, are observed by nothing, and are unrecoverable after the fact — so `elapsed_s` starts at the ledger, and the `init` leg beside it is preflight plus cycle construction, which reads under two seconds. Anyone quoting that leg as a setup measurement is out by orders of magnitude. `ORIGIN` also fires before `INIT` on every ledger, so the legs are not in reading order.
 
 `gate_s` is the one HUMAN leg — time held at the origin gate — and is never folded into a machine one. `unworked_s` is the opposite correction: seconds cells were not *allowed* to spend (machine suspend, or queued behind the shared limiter), summed off each cell's own envelope, and `None` where no cell ran under one. A headline counting a suspended box as work is not publishable, which is why absent and zero stay apart.
 
-## Per-sample P(best) stream
+## Per-sample race stream
 
-PoBB emits a per-sample Posterior-of-Being-Best snapshot for every candidate, on four channels:
+An optimizer's eliminator emits a per-sample standing for every candidate as a `race_standing` snapshot naming its manifest `member` — potter's PoBB (`pobb`) as a Posterior-of-Being-Best — on four channels:
 
 | Channel | Path | Format |
 |---|---|---|
-| Live dashboard | `dashboard.json::current_round.pobb` — `{current_id, n_samples, leader_prob, posterior_width, top}` | scalar floats + a top-5 list |
-| CLI / notebook | stderr | `p_best q14: *c042* 44.0%▲ c017 28.4%▼ …` |
-| Append-only stream | `cycles/{cycle_id}/.runtime/streams/round_NNNN_p_best.jsonl` | `{round, sample_idx, current_id, n_samples, p_best, p_best_delta}` |
+| Live dashboard | `dashboard.json::current_round.racing` — `{member, current_id, n_samples, leader_prob, posterior_width, top}`, null before a reading | scalar floats + a top-5 list |
+| CLI / notebook | stdout, mirrored to `cycles/{cycle_id}/readout.log` | `pobb P(best) @ q14: *c042* 44.0%▲ \| c017 28.4%▼ \| …`; a block race prints what each close decided instead — `block 1/4: 6 raced · outscored C1.3 (by 4) · 5 survive` |
+| Append-only stream | `cycles/{cycle_id}/.runtime/streams/round_NNNN_{member}.jsonl` | `{round, sample_idx, current_id, n_samples, p_best, p_best_delta}` |
 | Round digest | `log.md` § P(best) trajectory | per-candidate sparkline + final % |
 
 The JSONL stream is canonical replay; the dashboard fields and the sparkline are derived views.
@@ -46,6 +47,8 @@ Set `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` in `.env`, t
 ## MLflow sink
 
 `MLFLOW_ENABLED=true` (default false) logs each round as an MLflow run under `traces/mlruns/`, experiment `{tenant_id}/{cycle_id}`. Installs from `.[observability]` alongside the file + Langfuse sinks, as **`mlflow-skinny`** — the sink calls tracking APIs only, and full `mlflow` caps `cryptography<50`. MLflow 3.15 put that local file tree in maintenance mode, so the sink sets `MLFLOW_ALLOW_FILE_STORE=true`; without it the first round raises, and the migration MLflow points at (`sqlite:///`) needs SQLAlchemy, which skinny omits.
+
+**Both sinks sit downstream of two competing span conventions, and one must be chosen as primary before a third sink is added** ([`../research/external-constraints.md`](../research/external-constraints.md) § TOOL): OpenTelemetry GenAI, whose `gen_ai.*` attributes are all still *Development* (v1.42.0), so a version is pinned rather than head tracked; and Arize's OpenInference, which requires `openinference.span.kind` on every span.
 
 ## Display convention — `⚠ … ↳`
 
@@ -60,30 +63,32 @@ Line 1 names the observation, line 2 the repair or consequence. A finding withou
 
 ```
 ⚠ llm_only.model = 'gpt-4o' ∉ [openai/gpt-oss-20b]
-  ↳ scored 0; L2 brief will name this value
+  ↳ scored 0 (no backend call); the next l1_generate reads it in l1_wounds
 ```
 
-The structured finding is written to the round audit file (`AuditTrailProjection`) and read back via `useRoundFile` when an operator drills in.
+The structured finding is written to the round audit file (`AuditTrailProjection`) and read back via `useRoundAudit` when an operator drills in.
 
 **Per-sample annotation order** — one `⚠ {step}: {message}` per diagnostic warning (always), then exactly one status annotation from this exclusive set:
 
 - `🔄 cache had pipeline warnings → reran`
-- `🔬 cache had warnings + rerun still degraded → re-measured fresh on pipeline defaults; result accepted`
 - `🔀 query degrades ≥50% historically → using cached answer`
 - `⚠ cached failure was token-budget exhaustion + rerun max_tokens ≤ cached output → skipped LLM rerun; marked fatal`
 - `⚠ stale-data ladder exhausted → still degraded`
 - `↩ pipeline warning observed; X/Y toward rerun trigger` — only when no fatal warning fired
 
-Suppressing `↩` under a fatal warning is load-bearing: a fatal warning means the candidate is dead, so "1/3 toward rerun" would falsely promise more data. (The ladder's rescue step is *samplescan rescue*, never "probe".)
+Suppressing `↩` under a fatal warning is load-bearing: a fatal warning means the candidate is dead, so "1/3 toward rerun" would falsely promise more data.
 
 ## Reading what L2 wrote
 
 In `cycles/{cycle_id}/rounds/round_NNNN.json`:
 
-- `opt_search_point.l1_layout` — per-slot signal-name layout L2 stamped. **The** thing to read: it and `l1_overrides` are the only two surfaces L2 can move, so a fire that changed neither bought nothing (`review.md`'s `l2_targets_l1_surface`).
-- `opt_search_point.l1_overrides` — L1 runtime knobs (creativity, n_variants).
+- `optimizer_state.payload.memory.l1_layout` — per-slot signal-name layout L2 stamped. **The** thing to read: it and `l1_overrides` are the only two surfaces L2 can move, so a fire that changed neither bought nothing (`review.md`'s `l2_targets_l1_surface`).
+- `optimizer_state.payload.memory.l1_overrides` — L1 runtime knobs (creativity, n_variants).
+
+In its audit twin `cycles/{cycle_id}/.runtime/cache/rounds/round_NNNN.json` — the round document carries no `nodes`:
+
 - `nodes.l2_context.input.prompt` / `.output` — rendered L2 prompt (incl. the field catalogue) / raw JSON.
 
-`opt_search_point.task_context` is operator-authored framing that L2 reads and cannot write — a change there came from the operator, not the loop. There is no `probe_round_commitment` decision: probe rounds are not wired.
+The campaign's `task_context` (`Cycle.framing`, from the dataset's `task_context.yaml`) is operator-authored framing that L2 reads and cannot write — a change there came from the operator, not the loop. There is no `probe_round_commitment` decision: probe rounds are not wired.
 
 Deep dive: [`../developer/dispatch-hub.md`](../developer/dispatch-hub.md).

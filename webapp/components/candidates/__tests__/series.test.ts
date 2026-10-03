@@ -3,14 +3,12 @@ import {
   CANDIDATE_SERIES,
   activeSeries,
   seriesColumn,
-  whiskerAnchor,
+  whiskerBands,
   type SeriesCtx,
 } from "../series";
 import type { CandidateView } from "@/lib/types";
 
-// The registry is a table, so these are table facts — and every one of them is silent when
-// broken: a fabricated θ renders as a plausible bar, an absent whisker renders as no whisker,
-// and a token that does not exist renders as `transparent`.
+// Every one of these fails silently on screen: a plausible bar, no whisker, a `transparent` ink.
 
 function view(over: Partial<CandidateView>): CandidateView {
   return {
@@ -26,11 +24,10 @@ function view(over: Partial<CandidateView>): CandidateView {
   thetaCaveat: null,
     meanFitnessCiLo: null,
     meanFitnessCiHi: null,
-    matchedParentLift: null,
-    matchedParentLiftCiLo: null,
-    matchedParentLiftCiHi: null,
-    evaluators: {},
-    is_winner: false,
+    referenceLift: null,
+    referenceLiftCiLo: null,
+    referenceLiftCiHi: null,
+    is_selected: false,
     n_samples: null,
     n_expected: null,
     cached_samples: null,
@@ -60,8 +57,6 @@ const ctx = (over: Partial<SeriesCtx> = {}): SeriesCtx => ({
 const spec = (key: string) => CANDIDATE_SERIES.find((s) => s.key === key)!;
 
 describe("a missing value renders as a gap or a floor, never as a measurement", () => {
-  // A candidate that has STARTED but has no number yet gets a stub, so "still computing"
-  // reads differently from "not yet started".
   it("floors accuracy, composite and the mask once scoring has begun", () => {
     const started = [view({ started: true })];
     for (const key of ["accuracy", "composite", "mask"]) {
@@ -70,9 +65,6 @@ describe("a missing value renders as a gap or a floor, never as a measurement", 
     }
   });
 
-  // θ is a LOGIT: 0 is a real, middling ability, so a floored θ is a fabricated
-  // measurement rather than an empty slot. Same for the two sparse evidence channels — a
-  // floored 0 there claims a candidate scored nothing rather than that it was never read.
   it("never floors θ, overlap or verify — not even on a started bar", () => {
     const started = [view({ started: true })];
     for (const key of ["ability", "overlap", "verify"]) {
@@ -84,9 +76,7 @@ describe("a missing value renders as a gap or a floor, never as a measurement", 
     const v = view({ accuracy: 0.7, theta: -1.5, overlapAccuracy: 0.5, cached_samples: 3, n_samples: 6 });
     expect(seriesColumn(spec("ability"), [v])).toEqual([-1.5]);
     expect(seriesColumn(spec("overlap"), [v])).toEqual([0.5]);
-    // Provenance is a share of a served pair, and it is the only computed number here.
     expect(seriesColumn(spec("cached"), [v])).toEqual([0.5]);
-    // A zero denominator is a gap, not a division.
     expect(seriesColumn(spec("cached"), [view({ cached_samples: 0, n_samples: 0 })])).toEqual([null]);
   });
 });
@@ -120,9 +110,7 @@ describe("what is on screen", () => {
   it("shows the overlap bars at BOTH on-rungs, and only when a reading exists", () => {
     const withReading = [view({ overlapAccuracy: 0.5 })];
     const on = (c: Partial<SeriesCtx>) => activeSeries(ctx(c)).map((s) => s.key);
-    // `showOverlap` is `rung > 0`, so this is on for both the served set and a picked one —
-    // the press that opens the picker used to DELETE this series, which is what made the
-    // picker's own overlap button turn the overlap bars off.
+    // `showOverlap` is `rung > 0`: on for both the served set and a picked one.
     expect(on({ showOverlap: true, views: withReading })).toContain("overlap");
     // On, but nothing has been read on the whole set yet.
     expect(on({ showOverlap: true, views: [view({})] })).not.toContain("overlap");
@@ -132,13 +120,17 @@ describe("what is on screen", () => {
 });
 
 describe("the confidence band", () => {
-  // The band is a [0,1] mean interval, so it cannot be drawn against θ's logit axis — and
-  // when nothing on the percent axis is showing there is no bar to hang it from.
-  it("anchors on a percent-axis bar, and reports NOTHING rather than guessing", () => {
-    expect(whiskerAnchor(ctx({ electedMetric: "ability" }))).toBe("accuracy");
-    expect(whiskerAnchor(ctx({ electedMetric: "composite", metrics: new Set(["composite"]) })))
-      .toBe("composite");
-    // θ alone on screen: no percent bar exists, so the band must not be drawn.
-    expect(whiskerAnchor(ctx({ metrics: new Set(["ability"]) }))).toBeNull();
+  it("draws the served band only on the bar that produced it", () => {
+    const anchors = (c: Partial<SeriesCtx>) => whiskerBands(ctx(c)).map((b) => b.anchor);
+    expect(anchors({ electedMetric: "ability" })).toEqual(["accuracy", "ability"]);
+    // `mean_fitness_ci` is accuracy's: under a composite headline it stays on the accuracy bar,
+    // and with no accuracy bar on screen the composite bar gets no borrowed whisker.
+    const both: Partial<SeriesCtx> = {
+      electedMetric: "composite",
+      metrics: new Set(["accuracy", "composite"]),
+    };
+    expect(anchors(both)).toEqual(["accuracy"]);
+    expect(anchors({ electedMetric: "composite", metrics: new Set(["composite"]) })).toEqual([]);
+    expect(anchors({ metrics: new Set(["ability"]) })).toEqual(["ability"]);
   });
 });

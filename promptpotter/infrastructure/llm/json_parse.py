@@ -53,7 +53,7 @@ class OptimizerPromptParseError(RuntimeError):
         self.attempts = attempts
         self.model = model
         self.finish_reason = finish_reason
-        # The BILLED account, summed across both round-trips, and `dispatch/llm_call/call.py`
+        # The BILLED account, summed across both round-trips, and `bench/llm_call.py`
         # meters the burned spend off it. Narrowing it to one attempt to make a log read nicer
         # under-reports every repaired call by a full round-trip.
         self.usage = usage or TokenAccount()

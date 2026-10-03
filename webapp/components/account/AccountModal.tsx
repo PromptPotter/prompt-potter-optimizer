@@ -1,11 +1,6 @@
 "use client";
-// The account modal — a grouped nav over six panes: who you are (Profile), what the account may
-// spend and run (Usage & limits, Activity), how it behaves (Preferences), the workspace's disk
-// (Storage) and the unit itself (About).
-//
-// Update profile, remove account and connect account are INTENTIONAL placeholders, previewing the
-// config-edit surface — not scaffolding, and out of scope for any "hide non-functional controls"
-// sweep. Peers: `chat/ChatPane.tsx`, `shell/Sidebar.tsx`.
+// The account modal. Update profile, remove account and connect account are INTENTIONAL
+// placeholders — out of scope for any "hide non-functional controls" sweep.
 
 import { useEffect, useRef } from "react";
 import { AboutUnit } from "./AboutUnit";
@@ -27,9 +22,6 @@ interface Props {
   onClose: () => void;
 }
 
-// The pane set is `lib/view-tab.ts::AccountPane` — it is on the address
-// (`#/account/activity`), so the closed set cannot live inside the component that
-// renders it. The titles and the grouping stay here; they are presentation.
 const TAB_TITLES: Record<AccountPane, string> = {
   profile: "Profile",
   usage: "Usage & limits",
@@ -46,16 +38,13 @@ const NAV_GROUPS: readonly { label: string; panes: readonly AccountPane[] }[] = 
 ];
 
 export function AccountModal({ open, onClose }: Props) {
-  // Which pane, from the address. Nav clicks write it back, so a pane is linkable and
-  // survives a reload — the same rule the main view axis follows.
   const { accountPane, openAccount } = useWorkspace();
   const tab: AccountPane = accountPane ?? DEFAULT_ACCOUNT_PANE;
-  // Parked while closed, so every open is a new read and a prior session's profile never flashes in.
+  // Parked while closed, so a prior session's profile never flashes in.
   const profile = useRead(open ? { key: "me", fetch: fetchMe } : null, { surface: "profile" });
   const me = readyData(profile);
   const cardRef = useRef<HTMLDivElement>(null);
-  // Runs after Dialog's own first-focusable focus: land on the pane the address opened, or a
-  // ring on "Profile" reads as the selection while another pane is showing.
+  // Runs after Dialog's own first-focusable focus, which would ring "Profile" whatever pane shows.
   useEffect(() => {
     if (open) cardRef.current?.querySelector<HTMLElement>('[aria-current="page"]')?.focus();
   }, [open]);

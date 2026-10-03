@@ -76,8 +76,9 @@ def main() -> int:
         f"benchmarks resolved outside the installed package: {bench}"
     )
 
-    manifest_path = paths.optimizer_pipeline_path()
+    manifest_path = paths.optimizer_manifest_path("potter", paths.optimizers_root() / "potter")
     assert manifest_path.is_file(), f"optimizer manifest absent from the wheel: {manifest_path}"
+    assert paths.checkin_manifest_path().is_file(), "check-in manifest absent from the wheel"
 
     # 3. User data lands in $PROMPTPOTTER_HOME — never in site-packages (pip deletes that
     #    on upgrade) and never in the CWD (which scatters it per directory).
@@ -95,14 +96,12 @@ def main() -> int:
 
     # 4. The consumers, not just the paths. Each of these is a real read of a shipped
     #    asset, and each was previously exercised only in the checkout shape.
-    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-        optimizer_manifest,
-        optimizer_resolved_schemas,
-    )
+    from promptpotter.application.optimizer_manifest import checkin_manifest, resolve_optimizer
 
-    nodes = optimizer_manifest().get("nodes") or {}
-    assert "l1_generate" in nodes, f"optimizer manifest has no l1_generate: {sorted(nodes)}"
-    assert optimizer_resolved_schemas(), "generated schema registry is empty"
+    potter = resolve_optimizer("potter", {})
+    assert potter.llm_nodes, "the potter manifest declares no llm node"
+    assert potter.resolved_schemas, "the potter schema registry is empty"
+    assert checkin_manifest().schema.get_node("checkin"), "the check-in manifest has no checkin"
 
     from promptpotter.infrastructure.store.stores import build_stores
     from promptpotter.shared.identity import default_identity

@@ -9,27 +9,11 @@ import { fmtUsd } from "@/lib/format";
 
 ensureChartRegistered();
 
-// What each round COST, on the same x-axis as the trend beside it.
-//
-// Its own strip rather than a channel on the candidates bar chart, and that is the whole design
-// decision: dollars and fitness are different units, and the candidates chart is already carrying
-// up to seven series, two whisker bands, a crown-with-lift caption, partial-panel counts, a
-// divergence divider and an animated in-flight pulse — `barCaps` owns both text rows above every
-// bar and there is no annotation slot left. A cost bar seated beside a fitness bar also invites
-// reading them as comparable, which they are not.
-//
-// STACKED BY BUCKET, never pooled: the three run different prompts against different providers
-// (`derivations/spend.ts` records the measured case), so "where did round 3's money go" is a
-// three-part answer or it is not an answer.
-//
-// The prefix-cache reading rides the TOOLTIP rather than a lighter portion of each bar. A drawn
-// "discounted portion" would need dollars-SAVED, and nothing serves that: `used_usd` is the bill
-// with the discount already applied, and turning a token-share into a dollar-share here would be
-// exactly the client-side arithmetic `webapp/CLAUDE.md` § Scoring authority forbids.
+// What each round COST, on the trend's x-axis — its own strip, since dollars and fitness are
+// different units. Stacked by bucket, never pooled; prefix-cache rides the tooltip (no dollars-saved is served).
 export const CostStrip = memo(function CostStrip() {
   const { dash } = useDashboard();
-  // Subscribe to the theme so a flip re-runs this and pulls fresh canvas inks; a `<canvas>` has
-  // no cascade to read a `var()` off.
+  // Subscribe to the theme so a flip pulls fresh inks: a `<canvas>` has no cascade.
   useThemeVersion();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const rounds = useMemo(() => roundCosts(dash), [dash?.spend_by_round]);
@@ -47,10 +31,7 @@ export const CostStrip = memo(function CostStrip() {
       legend: { display: true, labels: { boxWidth: 10, font: { size: 10 } } },
       tooltip: {
         callbacks: {
-          // The prefix reading per bucket, on the round the operator is pointing at — which is the
-          // question the cost raises. `c0%` and `c?` are printed, not suppressed: a cold prefix is
-          // a measurement and an unreporting provider is a third thing, and collapsing them is
-          // what let a bucket sit at 0% capture looking exactly like a warm one.
+          // `c0%` and `c?` both print: a cold prefix is a measurement, an unreporting provider is not.
           afterBody: (items: { dataIndex: number }[]) => {
             const r = rounds[items[0]?.dataIndex ?? -1];
             if (!r) return "";

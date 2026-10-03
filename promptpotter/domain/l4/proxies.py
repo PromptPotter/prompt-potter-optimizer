@@ -5,8 +5,9 @@ from typing import Any
 
 from pydantic import ConfigDict, Field
 
+from promptpotter.domain.optimizer_state import PARSE_FAILURE_TOOLING
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
-from promptpotter.domain.results import L1_PARSE_FAILURE_TOOLING, CycleResult, RoundResult
+from promptpotter.domain.results import ArmOutcome, CycleResult, RoundResult
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import CellUnscoreableError
 from promptpotter.shared.statistics import sample_sd
@@ -85,7 +86,7 @@ def inner_cell_facts(result: CycleResult, campaign_id: str) -> InnerCellFacts | 
 
     Time the cell was not ALLOWED to spend belongs to no backend in particular and is banked for
     all of them at the scoring seam — ``domain/scoring.py::LedgerPipelineData.unworked_s``."""
-    levels = result.round_parent_levels
+    levels = result.round_levels
     if result.origin_level is None or not levels:
         return None
     origin = result.origin_level
@@ -93,7 +94,7 @@ def inner_cell_facts(result: CycleResult, campaign_id: str) -> InnerCellFacts | 
         inner_origin_level=origin,
         inner_final_lift=levels[-1] - origin,
         inner_peak_lift=max(levels) - origin,
-        inner_rounds_ran=result.n_l1_rounds,
+        inner_rounds_ran=result.n_rounds_after_origin,
         inner_round_budget=len(parent_level_series(result)),
         inner_stop_reason=str(result.stop_reason),
         inner_spend_usd=result.spend.total_used_usd if result.spend else None,
@@ -107,7 +108,7 @@ def parent_level_series(result: CycleResult) -> list[float]:
 
     That denominator is ONE for every cell on a panel: dividing by the series length instead makes
     it a per-cell quantity, and the panel then compares two estimands rather than one."""
-    levels = result.round_parent_levels
+    levels = result.round_levels
     if not levels:
         return []
     n = max(result.round_budget, len(levels))
@@ -117,7 +118,7 @@ def parent_level_series(result: CycleResult) -> list[float]:
 def mean_parent_level_se(result: CycleResult) -> float | None:
     """This arm's OWN half of a paired cell difference: two of these in quadrature give the
     difference's error. A PRECISION, never a penalty — no ``mean - λ·se``, never a rank key."""
-    ses = result.round_parent_level_ses
+    ses = result.round_level_ses
     if not ses:
         return None
     # `origin_level` is deliberately absent: every arm on a cell replays the same round-0 rows,
@@ -131,9 +132,16 @@ def mean_parent_level_se(result: CycleResult) -> float | None:
 
 
 def _is_evidential(rnd: RoundResult) -> bool:
-    """``L1_PARSE_FAILURE_TOOLING`` means the round lost its candidates to an empty optimizer
-    response — missing data, not a bad mutation. Scoring it dirty grades provider flakiness."""
-    return rnd.l1_parse_failure != L1_PARSE_FAILURE_TOOLING
+    """A round that lost its candidates to an empty optimizer response is missing data, not a bad
+    mutation. Scoring it dirty grades provider flakiness. Read off the arms, whatever optimizer
+    proposed them; only a round that proposed none asks its optimizer why."""
+    if not rnd.candidate_scores:
+        return not rnd.optimizer_state.payload.lost_to_empty_response()
+    return not all(
+        cs.outcome is ArmOutcome.INVALID
+        and any(vf.reason == PARSE_FAILURE_TOOLING for vf in cs.validation_failures)
+        for cs in rnd.candidate_scores
+    )
 
 
 def no_evidence_reason(result: CycleResult) -> str | None:
@@ -149,7 +157,7 @@ def no_evidence_reason(result: CycleResult) -> str | None:
         return f"it ran no L1 rounds (stop_reason={result.stop_reason})"
     if result.origin_level is None:
         return "its origin was never scored, so there is no floor to difference its rounds against"
-    if not result.round_parent_levels:
+    if not result.round_levels:
         return "it held no parent levels to difference against its origin"
     return None
 
@@ -204,7 +212,7 @@ class PanelPrecision(StrictModel):
     # THE SEED-PANEL LAYER, and the one thing L4 legitimately measures that the shared engine
     # cannot: an ordinary sample is graded so it carries no error bar, while an outer cell is a
     # whole inner campaign whose level was ESTIMATED. Everything else the outer level reports is
-    # the engine's own (`ScoredCandidate.matched_parent_lift*`). In the measurand's own units —
+    # the engine's own (`ScoredCandidate.reference_lift*`). In the measurand's own units —
     # θ logits — never fitness: a cell's precision cannot cross the user-editable scoring
     # formula, and two scales inside one object publish an effect and a variance that cannot be
     # compared to each other.

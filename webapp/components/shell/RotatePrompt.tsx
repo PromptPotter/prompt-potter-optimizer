@@ -1,22 +1,12 @@
 "use client";
-// Wraps a surface that cannot meaningfully fit on a portrait phone
-// (the candidates Forest view, the scoring-mask grid, the Optimizer card, HardSamplesHeatmap,
-// RoundFileView, etc.). On portrait <768px the children are hidden via
-// CSS and a branded "rotate to landscape" card renders in their place.
-// On landscape or ≥768px the children render normally.
-//
-// The `.rotate-prompt-host` / `.rotate-prompt-children` / `.rotate-prompt-card`
-// classes in `app/styles/foundation/responsive.css` do the swap; the
-// `useIsPortraitPhone()` branch additionally UNMOUNTS the children, because every
-// surface this wraps carries an expensive layout pass (large SVG, virtualised table).
+// Swaps a surface that cannot fit a portrait phone for a "rotate" card; the swap CSS lives in
+// foundation/responsive.css, and the children also UNMOUNT to skip their costly layout pass.
 
 import { type ReactNode } from "react";
 import { useIsPortraitPhone } from "@/lib/hooks/useMediaQuery";
 
 interface Props {
   children: ReactNode;
-  // Operator-readable label for the rotate card. Defaults to a generic
-  // line; pass the specific surface name when it adds clarity.
   surfaceName?: string;
 }
 

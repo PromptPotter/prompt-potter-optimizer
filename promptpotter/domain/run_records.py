@@ -6,14 +6,17 @@ from typing import Annotated, Any, Literal
 
 from pydantic import ConfigDict, Field, model_validator
 
-from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
+from promptpotter.domain.launch_limits import RoundsCap
+from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeSearchNarrowing
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler, ThetaCaveat
-from promptpotter.domain.spend import TokenUsageKind
+from promptpotter.domain.spend import BudgetChange, TokenUsageKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
 __all__ = [
+    "BenchCheckpointKind",
     "CandidateMintedRecord",
+    "CheckpointKind",
     "CommandAckRecord",
     "CommandRecord",
     "ConfigOverrides",
@@ -30,10 +33,10 @@ __all__ = [
     "LedgerCandidate",
     "LedgerRoundClose",
     "PhaseRecord",
-    "ResumeCheckpointKind",
     "ResumeCheckpointRecord",
     "RoundWarningKind",
     "RoundWarningRecord",
+    "RunLimitsRecord",
     "SnapshotRecord",
     "SpendHoldRecord",
     "TokenUsageRecord",
@@ -42,14 +45,16 @@ __all__ = [
 ]
 
 
-class ResumeCheckpointKind(enum.StrEnum):
-    ROUND_WINNER = "round_winner"
-    ELIMINATION_CUT = "elimination_cut"
-    LEADER_LOCK_IN = "leader_lock_in"
-    PANEL_COVERAGE = "panel_coverage"
-    L2_ESCALATION_TRIGGER = "l2_escalation_trigger"
-    L3_ESCALATION_TRIGGER = "l3_escalation_trigger"
+class CheckpointKind(enum.StrEnum):
+    """A decision kind: the bench's enum and each optimizer's, declared in its own package,
+    subclass this one. A record's ``kind`` is one of their values."""
+
+
+class BenchCheckpointKind(CheckpointKind):
+    """The bench's own decisions."""
+
     FORK_CUT = "fork_cut"
+    PANEL_COVERAGE = "panel_coverage"
 
 
 class ResumeCheckpointRecord(StrictModel):
@@ -58,7 +63,11 @@ class ResumeCheckpointRecord(StrictModel):
     model_config = ConfigDict(frozen=True)
 
     record_type: Literal["decision"] = "decision"
-    kind: ResumeCheckpointKind
+    # A `CheckpointKind` value, read back as the string: which kinds exist is the registries' to
+    # say (`decisions.py::resume_checkpoint_gating`), and a ledger read cannot wait on them.
+    kind: str
+    # The manifest node whose member took the decision; ``None`` for the bench's own.
+    node: str | None = None
     inputs_ref: dict[str, Any] = Field(default_factory=dict)
     outcome: Any = None
     data: dict[str, Any] = Field(default_factory=dict)
@@ -125,8 +134,10 @@ class SnapshotRecord(StrictModel):
 
 
 class TokenUsageRecord(StrictModel):
-    """EVERY call emits one, wire or cache — ``cached`` splits the BILL from what the search
-    would cost cold. Collapsing them lets a replayed L4 arm read as infinitely efficient."""
+    """ONE BILL: what a provider reported one response cost — or a replay, ``cached``, which
+    splits the bill from what the search would cost cold (collapsing them lets a replayed L4 arm
+    read as infinitely efficient). Never an estimate: a send that ended without a bill writes no
+    record, and its :class:`SpendHoldRecord` stays open instead."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -141,8 +152,7 @@ class TokenUsageRecord(StrictModel):
     """Who billed the call. Not decoration beside ``model``: a rate belongs to the PAIR,
     and the rate table registers the same model under many vendors at prices that differ
     several-fold, so a model alone cannot be priced
-    (``infrastructure/llm/pricing.py::lookup_rate``). ``None`` on a row written before this
-    field, where only an exact key resolves."""
+    (``infrastructure/llm/pricing.py::lookup_rate``). ``None`` ⇒ only an exact key resolves."""
     served_by: str | None = None
     """WHICH upstream host answered, where the one above is a GATEWAY that routes onward. The pair
     is the point: ``provider`` is who bills, this is whose silicon ran it, and hosts of one model
@@ -169,10 +179,6 @@ class TokenUsageRecord(StrictModel):
     cost_usd: float | None = None
     """The call's price, stamped once when it is recorded (``telemetry.py::emit_token_usage``) and
     only ever summed after — ``None`` is unpriced. A cached call carries what it WOULD have cost."""
-    unsettled: bool = False
-    """The call never reported what it used — cancelled, timed out, failed after it was sent — so
-    the counts and the price are the bound it was ADMITTED on (``infrastructure/llm/spend_book.py``),
-    the most the provider may have billed, never a measurement."""
     hold_id: str | None = None
     """The :class:`SpendHoldRecord` this call settles; ``None`` for a call nothing held (a replay)."""
     mirrored: bool = False
@@ -185,10 +191,10 @@ class TokenUsageRecord(StrictModel):
 
 
 class SpendHoldRecord(StrictModel):
-    """A paid call ADMITTED, written before it is sent at the most it may cost. The usage record
-    carrying its ``hold_id`` settles it; a hold nothing settled belongs to a run killed with the
-    call out, and is charged in full (``spend_book.py::charge_open_holds``) — so a hard exit never
-    leaves a billed call off the ledger."""
+    """A paid send ADMITTED, written before it leaves at the most it may cost. The bill carrying
+    its ``hold_id`` closes it. One no bill closed is UNREPORTED once its run is not live — the
+    request left and nobody learned what it cost (cancelled, timed out, killed): it binds every
+    ceiling at this bound and is never summed as spent (``infrastructure/llm/spend_book.py``)."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -220,6 +226,9 @@ class SpendTombstoneRecord(StrictModel):
     used_usd: float
     used_tokens: int
     unpriced_tokens: int
+    # What its unreported sends may have cost (`SpendHoldRecord`) — banked apart, as it is read.
+    unreported_usd: float = 0.0
+    unreported_tokens: int = 0
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -364,7 +373,7 @@ RoundWarningKind = Literal[
     "l1_critique_unavailable",
     # The odd one out, deliberately: nothing failed. The round measured cleanly and still
     # resolved nothing — no arm's blocked lift over the parent excluded 0 — which looks
-    # identical to a decisive round on every other channel. Emitted by `l1/score/winner.py`.
+    # identical to a decisive round on every other channel. Emitted by `runner/round.py`.
     "round_not_separable",
 ]
 
@@ -392,8 +401,7 @@ class ForkTrigger(enum.StrEnum):
     OPERATOR_DIAG = "operator_diag"
     OPERATOR_REWIND = "operator_rewind"
     OPERATOR_STEERED = "operator_steered"
-    L2_REBASE = "l2_rebase"
-    L3_REBASE = "l3_rebase"
+    OPTIMIZER_REBASE = "optimizer_rebase"
     SCORING_DIVERGENCE = "scoring_divergence"
 
 
@@ -432,8 +440,7 @@ FORK_DIRECTION: dict[ForkTrigger, ForkDirection] = {
     # Each retargets the active pointer and abandons the tail it cut from. The parent keeps
     # that tail as the record of what ran; the run is elsewhere now.
     ForkTrigger.OPERATOR_REWIND: ForkDirection.SUPERSEDE,
-    ForkTrigger.L2_REBASE: ForkDirection.SUPERSEDE,
-    ForkTrigger.L3_REBASE: ForkDirection.SUPERSEDE,
+    ForkTrigger.OPTIMIZER_REBASE: ForkDirection.SUPERSEDE,
     ForkTrigger.SCORING_DIVERGENCE: ForkDirection.SUPERSEDE,
 }
 
@@ -453,8 +460,7 @@ MintKind = Literal["session", "divergent_resume", "user_fork", "auto_rebase"]
 
 MINT_KIND_FOR_TRIGGER: dict[ForkTrigger, MintKind] = {
     ForkTrigger.SCORING_DIVERGENCE: "divergent_resume",
-    ForkTrigger.L2_REBASE: "auto_rebase",
-    ForkTrigger.L3_REBASE: "auto_rebase",
+    ForkTrigger.OPTIMIZER_REBASE: "auto_rebase",
     ForkTrigger.OPERATOR_DIAG: "user_fork",
     ForkTrigger.OPERATOR_STEERED: "user_fork",
     ForkTrigger.OPERATOR_REWIND: "user_fork",
@@ -478,16 +484,11 @@ class ConfigOverrides(StrictModel):
     max_rounds: int | None = None
     spend_budget_usd: float | None = None
     token_budget: int | None = None
-    l1_patience: int | None = None
-    l2_patience: int | None = None
-    l3_patience: int | None = None
-    pobb_epsilon: float | None = None
-    per_round_resubset: bool | None = None
-    schema_field_rename: bool | None = None
-    # The composite-fitness criterion (`CampaignConfig.scoring`). The one setting a mask can
-    # PREVIEW against the record — a lens re-elects every round from rows already measured, so the
-    # round it parts at is the round a fork carrying this is minted at. Every other field here moves
-    # a ceiling or a patience count, which no measurement can be re-read under.
+    # The fork's delta over the selected optimizer manifest, laid key by key onto the parent's own
+    # `optimization.nodes`. No field here switches the manifest: two optimizers are two campaigns.
+    nodes: dict[str, ManifestNodeOverlay] = Field(default_factory=dict)
+    # `CampaignConfig.scoring`, a map laid key by key over the parent's. The one setting a mask
+    # PREVIEWS: `{"per_cell": F}` is the `score:F` lens, so the fork is cut where the preview parts.
     scoring: str | dict[str, str] | None = None
 
 
@@ -511,8 +512,9 @@ class CycleSeed(StrictModel):
     origin_source: str = Field(
         default="",
         description=(
-            "C0 lineage provenance — 'fork_seed' | 'campaign_origin'; empty when the "
-            "seed carries no origin (an L2/L3 rebase replays its own)."
+            "Which act seeded C0 — 'fork_seed' | 'campaign_origin', naming its lineage's "
+            "`changes_description`; empty when the seed carries no origin (an L2/L3 rebase "
+            "replays its own)."
         ),
     )
 
@@ -535,7 +537,7 @@ class CandidateMintedRecord(StrictModel):
     round: int
     idx: int
     candidate_id: str
-    parent_id: str | None = None
+    parent_ids: list[str] = Field(default_factory=list)
     label: str
     changes_description: str = ""
     source: str = ""
@@ -557,7 +559,7 @@ class LedgerCandidate(StrictModel):
     round: int
     idx: int
     candidate_id: str
-    parent_id: str | None = None
+    parent_ids: list[str] = Field(default_factory=list)
     label: str
     changes_description: str = ""
     source: str = ""
@@ -567,8 +569,6 @@ class LedgerCandidate(StrictModel):
     # The searchpoint id — the archive's `prompt_fields_id`, and the only key joining a node of
     # the served tree to the rows it paid for.
     sp_hash: str = ""
-    # The candidate's stored evaluator namespace — what a `score:` lens re-scores against.
-    evaluators: dict[str, float] = Field(default_factory=dict)
     scored_samples: int | None = None
     expected_samples: int | None = None
     # ``None`` = minted, never measured; ``0`` = measured, nothing cached.
@@ -598,17 +598,20 @@ class LedgerFit(LedgerAbility):
     else, because the matched-parent floor is decided once, at the election, and never moves after
     it. Two models would put the same two fields under two names and let them drift."""
 
-    matched_parent_accuracy: float | None = None
-    matched_parent_composite: float | None = None
-    matched_parent_lift: float | None = None
-    matched_parent_lift_ci_lo: float | None = None
-    matched_parent_lift_ci_hi: float | None = None
+    # The individual this arm's lift is read against, over the cells it touched.
+    reference_id: str | None = None
+    reference_accuracy: float | None = None
+    reference_composite: float | None = None
+    reference_lift: float | None = None
+    reference_lift_ci_lo: float | None = None
+    reference_lift_ci_hi: float | None = None
 
 
 class LedgerRoundClose(StrictModel):
     """The fit facts, RE-READ on every close — which is what lets round 0's second close carry the
-    warm ruler's θ (``runner/loop.py``). The crown is on :class:`ElectionRecord` instead, because it
-    never moves. ``abilities`` keys are POSITIONAL: a resume re-mints a candidate under a fresh uuid."""
+    warm ruler's θ (``round.py::close_round``). The crown is on :class:`ElectionRecord` instead,
+    because it never moves. ``abilities`` keys are POSITIONAL: a resume re-mints a candidate under
+    a fresh uuid."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -622,10 +625,11 @@ class WallClock(StrictModel):
     BANKED, because the records it is read from are compactable and the clock is not re-derivable
     from the round documents — none of them carries a timestamp.
 
-    Two denominators, and confusing them is the whole trap. ``phase_s`` is CLOCK: the brackets do
-    not nest, so they sum, and a leg over ``elapsed_s`` is impossible. ``worked_s`` is summed CALL
-    time, which exceeds the clock whenever cells run concurrently and understates it whenever they
-    replay — it says what the search WORKED, never what share of the run a bucket held."""
+    Two denominators, and confusing them is the whole trap. ``phase_s``, ``gate_s`` and
+    ``unbracketed_call_s`` are CLOCK: disjoint legs that sum, so one over ``elapsed_s`` is
+    impossible. ``worked_s`` is summed CALL time, which exceeds the clock whenever cells run
+    concurrently and understates it whenever they replay — it says what the search WORKED, never
+    what share of the run a node held."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -634,9 +638,12 @@ class WallClock(StrictModel):
     # Keyed by ``CampaignPhase`` value — a phase that never fired, or whose exit never landed, is
     # ABSENT rather than 0.0: an unclosed bracket measured nothing.
     phase_s: dict[str, float] = Field(default_factory=dict)
-    # Keyed by ``TOKEN_KIND_BUCKET``'s bucket. Cached calls are excluded, as they are from the
-    # BILL: a replay occupied no clock.
-    worked_s: dict[str, float] = Field(default_factory=dict)
+    # ``TOKEN_KIND_BUCKET``'s bucket → the node that billed the call → summed call seconds. Cached
+    # calls are excluded, as they are from the BILL: a replay occupied no clock.
+    worked_s: dict[str, dict[str, float]] = Field(default_factory=dict)
+    # Same keys, in CLOCK: the seconds a node's calls held while no phase bracket and no gate was
+    # open — an optimizer call the round runs between brackets. Concurrent calls split an instant.
+    unbracketed_call_s: dict[str, dict[str, float]] = Field(default_factory=dict)
     # Round number (as a JSON key) → seconds from ``started_at`` to that round's FIRST close. This
     # is what puts a wall clock beside ``RoundClocks``'s round counts, and it takes the first close
     # rather than the last because the last is round 0's ruler restamp and a rewind's re-run —
@@ -645,9 +652,9 @@ class WallClock(StrictModel):
     # Time held at the origin gate — HUMAN, so it is never folded into a machine leg. An abandoned
     # gate closes at ``finished_at``, since the operator held it until the cycle ended.
     gate_s: float = 0.0
-    # ``elapsed_s`` minus every leg above. What it holds is real and unbracketed: the round's tail
-    # (the overlap series, the election, the critique call, the persist) and run init before the
-    # ledger exists. It is the number to drive DOWN, and never the one to explain away.
+    # ``elapsed_s`` minus every CLOCK leg: time no bracket, gate or fresh call held — the round's
+    # local tail (replayed cells, the election, the persist) and run init before the ledger exists.
+    # It is the number to drive DOWN, and never the one to explain away.
     unattributed_s: float | None = None
     # Seconds cells were not ALLOWED to spend — machine suspend plus the shared limiter's queue,
     # summed off the cells' own envelopes. ``None`` = no cell was measured under one, so nothing
@@ -657,30 +664,21 @@ class WallClock(StrictModel):
 
 
 class ElectionRecord(StrictModel):
-    """What the round's ELECTION produced, at its own coordinate: ``elect_round_winner`` is the
-    last thing ``l1_score`` does, so all of this exists a whole ``l1_critique`` call before the
-    close it used to ride.
+    """What the round's ELECTION produced, at its own coordinate — before the round closes, while
+    ``rounds/round_NNNN.json`` is not yet addressable and every live surface reads. Keyed by
+    LABEL, like ``selected_labels`` and ``LedgerRoundClose.abilities``, because a resume re-mints
+    candidate ids.
 
-    ``fit`` is here for the same reason the crown is, and the argument that once kept it out —
-    "already addressable in ``rounds/round_NNNN.json``" — is what this record now answers: that
-    document is not addressable until the round CLOSES, two LLM calls after the election stamped
-    it, and every live surface reads in that gap. Keyed by LABEL, like ``winner_label`` and like
-    ``LedgerRoundClose.abilities``, because a resume re-mints candidate ids.
-
-    ``winner_label`` empty = the round HELD; round 0 crowns the ``C0`` it adopted.
-
-    **θ and ``matched_parent_*`` do NOT belong here, and the shape invites re-proposing both.** θ is
-    RESTAMPED when the ruler warms, so it stays on ``round:complete``, which every close re-reads;
-    only the crown never moves, and only the crown belongs on a record that does not replay.
-    ``matched_parent_*`` is not merely unservable here but unwanted — nothing plots a floor on a
-    bar."""
+    ``selected_labels`` empty = the round HELD; round 0 selects the ``C0`` it adopted."""
 
     model_config = ConfigDict(frozen=True)
 
     record_type: Literal["election"] = "election"
     round: int
-    winner_label: str = ""
+    selected_labels: list[str] = Field(default_factory=list)
     fit: dict[str, LedgerFit] = Field(default_factory=dict)
+    # Mirrors `RoundResult.stamps_theta`, beside the θ it qualifies.
+    stamps_theta: bool
     # In-memory-only carrier for the live ``RoundResult``, the ``PhaseRecord.live_round_result``
     # shape and rationale: the round's OWN readings (``overlap``, the verdict, the electable count,
     # separability) have no other live carrier, and the fat arrays already live in
@@ -707,6 +705,30 @@ class RulerRecord(StrictModel):
     dataset_name: str
     round: int
     timestamp: str = Field(default_factory=utcnow_iso)
+
+
+class RunLimitsRecord(StrictModel):
+    """The cycle's STANDING operator ceiling, whole — the one source for what the operator declared
+    this cycle may spend, and for how many rounds. Appended by ``set-limits`` at its account-clamped
+    value and by a launch whose flag moved it, at the value admitted; the LAST record wins. Every
+    launch reads it as one layer of the run's budget and re-admits the spend arms against the
+    account as it stands then; ``rounds`` is set over the config and admits nothing.
+
+    Read PHYSICALLY (``ledger_scan.py::scan_ledger_run_limits``), so a fork does not inherit
+    its parent's: a fork's budget is its seed's declaration, and an inherited standing ceiling
+    would override it. Not a progress event — the SSE tail skips it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    record_type: Literal["run_limits"] = "run_limits"
+    usd: float | None = None
+    tokens: int | None = None
+    rounds: RoundsCap | None = None
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+    @property
+    def ceiling(self) -> BudgetChange:
+        return BudgetChange(self.usd, self.tokens)
 
 
 class CycleSeedRecord(StrictModel):
@@ -736,6 +758,7 @@ CycleRecord = Annotated[
     | RoundWarningRecord
     | RulerRecord
     | SnapshotRecord
+    | RunLimitsRecord
     | SpendHoldRecord
     | SpendTombstoneRecord
     | TokenUsageRecord,

@@ -6,26 +6,32 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from promptpotter.domain.results import HardSampleOrder, HeadlineMetric, OverlapReading
+from promptpotter.domain.dashboard_rows import RunStanding
+from promptpotter.domain.results import (
+    ArmOutcome,
+    DisplayMetric,
+    HardSampleOrder,
+    OptimizerFact,
+    OverlapReading,
+)
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.spend import SpendRollup
 
 __all__ = [
     "AnyView",
+    "BenchGradedView",
+    "BenchScoredView",
     "CandidatesGeneratedView",
     "DigestStatusView",
-    "EscalationEnterView",
-    "EscalationExitView",
     "FinalWinnerView",
     "ForkSummaryView",
     "HardSamplesView",
     "InitEnterView",
     "InitExitView",
-    "L2RefineEnterView",
-    "L2RefineExitView",
     "LogMdView",
-    "PlanEnterView",
-    "PlanExitView",
+    "MeasureEnterView",
+    "OptimizerStepEnterView",
+    "OptimizerStepExitView",
     "RoundCompleteView",
     "RoundDigestView",
     "RoundStartView",
@@ -42,19 +48,16 @@ class ViewContext:
     their own copy. Distinct from the frozen ``*View`` payloads: this carries running state the builders mutate."""
 
     max_rounds: int = 0
-    patience: int = 0
+    patience: int | None = None
     round_num: int = 0
-    l1_stall_count: int = 0
-    # Banked lives ("hearts") entering the current round; ``None`` when lives mode is off.
-    hearts: int | None = None
-    # The bank's ceiling — the denominator every ♥ readout renders against. A bare count
-    # is scaleless, and in lives mode there is no ``max_rounds`` to fall back on.
-    hearts_cap: int | None = None
+    # The optimizer's standing entering the current round; its cap is the denominator every ♥
+    # readout renders against, since a run banking stalls may have no ``max_rounds``.
+    run_standing: RunStanding | None = None
     parent_accuracy: float = 0.0
     parent_composite_fitness: float | None = None
     composite_fitness_formula: str | None = None
     composite_fitness_formula_short: str | None = None
-    headline_metric: HeadlineMetric = "accuracy"
+    display_metric: DisplayMetric = "accuracy"
     original_sp_flat: dict[str, str] = field(default_factory=dict)
     current_sp_flat: dict[str, str] = field(default_factory=dict)
     node_param_keys: dict[str, list[str]] | None = None
@@ -67,7 +70,7 @@ class ViewContext:
             "parent_composite_fitness": self.parent_composite_fitness,
             "composite_fitness_formula": self.composite_fitness_formula,
             "composite_fitness_formula_short": self.composite_fitness_formula_short,
-            "headline_metric": self.headline_metric,
+            "display_metric": self.display_metric,
         }
 
 
@@ -84,8 +87,8 @@ class InitEnterView:
 
     warnings: tuple[WarningEntry, ...] = ()
     max_rounds: int = 0
-    patience: int = 0
-    n_variants: int = 0
+    # The optimizer's own (`OptimizerPacing.patience`); ``None`` where it keeps none.
+    patience: int | None = None
     sp_budget_round: int = 0
     dataset_size: int = 0
     model: str = ""
@@ -106,6 +109,7 @@ class InitExitView:
     origin_acc: float | None
     cycle_id_short: str
     samples: int
+    bench_samples: int
     obs_on: bool
     # Count of origin per-sample measurements — the live dashboard's
     # ``origin.samples`` field. Carried on the view so the dashboard projection
@@ -115,26 +119,25 @@ class InitExitView:
     resumed_from_round: int = 1
     cached_rounds_count: int = 0
     task_context_keys: int = 0
-    l2_round: int = 0
     composite_fitness_formula: str | None = None
     composite_fitness_formula_short: str | None = None
 
 
 @dataclass(frozen=True)
 class RoundStartView:
-    """L1 generate enter — round banner + generate config block."""
+    """``propose:enter`` — the round banner and the proposing block, whichever optimizer proposes;
+    ``standing`` and ``note`` are the optimizer's own words (``RoundOpening``)."""
 
+    node: str
     round: int
     max_rounds: int
-    l1_stall_count: int
-    patience: int
+    standing: str
     current_acc: float
     prompt_preview: str
-    n_variants: int
+    arms: int | None
+    note: str
     model: str
-    has_l1_critique: bool
-    hearts: int | None = None
-    hearts_cap: int | None = None
+    run_standing: RunStanding | None = None
 
 
 @dataclass(frozen=True)
@@ -143,25 +146,41 @@ class SpDiffView:
     node_param_keys: dict[str, list[str]] | None
     round_num: int | None
     clone_labels: tuple[str, ...]
-    l1_yield: float
-    l1_n_no_op: int
-    l1_n_duplicate: int
-    l1_n_repeat: int
+    # Proposals each ``INVARIANT_REASONS`` member collapsed, and who proposed them.
+    collapses: dict[str, int]
+    proposer: str
 
 
 @dataclass(frozen=True)
 class CandidatesGeneratedView:
-    """L1 generate exit — N candidates ready, sp_diff table follows."""
+    """``propose:exit`` — N candidates ready, sp_diff table follows."""
 
     n_candidates: int
     source: str  # "disk" | "llm"
     n_scoring_samples: int
-    l1_yield: float
-    l1_n_no_op: int
-    l1_n_duplicate: int
-    l1_n_repeat: int
     clone_labels: tuple[str, ...]
     sp_diff: SpDiffView
+
+
+@dataclass(frozen=True)
+class MeasureEnterView:
+    node: str
+    n_candidates: int
+    n_samples: int
+
+
+@dataclass(frozen=True)
+class BenchScoredView:
+    # `BenchScore.model_dump(mode="json")` — the dashboard folds `bench_score` from it.
+    bench: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class BenchGradedView:
+    # One pass's `BenchReading.model_dump(mode="json")`, or ``None`` with `missing` saying why —
+    # the dashboard folds it onto the round it names.
+    reading: dict[str, Any] | None
+    missing: str | None
 
 
 @dataclass(frozen=True)
@@ -172,19 +191,17 @@ class ScoreEntry:
     total: int
     mean_fitness_ci_lo: float | None
     mean_fitness_ci_hi: float | None
-    escalation_aborted: bool = False
-    # Why this row scored fewer cells than the panel: "" (whole panel) | "skip" (operator cut the
-    # walk short). Carried because the display RANKS on it (`domain/results.py::scoreboard_rank_key`)
-    # and a view cannot demote what it was never told.
-    partial_reason: str = ""
+    # Carried because the display RANKS on it (`domain/results.py::scoreboard_rank_key`) and a
+    # view cannot demote what it was never told.
+    outcome: ArmOutcome
     # First-validation-failure reason for synthetic-zeroed variants (e.g. ``no_op_variant``);
     # scoreboard suppresses these rows so ranking reflects mutated candidates only.
     invalid_reason: str | None = None
     # The origin as this row's comparison floor. ``None`` unless the row covered the origin's
     # whole panel — a prefix rate is decided by where PoBB stopped the candidate, not by its
     # answers (`scoring/metrics.py::matched_parent_stats`) — which is NOT the same as 0.0.
-    matched_parent_accuracy: float | None = None
-    matched_parent_composite: float | None = None
+    reference_accuracy: float | None = None
+    reference_composite: float | None = None
     # What this row was RANKED on: ``None`` outside the election fit, and for every row while the
     # ruler is cold. A table printing accuracy alone can seat a winner it has no column able to
     # explain. The blocked LIFT and its interval are deliberately not here — the terminal's Δ
@@ -196,45 +213,40 @@ class ScoreEntry:
 
 @dataclass(frozen=True)
 class RoundCompleteView:
-    """L1 score exit — round summary. Round-trip invariant target."""
+    """``select:exit`` — the round's summary. Round-trip invariant target."""
 
     round: int
     parent_acc: float
     scores: tuple[ScoreEntry, ...]
+    # The selected arm's candidate label; ``""`` on a round that held its best-so-far.
     winner_label: str
+    # Mirrors `RoundResult.stamps_theta`: the scoreboard's ability column.
+    stamps_theta: bool
     # ``None`` where the round graded no cell on accuracy — every arm errored, or the backend is
-    # verifier-graded. It matches ``RoundResult.accuracy``, which has always been optional; this
-    # field narrowed it to ``float`` and the builder bridged the gap with a ``float()`` that
-    # RAISES, taking the whole round loop down (`stop_reason: crashed`) on a round whose only
-    # fault was having nothing to report.
+    # verifier-graded — as ``RoundResult.accuracy`` is.
     winner_accuracy: float | None
     winner_composite_fitness: float | None
     winner_evaluators: dict[str, float]
     winner_total: int
     improved: bool
-    # ``None`` alongside ``matched_parent_accuracy`` — there is no Δ without a floor.
+    # ``None`` alongside ``reference_accuracy`` — there is no Δ without a floor.
     delta: float | None
     p_value: float | None
     # The round's outcome in the numbers that decided it — see ``RoundResult.verdict_reason``.
     # Present on a won round as well as a held one, which is what lets the terminal print a
     # verdict either way instead of falling silent exactly when nothing was resolved.
     verdict_reason: str | None
-    next_action: str
-    l1_critique_text: str
     composite_fitness_formula: str | None
     composite_fitness_formula_short: str | None
-    # The parent restricted to the winner's measured samples; verdict line + Δ read these so
-    # operator-facing "Δ vs parent" matches the ``l1_score`` gate. ``None`` when the winner
-    # did not cover the parent's panel — the verdict then states the winner's own rate and
-    # drops the "(was …)" clause rather than quoting the full-set parent, which is a
-    # different sample basis and would read as lift the winner never earned.
-    # No default: the one builder resolves it, and a ``0.0`` sitting here would render
-    # "was 0.0%" on any round whose payload lacked the key.
-    matched_parent_accuracy: float | None
-    matched_parent_composite: float | None = None
-    # WHICH number headlines the verdict line. Carried rather than read from config at render
+    # The selected arm's reference restricted to its measured samples; the verdict line + Δ read
+    # these. ``None`` when the arm did not cover its reference's panel — the verdict then drops
+    # the reference rate rather than quoting a full-set one, a different sample basis that would
+    # read as lift the arm never earned. No default: a ``0.0`` here would render as a real rate.
+    reference_accuracy: float | None
+    reference_composite: float | None = None
+    # WHICH number leads the verdict line. Carried rather than read from config at render
     # time: a knob resolved in the renderer is one the disk round-trip cannot reproduce.
-    headline_metric: HeadlineMetric = "accuracy"
+    display_metric: DisplayMetric = "accuracy"
     # ``RoundResult.ability``'s θ. ``None`` while the ruler is cold, where the headline falls back
     # to accuracy — a cold θ is logit-accuracy on the arm's own subset, so headlining it dresses a
     # subset-relative number as the difficulty-adjusted one.
@@ -242,71 +254,27 @@ class RoundCompleteView:
 
 
 @dataclass(frozen=True)
-class EscalationEnterView:
-    check_name: str
-    target: str
-    degraded_rate: float
-    warning_types: dict[str, int]
+class OptimizerStepEnterView:
+    """An optimizer's own phase opening (``OptimizerRuntime.phases``), in its own words."""
+
+    node: str
+    activity: str
+    title: str
+    tag: str
+    lines: tuple[str, ...]
 
 
 @dataclass(frozen=True)
-class EscalationExitView:
-    classifications: tuple[tuple[str, str], ...]
+class OptimizerStepExitView:
+    """An optimizer's own phase closing. ``headline`` is empty where the step adopted nothing."""
 
-
-@dataclass(frozen=True)
-class L2RefineEnterView:
-    l2_round: Any
-    l1_stall_count: Any
-    current_acc: float
-    best_acc: float
-    l1_overrides: dict[str, str]
-
-
-@dataclass(frozen=True)
-class L2RefineExitView:
-    # The two surfaces L2 still writes (`escalation/firing.py::_l2_exit`), plus its prose.
-    # Three fields sat here that `_l2_exit` had stopped emitting, so each rendered its
-    # default forever: `task_context_changed` (the framing is frozen — L2 has no
-    # task_context field), `action` (probe rounds are not wired — no `action` on
-    # `L2ContextOutput`), and `warned_samples` (the warned-query inventory was deleted).
-    # Meanwhile `l1_layout_changed` and `axis_targeted` WERE emitted and shown nowhere —
-    # so the operator's L2 line reported a param count and stayed silent about the
-    # attention edit, which is the move L2 is for.
-    param_changes_count: int
-    l1_layout_changed: bool
-    axis_targeted: str
-    changes_description: str
-    # Post-fire L2 counters — the four scalars ``EscalationFSM.fold`` rebuilds resume state
-    # from. They ride the VIEW because the view is the persisted half of the record: they used
-    # to travel in ``PhaseEvent.data``, which is in-memory-only, so every resume silently
-    # rebuilt L2 as never-fired. A resume-critical fact is a declared field, not a loose key.
-    l2_round: int
-    l2_stall_count: int
-    l2_best_composite_fitness_at_entry: float
-    l2_best_theta_at_entry: float | None
-    # `l2_prompt` / `l2_response_json` are NOT here. The rendered call is already on this
-    # ledger as the `l2_context` LLMCallRecord and assembled human-readably in the audit twin
-    # (`.runtime/cache/rounds/round_NNNN.json::nodes.l2_context`, uncapped) — one prompt, three
-    # copies, two of them in this file. The terminal readout addresses the twin.
-
-
-@dataclass(frozen=True)
-class PlanEnterView:
-    l3_round: Any
-    l2_stall_count: Any
-    current_plan_preview: str
-
-
-@dataclass(frozen=True)
-class PlanExitView:
-    new_plan_preview: str
-    changes_description: str
-    # Post-fire L3 counters — same contract as ``L2RefineExitView``'s four above.
-    l3_round: int
-    l3_stall_count: int
-    l3_best_composite_fitness_at_entry: float
-    l3_best_theta_at_entry: float | None
+    headline: str
+    details: tuple[str, ...]
+    # The pointer's label and the node whose call the audit twin holds — addressed, never reprinted.
+    audit: tuple[str, str] | None
+    # What the optimizer's own resume fold rebuilds from, the view being the record's persisted
+    # half; ``None`` where the step adopted nothing and so advanced no state.
+    state: dict[str, Any] | None
 
 
 # --- Aggregate views for log.md (post-hoc, disk-derived only) -------------
@@ -316,6 +284,8 @@ class PlanExitView:
 class DigestStatusView:
     campaign_id: str
     parent_session_id: str | None
+    # The manifest the rounds were run under, off their own documents; ``None`` before round 0.
+    optimizer: str | None
     status: str
     stop_reason: str
     # ``None`` where the cycle banked no round 0 — `origin_accuracy_of` reads it off the round
@@ -340,29 +310,24 @@ class RoundDigestView:
     total: int
     composite_fitness: float
     changes_description: str
-    l1_critique_text: str
-    l1_yield: float
-    l1_n_no_op: int
-    l1_n_duplicate: int
-    l1_n_repeat: int
-    candidates_scored: int
+    facts: tuple[OptimizerFact, ...]
+    # Mirrors `RoundResult.stamps_theta`.
+    stamps_theta: bool
     evaluators: dict[str, float]
-    # THIS round's own comparison floor — the parent re-scored on the samples this round drew.
-    # `log.md` compared against the whole-cycle origin composite instead, so under
-    # `per_round_resubset` it read draw difficulty as candidate lift and printed a different Δ
-    # from the terminal for the same round. ``None`` where the round matched nothing, and there
-    # is no fallback to the cycle origin: that is a different sample basis, not a default.
-    matched_parent_composite: float | None = None
+    # THIS round's own comparison floor — the parent re-scored on the samples this round drew, as
+    # the terminal's Δ reads it. ``None`` where the round matched nothing, and there is no
+    # fallback to the cycle origin: that is a different sample basis, not a default.
+    reference_composite: float | None = None
     # The subset-invariant series and the scale it was read on, so a reader can see a round
     # scored mostly off that scale. Mirrors ``RoundResult``.
     ability: AbilityReading | None = None
     # The round's outcome in the numbers that decided it — see ``RoundResult.verdict_reason``.
     verdict_reason: str | None = None
-    # The parent line read on ONE shared set of cells — the only row in this view two rounds can
+    # The best-so-far line read on ONE shared set of cells — the only row two rounds can
     # be differenced on, since `accuracy` above is read on whatever subset the round bought.
     overlap: OverlapReading | None = None
-    # Per-candidate P(best) trajectory from ``.runtime/streams/round_NNNN_p_best.jsonl``;
-    # empty for resumed / pre-PoBB rounds.
+    # Per-candidate P(best) trajectory from the round's racing stream
+    # (``.runtime/streams/round_NNNN_{member}.jsonl``); empty for resumed rounds.
     p_best_trajectory: dict[str, list[float]] = field(default_factory=dict)
     # Who the round ELECTED. The trajectory above is a STOPPING posterior and cannot answer it —
     # its argmax is regularly not the elected arm, and can name two of them or none.
@@ -370,8 +335,8 @@ class RoundDigestView:
     # What THIS round cost, and how much of its input providers served off their own prefix cache.
     # Served per round by the projection (`dashboard.json::spend_by_round`) and read here, never
     # re-folded: the browser's cost strip and this line are the same number or one of them is
-    # wrong. ``None`` for a cycle with no dashboard on disk — a foreign fork sibling, or a round
-    # banked before the split was served.
+    # wrong. ``None`` for a cycle with no dashboard on disk (a foreign fork sibling) or a round
+    # that billed nothing.
     spend: SpendRollup | None = None
 
 
@@ -387,8 +352,8 @@ class HardSamplesView:
 
 @dataclass(frozen=True)
 class FinalWinnerView:
-    winner_prompt_fields: dict[str, Any]
-    winner_pipeline_params: dict[str, Any]
+    result_prompt_fields: dict[str, Any]
+    result_pipeline_params: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -421,13 +386,12 @@ AnyView = (
     | InitExitView
     | RoundStartView
     | CandidatesGeneratedView
+    | MeasureEnterView
+    | BenchScoredView
+    | BenchGradedView
     | RoundCompleteView
-    | EscalationEnterView
-    | EscalationExitView
-    | L2RefineEnterView
-    | L2RefineExitView
-    | PlanEnterView
-    | PlanExitView
+    | OptimizerStepEnterView
+    | OptimizerStepExitView
     | LogMdView
     | FinalWinnerView
     | ForkSummaryView

@@ -9,12 +9,8 @@ import type { ActivityItem } from "@/lib/chat/activity";
 import type { DecisionItem } from "@/lib/chat/decision";
 import type { DegradationHealth } from "@/lib/api/types";
 
-// The live tail of the one chat thread: the curated activity feed + the
-// transient progress chip + the inline decision card. This is the surface where
-// the parallel chat ↔ cycle-trace streams MERGE — a decision button fires an
-// existing control command that lands on the cycle ledger and re-appears in the
-// feed as a "control applied" item. Rendered inside `IngestConversation`'s
-// thread, after the ingest messages — one ordered conversation.
+// The live tail of the chat thread, where chat and cycle-trace MERGE: a decision button fires a control
+// command that lands on the cycle ledger and re-appears in the feed as "control applied".
 export function LiveSegment({
   campaignId,
   cycleId,
@@ -29,37 +25,24 @@ export function LiveSegment({
   cycleId: string;
   activity: ActivityItem[];
   progress: ActivityItem | null;
-  /**
-   * Is there anything still to listen FOR — the SSE socket being open AND the server
-   * still calling the run in-flight. The socket alone is not the answer: it stays open
-   * against a finished cycle (the endpoint 404s only for an unknown one), so gating on
-   * it had the thread announcing it was listening to a run that had ended.
-   */
+  /** Socket open AND the run still in flight — the socket stays open against a finished cycle. */
   listening: boolean;
   decision: DecisionItem | null;
   /** Banked lives of the VIEWED cycle; `null` when it isn't in lives mode. */
   hearts?: number | null;
-  /** The bank's ceiling — the denominator. Passed down, never re-derived here. */
+  /** The bank's ceiling. Passed down, never re-derived here. */
   livesCap?: number | null;
 }) {
-  // The decision value IS the verb, so `pending` drives the per-button "…" directly.
   const cmd = useCommand<OriginGateDecision>("origin-gate");
 
   const empty = activity.length === 0 && !progress && !decision;
-  // Nothing to show and nothing still coming — leave the thread to the ingest
-  // segment / welcome.
   if (empty && !listening) return null;
 
-  // Fire an existing control command. The decision item clears on its own when
-  // the poll observes `run_phase` leave `gate` (a rescore re-enters with a fresh
-  // verdict; proceed/abort end it) — same lifecycle the old modal had.
+  // The decision item clears itself once the poll sees `run_phase` leave `gate`.
   const decide = (d: OriginGateDecision) =>
     void cmd.run(d, () => postOriginGateDecision(campaignId, cycleId, d));
   const busy = cmd.pending !== null;
 
-  // ONE row that means "now": the in-flight chip, or — with nothing landed yet —
-  // the placeholder saying the socket is open. `empty` already implies no
-  // progress, so the two can never both be due.
   const now = progress ?? (empty && listening ? { icon: "·", label: "Listening for activity…", detail: null } : null);
 
   return (
@@ -84,8 +67,7 @@ export function LiveSegment({
           </span>
           <span className="chat-activity-label">{now.label}</span>
           {now.detail ? <span className="chat-activity-detail">{now.detail}</span> : null}
-          {/* The ♥ bank rides this chip, not the round rows above it: the feed is a
-              history, and painting the current bank onto a finished round would misdate it. */}
+          {/* The ♥ bank rides this chip, not the round rows: painting it on a finished round misdates it. */}
           {hearts != null && (
             <Hearts hearts={hearts} cap={livesCap} className="chat-activity-hearts" />
           )}
@@ -121,16 +103,10 @@ export function LiveSegment({
   );
 }
 
-// The origin verdict, folded in from the deleted `OriginGateModal` so no
-// diagnostic is lost when the gate decision moved into the chat.
 function GateVerdictView({ verdict }: { verdict: DegradationHealth }) {
-  // COVERAGE LEADS, because a rate the round could not support is the thing that misled hardest:
-  // this panel used to open on "Degraded rate 0%" beside advice reading "98% of this round's cells
-  // returned no measurement", the two being computed over disjoint sets of rows. What the round
-  // actually MEASURED is the first thing that makes either number readable.
+  // COVERAGE LEADS: the degraded rate and the advice are computed over disjoint rows.
   const panel = verdict.samples + verdict.not_attempted;
-  // Holes can never reach the degraded numerator, so a round of nothing but holes reports 0% here.
-  // The rate is worth showing only where something came back to classify.
+  // Holes never reach the degraded numerator, so the rate shows only where something came back.
   const classifiable = verdict.samples - verdict.hole_count;
   return (
     <>
@@ -163,8 +139,6 @@ function GateVerdictView({ verdict }: { verdict: DegradationHealth }) {
             <dd>{verdict.dominant_node}</dd>
           </div>
         ) : null}
-        {/* The advice tells the operator to read the row's error text before changing anything.
-            Until this row, no surface in the product showed it. */}
         {verdict.last_error ? (
           <div>
             <dt>Last error</dt>

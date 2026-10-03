@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import html
 import json
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
@@ -25,6 +25,7 @@ from promptpotter.presentation.terminal.primitives import (
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
+    from promptpotter.domain.bench import BenchScore
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import CycleResult
 
@@ -47,14 +48,15 @@ def render_completion(
         else f"{GREEN}{BOLD}OPTIMIZATION COMPLETE{RESET}"
     )
 
-    # The best round is derived here rather than taken as an argument: every caller computed the
-    # same `max` over `result.rounds`, and one of them keyed it off a `model_dump()` dict.
-    measured = [r for r in result.rounds if r.accuracy is not None]
-    best = max(measured, key=lambda r: cast("float", r.accuracy), default=None)
-    headline = f"Rounds       {result.n_l1_rounds:<15d}"
-    if best is not None and best.accuracy is not None:
-        headline += f"Best         {best.accuracy:.1%} (round {best.round})"
-    fields: list[str] = [headline, f"Stop reason  {result.stop_reason}"]
+    headline = f"Rounds       {result.n_rounds_after_origin:<15d}"
+    if result.result_accuracy is not None:
+        headline += f"Selected     {result.result_accuracy:.1%} (round {result.result_round})"
+    fields: list[str] = []
+    # First, because it is the headline: the selection graded on rows it never read. `Selected`
+    # below is the optimizer's own reading on the rows that chose it.
+    if (bench := result.bench) is not None:
+        fields.append(f"Bench        {_bench_text(bench)}")
+    fields += [headline, f"Stop reason  {result.stop_reason}"]
     # The reason's OWN next step, off the one table, so the terminal advises what `log.md`,
     # `review.md` and the browser advise. It replaces a hard-coded PAUSED line that was the only
     # advice any ending carried; `""` is a stated answer and prints nothing.
@@ -72,21 +74,36 @@ def render_completion(
         fields.append(f"Langfuse     {trace_url}")
 
     out = ["", _dbox_block(title, *fields)]
-    if overlay_block := render_pipeline_overlay(result.winner_pipeline_params, pipeline_schema):
+    if overlay_block := render_pipeline_overlay(result.result_pipeline_params, pipeline_schema):
         out.append("")
         out.append(overlay_block)
     return "\n".join(out)
 
 
+def _bench_text(bench: BenchScore) -> str:
+    def _value(x: float | None) -> str:
+        return "—" if x is None else f"{x:.3f}"
+
+    lift = "—" if bench.lift is None else f"{bench.lift:+.3f}"
+    selected, origin = bench.selected, bench.origin
+    missing = "" if bench.missing_reason is None else f" · missing: {bench.missing_reason}"
+    return (
+        f"{'—' if selected is None else _value(selected.composite_fitness)} selected"
+        f"{'' if selected is None else f' (round {selected.round})'} · "
+        f"{'—' if origin is None else _value(origin.composite_fitness)} origin · lift {lift} · "
+        f"{bench.bench_size} held-out rows{missing}"
+    )
+
+
 def render_completion_html(result: CycleResult) -> str:
-    if not result.winner_prompt_fields:
+    if not result.result_prompt_fields:
         return ""
     prompt_json = html.escape(
-        json.dumps(dict(result.winner_prompt_fields), indent=2, ensure_ascii=False, default=str)
+        json.dumps(dict(result.result_prompt_fields), indent=2, ensure_ascii=False, default=str)
     )
     pp_json = html.escape(
         json.dumps(
-            dict(result.winner_pipeline_params or {}), indent=2, ensure_ascii=False, default=str
+            dict(result.result_pipeline_params or {}), indent=2, ensure_ascii=False, default=str
         )
     )
     return (

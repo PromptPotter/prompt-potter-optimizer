@@ -47,15 +47,20 @@ def ensure_parent_dir(path: Path) -> None:
 
 
 def unlink_robust(path: Path) -> None:
-    """Delete one FILE — the same read-only chmod dance :func:`rmtree_robust` does, split from it
-    only by arity. Missing is success; anything else the caller must see."""
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        return
-    except PermissionError:
-        os.chmod(path, stat.S_IWRITE)
-        path.unlink()
+    """Delete one FILE — the same read-only chmod dance and retry :func:`rmtree_robust` does, split
+    from it only by arity (Windows refuses while a reader holds it). Missing is success."""
+    for attempt in range(4):
+        try:
+            path.unlink()
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            if attempt == 3:
+                raise
+            with contextlib.suppress(OSError):
+                os.chmod(path, stat.S_IWRITE)
+            time.sleep(0.05 * attempt)
 
 
 def rmtree_robust(path: Path) -> None:

@@ -3,20 +3,8 @@ import { cx } from "@/lib/cx";
 import { Popover, Switch } from "@/components/ui";
 import { useRunControl } from "@/lib/hooks/useRunControl";
 
-// The composer's "Tools" control — what this agent can do, one tap from the
-// message box, in the slot every chat app puts it in. Deliberately quiet: a
-// ghost chip between the input and Send, never an accent, because it is a
-// drawer you open when you want it rather than a thing asking to be pressed.
-//
-// It is the ONLY home for these switches. They used to be a 360px Settings
-// column in `.chat-grid`, which on a phone stacked underneath the composer —
-// a card you had to scroll past the input to reach.
-//
-// Three are locked coming-soon (`Switch locked` renders the unavailability
-// rather than a dead control styled like a live one, § I3). The fourth is
-// real: optimizing while you use it IS the run, so its switch is the run's
-// own pause/start verb (`useRunControl`), the same one the dashboard's
-// play/pause button fires.
+// The composer's "Tools" drawer — the only home for these switches. The optimize switch
+// IS the run's pause/start verb, the same one the dashboard's play/pause fires.
 
 const THINK_ICON = (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -58,18 +46,11 @@ const TOOLS_ICON = (
 
 export function ComposerTools() {
   const run = useRunControl();
-  // No cycle bound yet, or the run is alive but held somewhere this control does
-  // not speak for (the origin gate, check-in). Either way the switch states WHY
-  // instead of offering a press that misfires.
   const optimizeNote = !run
     ? "Starts once a campaign is running."
     : (run.noneReason ?? (run.pausing ? run.pausingNote : null));
   const optimizeLocked = !run || run.noneReason != null || run.pending;
-  // ON wherever nothing has turned it OFF. Optimizing while you use it is what the
-  // product IS, so before a run exists — no cycle bound, at the origin gate, still
-  // warming — the switch shows the default rather than an OFF that reads as "this
-  // app is not doing the one thing it does". Once the control speaks for a real run
-  // it tells the truth: a paused cycle reads OFF, because someone paused it.
+  // ON until a real run says otherwise: before one exists the default shows, never an OFF.
   const optimizeOn = !run || run.noneReason != null ? true : run.running;
 
   return (
@@ -83,7 +64,6 @@ export function ComposerTools() {
           className="chat-tools"
           aria-expanded={open}
           aria-haspopup="true"
-          // The label survives the phone, where the word is hidden for width.
           aria-label="Tools"
           title="Tools this chat can use"
           onClick={toggle}

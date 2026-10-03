@@ -44,12 +44,20 @@ Three verdicts ship, and each answers a different "what if".
 
 | Ask | How | Names an alternative? |
 |---|---|---|
-| **A different scoring formula** | `?lens=score:<formula>` on `GET /campaigns/{c}/cycles/{cy}/tree` — each node also gets a `lens_value` | Yes — the candidate that formula ranks first |
+| **A different scoring formula** | `?lens=score:<formula>` on `GET /campaigns/{c}/cycles/{cy}/tree`, the formula a `per_cell` composite — each node also gets a `lens_value` | Yes — the candidate that formula ranks first |
 | **A PoBB gate switched off** | `?lens=abort:<variant>`, variant = `<gate>_off` for any `EliminationGate` (`epsilon` \| `lock_in` \| `collapsed`), or `all_off` — the table is DERIVED from that enum, so a new gate is switchable without editing this row | No — the continuation was never measured |
 | **A changed engine or scorer** | `python -m promptpotter ab [--campaign <id>]` — replays one whole campaign, the active one by default | Where a `round_winner` decision flips, yes |
 
+**A lens is scored the way the run is.** `score:F` is the cycle's own scoring block with
+`per_cell` set to `F` — `mask/load.py::lens_overrides`, the `ConfigOverrides` a fork applying it
+carries — compiled to that cycle's `CellScorer`, run over each arm's rows in the round document by
+`rescore_results` and folded by `fold_cells`. So a `lens_value` is the composite a fresh run under
+`F` reports for that arm, whatever `F`'s shape: `F` over a round's means is a different number the
+moment `F` is nonlinear, and it ranks arms differently. The round's evaluator map is a reading the
+dashboard shows, never a formula input.
+
 **Row one re-ranks the RECORD; row three re-runs the ELECTION, and the difference is not a
-matter of degree.** The lens orders candidates by `scoreboard_rank_key` over the masked aggregate,
+matter of degree.** The lens orders candidates by `scoreboard_rank_key` over each arm's reading,
 so its divergence means *under this formula the crowned candidate is no longer the best-scoring
 one*. The election ranks Rasch θ-lift over the parent behind a coverage floor, and θ under
 another formula has to be re-fit from per-sample grades against a re-calibrated δ ruler — which
@@ -57,10 +65,11 @@ is what `ab` does and what a polled tree read cannot. Ask the lens which rounds 
 replaying; ask `ab` whether the run would have moved.
 
 `?samples=<id,id,…>` composes with a `score:` lens: re-score over just those samples, on **both
-sides** — the arms off their own rows, the parent off the round's `parent_results` — or the bar
+sides** — the arms off their own rows, the parent off the round's `reference_results` — or the bar
 stays at its full-set value while every challenger moves, and a round flips on nothing but that.
 A round that banked no parent panel is undecidable on a subset, never judged against a carried
-one. No lens and no samples is the raw read.
+one. A lens read on a subset is exact there, since it grades cells rather than meaning a map.
+Samples with no lens read each cycle under its own scorer. No lens and no samples is the raw read.
 
 ### The second consumer: a mask as a compare CHANNEL
 
@@ -90,9 +99,10 @@ two readings part rather than a verdict the campaign reached.
 A `score:` mask is the one setting an operator can change mid-campaign and see the cost of first,
 and the round it parts at is the round the fork is cut at. `fork-cycle` carries `keep_rounds`,
 which swaps the offshoot trigger for `OPERATOR_REWIND` — rounds `0..N-1` lifted, the branch
-continuing at N — and `ConfigOverrides.scoring` carries the criterion into the fork's effective
-config. Preview and action are one fact rather than two surfaces that have to agree, which is why
-the apply affordance sits beside the mask editor rather than in a fork dialog of its own.
+continuing at N — and `ConfigOverrides.scoring` carries the criterion as `{per_cell: F}`, laid
+key by key over the parent's block, so the fork runs the scorer the preview read under. Preview
+and action are one fact rather than two surfaces that have to agree, which is why the apply
+affordance sits beside the mask editor rather than in a fork dialog of its own.
 
 **Two settings preview; everything else forks blind, and the difference is the point.** A criterion
 and a sample subset are re-projections of rows already measured. A node parameter, a model or a
@@ -121,10 +131,9 @@ summary fields instead and still serves such a cycle.
   computable from the record. *Adding* one the run lacked is not — lock-in keys off the
   leader's per-step `p_best` trajectory, which the per-candidate snapshot does not carry.
   That question is answered by running a real sibling cycle on the policy-scope fork path.
-- **No backfill, structurally.** Row-derivable evaluators (`accuracy`, `error_rate`, …) and the
-  per-cell channel means (`latency`, `cost`, `tokens`) are recomputed from persisted per-sample
-  rows at read time, so they are never "missing" from an old record; snapshot-only evaluators
-  resolve to honest absence. No tool rewrites a stored round file.
+- **No backfill, structurally.** Every masked reading is graded from the persisted per-sample rows
+  at read time, so an old record is never "missing" a term; a term a row does not carry leaves
+  that ROW unscored, exactly as in a run. No tool rewrites a stored round file.
 - **A node lacking the masked input is *unknown*, never divergent.** Absence of data is not
   evidence of departure.
 
@@ -156,18 +165,17 @@ summary fields instead and still serves such a cycle.
 
 ## Invariants
 
-- **Fed the realizing criterion, the fold reproduces the record.** Each entity is re-scored
-  on its *own* stored evaluator namespace, and the recorded eligibility filter is reused
-  verbatim — so a higher-scoring but ineligible candidate is still not named leader. This is
-  the self-consistency gate, and it holds by construction rather than by test.
+- **Fed the realizing criterion, the fold reproduces the record.** Each entity is re-graded
+  from its *own* rows under its cycle's own scorer, and the recorded eligibility filter is reused
+  verbatim — so a higher-scoring but ineligible candidate is still not named leader.
 - **Non-stationary realized criterion.** A `per_cell` formula changes by FORK, never mid-cycle
-  (`persistence-and-state.md` § Changing the composite formula), so a mask spanning forks diffs
-  against the formula in effect at each round.
-- **A mask is the PROJECTION of the composite, not the composite.** The campaign scores per CELL;
-  a mask re-scores a stored per-ROUND evaluator map, because the record it reads may no longer
-  have the rows. The two agree exactly where the formula is linear in its terms and diverge by
-  Jensen where it is not — a clamp or a ratio is enough. Read a masked value as *what this round
-  would have scored on these round-level terms*, never as the number the election used.
+  (`persistence-and-state.md` § Changing the composite formula), so a lens replaces the composite
+  in each cycle's OWN block and keeps the correctness formula in effect there; a parent carried
+  across a fork edge is re-graded under the child's scorer.
+- **A mask IS the composite, read per cell** — never a formula over a round's means, which agrees
+  with the run only where the formula is linear, and the shipped length charge is not.
+- **Cost.** A lens read opens each round document of every campaign the tree spans and grades
+  every arm's rows once per request — formula evaluations only, no LLM call and no archive read.
 - **Record unchanged.** A mask is a projection on top. The realized lineage and its winners
   never move.
 - **One scoring home.** No mask math in TypeScript; the scoring gateway stays the single one; the fold is a read-time `application/` service, never an infrastructure

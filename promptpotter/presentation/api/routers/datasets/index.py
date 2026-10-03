@@ -12,7 +12,11 @@ from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     load_dataset_campaign_config,
 )
-from promptpotter.application.pipeline_resolve import nested_pipeline_ref
+from promptpotter.application.pipeline_resolve import (
+    dataset_pipeline_declaration,
+    experiment_outside_run,
+    nested_pipeline_ref,
+)
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     ModelCapability,
@@ -26,11 +30,9 @@ from promptpotter.domain.pipeline_schema import (
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.capabilities import resolve_schema_menu
 from promptpotter.infrastructure.store.dataset_access import (
-    dataset_pipeline_path,
     list_readable_datasets,
     readable_dataset_dir,
 )
-from promptpotter.infrastructure.store.io import read_yaml
 from promptpotter.presentation.api.deps import (
     StoresDep,
 )
@@ -137,10 +139,9 @@ def get_dataset_pipeline(name: str, stores: StoresDep) -> DatasetPipelineRespons
     no unauthenticated path to a benchmark's pipeline/overlay config.
     """
     dataset_dir = readable_dataset_dir(stores, name)
-    pipeline_path = dataset_pipeline_path(dataset_dir)
-    if not pipeline_path.is_file():
+    raw = dataset_pipeline_declaration(stores, dataset_dir, experiment_outside_run(dataset_dir))
+    if raw is None:
         raise NotFoundError(f"Dataset '{name}' has no pipeline.yaml")
-    raw = read_yaml(pipeline_path)
     # `parse_pipeline_response` strips lone surrogates at parse time so the
     # rendered model is already wire-safe (some overlays carry escape
     # sequences pointing at lone low surrogates that crash UTF-8 encode).

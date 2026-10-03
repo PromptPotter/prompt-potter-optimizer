@@ -12,9 +12,10 @@ from promptpotter.application.intelligence.exploration import (
 from promptpotter.application.intelligence.hard_sample_sorter import (
     build_hard_samples_artifact_from_observations,
 )
+from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.domain.measurement_provenance import entry_grade, meets_grade
+from promptpotter.domain.scoring import is_graded
 from promptpotter.infrastructure.store import archive_queries
-from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.domain.scoring import CellScorer
@@ -67,10 +68,11 @@ def _run_cells(
     detail = archive_queries.load_run(stores, run_id)
     if detail is None:
         return ()
+    rows = rescore_results([dict(item) for item in detail.get("measurements", [])], scorer)
     cells = tuple(
-        (int(sid), scorer.objective(item))
-        for item in detail.get("measurements", [])
-        if (sid := item.get("sample_id")) is not None and not is_error_result(item)
+        (int(sid), float(row["objective"]))
+        for row in rows
+        if (sid := row.get("sample_id")) is not None and is_graded(row)
     )
     if len(_CELLS) >= _CELLS_MAX:
         _CELLS.clear()
@@ -84,15 +86,17 @@ def build_archive_observations(
     dataset_name: str | None,
     scorer: CellScorer,
     scorer_id: str,
+    sample_ids: frozenset[int] | None,
     origin_sp_hash: str | None = None,
 ) -> list[Observation]:
     """Measurement store → ``Observation`` triples. **The candidate is the SEARCHPOINT, not the run** — keying on
     ``content_hash`` turns one prompt re-scored on N subsets into N candidates. Grade A only, by construction.
 
-    **The archive stores MEASUREMENTS; the grade is the READING campaign's** — *scorer* is required
-    for the same reason ``ab_replay`` rescores its origin rows. Pooling each row's stamped-at-write
-    worth builds one scale out of several formulas, so arm B is measured against arm A's δ, and a
-    stored grade cannot answer a ``per_cell`` declared after the row was banked."""
+    **The archive stores MEASUREMENTS; the grade is the READING campaign's** — *scorer* grades every
+    row, so one ruler is one formula, and a cell that formula cannot grade reaches no δ.
+
+    *sample_ids* is the reading campaign's search pool: the archive is filed by dataset, so a row of
+    that campaign's bench set sits here too and must reach no ruler it selects on. ``None`` reads all."""
     obs: list[Observation] = []
     sigs = archive_queries.run_signatures(stores)
     entries = archive_queries.list_runs(stores, dataset_name=dataset_name)
@@ -110,6 +114,7 @@ def build_archive_observations(
             for sample_id, response in _run_cells(
                 stores, run_id, sigs.get(run_id), scorer=scorer, scorer_id=scorer_id
             )
+            if sample_ids is None or sample_id in sample_ids
         )
     return dedup_observations(obs)
 
@@ -129,6 +134,7 @@ def build_archive_hard_samples_artifact(
             dataset_name=dataset_name,
             scorer=scorer,
             scorer_id=scorer_id,
+            sample_ids=None,
         ),
         cycle_id=None,
         top_k_candidates=top_k_candidates,

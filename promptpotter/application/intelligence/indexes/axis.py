@@ -6,13 +6,9 @@ from dataclasses import dataclass, field
 from itertools import combinations, pairwise
 from typing import TYPE_CHECKING, Annotated, Any
 
-from promptpotter.application.intelligence.indexes.sample import SampleIndex
-from promptpotter.application.scoring.formula import rescore_results
-from promptpotter.domain.measurement_provenance import entry_grade
 from promptpotter.domain.results import resolved_fitness
-from promptpotter.domain.scoring import CellScorer, is_unscored
+from promptpotter.domain.scoring import is_hit
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
-from promptpotter.infrastructure.store import archive_queries
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
@@ -23,8 +19,11 @@ def _is_forbidden_axis(axis: str) -> bool:
 
 
 if TYPE_CHECKING:
-    from promptpotter.application.intelligence.indexes.sample import FailureCluster, SampleRecord
-    from promptpotter.infrastructure.store.stores import Stores
+    from promptpotter.application.intelligence.indexes.sample import (
+        FailureCluster,
+        SampleIndex,
+        SampleRecord,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -119,25 +118,20 @@ def _collect(*items: tuple[str, str | None]) -> dict[str, str] | None:
 
 
 class AxisIndex:
-    """Derived axis-keyed view over the MeasurementArchive (axis → value → [accuracy])."""
+    """Derived axis-keyed view (axis → value → [accuracy]) over the runs a ``SampleIndex`` read,
+    plus the per-sample flips between consecutive rounds of the cycle reading it."""
 
-    def __init__(
-        self,
-        sample_index: SampleIndex | None = None,
-    ) -> None:
-        self.sample_index: SampleIndex = sample_index or SampleIndex()
+    def __init__(self, sample_index: SampleIndex) -> None:
+        self.sample_index = sample_index
         self._axis_values: dict[str, dict[str, list[float]]] = defaultdict(
             lambda: defaultdict(list),
         )
         self._axis_seen_runs: set[str] = set()
-        # Archived runs this formula cannot score (they predate a term it names). Bound once,
-        # read by BOTH halves of `refresh` — the per-sample ingest and the axis fold.
-        self._unscoreable_runs: set[str] = set()
         self._axis_failure_group_deltas: dict[str, dict[str, float]] = {}
         self._top_runs: list[RunRecord] = []
-        # Whether the persisted per-run fold was replayed instead of re-derived. Decides
-        # append-vs-replace when this refresh writes back; `None` until the first refresh.
-        self._fold_seeded: bool | None = None
+        self._flips: list[dict[str, Any]] = []
+        # The sample index's `generation` last folded here; `None` until the first refresh.
+        self._folded: int | None = None
 
     # ----- axis analytics -----
 
@@ -237,9 +231,9 @@ class AxisIndex:
                 ]
                 fg_lines.append(f"{a.axis} → {', '.join(parts)}")
 
-        flips = self.sample_index.flips(limit=50) if rankings5 else []
-        # Counted by sample_id, the cell's identity — `flips()` already detects them that
-        # way. Bucketing by the raw query text merged two samples that phrase the same
+        flips = self._flips[-50:] if rankings5 else []
+        # Counted by sample_id, the cell's identity — `record_flips_from_rounds` detects them
+        # that way. Bucketing by the raw query text merged two samples that phrase the same
         # question into one inflated volatility score. The text is the LABEL, not the key.
         flip_counts = Counter(f["sample_id"] for f in flips)
         flip_labels = {f["sample_id"]: str(f.get("query", "")) for f in flips}
@@ -250,7 +244,12 @@ class AxisIndex:
         return _collect(
             ("axis_rankings", _fmt_axis_rankings(rankings5, peaked) if rankings5 else None),
             ("top_values", top_vals_str),
-            ("failure_clusters", _fmt_clusters(clusters, with_counts=True) if clusters else None),
+            # One cluster partitions nothing — on a single-node pipeline it is "every failure is
+            # in the node", at 100%.
+            (
+                "failure_clusters",
+                _fmt_clusters(clusters, with_counts=True) if len(clusters) > 1 else None,
+            ),
             ("dead_queries", f"{len(dead)} queries never hit" if dead else None),
             (
                 "discriminating_queries",
@@ -272,7 +271,7 @@ class AxisIndex:
 
     @shapes_optimizer_prompt
     def _format_recent_attributions(self, limit: int = 5) -> str | None:
-        positive = [f for f in self.sample_index.all_flips() if f["new_hit"] and not f["old_hit"]]
+        positive = [f for f in self._flips if f["new_hit"] and not f["old_hit"]]
         if not positive:
             return None
         recent = positive[-limit:]
@@ -326,134 +325,31 @@ class AxisIndex:
 
         self._axis_failure_group_deltas = new_deltas
 
-    # ----- ingest / refresh -----
+    # ----- refresh -----
 
-    def _seed_from_fold(self, stores: Stores, dataset_name: str | None, formula_key: str) -> bool:
-        """Replay the persisted per-run fold; ``True`` if it was whole enough to trust. Validation is
-        all-or-nothing so the replay ORDER matches ingest — ``persistent_failures`` reads a tail streak."""
-        if not dataset_name:
-            return False
-        rows = archive_queries.sample_fold_rows(stores, dataset_name=dataset_name)
-        if not rows:
-            return False
-
-        signatures = archive_queries.run_signatures(stores)
-        for row in rows:
-            run_id = row.get("run_id") or ""
-            if row.get("fk") != formula_key:
-                return False
-            if list(signatures.get(run_id) or ()) != list(row.get("sig") or ()):
-                return False
-
-        for row in rows:
-            run_id = row["run_id"]
-            if row.get("unscoreable"):
-                self._unscoreable_runs.add(run_id)
-            else:
-                self.sample_index.replay_row(row)
-            self.sample_index.mark_seen(run_id)
-        logger.debug("AxisIndex seeded %d run(s) from the persisted fold", len(rows))
-        return True
-
-    def refresh(
-        self,
-        stores: Stores,
-        scorer: CellScorer | None = None,
-        scorer_id: str = "none",
-        *,
-        dataset_name: str | None,
-    ) -> None:
-        """Incremental archive refresh, dataset-scoped. A row this formula cannot score is SKIPPED, counted
-        and logged — never 0.0, which would poison the digest — and the skip binds BOTH halves below.
-
-        The fold is stamped with ``scorer_id`` alone: it hashes both formulas
-        (`compiler.py::auto_scorer_id`), so a second spelling here could only disagree with it."""
-        if self._fold_seeded is None:
-            self._fold_seeded = self._seed_from_fold(stores, dataset_name, scorer_id)
-
-        # Captured BEFORE the details are read, never after: a run whose log grows between the
-        # two must end up stamped with the OLDER signature, so the next process re-derives it.
-        # Stamping the newer one would leave a fold that silently omits the rows it gained.
-        signatures = archive_queries.run_signatures(stores)
-
-        added = 0
-        skipped: list[str] = []
-        folded: list[dict[str, Any]] = []
-        for run_id, detail in archive_queries.runs_since(
-            stores, self.sample_index._seen_runs, dataset_name=dataset_name
-        ):
-            stamp = {"fk": scorer_id, "sig": list(signatures.get(run_id) or ())}
-            if scorer is not None:
-                rows = rescore_results(detail.get("measurements") or [], scorer)
-                # The WHOLE run goes, on the first row that could not be graded. A per-row skip
-                # would fold a partial run under a `scorer_id` claiming it scored entire, and the
-                # digest cannot tell one from the other afterwards.
-                if unscored := next((r for r in rows if is_unscored(r)), None):
-                    skipped.append(run_id)
-                    self._unscoreable_runs.add(run_id)
-                    self.sample_index.mark_seen(run_id)
-                    folded.append({"run_id": run_id, "unscoreable": True, **stamp})
-                    logger.warning(
-                        "axis refresh: archived run %r is unscoreable under the active formula "
-                        "— skipping it (it predates the current observation vocabulary). %s",
-                        run_id,
-                        unscored.get("unscored"),
-                    )
-                    continue
-            folded.append({**self.sample_index.ingest_run(detail), **stamp})
-            self.sample_index.mark_seen(run_id)
-            added += 1
-
-        # Replace rather than append whenever the seed was rejected: what this process just
-        # derived IS the whole fold, and appending would leave the rejected rows in front of it.
-        if dataset_name and (folded or not self._fold_seeded):
-            archive_queries.write_sample_fold(
-                stores, dataset_name=dataset_name, rows=folded, append=self._fold_seeded
-            )
-            self._fold_seeded = True
-        if skipped:
-            logger.warning(
-                "axis refresh: %d archived run(s) skipped as unscoreable under the active "
-                "formula (%s) — the digest is built from the %d that scored.",
-                len(skipped),
-                ", ".join(skipped[:5]),
-                added,
-            )
-
-        # Grade-C runs (incidental connector-retrieval short-circuits) are dropped here so the
-        # cross-cycle digest the L1/L2/L3 prompts read reflects the deliberately-explored
-        # datapoints, not whichever connector replayed most. Unscoreable runs are dropped for the
-        # same reason: a fitness from a dead vocabulary is not comparable to one from this run's.
-        all_entries: list[dict[str, Any]] = []
-        for entry in archive_queries.list_runs(stores, dataset_name=dataset_name):
+    def refresh(self) -> None:
+        """Fold what the sample index read at its last refresh; a no-op until it reads again, so
+        the digest moves exactly when the archive view it is derived from does."""
+        if self._folded == self.sample_index.generation:
+            return
+        for entry, reading in self.sample_index.runs:
             run_id = entry.get("run_id", "")
-            if entry_grade(entry) == "C" or run_id in self._unscoreable_runs:
+            if run_id in self._axis_seen_runs:
                 continue
-            all_entries.append(entry)
-            if not run_id or run_id in self._axis_seen_runs:
-                continue
-            self._fold_entry(self._axis_values, entry)
+            self._fold_entry(self._axis_values, entry, reading)
             self._axis_seen_runs.add(run_id)
         self._recompute_failure_group_correlations()
-        self._refresh_top_runs(all_entries)
+        self._refresh_top_runs(self.sample_index.runs)
+        self._folded = self.sample_index.generation
 
-        if added:
-            logger.debug(
-                "AxisIndex refreshed: %d new runs (total seen: %d)",
-                added,
-                len(self.sample_index._seen_runs),
-            )
-
-    def _refresh_top_runs(self, entries: list[dict[str, Any]], k: int = 10) -> None:
+    def _refresh_top_runs(
+        self, entries: list[tuple[dict[str, Any], dict[str, Any]]], k: int = 10
+    ) -> None:
         """Top-K by (composite_fitness, accuracy) desc. Only the modal ``total`` count is kept: an 8/20
-        composite is not comparable with a 20/20 one, and mixing them inflates the leaderboard."""
-        from collections import Counter
-
-        all_totals = [
-            (entry.get("scores") or {}).get("total", 0)
-            for entry in entries
-            if (entry.get("scores") or {}).get("total", 0) > 0
-        ]
+        composite is not comparable with a 20/20 one, and mixing them inflates the leaderboard. A
+        one-cell run reads that cell, not a configuration, and backfills mint enough of them to
+        become the mode, so they are excluded."""
+        all_totals = [scores["total"] for _, scores in entries if scores["total"] > 1]
         if not all_totals:
             self._top_runs = []
             return
@@ -463,9 +359,8 @@ class AxisIndex:
         # collapse to the best record per run_id so the leaderboard never lists the
         # same run twice (wasted bytes + a misleading panel for L1/L2).
         best_by_run: dict[str, RunRecord] = {}
-        for entry in entries:
-            scores = entry.get("scores") or {}
-            total = scores.get("total") or 0
+        for entry, scores in entries:
+            total = scores["total"]
             if total != modal_total:
                 continue
             # An absence is not a measurement: a row that recorded no accuracy must not
@@ -478,7 +373,7 @@ class AxisIndex:
                 run_id=run_id,
                 name=entry.get("name", ""),
                 accuracy=accuracy,
-                composite=resolved_fitness(scores.get("composite_fitness"), accuracy),
+                composite=resolved_fitness(scores["composite_fitness"], accuracy),
                 total=total,
             )
             prev = best_by_run.get(run_id)
@@ -498,31 +393,33 @@ class AxisIndex:
             if rounds[-1].candidate_scores
             else ""
         )
-        flips = self.sample_index.record_flips(
-            round_num, desc, rounds[-2].results, rounds[-1].results
-        )
-        if flips:
-            logger.debug("Round %d: %d query flips recorded", round_num, flips)
+        prev_hits: dict[int, bool] = {}
+        for r in rounds[-2].results:
+            sid = r.get("sample_id")
+            if sid is not None:
+                prev_hits[sid] = is_hit(r.get("fitness"))
 
-    @classmethod
-    def ensure_for(
-        cls,
-        stores: Stores | None,
-        scorer: CellScorer | None = None,
-        scorer_id: str = "none",
-        *,
-        dataset_name: str | None,
-    ) -> AxisIndex | None:
-        if stores is None:
-            return None
-        idx = cls()
-        idx.refresh(
-            stores,
-            scorer=scorer,
-            scorer_id=scorer_id,
-            dataset_name=dataset_name,
-        )
-        return idx
+        count = 0
+        for r in rounds[-1].results:
+            sid = r.get("sample_id")
+            if sid is None or sid not in prev_hits:
+                continue
+            new_hit = is_hit(r.get("fitness"))
+            old_hit = prev_hits[sid]
+            if new_hit != old_hit:
+                self._flips.append(
+                    {
+                        "sample_id": sid,
+                        "query": r.get("query", ""),
+                        "round": round_num,
+                        "changes_description": desc[:80],
+                        "old_hit": old_hit,
+                        "new_hit": new_hit,
+                    }
+                )
+                count += 1
+        if count:
+            logger.debug("Round %d: %d query flips recorded", round_num, count)
 
     # ----- helpers -----
 
@@ -530,17 +427,11 @@ class AxisIndex:
     def _fold_entry(
         axis_values: dict[str, dict[str, list[float]]],
         entry: dict[str, Any],
+        scores: dict[str, Any],
     ) -> None:
-        """Fold one entry into ``axis_values``. An entry with no accuracy is skipped, never folded as 0.0 —
-        a fabricated arm manufactures ``effect_size`` against every real arm on the same axis.
-
-        "No accuracy" is a statement about the VALUE, and testing the key alone was not the same
-        thing: a row carrying ``accuracy: null`` passed the guard and died in ``float(None)``,
-        taking the whole run down at init with a TypeError and no mention of the axis index. An
-        outer L4 cell is exactly that row — its measurand is ``mean_round_delta`` and it has no
-        accuracy to record — so the recursion could not enter its round loop at all."""
-        scores = entry.get("scores") or {}
-        recorded = scores.get("accuracy")
+        """An entry with no accuracy — an outer L4 cell, whose measurand is ``mean_round_delta`` — is
+        skipped, never folded as 0.0, which manufactures ``effect_size`` against every real arm."""
+        recorded = scores["accuracy"]
         if recorded is None:
             return
         accuracy = float(recorded)

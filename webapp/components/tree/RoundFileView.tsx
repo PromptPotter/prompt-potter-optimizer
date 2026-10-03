@@ -5,20 +5,11 @@ import type { RoundResult } from "@/lib/api/types";
 import { fmtNum, fmtPct1, fmtSigned } from "@/lib/format";
 import { isHit } from "@/lib/fitness";
 
-// The round file IS `RoundResult.model_dump()`, so its shape is DERIVED from the generated wire
-// type rather than re-declared (`webapp/CLAUDE.md` § A wire shape is GENERATED). A hand-typed
-// interface drifts with the gate green, because nothing can compare one against the model it
-// claims to describe: require a `hits` the model never declares (`domain/results.py` disowns it
-// outright) and every summary line renders "undefined/20 hits" with no check able to say so.
-//
-// `Partial` because the value reaching this component is a cast over arbitrary parsed JSON: a
-// file on disk can promise a SUBSET of the current model, never the whole of it. That is also
-// what keeps a removed field a compile error here instead of an `undefined` on screen.
+// The round file IS `RoundResult.model_dump()`. `Partial` because a file on disk promises only a
+// SUBSET of the current model.
 export type RoundDoc = Partial<RoundResult>;
 
-// The one shape that genuinely cannot be derived: `results` is `list[dict[str, Any]]` on the
-// model, so the wire type is `Record<string, unknown>[]` and the per-row keys exist nowhere to
-// generate from. Hand-written, and saying so, per that section's narrow escape.
+// Hand-written: `results` is `list[dict[str, Any]]` on the model, so there is nothing to generate from.
 interface ResultRow {
   sample_id?: string | number;
   query?: string;
@@ -41,22 +32,25 @@ export function RoundFileView({ doc, raw }: Props) {
   const [showRaw, setShowRaw] = useState(false);
   const results = (doc.results ?? []) as ResultRow[];
   const scoreboard = doc.scoreboard ?? [];
-  // Matched first, full-set only as the fallback, and the label says which — an
-  // unlabelled "(parent 18%)" beside a subset accuracy of 58% is a lift nothing measured.
-  const matched = typeof doc.matched_parent_accuracy === "number" ? doc.matched_parent_accuracy : null;
-  const parentShown = matched ?? (typeof doc.parent_accuracy === "number" ? doc.parent_accuracy : null);
-  const parentLabel = matched != null ? "matched parent" : "parent, full set";
+  // A selector that fits no θ gets no column, not a blank one that reads as a cold ruler.
+  const stampsTheta = doc.stamps_theta ?? false;
+  // The selected arm's own matched floor: a round that held selected nobody and shows none.
+  const selectedLabels = doc.selected_labels ?? [];
+  const selected = (doc.candidate_scores ?? []).find((c) => selectedLabels.includes(c.label));
+  const matched = typeof selected?.reference_accuracy === "number" ? selected.reference_accuracy : null;
 
   return (
     <div className="round-file-view">
       <div className="round-file-summary">
         <div className="round-file-summary-row">
           <Badge className="round-file-badge">round {doc.round ?? "—"}</Badge>
-          <span>accuracy {fmtPct1(doc.accuracy)} {parentShown != null && (<span className="round-file-dim"><Term content={matched != null ? "The parent — the origin at round 0, the prior round's winner after — re-scored on the samples this round's winner measured. The floor the promotion gate used." : "The parent's full-set rate. This round carries no matched floor, so it is not directly comparable to a partially-scored winner."}>({parentLabel} {fmtPct1(parentShown)})</Term></span>)}</span>
+          <span>accuracy {fmtPct1(doc.accuracy)} {matched != null && (<span className="round-file-dim"><Term content="The parent — the origin at round 0, the prior round's winner after — re-scored on the samples this round's winner measured. The floor the promotion gate used.">(matched parent {fmtPct1(matched)})</Term></span>)}</span>
           <span>composite {fmtNum(doc.composite_fitness)}</span>
           <span>n {doc.total ?? "—"}</span>
-          {typeof doc.ability?.theta === "number" && (
-            <Term content="Ability of the adopted lineage on the cycle's fixed δ ruler — the subset-invariant series the round was won on. The cell count is how much of that ruler was real when this round was read.">
+          {stampsTheta && typeof doc.ability?.theta === "number" && (
+            <Term
+              content="Ability of the adopted lineage on the cycle's fixed δ ruler — the subset-invariant series the round was won on. The cell count is how much of that ruler was real when this round was read."
+            >
               θ {fmtSigned(doc.ability.theta, 3)}{doc.ability.ruler_n > 0 ? ` (${doc.ability.ruler_n} cells)` : ""}
             </Term>
           )}
@@ -78,7 +72,9 @@ export function RoundFileView({ doc, raw }: Props) {
                   <th>Candidate</th>
                   <th>Accuracy</th>
                   <th>Composite</th>
-                  <th><Term content="Difficulty-adjusted Rasch ability on the cycle's fixed δ ruler — the metric the round winner is elected on, which is what explains a lower-accuracy winner. Empty outside the election fit, and for every row while the ruler is cold.">θ</Term></th>
+                  {stampsTheta && (
+                    <th><Term content="Difficulty-adjusted Rasch ability on the cycle's fixed δ ruler — the metric the round winner is elected on, which is what explains a lower-accuracy winner. Empty outside the election fit, and for every row while the ruler is cold.">θ</Term></th>
+                  )}
                   <th><Term content="The candidate's blocked lift over the parent on the cells both measured, with its 95% interval. An interval spanning 0 means the round could not separate them.">Lift vs parent</Term></th>
                   <th>Win</th>
                 </tr>
@@ -92,9 +88,9 @@ export function RoundFileView({ doc, raw }: Props) {
                     </td>
                     <td>{fmtPct1(s.accuracy)}</td>
                     <td>{fmtNum(s.composite_fitness)}</td>
-                    <td>{fmtSigned(s.theta, 3)}</td>
-                    <td>{fmtLift(s.matched_parent_lift, s.matched_parent_lift_ci_lo, s.matched_parent_lift_ci_hi)}</td>
-                    <td>{s.is_winner ? <span className="pass">win</span> : ""}</td>
+                    {stampsTheta && <td>{fmtSigned(s.theta, 3)}</td>}
+                    <td>{fmtLift(s.reference_lift, s.reference_lift_ci_lo, s.reference_lift_ci_hi)}</td>
+                    <td>{s.is_selected ? <span className="pass">win</span> : ""}</td>
                   </tr>
                 ))}
               </tbody>

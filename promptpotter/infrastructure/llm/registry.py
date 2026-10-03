@@ -49,6 +49,7 @@ class ModelProfile:
 # What each measurement means per dataset: ``docs/operations/dataset-reasoning-matrix.md``.
 _MODEL_PROFILES: dict[str, ModelProfile] = {
     "deepseek/deepseek-v4-flash": ModelProfile(min_max_tokens=8000),
+    "openai/gpt-6-luna": ModelProfile(min_max_tokens=8000),
     "openai/gpt-oss-20b": ModelProfile(
         min_max_tokens=8000,
         refuses_efforts=frozenset({"none"}),

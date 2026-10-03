@@ -9,9 +9,8 @@ The default for a real client/tenant task (not a bundled benchmark): one chat-sh
 one origin, no hand-written loader. A registered benchmark skips all of it and uses
 `new <name>`.
 
-**Fully local.** The user clones the repo, starts TermNorm (`:8000`) and PromptPotter
-(`:8001`), drops their dataset, and runs end to end. Nothing leaves the machine except what
-those two servers do internally.
+**On a clone or on the team box.** The same flow runs locally (TermNorm `:8000` + PromptPotter
+`:8001`) or on the tier-3 deployment, which is the default context (root `CLAUDE.md`).
 
 **Web flow:**
 
@@ -27,8 +26,9 @@ those two servers do internally.
    ground_truth + framing are all CONFIRMED and every active LLM node owns a model —
    no individual prompt field is gated (the optimizer evolves them).
 5. The origin lands as **round 0 / C0** in the lineage tree.
-6. Select · modify · start. Mint writes the tenant dataset + campaign + cycle and runs from
-   round 0.
+6. Select · modify · start. The optimizer picker chooses which optimizer proposes and its node
+   knobs (`optimization.optimizer` + `optimization.nodes.<node>.config.<knob>`). Mint writes the
+   tenant dataset + campaign + cycle and runs from round 0.
 
 **CLI parity:**
 
@@ -37,7 +37,8 @@ python -m promptpotter new <file.csv> --set task_description='what the prompt do
 ```
 
 Same chain, same seam: `ingest_draft` → `resolve_origin_turn` → `prepare_checkin_run`. Omit
-`--set` to let the resolver propose the framing and ask.
+`--set` to let the resolver propose the framing and ask; `--set optimizer=capo` and
+`--set nodes.<node>.<knob>=V` are the picker's two answers.
 
 Seam: `application/datasets/` (`ingest.py`, `origin_resolve.py`, `origin_readiness.py`) +
 `application/jobs/` (`launcher/checkin.py`, `mint.py`). Web: `webapp/components/ingest/`.
@@ -68,8 +69,8 @@ loader.
 OpenAI/Anthropic/OpenRouter only if named. `.env.example` is the full template.
 
 **Backend `/status` unreachable.** TermNorm is the canonical test backend. If absent,
-`git clone https://github.com/runfish5/TermNorm-excel` to `../TermNorm-excel`. Tell the
-operator to run `start-server-py-LLMs.bat` in their own terminal; wait for `/status` 200.
+`git clone https://github.com/runfish5/TermNorm-excel` to `../TermNorm-excel`. Start
+`start-server-py-LLMs.bat` (who starts it: the autonomy mode, root `CLAUDE.md`); wait for `/status` 200.
 
 **Dataset has no loader.** Two paths:
 
@@ -77,11 +78,12 @@ operator to run `start-server-py-LLMs.bat` in their own terminal; wait for `/sta
   (`application/datasets/csv_ingest.py`) handles CSV/TSV/JSON/JSONL/XLSX.
 - **New bundled benchmark (rare):** register a loader returning `list[Sample]`
   (`domain/sample.py`) in `DATASET_LOADERS`, and draft
-  `datasets/<name>/{pipeline.yaml, campaign.json, dataset.md, prompts/<node>.yaml}` against
+  `datasets/<name>/{campaign.yaml, pipeline.yaml, task_description.md, dataset.md, prompts/<node>.yaml}` against
   `datasets/bbeh/`. Follow `docs/operations/dataset-selection-rationale.md` § Adding a
   dataset — canonical split first.
 
 ## First-run smoke
 
 If `datasets/{name}/` has never produced a measurement (`measurements/runs/{run_id}.jsonl`),
-suggest — don't auto-run — `python scripts/smoke_campaign.py --dataset {name}` (~90 s).
+run `python scripts/smoke_campaign.py --dataset {name}` (~90 s; it mints a campaign, so it falls
+under the autonomy mode).

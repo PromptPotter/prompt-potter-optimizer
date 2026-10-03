@@ -1,13 +1,6 @@
 "use client";
-// Headless modal a11y — the behavior half of a dialog, with no visual chrome.
-// While `open`, it: moves focus into the card, traps Tab within it, closes on
-// ESC, and restores focus to the previously-focused element on close. The
-// `Dialog` primitive uses this under its card; a surface that IS its own
-// backdrop (the full-screen hard-samples sheet) uses it directly.
-//
-// Attach the returned ref to the focus-trap container (the modal card). The
-// caller still renders its own backdrop + close button and wires those to
-// `onClose` — only keyboard + focus management lives here.
+// Headless modal a11y: focus in, Tab trap, Escape, focus restore. Backdrop and close button
+// stay the caller's.
 
 import { useEffect, useRef } from "react";
 
@@ -18,11 +11,8 @@ const FOCUSABLE =
 export function useDialogA11y(open: boolean, onClose: (() => void) | undefined) {
   const cardRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
-  // Hold the latest onClose in a ref so the effect depends only on `open`.
-  // Call sites pass an inline arrow, so onClose changes identity on every
-  // parent render — and modals mounted under a 2 s-polling subtree re-render
-  // every poll. Depending on onClose would tear down + re-run the focus trap
-  // each poll, yanking the caret out of any input the operator is typing in.
+  // A ref, not a dep: under a polling subtree an inline `onClose` would re-run the trap every
+  // poll, yanking the caret out of whatever the operator is typing in.
   const onCloseRef = useRef(onClose);
   useEffect(() => {
     onCloseRef.current = onClose;

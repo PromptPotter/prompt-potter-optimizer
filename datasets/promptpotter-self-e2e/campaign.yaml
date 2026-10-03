@@ -10,7 +10,7 @@ campaign_config:
     l1_generate: &e2e_models
       param_allowed_values:
         model:
-          - deepseek/deepseek-v4-flash:nitro
+          - openai/gpt-6-luna
     l1_critique: *e2e_models
     l2_context: *e2e_models
     l3_plan: *e2e_models
@@ -25,34 +25,50 @@ campaign_config:
   # geometry artefact up as a cost signal.
   scoring:
     per_sample: max(0.0, min(1.0, (mean_round_delta + 1.0) / 3.0))
-  headline_metric: ability
-  # = the panel size in inner_tasks.yaml. One cell.
-  sp_budget_round: 1
+  display_metric: ability
   exclude_nodes: []
   pipeline_overlay: {}
   optimization:
-    optimizer_set: self_optimizing
-    prompt_block_catalogue: 'off'
-    l1_patience: 1
     # Round 0 (the origin) plus ONE optimization round. The inner campaigns stay at
     # `max_inner_rounds: 1` — depth is what costs money here, since every outer cell is a whole
     # inner campaign, and one outer round is enough to exercise generate → score → elect.
     max_rounds: 2
-    # NOT 1, and this is a correctness bound rather than a coverage nicety. An inner cycle id is
-    # content-addressed on its optimizer prompt, so a single variant makes round 0's candidate
-    # byte-identical to the origin — the same inner cycle, spawned twice, and the second spawn
-    # hits `_open_inner_campaign`'s "another producer owns it" guard and errors the only cell on
-    # the panel. Two variants give the round a real candidate field and two distinct inner ids.
-    n_variants: 2
     degradation_threshold: 0.4
-    l2_patience: 1
-    l3_patience: 1
     # PoBB cannot eliminate on a 1-cell panel whatever this says — the floor is above the
     # panel by construction. Left at the engine default rather than tuned, so nothing here
     # reads as a considered racing decision.
     elimination_n_min: 4
-    pobb_epsilon: 0.30
     # The ceiling the browser walk runs under. It is a STOP, not a forecast: the fixture is
     # built to come in far below it, and the run halting here means the geometry drifted.
     spend_budget_usd: 0.05
     token_budget: null
+    # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
+    nodes:
+      # = the panel size in inner_tasks.yaml. One cell.
+      adaptive_queue:
+        config:
+          sp_budget_round: 1
+      l1_generate:
+        config:
+          prompt_family: l1_generate_self_optimizing
+          prompt_block_catalogue: 'off'
+          # NOT 1, and this is a correctness bound rather than a coverage nicety. An inner cycle id is
+          # content-addressed on its optimizer prompt, so a single variant makes round 0's candidate
+          # byte-identical to the origin — the same inner cycle, spawned twice, and the second spawn
+          # hits `_open_inner_campaign`'s "another producer owns it" guard and errors the only cell on
+          # the panel. Two variants give the round a real candidate field and two distinct inner ids.
+          n_variants: 2
+      l1_critique:
+        config:
+          prompt_family: l1_critique_self_optimizing
+      l2_context:
+        config:
+          prompt_family: l2_context_self_optimizing
+      pobb:
+        config:
+          epsilon: 0.30
+      escalation:
+        config:
+          l1_patience: 1
+          l2_patience: 1
+          l3_patience: 1

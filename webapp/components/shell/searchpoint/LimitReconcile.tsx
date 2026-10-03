@@ -1,32 +1,24 @@
 "use client";
 
 import { useState } from "react";
-import type { RunLimitOverrides } from "@/lib/api";
+import type { OptimizerLimit, RunLimitOverrides } from "@/lib/api";
 import { forkReconcileDefaults } from "@/lib/derivations";
 import { fmtUsd, fmtTokens } from "@/lib/format";
 import { parseCap } from "@/lib/run-limits";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 
-// The run-limit reconcile half of the steer flow (decision E). A fork numbers
-// its rounds from 1, so the operator confirms the fork's OWN absolute ceilings
-// — rounds + spend default to the parent's remaining ("3 of 6 rounds used → 3
-// left", "$4 of $10 spent → $6 left"). Patience + elimination epsilon inherit
-// the parent by default and live behind an "Advanced" disclosure (placeholders
-// show the inherited value; blank = inherit).
-//
-// Emits a sparse `RunLimitOverrides` on every edit: a field is included only when
-// the operator's value is present + valid, so blank = inherit. Self-contained
-// presentational input; the parent panel folds the result into the OperatorForkOverride.
+// The steer flow's run-limit reconcile. A fork numbers its rounds from 1, so rounds + spend default
+// to the parent's REMAINING; every other blank field inherits the parent's value.
 
 interface Fields {
   rounds: string;
   spend: string;
   tokens: string;
-  l1: string;
-  l2: string;
-  l3: string;
-  eps: string;
+  // The optimizer's own limits (`run_limits.optimizer`), keyed `node.knob`.
+  optimizer: Record<string, string>;
 }
+
+const limitKey = (l: OptimizerLimit) => `${l.node}.${l.knob}`;
 
 export function LimitReconcile({
   onChange,
@@ -34,35 +26,36 @@ export function LimitReconcile({
   onChange: (limits: RunLimitOverrides) => void;
 }) {
   const { dash } = useDashboard();
-  // Snapshot the defaults once at open — the cycle is stopped/paused while
-  // steering, but the 2 s poll keeps mutating `dash`; the operator's typed
-  // values are the working copy and must not be clobbered by a later tick.
+  // Snapshot once at open: the 2 s poll keeps mutating `dash` and must not clobber typed values.
   const [defaults] = useState(() => forkReconcileDefaults(dash));
   const [rl] = useState(() => dash?.run_limits ?? null);
+  // Guarded: `dashboard.json` is served verbatim, and a file an older build wrote lacks it.
+  const declared = Array.isArray(rl?.optimizer) ? rl.optimizer : [];
   const [f, setF] = useState<Fields>(() => ({
     rounds: defaults.roundsRemaining != null ? String(defaults.roundsRemaining) : "",
     spend: defaults.spendRemaining != null ? String(defaults.spendRemaining) : "",
     tokens: "",
-    l1: "",
-    l2: "",
-    l3: "",
-    eps: "",
+    optimizer: {},
   }));
 
   const set = (next: Fields) => {
     setF(next);
-    // 0 is meaningful on every one of these, so the floor is 0, not 1: `max_rounds: 0` means
-    // "measure the origin and stop", `l1_patience: 0` makes L1 stall after round 1. `parseCap`
-    // drops anything blank or out of range, and the fork then INHERITS the parent's value.
+    // The floor is 0, not 1: `max_rounds: 0` means "measure the origin and stop".
     const count = { int: true } as const;
+    // Each rides the fork's `nodes` overlay under the node that declared it; blank inherits.
+    const nodes: Record<string, { config: Record<string, number> }> = {};
+    for (const l of declared) {
+      const typed = next.optimizer[limitKey(l)];
+      if (typed === undefined) continue;
+      const value = parseCap(typed, l.integer ? count : { max: 1 });
+      if (value == null) continue;
+      (nodes[l.node] ??= { config: {} }).config[l.knob] = value;
+    }
     const limits: RunLimitOverrides = {
       max_rounds: parseCap(next.rounds, count) ?? undefined,
       spend_budget_usd: parseCap(next.spend) ?? undefined,
       token_budget: parseCap(next.tokens, count) ?? undefined,
-      l1_patience: parseCap(next.l1, count) ?? undefined,
-      l2_patience: parseCap(next.l2, count) ?? undefined,
-      l3_patience: parseCap(next.l3, count) ?? undefined,
-      pobb_epsilon: parseCap(next.eps, { max: 1 }) ?? undefined,
+      ...(Object.keys(nodes).length ? { nodes } : {}),
     };
     onChange(limits);
   };
@@ -137,65 +130,36 @@ export function LimitReconcile({
         </small>
       </label>
 
-      <details className="limit-advanced">
-        <summary>Advanced — patience &amp; elimination</summary>
-        <div className="limit-advanced-body">
-          <label className="limit-row">
-            <span className="limit-label">L1 patience</span>
-            <input
-              type="number"
-              min={1}
-              step={1}
-              className="limit-input"
-              value={f.l1}
-              placeholder={ph(rl?.l1_patience, "inherit")}
-              aria-label="Fork L1 patience"
-              onChange={(e) => set({ ...f, l1: e.target.value })}
-            />
-          </label>
-          <label className="limit-row">
-            <span className="limit-label">L2 patience</span>
-            <input
-              type="number"
-              min={1}
-              step={1}
-              className="limit-input"
-              value={f.l2}
-              placeholder={ph(rl?.l2_patience, "inherit")}
-              aria-label="Fork L2 patience"
-              onChange={(e) => set({ ...f, l2: e.target.value })}
-            />
-          </label>
-          <label className="limit-row">
-            <span className="limit-label">L3 patience</span>
-            <input
-              type="number"
-              min={1}
-              step={1}
-              className="limit-input"
-              value={f.l3}
-              placeholder={ph(rl?.l3_patience, "inherit")}
-              aria-label="Fork L3 patience"
-              onChange={(e) => set({ ...f, l3: e.target.value })}
-            />
-          </label>
-          <label className="limit-row">
-            <span className="limit-label">PoBB ε</span>
-            <input
-              type="number"
-              min={0}
-              max={1}
-              step={0.01}
-              className="limit-input"
-              value={f.eps}
-              placeholder={ph(rl?.pobb_epsilon, "inherit")}
-              aria-label="Fork PoBB elimination epsilon"
-              onChange={(e) => set({ ...f, eps: e.target.value })}
-            />
-          </label>
-          <small className="limit-note">Blank inherits the parent&apos;s value.</small>
-        </div>
-      </details>
+      {declared.length > 0 ? (
+        <details className="limit-advanced">
+          <summary>Advanced — the optimizer&apos;s own limits</summary>
+          <div className="limit-advanced-body">
+            {declared.map((l) => (
+              <label key={limitKey(l)} className="limit-row">
+                <span className="limit-label">{l.label}</span>
+                <input
+                  type="number"
+                  min={l.integer ? 1 : 0}
+                  max={l.integer ? undefined : 1}
+                  step={l.integer ? 1 : 0.01}
+                  className="limit-input"
+                  value={f.optimizer[limitKey(l)] ?? ""}
+                  placeholder={ph(l.value, "inherit")}
+                  aria-label={`Fork ${l.label}`}
+                  onChange={(e) =>
+                    set({ ...f, optimizer: { ...f.optimizer, [limitKey(l)]: e.target.value } })
+                  }
+                />
+              </label>
+            ))}
+            <small className="limit-note">Blank inherits the parent&apos;s value.</small>
+          </div>
+        </details>
+      ) : (
+        <small className="limit-note">
+          This optimizer declares no run limits of its own; its knobs are in the Optimizer card.
+        </small>
+      )}
 
       <small className="limit-reconcile-foot">The fork numbers rounds from 1.</small>
     </div>

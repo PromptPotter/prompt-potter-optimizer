@@ -25,9 +25,6 @@ function RawJsonCard({ dash }: { dash: DashboardSnapshot | null }) {
 
 export function FilesPane({ campaignId, cycleId }: Props) {
   const [selected, setSelected] = useState<{ scope: string; path: string } | null>(null);
-  // RawJsonCard sits with the on-disk artifacts it dumps — the operator
-  // who wants the raw dashboard.json blob is the same operator browsing
-  // the rest of the file tree, not the one watching the live drill.
   const { dash } = useCycleStream();
   return (
     <div className="content files-content" id="content-files">

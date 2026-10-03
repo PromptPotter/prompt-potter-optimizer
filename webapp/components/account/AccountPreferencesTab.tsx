@@ -1,6 +1,4 @@
 "use client";
-// Preferences pane — try-and-learn demo dataset toggle (server setting) +
-// appearance/theme (client-only, per-device).
 
 import { useEffect, useState } from "react";
 import { AccountSection } from "./AccountSection";
@@ -8,6 +6,7 @@ import { Switch } from "@/components/ui";
 import { fetchUserSettings, patchUserSettings } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { applyTheme, readStoredTheme, useThemeVersion } from "@/lib/theme";
+import { useShowCandidates } from "@/lib/tree-prefs";
 
 export function AccountPreferencesTab() {
   const [demo, setDemo] = useState<boolean | null>(null);
@@ -15,9 +14,7 @@ export function AccountPreferencesTab() {
   const cmd = useCommand<"user-settings">("preferences", { revalidate: false });
   const [readError, setReadError] = useState<string | null>(null);
 
-  // Hand-rolled, not `useRead`: `demo` is mutable local state the toggle below
-  // writes after each PATCH, not a read-only fetch result — the server load
-  // only seeds it.
+  // Hand-rolled, not `useRead`: the load only seeds `demo`, which each PATCH then writes.
   useEffect(() => {
     let cancelled = false;
     fetchUserSettings()
@@ -65,14 +62,31 @@ export function AccountPreferencesTab() {
           </p>
         ) : null}
       </AccountSection>
+      <CampaignTreeSection />
       <ThemeSection />
     </>
   );
 }
 
-// Theme lives in settings (not the navbar) so it's reachable the same way on
-// every device — on phones the standalone navbar toggle is hidden. Client-only
-// state via lib/theme.ts; deliberately not a server-side user setting.
+// Client-only, like the theme: nothing on the server reads it.
+function CampaignTreeSection() {
+  const [show, setShow] = useShowCandidates();
+  return (
+    <AccountSection
+      title="Campaign tree"
+      lede="Off by default, so a campaign is the last row of its branch — no ▶, and its candidates are read on the dashboard, where the chart plots them against each other. Turn this on to open a campaign into C0, C1.1, C1.2 … in the sidebar instead: worth it for a self-optimization run, where each candidate contains a whole inner run. Kept on this device only."
+      aside={
+        <Switch
+          label="Open campaigns into their candidates"
+          checked={show}
+          onChange={() => setShow(!show)}
+        />
+      }
+    />
+  );
+}
+
+// Here as well as the navbar because phones hide the navbar toggle.
 function ThemeSection() {
   useThemeVersion();
   const dark = readStoredTheme() === "dark";

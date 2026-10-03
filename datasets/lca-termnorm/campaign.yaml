@@ -1,7 +1,6 @@
 campaign_config:
   dataset_name: train
   scoring: rr(ground_truth_rank)
-  sp_budget_round: 20
   exclude_nodes: []
   pipeline_overlay:
     web_search:
@@ -18,9 +17,15 @@ campaign_config:
     token_matching:
       param_keys: []
   optimization:
-    l1_patience: 3
     max_rounds: 15
-    n_variants: 3
     degradation_threshold: 0.4
-    l2_patience: 2
-    l3_patience: 1
+    # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
+    nodes:
+      l1_generate:
+        config:
+          n_variants: 3
+      escalation:
+        config:
+          l1_patience: 3
+          l2_patience: 2
+          l3_patience: 1

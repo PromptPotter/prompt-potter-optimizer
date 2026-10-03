@@ -22,6 +22,7 @@ def warm_stats_backend() -> None:
     threading.Thread(target=_warm, name="stats-warm", daemon=True).start()
 
 
+@shapes_optimizer_prompt
 def t_critical(df: int, alpha: float = 0.05) -> float:
     """Two-sided Student-t critical value for a mean whose SE was estimated from the same few observations — the normal
     quantile understates the interval at the panel sizes the paired verdicts run on."""
@@ -64,6 +65,7 @@ def p_exceeds(mean_a: float, se_a: float, mean_b: float, se_b: float) -> float:
 # --- PoBB: Posterior-of-Being-Best (Russo 2016 / Top-Two Thompson family) ---
 
 
+@shapes_optimizer_prompt
 def _normal_posterior(scores: list[float]) -> tuple[float, float]:
     """Normal posterior on the population mean of *scores*. SE is clipped to the Beta-Binomial worst case, which protects the
     small-n binary regime — 4/4 hits has empirical variance 0 and would collapse to a point mass, stopping exploration."""
@@ -86,6 +88,7 @@ def _normal_posterior(scores: list[float]) -> tuple[float, float]:
 # --- Paired-difference posterior — cand-vs-prior on shared sample set ---
 
 
+@shapes_optimizer_prompt
 def paired_diff_posterior(
     candidate_scores: list[float],
     prior_scores: list[float],
@@ -120,7 +123,7 @@ def mean_ci_t(values: list[float], alpha: float = 0.05) -> tuple[float, float, f
 
     Not a second spelling of ``mean_ci``, which stays z because it is pinned to the persisted ``noise_floor_ci_*`` fields. This
     is for a READ that brackets a handful of cells, where the two quantiles are not interchangeable: at 6 cells t is 2.571
-    against z's 1.96, so the normal understates the interval by a third. It is the bracket ``matched_parent_lift`` and the
+    against z's 1.96, so the normal understates the interval by a third. It is the bracket ``reference_lift`` and the
     edit ranking already use, so a campaign interval and a paired difference beside it cannot disagree about zero.
 
     ``None`` below two values: one reading has no spread, and a bracket drawn from it is a fiction."""
@@ -133,6 +136,7 @@ def mean_ci_t(values: list[float], alpha: float = 0.05) -> tuple[float, float, f
     return (mean, mean - half, mean + half, n)
 
 
+@shapes_optimizer_prompt
 def paired_reading(
     candidate_scores: list[float],
     prior_scores: list[float],
@@ -348,11 +352,78 @@ def rank_correlation(xs: list[float], ys: list[float]) -> float | None:
     return None if math.isnan(rho) else rho
 
 
+def _order(a: float, b: float) -> int:
+    return (a > b) - (a < b)
+
+
+def _rank_agreement(full: Sequence[float], proxy: Sequence[float]) -> float:
+    pairs = [(i, j) for i in range(len(full)) for j in range(i + 1, len(full))]
+    if not pairs:
+        return 1.0
+    total = 0.0
+    for i, j in pairs:
+        f, p = _order(full[i], full[j]), _order(proxy[i], proxy[j])
+        # The paper grants a tie on one side "partial credit" without its size; half is the midpoint.
+        total += 1.0 if f == p else 0.5 if f == 0 or p == 0 else 0.0
+    return total / len(pairs)
+
+
+def _pearson(xs: Sequence[float], ys: Sequence[float]) -> float:
+    mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+    sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys, strict=True))
+    sxx, syy = sum((x - mx) ** 2 for x in xs), sum((y - my) ** 2 for y in ys)
+    # A constant column orders nothing, so it correlates with nothing.
+    return sxy / math.sqrt(sxx * syy) if sxx > 0.0 and syy > 0.0 else 0.0
+
+
+def greedy_column_subset(
+    matrix: Sequence[Sequence[float]],
+    k: int,
+    *,
+    rank_weight: float,
+    separation_weight: float,
+    redundancy_weight: float,
+) -> list[int]:
+    """The ``k`` columns of a candidates × examples score matrix whose mean ranks the candidates as
+    the full mean does, added greedily by LEVI's marginal score (arXiv 2605.09764 §3.3)."""
+    n_rows, n_cols = len(matrix), len(matrix[0]) if matrix else 0
+    columns = [[matrix[i][j] for i in range(n_rows)] for j in range(n_cols)]
+    full = [sum(row) / n_cols for row in matrix]
+    spreads = [math.sqrt(sum((v - sum(c) / n_rows) ** 2 for v in c) / n_rows) for c in columns]
+    widest = max(spreads, default=0.0)
+    chosen: list[int] = []
+    sums = [0.0] * n_rows
+    while len(chosen) < min(k, n_cols):
+        best, best_score = -1, -math.inf
+        for j in range(n_cols):
+            if j in chosen:
+                continue
+            taken = [*chosen, j]
+            proxy = [(sums[i] + columns[j][i]) / len(taken) for i in range(n_rows)]
+            separation = sum(spreads[c] for c in taken) / len(taken) / widest if widest else 0.0
+            redundancy = (
+                sum(abs(_pearson(columns[j], columns[c])) for c in chosen) / len(chosen)
+                if chosen
+                else 0.0
+            )
+            score = (
+                rank_weight * _rank_agreement(full, proxy)
+                + separation_weight * separation
+                - redundancy_weight * redundancy
+            )
+            if score > best_score:
+                best, best_score = j, score
+        chosen.append(best)
+        sums = [sums[i] + columns[best][i] for i in range(n_rows)]
+    return chosen
+
+
 __all__ = [
     "cells_for_exact_verdict",
     "discordant_counts",
     "exact_p_floor",
     "exact_paired_reading",
+    "greedy_column_subset",
     "holm_adjusted",
     "mean_ci",
     "mean_ci_t",

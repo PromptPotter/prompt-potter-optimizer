@@ -6,21 +6,19 @@ from __future__ import annotations
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.application.views.view_models import (
     AnyView,
+    BenchGradedView,
     CandidatesGeneratedView,
-    EscalationEnterView,
-    EscalationExitView,
     InitEnterView,
     InitExitView,
-    L2RefineEnterView,
-    L2RefineExitView,
-    PlanEnterView,
-    PlanExitView,
+    MeasureEnterView,
+    OptimizerStepEnterView,
+    OptimizerStepExitView,
     RoundCompleteView,
     RoundStartView,
     SpDiffView,
 )
 from promptpotter.domain.candidate_diff import group_diff_keys
-from promptpotter.domain.results import scoreboard_rank_key
+from promptpotter.domain.results import ArmOutcome, scoreboard_rank_key
 from promptpotter.presentation.terminal.primitives import (
     BOLD,
     CYAN,
@@ -31,6 +29,7 @@ from promptpotter.presentation.terminal.primitives import (
     _fmt_delta,
     _node_block,
     _node_line,
+    _node_top,
     _round_rule,
     _scoreboard,
     fmt_pvalue,
@@ -52,13 +51,12 @@ def _render_init_exit(v: InitExitView) -> str:
     obs = "ON" if v.obs_on else "OFF"
     out = [
         f"  {GREEN}✓{RESET} Initialized  origin={fmt_pct(v.origin_acc)}  "
-        f"cycle={v.cycle_id_short}  samples={v.samples}  obs={obs}"
+        f"cycle={v.cycle_id_short}  samples={v.samples}  bench={v.bench_samples} held out  "
+        f"obs={obs}"
     ]
     parts: list[str] = []
     if v.task_context_keys:
         parts.append(f"task_context={v.task_context_keys} keys")
-    if v.l2_round:
-        parts.append(f"l2_round={v.l2_round}")
     suffix = f"  ({', '.join(parts)})" if parts else ""
     if v.cached_rounds_count > 0:
         out.append(
@@ -71,50 +69,37 @@ def _render_init_exit(v: InitExitView) -> str:
     return "\n".join(out)
 
 
-def _heart_bar(hearts: int, cap: int | None) -> str:
-    """Banked lives filled, the rest of the ceiling hollow. The EMPTY pips are the readout: three hearts alone cannot
-    distinguish healthy-of-four from nearly-dead-of-seven, and lives mode has no ``ROUND n/max`` to carry the scale."""
-    if hearts <= 0:
+def _heart_bar(stalls_left: int, cap: int | None) -> str:
+    """Banked stalls filled, the rest of the ceiling hollow. The EMPTY pips are the readout: three
+    alone cannot distinguish healthy-of-four from nearly-dead-of-seven, and a run banking stalls
+    has no ``ROUND n/max`` to carry the scale."""
+    if stalls_left <= 0:
         return "💀"
-    if cap is None or cap < hearts:
-        return "♥" * hearts
-    return "♥" * hearts + "♡" * (cap - hearts)
+    if cap is None or cap < stalls_left:
+        return "♥" * stalls_left
+    return "♥" * stalls_left + "♡" * (cap - stalls_left)
 
 
 def _render_round_start(v: RoundStartView) -> str:
-    if v.has_l1_critique:
-        crit = f"from R{v.round - 1}"
-    elif v.round <= 1:
-        crit = "none yet (first round)"
-    else:
-        crit = f"none (R{v.round - 1} produced none)"
-    # Lives mode → show the ♥ bank instead of the fixed round ceiling (which is null/999
-    # when lives governs the budget); non-lives runs keep the "ROUND N/max" form.
+    # A run banking stalls shows the ♥ bank instead of the fixed round ceiling (null/999 when the
+    # bank governs the budget); any other run keeps the "ROUND N/max" form.
+    standing = v.run_standing
     round_label = (
-        f"ROUND {v.round}  {_heart_bar(v.hearts, v.hearts_cap)}"
-        if v.hearts is not None
+        f"ROUND {v.round}  {_heart_bar(standing.stalls_left, standing.stalls_left_cap)}"
+        if standing is not None and standing.stalls_left is not None
         else f"ROUND {v.round}/{v.max_rounds or 999}"
     )
-    # `l1_patience` is the distance to the next ESCALATION, not the run's remaining life —
-    # hearts own that. Labelling it "patience" beside a ♥ bank put two different facts under
-    # one word and read as a duplicate. At 0 the `l1_to_l2` fall-through fires L2 every round,
-    # which "stall 1/0" would state as a riddle; say it plainly instead.
-    escalation = (
-        "L2 every round" if v.patience == 0 else f"stall {v.l1_stall_count}/{v.patience} → L2"
-    )
+    arms = "?" if v.arms is None else str(v.arms)
     return "\n".join(
         [
             "",
-            _round_rule(
-                round_label,
-                escalation,
-            ),
+            _round_rule(round_label, v.standing),
             "",
             _node_block(
                 "GENERATE",
                 f"Parent accuracy {v.current_acc:.1%}",
                 f"Parent prompt   {v.prompt_preview}",
-                f"Candidates      {v.n_variants}   Prior critique: {crit}",
+                f"Candidates      {arms}" + (f"   {v.note}" if v.note else ""),
                 f"Model           {v.model}",
             ),
         ]
@@ -132,22 +117,28 @@ def _render_candidates_generated(v: CandidatesGeneratedView) -> str:
     )
 
 
+def _render_measure_enter(v: MeasureEnterView) -> str:
+    return "\n" + _node_top(
+        "MEASURE", f"{v.node} · {v.n_candidates} candidates on {v.n_samples} cells"
+    )
+
+
 def _render_round_complete(v: RoundCompleteView) -> str:
     out: list[str] = []
     if len(v.scores) > 3:
-        if board := _scoreboard(v.scores, v.winner_label):
+        if board := _scoreboard(v.scores, v.winner_label, theta=v.stamps_theta):
             out.append(board)
     elif v.scores:
         parts = [
-            f"{s.label}={fmt_pct(s.accuracy)}{' (aborted)' if s.escalation_aborted else ''}"
+            f"{s.label}={fmt_pct(s.accuracy)}{f' ({s.outcome})' if s.outcome.cut_short else ''}"
             for s in sorted(
                 v.scores,
                 key=lambda s: scoreboard_rank_key(
                     s.composite_fitness,
                     s.accuracy,
                     s.theta,
-                    is_winner=s.label == v.winner_label,
-                    is_partial=bool(s.partial_reason),
+                    is_selected=s.label == v.winner_label,
+                    is_partial=s.outcome is ArmOutcome.SKIPPED,
                 ),
                 reverse=True,
             )
@@ -164,137 +155,65 @@ def _render_round_complete(v: RoundCompleteView) -> str:
         else ""
     )
 
-    # A winner that stopped short gets no "(was …)" clause rather than the full-set rate:
-    # subtracting a full panel from a prefix accuracy publishes lift nobody measured.
-    versus = (
-        f"was {v.matched_parent_accuracy:.1%}, {_fmt_delta(v.delta)}"
-        if v.matched_parent_accuracy is not None and v.delta is not None
-        else "no matched parent — winner stopped before covering the panel"
-    )
-
-    # The campaign says WHICH number headlines this line. `ability` is what a resubset campaign
-    # sets (`knobs.py::headline_subset_relative_under_resubset`), because the panel is re-picked
+    # The campaign says WHICH number leads this line. `ability` is what a resubset campaign
+    # sets (`couplings.py::display_subset_relative_under_resubset`), because the panel is re-picked
     # each round, so accuracy is subset-relative and a parent that did nothing still moves with it.
     # Accuracy does not disappear; it moves into the parenthetical, so declaring the other loses
     # no reading.
     acc_txt = fmt_pct(v.winner_accuracy)
-    if v.headline_metric == "ability" and v.ability_theta is not None:
-        headline = f"θ {v.ability_theta:+.3f}"
-        detail = f"{acc_txt}, {versus}"
-    else:
-        headline = acc_txt
-        detail = versus
+    ability = v.stamps_theta and v.display_metric == "ability" and v.ability_theta is not None
+    headline = f"θ {v.ability_theta:+.3f}" if ability else acc_txt
+    detail = [acc_txt] if ability else []
 
     if v.improved:
+        # An arm that stopped short gets no reference rate rather than the full-set one:
+        # subtracting a full panel from a prefix accuracy publishes lift nobody measured.
+        detail.append(
+            f"vs reference {v.reference_accuracy:.1%}, {_fmt_delta(v.delta)}"
+            if v.reference_accuracy is not None and v.delta is not None
+            else "no matched reference — stopped before covering its reference's cells"
+        )
         sig_tag = f"  {fmt_pvalue(v.p_value)}" if v.p_value is not None else ""
         out.append(
-            f"  {GREEN}{BOLD}✓ IMPROVED{RESET}  {headline}"
-            f" ({detail}){comp_tag}{sig_tag}"
-            f"  ->  next: {v.next_action}"
+            f"  {GREEN}{BOLD}✓ SELECTED {v.winner_label}{RESET}  {headline}"
+            f" ({', '.join(detail)}){comp_tag}{sig_tag}"
         )
     else:
-        out.append(
-            f"  {YELLOW}{BOLD}✗ NOT PROMOTED{RESET}  {headline}"
-            f" ({detail}, n={v.winner_total}){comp_tag}"
-        )
-    # The round is won on θ-lift, so the accuracy on the line above is never the number that
-    # decided it. The reason prints whichever way the round went — on a win as much as a hold, or
-    # "why did THIS one win?" is answered nowhere. The lift interval is NOT repeated here;
-    # `live/phase.py::render_round_stats` prints it once at round close.
+        detail += ["the best-so-far held", f"n={v.winner_total}"]
+        out.append(f"  {YELLOW}{BOLD}· HELD{RESET}  {headline} ({', '.join(detail)}){comp_tag}")
+    # The selector's own reason, whichever way the round went: the rate on the line above is never
+    # what an optimizer's selection read. Its lift interval prints once, in `render_round_stats`.
     if v.verdict_reason:
         out.append(f"  {DIM}why: {v.verdict_reason}{RESET}")
 
     if not show_inline and v.winner_composite_fitness is not None:
-        # No fallback to the cycle's origin composite — the substitution `versus` above refuses.
+        # No fallback to the cycle's origin composite — the substitution the verdict line refuses.
         for line in render_composite_fitness_block(
             v.winner_composite_fitness,
             v.winner_evaluators,
             formula,
-            parent=v.matched_parent_composite,
+            reference=v.reference_composite,
             use_short_names=bool(v.composite_fitness_formula_short),
         ):
             out.append(f"  {line}")
-
-    if crit := v.l1_critique_text.replace("\n", " ").strip():
-        out.append(f"  {CYAN}L1 Critique:{RESET} {crit}")
     return "\n".join(out)
 
 
-def _render_escalation_enter(v: EscalationEnterView) -> str:
-    extras = [f"{wt}: {count} occurrences" for wt, count in v.warning_types.items()]
-    return "\n" + _node_block(
-        "ESCALATION",
-        f"{YELLOW}Degraded: {v.degraded_rate:.0%} of samples{RESET}",
-        *extras,
-        label_right=f"{v.check_name} → {v.target}",
-    )
+def _render_step_enter(v: OptimizerStepEnterView) -> str:
+    return "\n" + _node_block(v.title, *v.lines, label_right=v.tag)
 
 
-def _render_escalation_exit(v: EscalationExitView) -> str:
-    if not v.classifications:
+def _render_step_exit(v: OptimizerStepExitView) -> str:
+    if not v.headline:
         return ""
-    out = [f"  {CYAN}Warning classifications:{RESET}"]
-    out.extend(f"    {wt}: {status}" for wt, status in v.classifications)
-    return "\n".join(out)
-
-
-def _render_l2_refine_enter(v: L2RefineEnterView) -> str:
-    if v.l1_overrides:
-        items = list(v.l1_overrides.items())
-        parts = [f"{k}={s if len(s) <= 30 else s[:27] + '...'}" for k, s in items[:5]]
-        extra = len(items) - 5
-        body = ", ".join(parts) + (f", +{extra} more" if extra > 0 else "")
-        params_line = f"l1_overrides: {body}"
-    else:
-        params_line = "l1_overrides: (none)"
-    return "\n" + _node_block(
-        "L2 REFINE CONTEXT",
-        f"L1 stalled {v.l1_stall_count} rounds  |  acc={v.current_acc:.1%}  best={v.best_acc:.1%}",
-        params_line,
-        "LLM analyzing failure patterns...",
-        label_right=f"L2 fire {v.l2_round + 1}",
-    )
-
-
-def _render_l2_refine_exit(v: L2RefineExitView) -> str:
-    # The two L1 surfaces an L2 fire can touch — the same pair `l2_targets_l1_surface`
-    # scores it on, so what the operator reads matches what the validator judges. A fire
-    # showing neither is the wasted escalation that check exists to catch.
-    layout = f", {GREEN}l1_layout edited{RESET}" if v.l1_layout_changed else ""
-    axis = f", {CYAN}axis={v.axis_targeted}{RESET}" if v.axis_targeted else ""
-    out = [f"  {GREEN}✓{RESET} L2 decision: {v.param_changes_count} param changes{layout}{axis}"]
-    if v.changes_description:
-        out.append(f"    {v.changes_description}")
-
-    # Address the I/O, never re-print it — and address its CANONICAL home. The audit twin
-    # assembles the whole call human-readably and uncapped; this record carries no copy of it,
-    # so a dump here had nothing local to quote and the old `[:40]` on the response amputated
-    # what it did quote. `AuditTrailProjection` owns deep LLM I/O; this line points at it.
-    out.append(
-        f"  {CYAN}L2 call{RESET} {DIM}→ .runtime/cache/rounds/round_NNNN.json"
-        f"::nodes.l2_context (prompt · response · usage){RESET}"
-    )
-    return "\n".join(out)
-
-
-def _render_plan_enter(v: PlanEnterView) -> str:
-    plan = v.current_plan_preview
-    plan = plan if len(plan) <= 55 else plan[:52] + "..."
-    return "\n" + _node_block(
-        "L3 MODIFY PLAN",
-        f"L2 stalled {v.l2_stall_count} rounds",
-        f"Current plan: {plan}",
-        "LLM designing new strategy...",
-        label_right=f"L3 fire {v.l3_round + 1}",
-    )
-
-
-def _render_plan_exit(v: PlanExitView) -> str:
-    plan = v.new_plan_preview
-    plan = plan if len(plan) <= 55 else plan[:52] + "..."
-    out = [f"  {GREEN}✓{RESET} New plan: {plan}"]
-    if v.changes_description:
-        out.append(f"    {v.changes_description}")
+    out = [f"  {GREEN}✓{RESET} {v.headline}", *(f"    {line}" for line in v.details)]
+    if v.audit is not None:
+        # Address the call's canonical home, never re-print it: the audit twin holds it uncapped.
+        label, node = v.audit
+        out.append(
+            f"  {CYAN}{label}{RESET} {DIM}→ .runtime/cache/rounds/round_NNNN.json"
+            f"::nodes.{node} (prompt · response · usage){RESET}"
+        )
     return "\n".join(out)
 
 
@@ -310,24 +229,37 @@ def to_text(view: AnyView) -> str:
             return _render_round_start(view)
         case CandidatesGeneratedView():
             return _render_candidates_generated(view)
+        case MeasureEnterView():
+            return _render_measure_enter(view)
         case RoundCompleteView():
             return _render_round_complete(view)
-        case EscalationEnterView():
-            return _render_escalation_enter(view)
-        case EscalationExitView():
-            return _render_escalation_exit(view)
-        case L2RefineEnterView():
-            return _render_l2_refine_enter(view)
-        case L2RefineExitView():
-            return _render_l2_refine_exit(view)
-        case PlanEnterView():
-            return _render_plan_enter(view)
-        case PlanExitView():
-            return _render_plan_exit(view)
+        case OptimizerStepEnterView():
+            return _render_step_enter(view)
+        case OptimizerStepExitView():
+            return _render_step_exit(view)
+        case BenchGradedView():
+            return _render_bench_graded(view)
         case _:
             return ""
 
 
+def _render_bench_graded(v: BenchGradedView) -> str:
+    reading = v.reading
+    if reading is None:
+        return f"  {YELLOW}bench: no reading — {v.missing}{RESET}"
+    composite = reading["composite_fitness"]
+    value = "—" if composite is None else f"{composite:.3f}"
+    return (
+        f"  {DIM}bench R{reading['round']}: composite {value} on "
+        f"{reading['n_scored']} held-out rows{RESET}"
+    )
+
+
+_COLLAPSE_WORDS = {
+    "no_op_variant": "no-op",
+    "duplicate_variant": "duplicate",
+    "repeat_variant": "repeat",
+}
 _SP_DIFF_ABSENT = "-"
 _SP_DIFF_UNCHANGED = "·"
 _SP_DIFF_VAL_INLINE_MAX = 12
@@ -348,28 +280,17 @@ def render_sp_diff(view: SpDiffView) -> str:
     ]
     node_param_keys = view.node_param_keys
     round_num = view.round_num
-    n_no_op = view.l1_n_no_op
-    n_duplicate = view.l1_n_duplicate
-    n_repeat = view.l1_n_repeat
-    l1_yield = view.l1_yield
 
     warning_lines: list[str] = []
-    if n_no_op or n_duplicate or n_repeat:
+    bits = [f"{view.collapses[r]} {w}" for r, w in _COLLAPSE_WORDS.items() if view.collapses.get(r)]
+    if bits:
         n_total = sum(1 for label, _ in columns_in if label.startswith("C"))
-        n_valid = max(0, n_total - n_no_op - n_duplicate - n_repeat)
-        bits: list[str] = []
-        if n_no_op:
-            bits.append(f"{n_no_op} no-op")
-        if n_duplicate:
-            bits.append(f"{n_duplicate} duplicate")
-        if n_repeat:
-            bits.append(f"{n_repeat} repeat")
-        bits_text = " / ".join(bits)
+        n_valid = max(0, n_total - sum(view.collapses.values()))
         cl_text = f" ({', '.join(sorted(clone_labels))})" if clone_labels else ""
         warning_lines.append(
             _node_line(
-                f"{YELLOW}⚠ L1 produced {bits_text} variant(s){cl_text} — "
-                f"synthetic-zeroed (no API cost). yield={l1_yield:.0%} "
+                f"{YELLOW}⚠ {view.proposer} produced {' / '.join(bits)} variant(s){cl_text} — "
+                f"synthetic-zeroed (no API cost). yield={n_valid / n_total:.0%} "
                 f"({n_valid}/{n_total} valid).{RESET}"
             )
         )

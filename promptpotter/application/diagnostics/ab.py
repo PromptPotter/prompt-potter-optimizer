@@ -1,19 +1,20 @@
 """The ``ab`` verb's session half: open a session on ANY campaign by id and replay it. The replay itself is
-``optimization/resume_and_fork/ab_replay.py``, beside the replayers it shares with resume."""
+``bench/resume_and_fork/ab_replay.py``, beside the replayers it shares with resume."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from promptpotter.application.initialization.loop_start import arm_diagnostic_scoring
-from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.optimization.resume_and_fork.ab_replay import (
+from promptpotter.application.bench.resume_and_fork.ab_replay import (
     AbReplayError,
     AbReport,
     ab_replay_cycle,
 )
+from promptpotter.application.initialization.loop_start import arm_diagnostic_scoring
+from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
+from promptpotter.domain.measurement_provenance import RunSource
 
 if TYPE_CHECKING:
     from promptpotter.domain.cycle_paths import CycleHop
@@ -44,12 +45,5 @@ async def ab_replay_campaign(
     session.campaign_id = hop.campaign_id
     session.state.cycle_id = hop.cycle_id
     campaign_config = resolve_campaign_config(stores, campaign, hop)
-    arm_diagnostic_scoring(
-        session, campaign_config, source=f"ab:{hop.campaign_id}:{hop.cycle_id}", log=log
-    )
-    return ab_replay_cycle(
-        hop,
-        session,
-        campaign_config.optimization.elimination_n_min,
-        enable_2pl=campaign_config.optimization.enable_2pl_graduation,
-    )
+    arm_diagnostic_scoring(session, campaign_config, source=RunSource.AB, log=log)
+    return ab_replay_cycle(hop, session, campaign_config)

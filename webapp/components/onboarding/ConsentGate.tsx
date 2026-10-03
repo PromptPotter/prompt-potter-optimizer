@@ -1,22 +1,6 @@
 "use client";
-// Post-auth consent gate — the provable-consent surface.
-//
-// Mounts for a SIGNED-IN user whose accepted Terms version doesn't match the
-// live one (`me.terms_accepted_version !== me.terms_version`), and blocks the
-// app behind a non-dismissable overlay until they tick the box and accept. The
-// accept POSTs `/auth/accept-terms`, which writes the provable record
-// (version + server-stamped timestamp) to user.json, then re-probes `/auth/me`
-// so the gate clears. An anon visitor (read-only public preview) is never
-// gated — consent attaches only when someone is about to actually submit data.
-// A PENDING account is never gated either, for that same reason: it holds no
-// capability, so it is not about to submit anything. AccessGate has it instead.
-//
-// Unlike WelcomeLockoutModal this has no close affordance: no ×, no
-// overlay-click dismiss, no ESC (`Dialog` with no `onClose`). The only way out
-// is to agree — that's the point of a gate.
-//
-// Reuses .account-modal / .account-pane-head / .account-pane-body from the
-// account domain stylesheet; .consent-* live in the auth domain stylesheet.
+// Provable-consent gate: `/auth/accept-terms` writes the record server-side. Consent attaches only
+// to someone about to submit data, so anon visitors and non-active accounts are never gated.
 
 import { useState } from "react";
 import { BRAND } from "@/lib/brand";
@@ -28,8 +12,7 @@ import { Dialog } from "@/components/ui";
 export function ConsentGate() {
   const { status, me, refresh } = useAuth();
   const [checked, setChecked] = useState(false);
-  // One sentence for every refusal, because the recovery is the same one either way: the
-  // re-probe below reloads the live terms and this gate re-renders against them.
+  // One sentence for every refusal: the re-probe below reloads the live terms either way.
   const cmd = useCommand<"accept-terms">("consent-gate", {
     revalidate: false,
     describe: () => "Couldn't record that — reloading the current terms. Try again.",
@@ -43,9 +26,7 @@ export function ConsentGate() {
 
   if (!open) return null;
 
-  // Either way the answer is a fresh /auth/me: on success `terms_accepted_version` matches and
-  // the gate clears; on a 409 the displayed terms went stale mid-session and the re-probe pulls
-  // the current ones.
+  // A 409 means the displayed terms went stale mid-session; the re-probe pulls the current ones.
   const onAccept = () =>
     void cmd.run("accept-terms", () => acceptTerms(me.terms_version), refresh).then((r) => {
       if (!r.ok) refresh();

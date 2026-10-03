@@ -8,7 +8,7 @@ import hashlib
 import math
 from collections.abc import Callable, Mapping
 from types import SimpleNamespace
-from typing import Any, NamedTuple, cast
+from typing import Any, Literal, NamedTuple, cast
 
 from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
 from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS
@@ -36,8 +36,8 @@ class ScoringTermMissingError(ScoringFormulaError):
     """The formula names a term the measurement does not carry. Distinct from its parent because the readers want opposites:
     the parent is a contract bug every cell fails, while this one is PER-CELL — a grading that fails
     past its retry omits its term while the cell beside it grades fine. So neither reader halts on
-    it: ``rescore_results`` resolves the row to UNSCORED and keeps the paid measurement, and the
-    read-side mask reports *unscorable*."""
+    it: ``rescore_results`` resolves the row to UNSCORED and keeps the paid measurement — under a
+    lens too, which reads through it."""
 
 
 SAFE_BUILTINS = {
@@ -255,6 +255,9 @@ _CHANNEL_READERS: dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], flo
     "tokens": lambda _row, pd: _own_else_steps(
         _number(pd.get("inner_tokens")), _step_tokens_sum(pd, "input", "output")
     ),
+    # Characters, not tokens: no tokenizer ships, and CAPO's length ratio reads the same over
+    # chars as over the chars/4 estimate `_compute_step_tokens` falls back to.
+    "target_prompt_chars": lambda _row, pd: _number(pd.get("target_prompt_chars")),
 }
 
 # The three health facts a cell answers about ITSELF, as 0/1 so a composite can price them — at
@@ -270,6 +273,34 @@ _ROW_HEALTH: dict[str, Callable[[Mapping[str, Any]], float]] = {
 }
 
 CELL_CHANNELS: tuple[str, ...] = tuple(_CHANNEL_READERS)
+
+
+class CellTerm(NamedTuple):
+    """How a ``per_cell`` term is TAUGHT — the scoring-mask editor's vocabulary, never a reading."""
+
+    direction: Literal["high", "low"]
+    description: str
+
+
+CELL_TERMS: dict[str, CellTerm] = {
+    "fitness": CellTerm("high", "The cell's correctness under the per-sample formula."),
+    "ground_truth_rank": CellTerm("low", "Where the truth landed in the ranking; 1 is the top."),
+    "latency": CellTerm("low", "Seconds the cell took when measured; a replay keeps them."),
+    "unworked": CellTerm("low", "Seconds the cell sat blocked (suspend, rate-limit queue)."),
+    "lift": CellTerm("high", "L4: the inner campaign's mean lift over its own origin."),
+    "origin": CellTerm("high", "L4: the inner campaign's origin level."),
+    "final_lift": CellTerm("high", "L4: the lift the inner campaign ended on."),
+    "peak_lift": CellTerm("high", "L4: the best lift the inner campaign reached."),
+    "rounds": CellTerm("low", "L4: rounds the inner campaign ran."),
+    "round_budget": CellTerm("high", "L4: rounds the inner campaign was allowed."),
+    "cost": CellTerm("low", "USD the cell cost."),
+    "tokens": CellTerm("low", "Input plus output tokens the cell spent."),
+    "target_prompt_chars": CellTerm("low", "Characters of the candidate's prompt template."),
+    "errored": CellTerm("low", "1 where the cell errored, else 0."),
+    "degraded": CellTerm("low", "1 where the pipeline reported degradation, else 0."),
+    "cached": CellTerm("high", "1 where the cell was replayed from the archive, else 0."),
+}
+assert set(CELL_TERMS) == {*_CHANNEL_READERS, *_ROW_HEALTH}, "a per-cell term went untaught"
 
 
 def cell_channels_of(result: Mapping[str, Any]) -> dict[str, float]:
@@ -298,10 +329,8 @@ def cell_namespace(result: dict[str, Any]) -> dict[str, Any]:
     truth was not in the ranking, which is what ``rr`` scores as a miss."""
     pd = result.get("pipeline_data") or {}
 
-    # No ``hit`` here: it is written by ``rescore_results`` AFTER this scorer runs, so a
-    # formula naming it read 0 on every fresh row and the PREVIOUS scorer's value on a
-    # rescore — order-dependent, and silently so. Ask the matchers instead; they are the
-    # arm that decides a label.
+    # No ``hit`` and no grade here: a formula reads the cell's facts, never another formula's
+    # reading of them. Ask the matchers instead; they are the arm that decides a label.
     ns: dict[str, Any] = {
         "ground_truth_rank": result.get("ground_truth_rank"),
         "error": result.get("error"),
@@ -373,12 +402,16 @@ def objective_namespace(result: dict[str, Any]) -> dict[str, Any]:
 
 _LABEL_TERM = "ground_truth"
 
+# The share of the composite a cell would score SOLVED that it keeps when missed, so a miss is
+# ranked by what it cost. Part of the grading function, so `auto_scorer_id` hashes it.
+MISS_COST_SHARE = 0.2
+
 
 def _refuse_label_formula(formula: str, names: frozenset[str], *, source: str) -> None:
     """A formula reading the LABEL, armed against a bank that has none, does not merely score
     badly — it scores WRONG, and in the flattering direction.
 
-    ``exact_match(predicted, ground_truth)`` strips and lowercases both sides, so with the label
+    ``label_match(predicted, ground_truth)`` strips and lowercases both sides, so with the label
     empty every cell whose prediction is also empty compares equal and takes a PERFECT 1.0. That
     is the launcher's own default formula shape (``jobs/launcher/draft_build.py``), so a
     verifier-graded dataset drafted through the browser arrives armed this way with nothing
@@ -394,7 +427,7 @@ def _refuse_label_formula(formula: str, names: frozenset[str], *, source: str) -
     raise PayloadInvalidError(
         f"the {source} {formula!r} compares against {_LABEL_TERM}, but this dataset's cells carry "
         f"no label — its backend answers with a number that its own verifier decided. Every cell "
-        f"would be graded against an empty string, which `exact_match` scores as a PERFECT 1.0 "
+        f"would be graded against an empty string, which `label_match` scores as a PERFECT 1.0 "
         f"wherever the prediction is also empty. Score the observation the backend emits instead "
         f"(the key the connector declares in `required_observation_keys`, e.g. "
         f"`max(0.0, min(1.0, env_reward))`).",
@@ -420,7 +453,7 @@ def compile_scorer(
         raise ValueError(
             "compile_scorer: scoring formula is required. "
             "Set ``campaign_config.scoring`` (e.g. "
-            '"exact_match(predicted, ground_truth)") — a trace carries a prediction '
+            '"label_match(predicted, ground_truth)") — a trace carries a prediction '
             "and a ground truth, never a verdict; the formula IS the verdict."
         )
 
@@ -441,29 +474,43 @@ def compile_scorer(
         _refuse_label_formula(per_cell, composite.names, source="per_cell scoring formula")
 
     def _objective(result: dict[str, Any]) -> float:
-        query = str(result.get("query", "?"))[:80]
-        value = composite.evaluate(objective_namespace(result), f"query {query!r}")
-        return clamp_unit_score(value, formula=per_cell, subject=f"query {query!r}")
+        subject = f"query {str(result.get('query', '?'))[:80]!r}"
+        namespace = objective_namespace(result)
+        charged = clamp_unit_score(
+            composite.evaluate(namespace, subject), formula=per_cell, subject=subject
+        )
+        solved = clamp_unit_score(
+            composite.evaluate({**namespace, "fitness": 1.0}, subject),
+            formula=per_cell,
+            subject=subject,
+        )
+        # Written as a step from `charged`, so a solved cell returns its composite bit-for-bit.
+        return charged + MISS_COST_SHARE * (solved - charged)
 
     return CellScorer(fitness=_fitness, objective=_objective)
 
 
-def auto_scorer_id(per_sample: str | None, per_cell: str | None) -> str:
+def auto_scorer_id(
+    per_sample: str | None, per_cell: str | None, *, judge_instrument: str | None
+) -> str:
     """Stable id over the WHOLE grading function; ``None``/empty ``per_sample`` → ``default_hit``.
 
     ``per_cell`` is half of it — the composite IS ``objective`` — and grades cached under this id
     are what a δ ruler is fit on (`hard_sample_archive`), so an id naming only ``per_sample``
-    hands one arm the other's grades. Absent, the payload is unchanged, so a campaign declaring
-    no composite keeps the id it already has."""
+    hands one arm the other's grades. The judges are the rest: a formula reads the terms they
+    banked, so the same text over another grader is another grading function
+    (``judges.judge_instrument``). Either absent, the payload is unchanged."""
     if not per_sample:
         return DEFAULT_SCORER_ID
-    payload = f"{per_sample}\x1f{per_cell}" if per_cell else per_sample
+    payload = f"{per_sample}\x1f{per_cell}\x1f{MISS_COST_SHARE}" if per_cell else per_sample
+    if judge_instrument is not None:
+        payload = f"{payload}\x1f{judge_instrument}"
     h = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:10]
     return f"auto_{h}"
 
 
 def split_scoring_block(
-    block: str | dict[str, str] | None,
+    block: str | dict[str, str] | None, *, judge_instrument: str | None
 ) -> ScoringSpec:
     if isinstance(block, dict):
         unknown = set(block) - {"per_sample", "per_cell"}
@@ -477,15 +524,20 @@ def split_scoring_block(
             )
         per_sample = block.get("per_sample")
         per_cell = block.get("per_cell")
-        return ScoringSpec(per_sample, per_cell, auto_scorer_id(per_sample, per_cell))
+        scorer_id = auto_scorer_id(per_sample, per_cell, judge_instrument=judge_instrument)
+        return ScoringSpec(per_sample, per_cell, scorer_id)
     if isinstance(block, str) and block:
-        return ScoringSpec(block, None, auto_scorer_id(block, None))
+        return ScoringSpec(
+            block, None, auto_scorer_id(block, None, judge_instrument=judge_instrument)
+        )
     return ScoringSpec(None, None, DEFAULT_SCORER_ID)
 
 
 __all__ = [
     "CELL_CHANNELS",
+    "CELL_TERMS",
     "SAFE_BUILTINS",
+    "CellTerm",
     "CompiledExpression",
     "ScoringFormulaError",
     "ScoringTermMissingError",

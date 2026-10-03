@@ -19,27 +19,18 @@ export interface NestedLayer {
   connector: string | null;
   view: PipelineView | null;
   schema: Record<string, NodeConfigParam[]> | null;
-  // Summed off those rows by the same read that served them. Null while the level is only a
-  // pointer — unknown, which is what an unread node must draw as.
+  // Null while the level is only a pointer: unknown, which is how an unread node draws.
   reach: Record<string, NodeReach> | null;
-  // This layer's own nesting node, served, so a renderer never looks ahead to the next
-  // layer to know whether to draw a handle.
   nestsNode: string | null;
-  // `loading` while only the POINTER to this layer has arrived. The level exists from the
-  // moment something names it, and only its content streams in — a layer that appears late
-  // moves which one is innermost, and the stack re-lays every level out around it.
+  // `loading` while only the POINTER has arrived: a level exists once something names it.
   status: PipelineStatus;
 }
 
-// Backstop for a dataset that transitively declares itself: a visible short read rather
-// than a hung panel. Far above any real nesting.
 const MAX_DEPTH = 6;
 
 export interface NestedPipelines {
   layers: NestedLayer[];
-  // Why the walk stopped early. A truncated recursion that looks finished is worse than a
-  // short one, so this is rendered rather than left to the layer count. In-flight is NOT
-  // reported here — it is the pending layer's own `status`, so the fact has one home.
+  // Rendered: a truncated recursion must not look finished. In-flight is the layer's `status`.
   truncated: string | null;
 }
 
@@ -50,8 +41,6 @@ export function useNestedPipelines(
   enabled: boolean,
 ): NestedPipelines {
   const [state, setState] = useState<NestedPipelines>(EMPTY);
-  // Stamping the key onto the result is the pure-derivation half of webapp/CLAUDE.md
-  // § State reset on prop change — no post-paint frame of the prior campaign's stack.
   const key = enabled && root ? `${root.node}>${root.dataset}` : null;
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
 
@@ -105,10 +94,7 @@ export function useNestedPipelines(
 
   if (!key || !root) return EMPTY;
   if (loadedKey === key) return state;
-  // The pointer already NAMES the next level, so publish it now and let its content land.
-  // Returning zero layers while the walk runs makes the CALLER's own level the innermost
-  // one for a frame — it draws full size, with its own ends, and then re-lays out as a
-  // container the moment the child arrives.
+  // Publish the named level now: zero layers would make the caller's level innermost for a frame.
   return {
     layers: [
       {

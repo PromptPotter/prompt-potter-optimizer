@@ -63,10 +63,16 @@ the inflation that left the outer election unable to crown and PoBB pinned at a 
 `fit_theta_given_delta` scales the SE by `√φ`, the Pearson dispersion estimated off the fit's own
 residuals (Wedderburn 1974). **An estimate, not a knob**, failing safe in both directions: `φ ≈ 1`
 leaves a dichotomous campaign unchanged, `φ < 1` returns a graded backend's real precision, `φ > 1`
-widens the SE on an overdispersed one. It is floored — a response with no residual variance carries
-no evidence about its own dispersion, and an unfloored `φ→0` would report infinite confidence.
+widens the SE on an overdispersed one. It is shrunk toward the nominal 1.0 by an inverse-gamma
+prior rather than floored — a response with no residual variance carries no evidence about its own
+dispersion, and an unshrunk `φ→0` would report infinite confidence.
 
-**1PL today, 2PL when the data earns it.** The current model is difficulty-only. With enough
+**1PL by default; each dataset graduates to 2PL where it wins held-out CV**
+(`enable_2pl_graduation`, on by default). Elsewhere 2PL is the field default —
+[`../research/external-constraints.md`](../research/external-constraints.md) § M14. tinyBenchmarks,
+metabench and [Fluid Benchmarking](https://arxiv.org/abs/2509.11106) all validate IRT ability as
+the comparability tool, which supports θ, but they fit discrimination as well as difficulty, so
+1PL is the choice that needs defending here, not 2PL. With enough
 observations per sample a 2PL fit adds per-sample **discrimination** `aₛ` — how sharply a sample
 separates able from unable candidates, i.e. its signal-to-noise — giving both selection and the gate
 more power. It graduates **per-dataset**, behind the same θ interface, only when it provably beats
@@ -94,12 +100,20 @@ So **a winner with lower accuracy than a rival, or than the previous round, is n
 reads the accuracy column and calls the election wrong, say which column the election used; do not
 treat the inversion as a defect on their word.
 
-**States where θ is NOT ability, and the pushback above is wrong.** Count them off the list, not
-off this sentence — it said "two" while listing three, then listed three while the code served four.
+**So no harness rule ranks rounds by their own readings.** The `--halt-at` target stop
+(`runner/termination.py::target_tripped`) reads the optimizer's declared pick (`Cycle.selection`)
+on the round that picked it — the individual the bench grades — never the high-water of each round's
+composite, which can name a round that is not the pick and stop, or refuse to, on rows the pick never
+sat. The overlap line's members are those picks too (`overlap` below): a pick whose round's composite
+trails an earlier round's still joins it. Only potter's L2/L3 stall comparator keeps that
+high-water, as its own signal.
 
-**All four are now SERVED as a `ThetaCaveat` (`domain/ruler.py`), so the screen and the optimizer's
+**States where θ is NOT ability, and the pushback above is wrong.** Count them off
+`domain/ruler.py::ThetaCaveat`, not off prose.
+
+**Every one is SERVED as a `ThetaCaveat` member, so the screen and the optimizer's
 `confounds` panel read one verdict rather than each deciding.** They arrive on two carriers,
-because they are facts about different things: the three SCALE states are decided by
+because they are facts about different things: the SCALE states are decided by
 `ruler.py::theta_caveat` and ride the round's `AbilityReading.caveat`; the 0% floor is decided by
 `results.py::is_floor_pinned` and rides the candidate row, since it is a property of one arm's
 responses. A sound round can carry a pinned arm, and a pinned arm can sit on a sound ruler.
@@ -148,9 +162,10 @@ responses. A sound round can carry a pinned arm, and a pinned arm can sit on a s
 
   **The question this state makes unanswerable — "is the round-N winner better than C0?" — has its
   own answer, and it is not θ.** `RoundResult.overlap` (`domain/results.py::OverlapReading`) reads
-  C0 and every winner since on the ORIGIN PANEL (`domain/results.py::origin_panel`) — cells the
-  origin answered, fixed for the life of the cycle, each winner topped up onto them at its own
-  election. Fixed because a set re-chosen from what the line happened to share CONTRACTED as the
+  C0 and each individual the optimizer has since declared its pick — the best-so-far the bench
+  grades, by the rule above, never a composite high-water (`domain/results.py::best_line`, the
+  same line for every optimizer) — on the ORIGIN PANEL (`domain/results.py::origin_panel`) — cells the
+  origin answered, fixed for the life of the cycle, each new best topped up onto them once. Fixed because a set re-chosen from what the line happened to share CONTRACTED as the
   line grew, so consecutive rounds' bars answered different questions and a winner that shared
   too little simply had no bar. It is a rate, not an ability, so it needs
   no ruler and no adjustment — which is the point: it is what remains readable when the scale
@@ -164,6 +179,36 @@ responses. A sound round can carry a pinned arm, and a pinned arm can sit on a s
   pulled θ down ~2 logits. `fit_theta_given_delta` raises on it now, and `Cycle.calibrate_ruler`
   makes coverage a postcondition by EXTENDING the ruler onto each round's cells.
 
+## What an arm's lift is read against — `lift_reference`
+
+Every arm's `reference_*` numbers — the blocked lift and its interval, the matched floor — the
+round's `separable` and its `p_value` are read against ONE individual per arm, named by
+`ScoredCandidate.reference_id`, with its rows banked in `RoundResult.reference_results`. Which
+individual is a campaign-level choice, `OptimizationConfig.lift_reference`, and both values run
+under every optimizer so a comparison of the two readings is one knob apart:
+
+- **`best_so_far` (default)** — the round's selected best-so-far individual. It is re-scored on
+  the round's whole panel and paired with each arm on the cells both
+  measured, so a truncated arm keeps its lift and interval but gets no matched floor. It asks
+  whether an arm beats what the bench already holds. Potter's parent IS this individual — its
+  generator mutates the prior winner — so potter reads exactly what it read before the choice
+  existed.
+- **`parents`** — the arm's own `parent_ids`, each re-measured on exactly the cells the arm
+  measured, so every arm has a matched floor. It asks whether the operator that made the arm
+  added anything over its inputs. A crossover child is read against the BETTER of its parents on
+  those cells: the bar it must clear to have gained over what it recombined, and a conservative
+  one, since the better parent is picked on the same cells the lift is read on. An arm with no
+  parent has no reference. A parent is any individual a round measured — an archive elite no
+  round selected included — re-measured under the configuration its round banked
+  (`Cycle.searchpoint`).
+
+Neither value moves what an optimizer's selector reads: potter elects on θ against the round's
+best-so-far and CAPO keeps its population on its own length-penalised objective, whichever lift is
+reported. What
+moves is every number above — and through `separable`, potter's stall ladder. Under `parents`
+arms read against several individuals leave a sample-set mask no single bar to re-derive
+(`mask/load.py::_parent`), so a masked election there is undecidable rather than guessed.
+
 ## ⚠️ The crowning bar is an OPEN defect — be skeptical of anything resting on it
 
 **Unresolved as of 2026-08-29. This is not a caveat on a working mechanism; it is a known bug with
@@ -172,8 +217,9 @@ BAR it reads that column against does not currently test anything, so a crowned 
 evidence than the word "winner" implies. Treat any claim that rests on "this round improved" as
 provisional, and say so rather than passing it on.
 
-- **The bar is a bare point estimate.** `selection.py` admits on `lift > 0.0` — no interval, no
-  multiplicity correction — and `winner.py` sets `improved = bool(winner_id)`. With three arms,
+- **The bar is a bare point estimate.** `selection.py::elect_round_winner` admits on a raw θ
+  lift over the parent above zero — the earned `parent_selection_bias` credit only reorders
+  admitted arms — with no interval and no multiplicity correction — and `runner/round.py::_round_result` sets `improved = bool(winner_id)`. With three arms,
   P(at least one positive | every arm identical to the parent) is **0.875 per round**.
 - **Almost nothing separates.** `separable=True` in 6 of 508 banked rounds; `round_not_separable`
   fired 362 times. `separable` gates the L1 patience reset and is the clock a result quotes
@@ -289,15 +335,16 @@ Together they are a **Knowledge Gradient** acquisition — the one-step Bayesian
 would measuring `(c, s)` shift our point estimate of the best candidate?", closed-form for Bernoulli
 observations under Laplace.
 
-**Selection is parameter-free at the policy level** — no swap thresholds. `select_round_subset`
-ranks the whole bank each round and takes the top `budget`: *exploit* falls out of the ranking
-(samples on the contested band `δ_s ≈ leader θ` carry the most decision information and sort to the
-top), *explore* falls out of the prior. Note the strength of that second term: an unmeasured sample
-carries the population `σ_δ`, and `delta_learning_gain` rises with that SE, so unmeasured samples
-**outrank** measured ones rather than merely competing — and they tie with each other, so the
-tiebreak (ascending `sample_id`) drains the bank in stored order. On a bank stored grouped by label
-that yields disjoint single-label panels per round, and cross-round accuracy stops being a series.
-Cold start → bank-order prefix. The scoring-set floor is `elimination_n_min`.
+**The between-round pick spends the two terms separately, not summed** — no swap thresholds.
+`select_round_subset` (`intelligence/exploration.py`) ranks the whole bank on term 1 alone
+(`adaptive_queue_mechanism.py::decision_order`) against the best θ among the arms in this race, so
+*exploit* falls out of the ranking (samples on the contested band `δ_s ≈ leader θ` sort to the
+top). *Explore* is a reserved tail rather than a term: `_with_ruler_learning` gives the last few
+slots to the cells δ is least sure of, which holds the band open, and `_with_anchor_block` swaps
+already-anchored cells into the tail until the next ruler extension has enough to equate against.
+Summed, `delta_learning_gain` dominated — an unmeasured sample carries the population `σ_δ`, so
+unmeasured samples outranked measured ones and tied with each other, draining the bank in stored
+order. Cold start → bank-order prefix. The scoring-set floor is `elimination_n_min`.
 
 **On by default — but warm-gated.** `mechanisms.selection.per_round_resubset` (default `True`):
 while the δ ruler is still cold the subset stays frozen to the campaign-start prefix
@@ -375,7 +422,7 @@ one per scope: `campaigns/{id}/cycles/{id}/hard_samples.json` (this cycle's roun
 `campaigns/{id}/hard_samples.json` (those folded with the campaign's archive observations). The
 active scoring set is in-memory only — restored on resume by re-running both mutations against the
 rebuilt observation history. **Dataset scope is never persisted**: it is cross-campaign, so no
-campaign owns it, and `GET /datasets/{name}/heatmap` folds it from the archive per request.
+campaign owns it, and `GET /datasets/{name}/cells?scope=dataset` folds it from the archive per request.
 
 ---
 
@@ -383,8 +430,8 @@ campaign owns it, and `GET /datasets/{name}/heatmap` folds it from the archive p
 
 - Acquisition score — `intelligence/adaptive_queue_mechanism.py::pick_value` (with
   `::decision_information_gain` + `::delta_learning_gain`).
-- Round order — `::build_round_order`, called once per round at
-  `optimization/l1/score/loop.py::score_population`.
+- Round order — `::build_round_order`, called once per round by potter's sampler
+  (`optimizers/potter/members.py::AdaptiveQueue.draw`).
 - Between-round subset pick — `intelligence/exploration.py::select_round_subset`, off the LOCKED
   ruler (still **1PL**: feeding graduated discrimination `aₛ` in here is open,
   [`../specs/roadmap.md`](../specs/roadmap.md) § Fitness comparability).

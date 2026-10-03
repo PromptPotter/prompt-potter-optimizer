@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.config.paths import benchmark_datasets_root
-from promptpotter.domain.measurement_provenance import grade_run
+from promptpotter.domain.measurement_provenance import RunSource, grade_run
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.store.dataset_access import readable_dataset_rows
 from promptpotter.shared import GSM8K_ANSWER_RE
@@ -64,14 +64,24 @@ def samples_from_dicts(items: list[dict[str, Any]]) -> list[Sample]:
     return [Sample.from_dict(item, fallback_id=i) for i, item in enumerate(items)]
 
 
+def bank_samples(items: list[dict[str, Any]]) -> list[Sample]:
+    """The bank a run measures off its dataset's items — every reader that partitions it must
+    start here, or two partitions of one split disagree about which rows it held out.
+
+    Whether a MISSING label disqualifies a row is DERIVED from the set, not declared: if any row
+    carries one this is a labelled dataset and a row without is broken; if none does, the dataset
+    is verifier-graded and dropping on that test would empty it."""
+    labelled = any(item.get("ground_truth") for item in items)
+    return samples_from_dicts(
+        [item for item in items if item.get("query") and (item.get("ground_truth") or not labelled)]
+    )
+
+
 def sample_dataset(dataset: list[Sample], sample_size: int) -> list[Sample]:
     """Top-``sample_size`` slice; the bank is already shuffled at creation, so no second RNG. A size above
-    the bank yields ALL of it — deliberate, and what ``sp_budget_origin`` above ``sp_budget_round`` needs."""
+    the bank yields ALL of it — deliberate, and what a wide ``sp_budget_origin`` needs."""
     if sample_size <= 0:
-        # Both budgets land here (`sp_budget_round` per round, `origin_budget()` at C0), so
-        # the message names neither — it named `sp_budget_round` and sent anyone hitting it
-        # off the origin path to the wrong knob.
-        raise ValueError(f"eval budget must be > 0, got {sample_size}")
+        raise ValueError(f"sp_budget_origin must be > 0, got {sample_size}")
     return dataset[:sample_size]
 
 
@@ -132,10 +142,10 @@ def load_bbeh() -> list[Sample]:
 # (`justlogic-d234` → depths 2,3,4), so measuring a new combination costs a dataset dir and
 # nothing else — no loader, no registry row, no depth constant, no listing entry.
 #
-# Each cut MUST remain its own dataset NAME. The archive keys a cell by
-# (dataset_name, node_configs, sample_id) with the query text OUT of the key, so re-cutting
-# in place points sample_id 0..N at new queries while the archive still serves the prior
-# cut's rows under those keys.
+# Each cut MUST remain its own dataset NAME. Per-sample history — δ, hit rates, hard samples —
+# is keyed by (dataset_name, sample_id), so re-cutting in place points sample_id 0..N at new
+# queries that inherit the prior cut's history. Replay needs no such care: it matches a cell by
+# its content, so a query two cuts share is measured once.
 _JUSTLOGIC_TRAIN_PER_DEPTH: int = 200
 # Deterministic and fixed: the per-depth train/test split and the interleave shuffle must
 # reproduce byte-for-byte across processes, or a cut silently becomes a different bank.
@@ -277,16 +287,15 @@ def build_dataset_run_data(
     name: str,
     content_hash: str,
     search_point: JobSearchPoint,
-    scores: dict[str, Any],
     results: list[Any],
     *,
     dataset_name: str | None,
-    source: str = "",
+    source: RunSource,
     pipeline_schema: PipelineSchema,
     human_intervened: bool = False,
 ) -> dict[str, Any]:
-    """Measurement-batch dict for ``Stores.archive.save()``. ``pipeline_schema`` is REQUIRED: it picks the
-    ``sp_hash`` algorithm and supplies ``node_configs``, so a batch without one gets a second identity."""
+    """Measurement-batch dict for ``Stores.archive.save()``, scoreless. ``pipeline_schema`` is REQUIRED: it
+    picks the ``sp_hash`` algorithm and supplies ``node_configs``, so a batch without one gets a second identity."""
 
     rendered_prompt = search_point.render()
     sp_h = search_point.sp_hash(pipeline_schema)
@@ -301,8 +310,7 @@ def build_dataset_run_data(
         "rendered_prompt_hash": hashlib.sha256(
             rendered_prompt.encode(),
         ).hexdigest()[:HASH_TRUNCATE],
-        "item_count": scores["total"],
-        "scores": scores,
+        "item_count": len(measurements),
         "source": source,
         "provenance": provenance.as_dict(),
         "created_at": utcnow_iso(),

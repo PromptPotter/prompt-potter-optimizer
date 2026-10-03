@@ -1,6 +1,3 @@
-/* Badge primitive — a small pill label. A tone always rides text that carries
-   the same meaning; state is never conveyed by colour alone. */
-
 @layer ui {
 .badge {
   font-size:var(--text-xs);

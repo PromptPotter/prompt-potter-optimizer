@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.pobb.classification import (
+from promptpotter.application.scoring.classification import (
     get_ranked_items,
     ranked_item_keys_from_schema,
 )
@@ -14,7 +14,7 @@ from promptpotter.application.scoring.row_diagnostics import find_rank
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.results import (
-    is_round_winner,
+    ArmOutcome,
     overlap_series,
     resolved_fitness,
     scoreboard_rank_key,
@@ -52,14 +52,15 @@ def fmt_elapsed(seconds: float) -> str:
 _PLATEAU_THETA_BAND = 0.05
 
 
-def render_progress_table(rounds: list[dict[str, Any]]) -> str:
+def render_progress_table(rounds: list[dict[str, Any]], *, stamps_theta: bool) -> str:
+    """``stamps_theta`` is the selector's own declaration: one that elects on no θ gets no θ
+    column, trend or plateau advice, since its rounds were never decided on one."""
     if not rounds:
         return ""
 
-    header = (
-        f"{'Round':<7s} {'Accuracy':>9s} {'n':>5s} {'Composite':>10s} "
-        f"{'Ability θ':>10s} {'Trend':>9s}"
-    )
+    header = f"{'Round':<7s} {'Accuracy':>9s} {'n':>5s} {'Composite':>10s}"
+    if stamps_theta:
+        header += f" {'Ability θ':>10s} {'Trend':>9s}"
     lines: list[str] = [_node_line(header)]
 
     # Trend and the plateau banner read ABILITY, never accuracy. Under `per_round_resubset` each
@@ -87,10 +88,12 @@ def render_progress_table(rounds: list[dict[str, Any]]) -> str:
         # then the fixed yardstick every round shares. One number would hide that two rounds
         # with the same `n` can have bought entirely different cells.
         n = int(rd.get("total") or 0)
-        row = f"  {rl:<5s} {acc:>8.1%} {n:>5d} {comp:>9.4f} {th_str:>10s} {trend:>9s}"
+        row = f"  {rl:<5s} {acc:>8.1%} {n:>5d} {comp:>9.4f}"
+        if stamps_theta:
+            row += f" {th_str:>10s} {trend:>9s}"
         lines.append(_node_line(row))
 
-    if len(thetas) >= 3:
+    if stamps_theta and len(thetas) >= 3:
         recent = thetas[-3:]
         mean = sum(recent) / 3
         if all(abs(t - mean) < _PLATEAU_THETA_BAND for t in recent):
@@ -117,19 +120,15 @@ def render_round_stats(
         # display ordering — never a private accuracy-argmax that can star a
         # candidate the engine didn't elect.
         best = next(
-            (
-                s
-                for s in round_result.candidate_scores
-                if is_round_winner(s.candidate_id, round_result.winner_id)
-            ),
+            iter(round_result.selected_scores),
             max(
                 round_result.candidate_scores,
                 key=lambda s: scoreboard_rank_key(
                     s.composite_fitness,
                     s.accuracy,
                     s.theta,
-                    is_winner=is_round_winner(s.candidate_id, round_result.winner_id),
-                    is_partial=bool(s.partial_reason),
+                    is_selected=s.label in round_result.selected_labels,
+                    is_partial=s.outcome is ArmOutcome.SKIPPED,
                 ),
             ),
         )
@@ -147,25 +146,27 @@ def render_round_stats(
         )
     )
 
-    # The winner's blocked lift over the matched parent WITH its interval — the served
+    # The selected arm's blocked lift over its reference WITH its interval — the served
     # `RoundResult` pair, not a recomputation. The header above prints a point estimate and every
     # other line reads the same on a round that resolved nothing as on one that resolved
-    # something; this is the line that separates them. Silent when the round crowned nobody or the
-    # panel held under two shared cells, where the absence is the honest answer.
-    lo, hi = round_result.matched_parent_lift_ci_lo, round_result.matched_parent_lift_ci_hi
-    if round_result.matched_parent_lift is not None and lo is not None and hi is not None:
+    # something; this is the line that separates them. Silent when the round selected nobody or
+    # the panel held under two shared cells, where the absence is the honest answer.
+    selected = next(iter(round_result.selected_scores), None)
+    lift = selected.reference_lift if selected else None
+    lo = selected.reference_lift_ci_lo if selected else None
+    hi = selected.reference_lift_ci_hi if selected else None
+    if lift is not None and lo is not None and hi is not None:
         spans_zero = lo <= 0.0 <= hi
         verdict = (
-            f"{YELLOW}spans 0 — not separable from the parent{RESET}" if spans_zero else "clears 0"
+            f"{YELLOW}spans 0 — not separable from its reference{RESET}"
+            if spans_zero
+            else "clears 0"
         )
         lines.append(
-            _node_line(
-                f"lift vs matched parent: {round_result.matched_parent_lift:+.3f} "
-                f"[{lo:+.3f}, {hi:+.3f}]  |  {verdict}"
-            )
+            _node_line(f"lift vs reference: {lift:+.3f} [{lo:+.3f}, {hi:+.3f}]  |  {verdict}")
         )
 
-    # The 1-to-1 series: the parent line read on the cells all of it has answered. It is the
+    # The 1-to-1 series: the best-so-far line read on the cells all of it has answered. It is the
     # ONLY line here two rounds can be differenced on — every other number above is read on the
     # subset this round happened to buy. Silent until the line has a second member.
     if series := overlap_series(round_result.overlap):
@@ -224,10 +225,10 @@ def render_round_stats(
     return "\n".join(lines)
 
 
-def render_patience_status(improved: bool, l1_stall_count: int, l1_patience: int) -> str:
+def render_patience_status(improved: bool, stall: int, patience: int) -> str:
     if improved:
         return _node_line(f"{GREEN}✓ Improvement detected, auto-continuing...{RESET}")
-    return _node_line(f"{YELLOW}⚠ No improvement ({l1_stall_count}/{l1_patience} patience){RESET}")
+    return _node_line(f"{YELLOW}⚠ No improvement ({stall}/{patience} patience){RESET}")
 
 
 __all__ = [

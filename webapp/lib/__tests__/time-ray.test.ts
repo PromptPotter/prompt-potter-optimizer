@@ -3,10 +3,6 @@ import { fmtGap } from "@/lib/format";
 import { raySteps, rayHead, WEDGED_AFTER_S } from "@/lib/derivations";
 import type { RayItem } from "@/lib/api/types";
 
-// The ray's two load-bearing derivations. Both are pure, both decide something an operator
-// reads as a fact about the run, and neither has any other witness — a wrong gap or a wrong
-// head state renders perfectly and says the wrong thing.
-
 const ROOT = "camp::cycle_root";
 const INNER = "camp::cycle_root~inner::cycle_in";
 
@@ -49,10 +45,8 @@ function innerRound(sec: number, n: number, offset: number): RayItem {
 
 describe("raySteps", () => {
   it("drops bare heartbeats from the steps but keeps them as gap suppressors", () => {
-    // THE COUPLING this test exists to hold. `measure_sample`'s QUERY_TIMEOUT is 120 s and
-    // the heartbeat fires every 15 s, so a legitimate long query is 120 s of wall-clock with
-    // heartbeats through it. If the heartbeats stopped feeding the silence clock, every
-    // backend query would sprout a spurious "── 2m ──".
+    // A heartbeated long `measure_sample` query grows no gap; stop feeding heartbeats to
+    // the silence clock and every backend query sprouts a spurious one.
     const steps = raySteps(
       [round(0, 1, 0), heartbeat(60, 1), heartbeat(110, 2), round(120, 2, 3)],
       ROOT,
@@ -75,8 +69,7 @@ describe("raySteps", () => {
     );
     expect(steps.map((s) => s.pathKey)).toEqual([ROOT, INNER, ROOT]);
     expect(steps[1]?.cluster).toBe(3);
-    // The cluster's gap is the gap before the RUN began — folding the interior silences in
-    // would invent a pause that never happened.
+    // The cluster's gap is the one before the run began; interior silences are no pause.
     expect(steps[1]?.gapBeforeS).toBe(1);
     // Consecutive ROOT steps never cluster: they are the story, not a digression.
     expect(steps[0]?.cluster).toBe(1);
@@ -102,9 +95,8 @@ describe("rayHead", () => {
     rayHead(raySteps(items, ROOT), items, phase, "Finished", T0 + nowSec * 1000, ROOT);
 
   it("reads wedged when the server still says running and nothing has progressed", () => {
-    // THE POINT OF THE WHOLE ARC. Every await that outlasts RUN_FRESH_S must heartbeat, so a
-    // live cycle can never go stale — which means a WEDGED process reads `running` forever.
-    // Freshness proves attachment, never progress.
+    // Every await past RUN_FRESH_S heartbeats, so freshness proves attachment, never
+    // progress: a WEDGED process reads `running` forever.
     const items = [round(0, 1, 0), heartbeat(WEDGED_AFTER_S + 60, 1)];
     const head = label(items, "running", WEDGED_AFTER_S + 61);
     expect(head.state).toBe("wedged");
@@ -112,10 +104,8 @@ describe("rayHead", () => {
   });
 
   it("never reads wedged at the origin gate, however long it is held", () => {
-    // The gate is the package's only UNBOUNDED await — it ends when a human decides — and it
-    // heartbeats. So it emits proof-of-life and zero progress indefinitely and would trip any
-    // threshold within minutes. It is not wedged: it is blocked on the operator, and it
-    // already has a state that says exactly that.
+    // The gate is the only UNBOUNDED await and heartbeats with zero progress: it is
+    // blocked on the operator, not wedged.
     const items = [round(0, 1, 0), heartbeat(9999, 1)];
     expect(label(items, "gate", 10_000).state).toBe("gate");
   });

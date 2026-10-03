@@ -12,10 +12,10 @@ import logging
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from promptpotter.application.bench.difficulty import _calibrate_delta_ruler
 from promptpotter.application.datasets.authored import dataset_cell_scorer
 from promptpotter.application.intelligence.exploration import extend_ruler
 from promptpotter.application.intelligence.hard_sample_archive import build_archive_observations
-from promptpotter.application.optimization.cycle import _calibrate_delta_ruler
 from promptpotter.application.runner.inner.spawn_context import (
     inner_spawn_context,
     set_inner_rulers,
@@ -41,12 +41,11 @@ def refresh_inner_rulers(
     At run init and each outer round boundary, where the prior round's cells are all banked. A
     no-op for a campaign that spawns nothing."""
     ctx = inner_spawn_context()
-    if ctx is None or ctx.panel is None or not session.state.cycle_id:
+    if ctx is None or ctx.cells is None or not session.state.cycle_id:
         return
-    datasets = {ctx.panel.dataset_for(cell) for cell in ctx.panel.tasks}
     rulers = {
         name: ruler
-        for name in sorted(datasets)
+        for name in sorted(ctx.cells.by_dataset)
         if (ruler := _fit_or_extend(session, campaign_config, name, round_num)) is not None
     }
     set_inner_rulers(replace(ctx, rulers=rulers))
@@ -68,6 +67,8 @@ def _fit_or_extend(
         dataset_name=dataset_name,
         scorer=scorer,
         scorer_id=scorer_id,
+        # An inner cell holds nothing out (`tasks.py::inner_instrument_config`).
+        sample_ids=None,
     )
     if not obs:
         return None

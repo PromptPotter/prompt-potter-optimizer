@@ -8,7 +8,11 @@ import time
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
+from promptpotter.domain.launch_limits import RoundsCap
 from promptpotter.domain.phases import RunPhase
+from promptpotter.domain.run_records import RunLimitsRecord
 from promptpotter.domain.spend import BudgetChange
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
 from promptpotter.infrastructure.store.layout import CycleLayout
@@ -88,54 +92,80 @@ def read_sample_lookahead(cycle_dir: Path) -> int:
     return max(1, cells)
 
 
-def clear_run_control_flags(cycle_dir: Path) -> BudgetChange:
-    """Drop every POLLED run-control flag — a fresh launch IS the operator's intent to run at the
-    engine's own cadence, and a flag surviving the gesture it answered re-answers the next one. An
-    ``auto`` look-ahead answered no gesture, so it stays until toggled off.
+def clear_run_control_flags(cycle_dir: Path) -> None:
+    """Drop every POLLED run-control flag a fresh launch supersedes — a launch IS the operator's
+    intent to run at the engine's own cadence, and a flag surviving the gesture it answered
+    re-answers the next one. An ``auto`` look-ahead answered no gesture, so it stays until toggled
+    off.
 
-    **Returns the spend ceiling it dropped, and the caller must compose it.** Alone among these
-    flags, ``spend_cap.json`` can carry a decision the run has not acted on yet:
-    ``change-spend-budget`` applies to a PAUSED cycle too, and swept like the rest, a lowering the
-    operator was acked ``applied`` for simply stopped existing at resume. Reading it HERE rather
-    than at the call site is what stops the read and the sweep drifting apart into the wrong order,
-    which loses the ceiling with nothing raising."""
+    ``run_limits.json`` goes too, and loses nothing: it only MIRRORS the ledger's standing ceiling,
+    which the launch has already declared and admitted, and re-lands the mirror at the value it
+    holds (`runner/entry.py::_prepare_run`)."""
     layout = CycleLayout(cycle_dir)
-    dropped = read_spend_caps(cycle_dir)
     layout.pause_flag.unlink(missing_ok=True)
     layout.skip_flag.unlink(missing_ok=True)
+    layout.run_limits.unlink(missing_ok=True)
     spend_sample_lookahead(cycle_dir)
-    # `entry.py::_usd_cap` prefers this file over the cap the launch just composed, so a ceiling
-    # clamped against a richer account governs every later resume unless it goes with the run.
-    layout.spend_cap.unlink(missing_ok=True)
-    return dropped
 
 
-def write_spend_caps(cycle_dir: Path, change: BudgetChange) -> None:
-    """Land the live ceilings, an untouched arm omitted. Peer of :func:`read_spend_caps` so the
-    shape is spelled once — a caller hand-building this dict is a writer that can drift from its
-    own reader."""
-    path = CycleLayout(cycle_dir).spend_cap
+def write_run_limits_mirror(
+    cycle_dir: Path, change: BudgetChange, *, rounds: RoundsCap | None
+) -> None:
+    """Land the POLLED MIRROR of the cycle's standing operator ceiling, an unset arm omitted — so
+    ``max_rounds: null`` (a lifted round cap) and no ``max_rounds`` key are two answers.
+
+    The mirror has one job: carrying a ceiling moved in another process to a run already in
+    flight, read on every paid call (`runner/entry.py::_build_budget_gate`), every round boundary
+    (`runner/loop.py`) and every served dashboard (:func:`overlay_armed_controls`), where
+    rescanning the ledger each time costs the whole log. What the operator DECLARED is the ledger's
+    ``RunLimitsRecord`` alone — `CampaignStore.write_run_limits` writes both, and nothing
+    else declares one."""
+    path = CycleLayout(cycle_dir).run_limits
     path.parent.mkdir(parents=True, exist_ok=True)
-    caps: dict[str, float | int] = {}
+    caps: dict[str, float | int | None] = {}
     if change.usd is not None:
         caps["max_usd"] = change.usd
     if change.tokens is not None:
         caps["max_tokens"] = change.tokens
+    if rounds is not None:
+        caps["max_rounds"] = rounds.max_rounds
     write_json(path, caps)
 
 
-def read_spend_caps(cycle_dir: Path) -> BudgetChange:
-    """Live ceilings, ``None`` per arm when absent, unreadable or the wrong type.
-    **The one place that knows this file's shape.**"""
-    data = read_json_tolerant(CycleLayout(cycle_dir).spend_cap)
+def read_run_limits_mirror(cycle_dir: Path) -> RunLimitsRecord:
+    """The mirrored ceilings, ``None`` per arm when absent, unreadable or the wrong type — for the
+    pollers only; a launch reads the ledger (`CampaignStore.read_run_limits`). The one place that
+    knows this file's shape."""
+    data = read_json_tolerant(CycleLayout(cycle_dir).run_limits)
     if not isinstance(data, dict):
-        return BudgetChange(None, None)
+        return RunLimitsRecord()
     usd = data.get("max_usd")
     tokens = data.get("max_tokens")
-    return BudgetChange(
-        float(usd) if isinstance(usd, int | float) and not isinstance(usd, bool) else None,
-        int(tokens) if isinstance(tokens, int) and not isinstance(tokens, bool) else None,
+    rounds = None
+    if "max_rounds" in data:
+        try:
+            rounds = RoundsCap(max_rounds=data["max_rounds"])
+        except ValidationError:
+            rounds = None
+    return RunLimitsRecord(
+        usd=float(usd) if isinstance(usd, int | float) and not isinstance(usd, bool) else None,
+        tokens=int(tokens) if isinstance(tokens, int) and not isinstance(tokens, bool) else None,
+        rounds=rounds,
     )
+
+
+def armed_run_limits(cycle_dir: Path) -> dict[str, float | int | None]:
+    """The mirror as ``run_limits`` updates, an unmoved arm omitted — the ARMED ceilings, which
+    both writers of a dashboard body lay over the ones INIT declared."""
+    mirror = read_run_limits_mirror(cycle_dir)
+    armed: dict[str, float | int | None] = {}
+    if mirror.usd is not None:
+        armed["spend_budget_usd"] = mirror.usd
+    if mirror.tokens is not None:
+        armed["token_budget"] = mirror.tokens
+    if mirror.rounds is not None:
+        armed["max_rounds"] = mirror.rounds.max_rounds
+    return armed
 
 
 def overlay_armed_controls(body: dict[str, Any], cycle_dir: Path) -> None:
@@ -153,11 +183,7 @@ def overlay_armed_controls(body: dict[str, Any], cycle_dir: Path) -> None:
     moment's is a fabrication. Call it after ``run_phase`` is set on the body."""
     limits = body.get("run_limits")
     if isinstance(limits, dict):
-        armed_usd, armed_tokens = read_spend_caps(cycle_dir)
-        if armed_usd is not None:
-            limits["spend_budget_usd"] = armed_usd
-        if armed_tokens is not None:
-            limits["token_budget"] = armed_tokens
+        limits.update(armed_run_limits(cycle_dir))
     # Clamped against the SERVED ceiling, so this is the depth the walk will hold rather than the
     # depth someone asked for. `max_cells_in_flight` is a WIRING_FIELD stamped at INIT:exit, so it
     # is already in the body being corrected. Unclamped, an out-of-range request rendered as fact —
@@ -172,7 +198,9 @@ def overlay_armed_controls(body: dict[str, Any], cycle_dir: Path) -> None:
     # The flight gauge is the one FOLDED value that goes stale the same way: a killed or crashed
     # run never publishes its closing zero, so a dead producer would go on reporting calls out.
     if body.get("run_phase") != RunPhase.RUNNING:
-        body.update(in_flight=0, lookahead_allowed=0, waiting_on=None, waiting_since=None)
+        body.update(
+            in_flight=0, lookahead_allowed=0, waiting_on=None, waiting_since=None, backpressure=None
+        )
 
 
 # dashboard.json untouched for longer than this ⇒ an active cycle's producer is
@@ -268,10 +296,18 @@ def run_phase_validator_epoch(cycle_dir: Path, *, fresh_s: float = RUN_FRESH_S) 
     ``detached`` edge moves with the CLOCK, so without it a stale ``If-Modified-Since`` pins a dead
     producer at ``running`` for as long as the browser keeps polling. It is read from
     :func:`_detached_after`, the same expression the phase itself derives from — restating it here
-    is what would let the 304 outlive the answer it stands for."""
+    is what would let the 304 outlive the answer it stands for. The campaign's ``campaign.json``
+    rides too: a halted cycle serves the ceilings its frozen config declares."""
     layout = CycleLayout(cycle_dir)
+    campaign_manifest = cycle_dir.parent.parent / "campaign.json"
     stamps: list[float] = []
-    for path in (layout.cycle_dir, layout.dashboard, layout.manifest, layout.runtime):
+    for path in (
+        layout.cycle_dir,
+        layout.dashboard,
+        layout.manifest,
+        layout.runtime,
+        campaign_manifest,
+    ):
         try:
             stamps.append(path.stat().st_mtime)
         except OSError:
@@ -284,15 +320,16 @@ def run_phase_validator_epoch(cycle_dir: Path, *, fresh_s: float = RUN_FRESH_S) 
 
 __all__ = [
     "RUN_FRESH_S",
+    "armed_run_limits",
     "clear_run_control_flags",
     "derive_run_phase",
     "is_checkin",
     "is_paused",
+    "read_run_limits_mirror",
     "read_sample_lookahead",
-    "read_spend_caps",
     "run_phase_validator_epoch",
     "sample_lookahead_auto",
     "spend_sample_lookahead",
+    "write_run_limits_mirror",
     "write_sample_lookahead",
-    "write_spend_caps",
 ]

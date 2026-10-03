@@ -62,7 +62,7 @@ def branch_offset(cycle_dir: CycleDir) -> int | None:
     as ``index.json::forked_at_offset``. ``None`` for a root, which inherits nothing.
 
     The one copy of this number: ``forked_from_round`` is a round and ``forked_at`` a wall clock,
-    so neither substitutes for it. A FORK whose manifest predates the stamp raises rather than
+    so neither substitutes for it. A FORK whose manifest carries no stamp raises rather than
     defaulting — inheriting ``0`` would silently serve a fork as though it began from nothing,
     which reads as a real (and much shorter) history."""
     link = _fork_link(cycle_dir)
@@ -165,7 +165,7 @@ class CycleEventLog:
         """The whole chain — a fork's parent prefix, then this ledger's own records — as
         ``(offset, record)``, cut after ``own_limit`` of THIS ledger's own records; ``offset`` is a
         ``Cut``'s. ``own_limit`` counts OWN records, never the chain: that is what
-        ``forked_at_offset`` counts (``campaign_store::_branch_offset`` reads the parent's
+        ``forked_at_offset`` counts (``campaign_store/store.py::_branch_offset`` reads the parent's
         ``next_offset``) and what a caller holds, and bounding the chain instead truncates a fork
         of a fork inside its GRANDPARENT."""
         if self._inherit_parent is not None:

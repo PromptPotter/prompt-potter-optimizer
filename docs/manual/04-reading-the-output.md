@@ -8,7 +8,7 @@ While a campaign runs, three streams tell you what's happening: per-sample lines
 init       origin       round 1..N            stop
   │           │              │                    │
   ▼           ▼              ▼                    ▼
-prep      score start      generate → evaluate     winner
+prep      score start      generate → score        winner
 no LLM    prompt on full   → critique → winner    in index.json
 calls     scoring slice    selection              best in log.md
                            (L2 fires on stall;
@@ -20,9 +20,9 @@ Each round runs four steps in sequence:
 | Step | What happens |
 |------|--------------|
 | 🧪 **Generate** | The optimizer proposes N new candidates, informed by last round's critique. |
-| ⚖️ **Evaluate** | Each candidate is scored query-by-query. Inferior candidates can be eliminated early once there's enough statistical evidence (~4+ samples). |
+| ⚖️ **Score** | Each candidate is scored query-by-query. Inferior candidates can be eliminated early once there's enough statistical evidence (`elimination_n_min`, default 6 samples). |
 | 📝 **Critique** | The optimizer reads the raw results and writes a structured analysis: where it failed, what to try next. |
-| 🏆 **Winner** | Round's best beats the current best by ≥ improvement threshold → new best. Otherwise patience ticks up. |
+| 🏆 **Winner** | The round is elected on difficulty-adjusted ability (θ) against its parent — the candidate this round's were mutated from — with no threshold knob ([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § Reading a round). A winner becomes the next parent; otherwise patience ticks up. |
 
 When patience runs out, an **outer loop** steps in to redirect (see [chapter 1 — When the optimizer gets stuck](01-what-is-promptpotter.md#when-the-optimizer-gets-stuck)). Self-healing also fires whenever a candidate produces invalid or broken output — full mechanics in [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md).
 
@@ -55,18 +55,19 @@ A round opens with a rule naming the round and the distance to the next escalati
 ROUND 3/10                                        stall 0/3 → L2
 
 GENERATE
-  Current best    62.0%
+  Parent accuracy 62.0%
   Parent prompt   You are a careful reasoner…
   Candidates      5   Prior critique: from R2
   Model           openai/gpt-oss-20b
 ```
 
-It closes with a scoreboard, one verdict line, and the critique:
+Scoring opens under a `MEASURE` rule naming the manifest's measurement node, and the round
+closes with a scoreboard and one verdict line:
 
 ```
   Scoreboard: C3.1=74.0% | C3.2=71.0% | C3.3=68.0%
-  ✓ IMPROVED  74.0% (was 62.0%, +12.0%)  p=0.003 **  ->  next: continue
-  L1 Critique: …
+  ✓ SELECTED C3.1  74.0% (vs reference 62.0%, +12.0%)  p=0.003 **
+  why: …
 ```
 
 | Line | Meaning |
@@ -74,11 +75,10 @@ It closes with a scoreboard, one verdict line, and the critique:
 | `ROUND 3/10` | Round number and ceiling. In lives mode the ceiling is replaced by a ♥ bank. |
 | `stall 0/3 → L2` | Rounds of no improvement, and how many trigger [L2](../concepts/the-loop.md). Reads `L2 every round` when patience is 0. |
 | `Prior critique` | Whether last round produced one — the input this round's candidates were built from. |
-| `Scoreboard` | Each candidate's accuracy. Above three candidates this becomes a full box adding composite fitness, 95% CI and delta, with the winner marked `*`. |
-| the verdict | One of `✓ IMPROVED`, `✗ NOT PROMOTED` (a positive delta blocked by significance or the sample floor — the reason is named inline) or `⚠ NO IMPROVEMENT`. |
-| `(was 62.0%, +12.0%)` | The **matched-pair** origin: the origin restricted to the samples this winner actually measured. A winner that stopped before covering the panel gets no such clause, because subtracting the full-set origin from a prefix would publish lift nobody measured. |
-| `p=0.003 **` | Significance of the improvement; the stars are the band. |
-| `L1 Critique:` | The optimizer's own analysis, flattened to a single line. |
+| `Scoreboard` | Each candidate's accuracy. Above three candidates this becomes a full box adding composite fitness, 95% CI and delta, with the selected arm marked `*` — and an `Ability θ` column where the optimizer's selector fits one per arm. |
+| the verdict | `✓ SELECTED <label>` or `· HELD` (the best-so-far stands). The accuracy on it never decided the round — the optimizer's selector did — so a `why:` line beneath states its reason whichever way it went. |
+| `(vs reference 62.0%, +12.0%)` | The **matched-pair** reference — the individual this arm's lift is read against (`lift_reference`) — restricted to the samples the arm actually measured. An arm that stopped before covering its reference's panel gets no such rate, because subtracting a full-set rate from a prefix would publish lift nobody measured. |
+| `p=0.003 **` | Significance of the lift over that reference; the stars are the band. |
 
 Candidate labels are `C0` for the origin and `C{round}.{n}` after it — so `C3.2` is the second candidate of round 3.
 
@@ -93,7 +93,7 @@ When the optimizer finds something notable, it surfaces a two-line annotation:
 
 ```
 ⚠ llm_only.model = 'gpt-4o'  ∉ [openai/gpt-oss-20b, groq/llama-3.3-70b, … (+5)]
-  ↳ scored 0 (no backend call); L2 brief will name this value
+  ↳ scored 0 (no backend call); the next l1_generate reads it in l1_wounds
 ```
 
 A candidate cut mid-scoring says which mechanism cut it, and both forms start `✂`:
@@ -112,10 +112,10 @@ The optimizer has already handled it — these exist for audit, not to ask for i
 
 - **Webapp preview** — in a separate terminal, run:
   ```bash
-  python -m uvicorn promptpotter.main:app --port 8001
+  python -X utf8 -m uvicorn promptpotter.main:app --port 8001
   ```
   then open <http://127.0.0.1:8001/>. Keep `python -m promptpotter resume` running in another terminal for live refresh.
-- For a headless tail of the live run readout (per-sample HIT/MISS, round summaries), read the gitignored `logs/latest.log` — the most-recent run's stdout, ANSI-stripped.
+- For a headless tail of the live run readout (per-sample HIT/MISS, round summaries), read the cycle's `readout.log` — its stdout, ANSI-stripped, the path printed as `Readout:` at launch. The gitignored `logs/latest-readout-path.txt` names the newest launch's.
 
 Full on-disk shape — the exact `dashboard.json` / `active_session.json` paths, fork-directory layout: [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md).
 
@@ -125,9 +125,9 @@ Best config, provenance, and per-round digest all live under the campaign's dire
 
 ## Stopping
 
-A campaign stops when: round limit reached, perfect accuracy, or Ctrl+C. First Ctrl+C cancels the in-flight call, saves everything already banked, and exits 130; second force-quits.
+A campaign stops when: round limit reached, perfect accuracy, or Ctrl+C. First Ctrl+C pauses: it saves everything already banked and exits 130, cancelling a sent call only where cancelling stops what it bills (`Connector.cancel_stops_billing`) and otherwise letting it land; second force-quits.
 
-After it **finishes**: best config in `index.json::final` (`winner_prompt_fields` / `winner_pipeline_params`); the same winner with its provenance, in the shape another program reads, in `export.json`; per-round digest in `log.md`; live state in `dashboard.json`. Open these directly; `evidence` is the one read VERB, because a comparison ACROSS subjects is in no single file. Ctrl+C is a pause, not a finish: it writes no `final` and no `finished_at`, which is what keeps the cycle resumable.
+After it **finishes**: the optimizer's declared pick in `index.json::final` (`result_round` / `result_prompt_fields` / `result_pipeline_params`); the same winner with its provenance, in the shape another program reads, in `export.json`; per-round digest in `log.md`; live state in `dashboard.json`. Open these directly; `evidence` is the one read VERB, because a comparison ACROSS subjects is in no single file. Ctrl+C is a pause, not a finish: it writes no `final` and no `finished_at`, which is what keeps the cycle resumable.
 
 ## Resuming and rewinding
 

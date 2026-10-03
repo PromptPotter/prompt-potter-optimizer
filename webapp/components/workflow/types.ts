@@ -1,6 +1,4 @@
-// The `Optimizer` card's own types — the `/optimizer-pipeline` envelope and the node-kind
-// vocabulary every graph surface reads. The graph shapes themselves are re-exported from
-// the generated wire types, never mirrored here.
+// The Optimizer card's own types; graph shapes are re-exported from the generated wire types.
 
 export type {
   OptimizerPipelineResponse as PipelineDoc,
@@ -9,9 +7,7 @@ export type {
   PipelineViewNode,
 } from "@/lib/api";
 
-// ONE record per node kind. Its three projections — the chip label, the sentence under a
-// node's header, and the CSS suffix — are one closed set; hold them apart and a caller
-// styles a kind another caller captions differently. The set is the server's
+// ONE record per node kind: label, caption and CSS suffix stay one closed set, the server's
 // (`pipeline_schema.py::PipelineViewNode.kind`).
 const NODE_KINDS: Record<string, { label: string; role: string }> = {
   llm: { label: "LLM", role: "LLM call — runs the prompt below against each query." },
@@ -31,9 +27,7 @@ const NODE_KINDS: Record<string, { label: string; role: string }> = {
   io: { label: "I/O", role: "Pipeline terminal." },
 };
 
-// Absent kind resolves to `tool` — the PRODUCER's own fallback
-// (`pipeline_parsing.py::_derive_node_kind`), so the browser cannot name it something the
-// server would not.
+// Absent kind resolves to `tool`, the producer's own fallback (`pipeline_parsing.py::_derive_node_kind`).
 export function nodeKind(kind: string | undefined): {
   label: string;
   role: string;
@@ -43,9 +37,7 @@ export function nodeKind(kind: string | undefined): {
   return { ...(NODE_KINDS[key] ?? { label: key, role: "Pipeline node." }), cls: `kind-${key}` };
 }
 
-// What a node's dot says UNDER its name. `measurement` runs no model and says what it is
-// instead; an unresolved read is "…" rather than "idle", which would claim a node has never
-// fired when the answer has simply not arrived yet.
+// An unresolved read is "…", never "idle", which would claim the node never fired.
 export function nodeSubLabel(kind: string, model: string | null, loading: boolean): string {
   if (kind === "io") return "";
   if (kind === "measurement") return nodeKind(kind).label;
@@ -53,9 +45,8 @@ export function nodeSubLabel(kind: string, model: string | null, loading: boolea
   return loading ? "…" : "idle";
 }
 
-// One node block as written by AuditTrailProjection._handle_llm_call
-// (promptpotter/infrastructure/projections/audit_trail.py). Shared by
-// dashboard.json::current_round.nodes and round_NNNN.json::nodes.
+// As written by AuditTrailProjection._handle_llm_call; shared by `current_round.nodes` and
+// `round_NNNN.json::nodes`.
 export interface NodeDataLike {
   model?: string;
   duration_s?: number;

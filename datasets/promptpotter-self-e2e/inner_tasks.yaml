@@ -17,8 +17,11 @@ inner_benchmark_config:
   n_samples_per_inner_round: 2
   n_samples_origin: 2
   max_inner_rounds: 1
-  inner_n_variants: 1
-  # No `inner_lives`: with one round there is nothing for a life to stop early.
+  inner_nodes:
+    l1_generate:
+      config:
+        n_variants: 1
+  # No `lives` under `inner_depth_nodes`: with one round there is nothing for a life to stop early.
   inner_optimizer_temperature: 0.0
 tasks:
   # Seed 0 only. The real panel's six seeds were each chosen against a measured

@@ -1,34 +1,21 @@
 "use client";
-// WHAT one searchpoint is, and what it scored — the whole drill-in, wherever it is shown.
-//
-// It renders on the dashboard (a click on the candidates cladogram) and on Records (a click on a
-// Compare channel's map), so it is chrome rather than either surface's own. A second copy would be
-// a second answer to "what is this point", and the two would drift on exactly the thing that
-// matters: which of these numbers the round could actually separate.
-//
-// **Presentational — it fetches nothing.** The two hosts read the same point from different
-// places and neither can do the other's job: the dashboard holds a live snapshot for the ONE cycle
-// it streams (`webapp/CLAUDE.md` § Polling shape allows exactly one), while a Compare channel may
-// sit on any branch of any campaign and has only that branch's round file. So the host resolves
-// the row, the spec and the samples, and hands them over.
-//
-// Every number here is SERVED. Nothing subtracts, ranks or re-scores: the lift is the election's
-// own verdict with its own interval, not a difference of two accuracies computed in the browser.
+// What one searchpoint is and what it scored — chrome, shown on the dashboard and on Records.
+// Presentational: the host resolves row and spec, since only the dashboard holds a live stream.
 
-import type { ElectedRow, PipelineStatus, SampleRow } from "@/lib/types";
+import type { ReactNode } from "react";
+import type { ElectedRow, PipelineStatus } from "@/lib/types";
 import type { NodeConfigParam, NodeOutputSchema } from "@/lib/api";
 import { cacheShare, prefixReading, type ObserveConfig } from "@/lib/derivations";
 import { TERMS } from "@/lib/terms";
 import { NOT_SEPARABLE, liftSeparates } from "@/lib/fitness";
 import { Term } from "@/components/ui";
-import { fmtPct0, fmtPct1, fmtSigned, fmtTokens } from "@/lib/format";
+import { fmtPct1, fmtSigned, fmtTokens } from "@/lib/format";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
-import { SampleRowItem, SAMPLE_RENDER_CAP } from "@/components/shell/samples/SampleRowItem";
 
 export function SearchpointDrillIn({
   row,
   cfg,
-  samples,
+  measurements,
   arms,
   schema,
   schemaStatus,
@@ -38,32 +25,19 @@ export function SearchpointDrillIn({
   onOverlay,
   actions,
 }: {
-  // The point's served row. `null` while its source is still loading, or where no source holds
-  // it — a round still scoring has written no document, and the drill-in says so rather than
-  // rendering a table of dashes that reads like a measured zero.
+  // `null` also where a round still scoring has written no document yet.
   row: ElectedRow | null;
-  // Its runnable specification, through the one observe join every spec surface reads.
   cfg: ObserveConfig | null;
-  samples: readonly SampleRow[];
-  // How many arms stood in this point's round. `null` = the host cannot say, which is a different
-  // fact from one — a crown over no rivals is not an election.
+  measurements?: ReactNode;
+  // `null` = the host cannot count the round's arms, a different fact from one.
   arms: number | null;
   schema: Record<string, NodeConfigParam[]> | null;
-  // How the read that produced `schema` went, from the same source. See `NodeConfigEditor`.
   schemaStatus: PipelineStatus;
   outputSchema: Record<string, NodeOutputSchema | null> | null;
-  // What to say while there is no row: the two hosts are waiting on different things.
   pending: string;
-  // What the config editor is SEEDED from — the point's resolved config, or a host's working copy
-  // of it with the operator's changes written in. Same shape either way (`{node: {param: value}}`,
-  // plus the pipeline's own non-node keys).
   overlay?: Record<string, unknown>;
-  // **Absence IS read-only** — the same contract `NodeSurface` states, not a second flag beside
-  // it. The emission is the point's WHOLE running config, never a delta: diff it against what was
-  // seeded (`overlayEdits`) before reading it as "what changed".
+  // Absence IS read-only. Emits the WHOLE running config — diff against the seed (`overlayEdits`).
   onOverlay?: (next: Record<string, Record<string, unknown>>) => void;
-  // Whatever this host lets the operator DO with the point — steer & fork, move a channel here.
-  // The verbs differ per surface; the reading of the point does not.
   actions?: React.ReactNode;
 }) {
   return (
@@ -76,10 +50,7 @@ export function SearchpointDrillIn({
           schema={schema}
           schemaStatus={schemaStatus}
           outputSchema={outputSchema}
-          // No `label`. NodeSurface prints one "because nothing else on screen names it", which is
-          // true on the chat hero, where it carries the observe STATE ("best · C2.1"). Both hosts
-          // of this drill-in name the point in the line directly above, so here it is the same
-          // string twice.
+          // No `label`: both hosts already name the point in the line above.
           mode="values"
           onConfigChange={onOverlay}
         />
@@ -102,28 +73,24 @@ export function SearchpointDrillIn({
                 }
               />
             )}
-            {typeof row.matchedParentAccuracy === "number" && (
+            {typeof row.referenceAccuracy === "number" && (
               <Fact
                 k="vs parent"
-                v={fmtPct1(row.matchedParentAccuracy)}
+                v={fmtPct1(row.referenceAccuracy)}
                 hint="The candidate's PARENT — the origin at round 0, the prior round's winner after — re-scored on the samples THIS candidate measured, and the floor the promotion gate compared it against. Under elimination a candidate may run only part of the round's samples, so the parent's full-set rate is the wrong comparison and would read as a phantom lift."
               />
             )}
-            {/* The SERVED lift and its interval. A difference of two accuracies would be a number
-                made in the browser (`webapp/CLAUDE.md` § Scoring authority) and would carry no
-                uncertainty — so a margin the round could not resolve would render identically to
-                one it could, which is the whole question this row answers. */}
-            {typeof row.matchedParentLift === "number" &&
-              typeof row.matchedParentLiftCiLo === "number" &&
-              typeof row.matchedParentLiftCiHi === "number" && (
+            {typeof row.referenceLift === "number" &&
+              typeof row.referenceLiftCiLo === "number" &&
+              typeof row.referenceLiftCiHi === "number" && (
                 <Fact
                   k="lift vs parent"
                   hint="Mean per-cell (candidate − parent) across the cells both measured, Student-t bracketed. Pairing removes the parent's cell-to-cell variation, so this is sharper than the candidate's own mean band."
                   v={
                     <>
-                      {fmtSigned(row.matchedParentLift)} [{fmtSigned(row.matchedParentLiftCiLo)},{" "}
-                      {fmtSigned(row.matchedParentLiftCiHi)}]
-                      {liftSeparates(row.matchedParentLiftCiLo, row.matchedParentLiftCiHi) ? (
+                      {fmtSigned(row.referenceLift)} [{fmtSigned(row.referenceLiftCiLo)},{" "}
+                      {fmtSigned(row.referenceLiftCiHi)}]
+                      {liftSeparates(row.referenceLiftCiLo, row.referenceLiftCiHi) ? (
                         " clears 0"
                       ) : (
                         <span className="l4-eff-flat"> — {NOT_SEPARABLE}</span>
@@ -144,18 +111,12 @@ export function SearchpointDrillIn({
             {typeof row.composite === "number" && (
               <Fact k="composite" v={row.composite.toFixed(4)} />
             )}
-            {/* A crown over no rivals is not an election (`derivations/election.ts`): round 0 runs
-                one arm. A null `arms` means the host cannot count them, so it reports the served
-                fact rather than guessing at "uncontested". */}
             <Fact
               k="winner"
-              v={!row.is_winner ? "no" : arms === 1 ? "yes — uncontested" : "yes"}
+              v={!row.is_selected ? "no" : arms === 1 ? "yes — uncontested" : "yes"}
             />
-            {/* What measuring THIS searchpoint consumed, and how much of it the provider served
-                off its own prefix cache. Named "measured on" rather than "cost": it is the
-                BACKEND bucket alone — the judge's spend carries no candidate and the optimizer's
-                is per round — and a row labelled plain "cost" would silently mean one of three.
-                Absent where nothing served an account (the Compare host's scoreboard source). */}
+            {/* "measured on", never "cost": the BACKEND bucket alone — judge and optimizer spend
+                carry no candidate. */}
             {typeof row.input_tokens === "number" && (
               <Fact
                 k="measured on"
@@ -178,38 +139,12 @@ export function SearchpointDrillIn({
           </>
         )}
       </div>
-      {samples.length > 0 && (
-        <div className="inspector-samples">
-          <div className="rsv-group-head" aria-hidden>
-            <span className="rsv-cand-label">{row?.label ?? ""} · samples</span>
-            {/* Served numbers, not a tally over the rendered rows: the two disagree whenever this
-                list is capped or still filling. */}
-            {row && typeof row.accuracy === "number" && typeof row.n_samples === "number" && (
-              <span className="rsv-tally">
-                {fmtPct0(row.accuracy)} of {row.n_samples}
-              </span>
-            )}
-          </div>
-          <div className="rsv-rows">
-            {samples.slice(0, SAMPLE_RENDER_CAP).map((s) => (
-              <SampleRowItem key={s.key} row={s} />
-            ))}
-            {samples.length > SAMPLE_RENDER_CAP && (
-              <div className="rsv-empty-row">
-                +{samples.length - SAMPLE_RENDER_CAP} more (rendering capped at{" "}
-                {SAMPLE_RENDER_CAP}).
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {measurements && <div className="inspector-samples">{measurements}</div>}
       {actions && <div className="inspector-actions">{actions}</div>}
     </>
   );
 }
 
-// One key/value line of the stats block. `.inspector-row` is `display:contents`, so the pair lands
-// on the grid the body owns rather than nesting a second one.
 function Fact({ k, v, hint }: { k: string; v: React.ReactNode; hint?: string }) {
   return (
     <div className="inspector-row">

@@ -8,17 +8,18 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from promptpotter.application.campaign_config import (
-    load_campaign_config as validate_campaign_config,
-)
+from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.initialization.loop_start import (
     arm_diagnostic_scoring,
     diagnostic_pass,
+    diagnostic_trace,
 )
 from promptpotter.application.initialization.wiring import init_services
+from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import (
     DiagnosticRunRecord,
@@ -94,16 +95,21 @@ async def measure_noise_floor(
     # needs this cycle published as the spawn context before it can dispatch an inner
     # campaign per sample. Normally done once by `run_optimization`; this use-case
     # bypasses that runner, so it publishes for itself (no-op on a non-recursive cycle).
-    campaign_config = validate_campaign_config(campaign.config)
+    campaign_config = resolve_campaign_config(stores, campaign, hop)
     publish_inner_spawn_context(session, campaign_config)
 
     log_fn = log or (lambda *_a, **_k: None)
     pipeline_params = arm_diagnostic_scoring(
-        session, campaign_config, source=f"noise_floor:{hop.campaign_id}", log=log_fn
+        session, campaign_config, source=RunSource.NOISE_FLOOR, log=log_fn
     )
 
     schema = session.pipeline_schema
-    jsp = opt_sp.to_job_search_point(pipeline_params, schema=schema)
+    jsp = opt_sp.to_job_search_point(
+        pipeline_params,
+        schema=schema,
+        framing=campaign_framing(stores, campaign_config, campaign.dataset_name),
+        demo=session.scoring.require_partition().demo,
+    )
     scoring_set = [s for s in session.samples if s.id in sample_ids]
     if not scoring_set:
         raise NoiseFloorError(
@@ -122,24 +128,20 @@ async def measure_noise_floor(
     composites: list[float] = []
     accuracies: list[float] = []
     for i in range(k):
-        scored = await diagnostic_pass(
-            NoiseFloorError,
-            score_search_point(
-                jsp,
-                scoring_set,
-                session,
-                label=f"noise_floor_{i}",
-                # ONE fixed config re-scored k times: the spread between runs IS the measurement,
-                # and an opt_sp-aware term is identical across all k, so it can only add a
-                # constant offset to a band that exists to isolate backend noise.
-                opt_sp=None,
-                measured=None,
-                on_sample_scored=lambda *_a, **_k: None,
-                on_sample_starting=lambda *_a, **_k: None,
-                source=f"noise_floor:{hop.campaign_id}:C0:{i}",
-                force_fresh=True,
-            ),
-        )
+        with diagnostic_trace(stores, hop):
+            scored = await diagnostic_pass(
+                NoiseFloorError,
+                score_search_point(
+                    jsp,
+                    scoring_set,
+                    session,
+                    label=f"noise_floor_{i}",
+                    measured=None,
+                    on_sample_scored=lambda *_a, **_k: None,
+                    on_sample_starting=lambda *_a, **_k: None,
+                    force_fresh=True,
+                ),
+            )
         scores = scored.scores
         if (measured := scores.get("accuracy")) is None:
             raise NoiseFloorError(

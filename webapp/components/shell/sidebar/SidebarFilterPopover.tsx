@@ -4,10 +4,8 @@ import { Icon, Popover, SegmentedControl, type Segment } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import type { LifecycleFilter } from "@/lib/api";
 
-// The campaign-library filter, folded behind one button so the sidebar body stays a
-// clean forest even with dozens of datasets: a lifecycle segment, a dataset picker,
-// and a type-to-filter box. The trigger carries a dot whenever a non-default filter
-// is set — a narrowed list must never look like a complete one.
+// The campaign-library filter. The trigger carries a dot whenever a non-default filter is set —
+// a narrowed list must never look like a complete one.
 
 interface Props {
   lifecycleFilter: LifecycleFilter;
@@ -17,7 +15,6 @@ interface Props {
   setDatasetFilter: (d: string | null) => void;
 }
 
-// Two-slider "adjust filters" glyph (currentColor → tints with theme + state).
 const FILTER_GLYPH = (
   <Icon size={15} strokeWidth={1.7}>
     <line x1="8" y1="4" x2="8" y2="20" />
@@ -27,8 +24,6 @@ const FILTER_GLYPH = (
   </Icon>
 );
 
-// The two lifecycles a campaign can be listed under. Deleted is not a third: the tree is gone,
-// so there is nothing to list.
 const LIFECYCLE_SEGMENTS: readonly Segment<LifecycleFilter>[] = [
   { value: "active", label: "Active" },
   {

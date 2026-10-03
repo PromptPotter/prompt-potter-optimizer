@@ -5,20 +5,12 @@ import { createPortal } from "react-dom";
 import { cx } from "@/lib/cx";
 import s from "./HoverCard.module.css";
 
-// Anchored hover/focus card. Wraps a trigger; while pointed at (or keyboard-
-// focused) it renders `content` in a `position:fixed` card portaled to <body>,
-// off the trigger's edge, so no ancestor's `overflow` can clip it.
-//
-// The card is REACHABLE — the pointer crosses into it and its text selects, so
-// it is `role="note"` (a tooltip may hold no control) and WCAG 1.4.13 applies:
-// hoverable, dismissible, persistent. Callers own what goes inside; lazy content
-// is fine, since `content` mounts on hover and unmounts on leave.
+// Teaching prose for a control, portaled to <body> so no ancestor's `overflow` clips it. REACHABLE,
+// hence `role="note"` rather than tooltip, and WCAG 1.4.13 applies.
 const CLOSE_GRACE_MS = 160;
 const GAP = 8;
 
-// Hang off the trigger, growing toward the roomier half on each axis, so a row
-// near an edge opens inward instead of off-screen. Trigger geometry only —
-// nothing measures the card, so content arriving late can't strand it.
+// Trigger geometry only — nothing measures the card, so late-arriving content can't strand it.
 const anchor = (r: DOMRect): CSSProperties => ({
   position: "fixed",
   ...(r.top * 2 < window.innerHeight ? { top: r.top } : { bottom: window.innerHeight - r.bottom }),
@@ -35,8 +27,6 @@ export function HoverCard({
 }: {
   content: ReactNode;
   className?: string;
-  /** The trigger is block content (a whole row), so the wrapper is a full-width `<div>`
-   *  rather than the inline `<span>` a term inside running text needs. */
   block?: boolean;
   children: ReactNode;
 }) {
@@ -46,11 +36,10 @@ export function HoverCard({
   }, []);
   const cardRef = useRef<HTMLDivElement>(null);
   const timer = useRef(0);
-  // Where the card is — `null` IS closed, so this is one state, not two.
+  // `null` IS closed.
   const [at, setAt] = useState<CSSProperties | null>(null);
   const open = at !== null;
 
-  // The card is no DOM descendant of the wrapper, so "within" asks both halves.
   const within = useCallback(
     (n: Node | null) => !!n && !!(ref.current?.contains(n) || cardRef.current?.contains(n)),
     [],
@@ -62,15 +51,12 @@ export function HoverCard({
     if (r) setAt(anchor(r));
   }, []);
 
-  // Never immediate: the card sits GAP off the trigger, so a pointer on its way
-  // in spends a moment over neither half.
+  // Never immediate: a pointer crossing the GAP is over neither half for a moment.
   const hide = useCallback(() => {
     timer.current = window.setTimeout(() => setAt(null), CLOSE_GRACE_MS);
   }, []);
 
-  // The one leave rule, for both halves: a held button is a drag-select in
-  // flight and the selection outlives the card's edge, so the release below
-  // closes it instead of this.
+  // A held button is a drag-select in flight, so the release below closes it instead of this.
   const leave = useCallback(
     (e: { buttons: number }) => {
       if (e.buttons === 0) hide();
@@ -97,8 +83,6 @@ export function HoverCard({
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
   const Wrap = block ? "div" : "span";
-  // Both halves are their own hover target, and `within` spans them, so focus
-  // moving into the card can't close the card under the focus that entered it.
   return (
     <Wrap
       ref={setRef}

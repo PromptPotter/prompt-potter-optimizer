@@ -26,7 +26,7 @@ from promptpotter.application.datasets.draft_campaign import (
     default_slug_from_filename,
     new_draft,
 )
-from promptpotter.application.datasets.loaders import resolve_dataset_items
+from promptpotter.application.datasets.loaders import bank_samples, resolve_dataset_items
 from promptpotter.application.datasets.prompts import (
     list_dataset_prompts,
     load_dataset_prompt,
@@ -36,6 +36,7 @@ from promptpotter.application.jobs.launcher.draft_build import overlay_from_camp
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.connectors.protocol import PROBE_WORKLOAD
+from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
@@ -192,7 +193,7 @@ def draft_from_dataset(
 
     # One validated parse of the dataset's config files. The `or` ladders below fire only where
     # the authored file leaves a field empty. The optimizer LLM is install-global
-    # (`promptpotter/assets/optimizer/pipeline.yaml`), so no draft carries provider/model.
+    # (`promptpotter/assets/optimizers/potter/pipeline.yaml`), so no draft carries provider/model.
     authored = read_authored_dataset(dataset_dir)
     cc = authored.campaign_config
     task = authored.task_description
@@ -214,7 +215,7 @@ def draft_from_dataset(
         )
 
     # The authored dataset's own starting prompt rides through as the draft's
-    # ``origin_prompt_fields`` (its six string fields + few-shot), so committing a
+    # ``origin_prompt_fields`` (its six string fields), so committing a
     # demo/benchmark/owned Origin preserves the prompt the optimizer evolves
     # from — a fresh CSV upload instead gets the check-in's decomposition.
     origin_prompt_fields: dict[str, Any] = {}
@@ -222,7 +223,7 @@ def draft_from_dataset(
     if prompt_names:
         name = "default" if "default" in prompt_names else prompt_names[0]
         try:
-            origin_prompt_fields = load_dataset_prompt(dataset_dir, name).prompt_field_dict()
+            origin_prompt_fields = load_dataset_prompt(dataset_dir, name).prompt_fields()
         except FileNotFoundError:
             origin_prompt_fields = {}
 
@@ -231,6 +232,12 @@ def draft_from_dataset(
     # `dataset:{name}` source_file marks this draft as derived, and the commit
     # path mints against this canonical dataset instead of materializing a folder.
     slug = dataset_name.lower()
+    # The check-in model reads the preview with its labels, so it is drawn from the rows the
+    # dataset's own split leaves to the search: no bench row reaches the origin's author.
+    preview = [
+        {"query": s.query, "ground_truth": str(s.ground_truth)}
+        for s in partition_bank(bank_samples(items), cc.dataset_split).search
+    ]
 
     # headers ["query","ground_truth"] auto-confirm the column mapping in
     # new_draft(); the config knobs auto-confirm there too. We then state the
@@ -239,7 +246,7 @@ def draft_from_dataset(
         tenant_id=stores.identity.tenant_id,
         slug=slug,
         n_samples=len(rows),
-        sample_preview=rows[:PREVIEW_ROWS],
+        sample_preview=preview[:PREVIEW_ROWS],
         headers=["query", "ground_truth"],
         source_file=f"dataset:{dataset_name}",
         column_label_sets=_column_label_sets(["query", "ground_truth"], rows),
@@ -250,17 +257,16 @@ def draft_from_dataset(
             "connector": connector,
             "scoring_composite": scoring,
             # The campaign-config knobs as one object. Preserve the dataset's round
-            # ceiling + its own mechanism toggles (sorting/early-abort) so reusing an
-            # Origin carries its config instead of resetting to stock. Built off the
-            # default dump (not validated) so a dataset's higher ceiling passes
+            # ceiling, its optimizer and that optimizer's overlay, so reusing an Origin
+            # carries its config instead of resetting to stock — an ablation arm reset to the
+            # full ladder would measure a different thing under the same Origin's name. Built
+            # off the default dump (not validated) so a dataset's higher ceiling passes
             # through — the 1-100 bound gates only the operator edit path.
             "optimization_overrides": {
                 **OptimizationOverrides().model_dump(mode="json"),
                 "max_rounds": max_rounds,
-                # An ablation arm that silently reset to the full ladder on reuse would
-                # measure a different thing under the same Origin's name.
-                "escalation_ladder": cc.optimization.escalation_ladder.value,
-                "mechanisms": cc.optimization.mechanisms.model_dump(mode="json"),
+                "optimizer": cc.optimization.optimizer,
+                "nodes": {n: o.model_dump(mode="json") for n, o in cc.optimization.nodes.items()},
             },
             "pipeline_overlay": pipeline_overlay,
             "origin_prompt_fields": origin_prompt_fields,

@@ -23,12 +23,14 @@ except ModuleNotFoundError as exc:  # lazy: an extra, and the only importer is t
         "promptpotter.presentation.teleprompter needs DSPy — `pip install promptpotter[dspy]`"
     ) from exc
 
+from promptpotter.application.campaign_config import OptimizationConfig
 from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     load_dataset_campaign_config,
 )
 from promptpotter.application.datasets.loaders import samples_from_dicts
 from promptpotter.application.embedded_run import open_session, run_campaign
+from promptpotter.application.optimizer_manifest import resolve_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.runner.entry import RunMode
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
@@ -40,13 +42,14 @@ from promptpotter.connectors.dspy_module import (
 )
 from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
+from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.infrastructure.store.dataset_access import dataset_pipeline_path
 from promptpotter.infrastructure.store.io import write_text, write_yaml
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.shared.identity import default_identity
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
     from promptpotter.domain.export import PromptExport
@@ -54,39 +57,41 @@ if TYPE_CHECKING:
 __all__ = ["Loop", "Node", "PromptPotterOpt"]
 
 
+_DEFAULT_OPTIMIZER: str = OptimizationConfig.model_fields["optimizer"].default
+
+
 @dataclass(frozen=True)
 class Loop:
     """Loop control. Every field has a default, so ``Loop()`` is a complete configuration."""
 
-    max_rounds: int = 5
-    n_variants: int = 6
-    samples_per_round: int = 20
-    """How many trainset rows each candidate is scored on per round — the adaptive queue picks
-    the informative ones out of the whole set. The cost knob: a round costs roughly
-    ``n_variants x samples_per_round`` calls before PoBB starts cutting."""
+    optimizer: str = _DEFAULT_OPTIMIZER
+    """Which optimizer proposes: any name ``optimizer_roster()`` lists."""
 
-    l1_patience: int = 0
-    l2_patience: int = 2
-    l3_patience: int = 1
+    nodes: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    """Knobs on that optimizer's nodes, ``{node: {knob: value}}``, refused at construction when
+    the manifest does not take them; the manifest's declared values run everywhere else."""
+
+    max_rounds: int = 5
     degradation_threshold: float = 0.4
     elimination_n_min: int = 4
-    pobb_epsilon: float = 0.2
     spend_budget_usd: float | None = None
-    # Rides the run-scoped seam rather than ``_optimization`` below, so ``None`` keeps the
-    # campaign's armed default instead of disarming the ceiling the way its USD neighbour does.
     token_budget: int | None = None
+
+    def __post_init__(self) -> None:
+        resolve_optimizer(self.optimizer, self._overlay())
+
+    def _overlay(self) -> dict[str, ManifestNodeOverlay]:
+        return {node: ManifestNodeOverlay(config=dict(knobs)) for node, knobs in self.nodes.items()}
 
     def _optimization(self) -> dict[str, Any]:
         return {
+            "optimizer": self.optimizer,
             "max_rounds": self.max_rounds,
-            "n_variants": self.n_variants,
-            "l1_patience": self.l1_patience,
-            "l2_patience": self.l2_patience,
-            "l3_patience": self.l3_patience,
             "degradation_threshold": self.degradation_threshold,
             "elimination_n_min": self.elimination_n_min,
-            "pobb_epsilon": self.pobb_epsilon,
             "spend_budget_usd": self.spend_budget_usd,
+            "token_budget": self.token_budget,
+            "nodes": {n: o.model_dump(mode="json") for n, o in self._overlay().items()},
         }
 
 
@@ -163,10 +168,9 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
     ) -> Any:
         """Run one campaign over *trainset* and return *student* with the winning prompt applied.
 
-        ``valset`` is accepted for contract parity and deliberately unused: PromptPotter holds out
-        no set of its own — PoBB prunes on the training rows and the caller evaluates the returned
-        program however they already do. Taking it and ignoring it silently would be the wrong
-        shape, so it is named here instead."""
+        ``valset`` is accepted for contract parity and deliberately unused: the campaign this
+        writes declares no ``dataset_split``, so the whole trainset is the search pool, no bench
+        score is taken, and the caller evaluates the returned program on its own held-out rows."""
         rows = samples_from_dicts([{"query": _query_of(ex), "ground_truth": ""} for ex in trainset])
         program = DspyProgram(
             student=student,
@@ -182,18 +186,15 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
         self._write_dataset_dir()
         session = await open_session(self.dataset_name, program=program)
         try:
-            # No overrides: the file this compile just wrote IS the projection of `loop` and
-            # `nodes`, so passing them again would be a second path to the same values.
+            # No overrides, budgets included: the file this compile just wrote IS the projection
+            # of `loop` and `nodes`, so passing them again would be a second path to the same values.
             config = load_dataset_campaign_config(self._campaign_path())
             configure_and_apply_pipeline(session, config)
             result = await run_campaign(
                 session,
                 rows,
                 config,
-                limits=LaunchLimits(
-                    spend_budget_usd=self.loop.spend_budget_usd,
-                    token_budget=self.loop.token_budget,
-                ),
+                limits=LaunchLimits(),
                 mode=RunMode(),
             )
         finally:
@@ -201,14 +202,12 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
 
         if stop_reason_outcome(result.stop_reason) is not StopOutcome.SUCCESS:
             return student
-        # The winner comes off the ARTIFACT, never off `CycleResult.winner_prompt_fields`: that is
-        # the wire-side projection and flattens few-shot examples into a rendered block a
-        # `PromptTemplate` rejects outright — a crash that waits for the first winner carrying
-        # demonstrations and lands after the whole campaign is paid for.
+        # The winner comes off the ARTIFACT, never off `CycleResult.result_prompt_fields`: that is
+        # the wire-side projection, whose rendered shot block a `PromptTemplate` rejects outright.
         self.export = session.store.campaigns.read_export(session.hop)
         if self.export is None:
             return student
-        return _with_instructions(student, self.export.template().render())
+        return _with_instructions(student, self.export.render())
 
     # -- the dataset the campaign is keyed by -------------------------------------------------
 
@@ -267,8 +266,7 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
                     # The caller's metric already graded the sample; the formula only carries its
                     # number through. Overriding `scoring` composes evaluators on top of it.
                     "scoring": self.scoring,
-                    "headline_metric": "accuracy",
-                    "sp_budget_round": self.loop.samples_per_round,
+                    "display_metric": "accuracy",
                     "optimization": self.loop._optimization(),
                 }
             },

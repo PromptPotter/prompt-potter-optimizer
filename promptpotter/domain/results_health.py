@@ -528,7 +528,7 @@ def compute_round_health(
     not_attempted: int = 0,
     # Cells that WERE measured and carry no verdict. Passed in rather than recounted off
     # ``results``, even though it could be: the number is the winner's and
-    # ``l1/score/winner.py`` owns it, so deriving it a second time here is a second answer that
+    # ``runner/round.py`` owns it, so deriving it a second time here is a second answer that
     # can disagree with the round document beside it — the same reason ``deprecated`` is threaded.
     unscored: int = 0,
 ) -> DegradationHealth | None:

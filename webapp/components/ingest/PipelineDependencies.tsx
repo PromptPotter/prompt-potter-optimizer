@@ -4,13 +4,8 @@ import { useRef, useState } from "react";
 import type { PipelineDependencyWire } from "@/lib/api";
 import { cx } from "@/lib/cx";
 
-// The active pipeline's required inputs — derived server-side from its node types
-// (a `candidate_source` node needs a target library). Each unfulfilled dependency
-// offers two unified ways to fulfil it in place: drop a file, or build it from one
-// of the dataset's own columns (the target column / the union of its category
-// sheets). Fulfilled ones collapse to a confirmation line. The library is a soft
-// dependency — it sharpens the candidate pool but doesn't gate Start (the answers
-// already in the data are a runnable pool), so this never blocks the campaign.
+// The pipeline's server-derived required inputs (a `candidate_source` node needs a target
+// library). Soft: the answers already in the data are a runnable pool, so it never gates Start.
 export function PipelineDependencies({
   dependencies,
   librarySize,
@@ -65,8 +60,6 @@ function DependencyRow({
   busy: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
-  // Default the build-from column to the resolved target column when it's a real
-  // header, else the first column.
   const [column, setColumn] = useState(
     headers.includes(targetColumn) ? targetColumn : (headers[0] ?? ""),
   );
@@ -83,7 +76,6 @@ function DependencyRow({
       </div>
       <p className="ingest-dependency-hint">{dep.hint}</p>
       <div className="ingest-dependency-actions">
-        {/* Build from the dataset's own columns — the unified, no-file path. */}
         {headers.length > 0 ? (
           <div className="ingest-dependency-build">
             <label className="ingest-dependency-build-label">
@@ -112,7 +104,6 @@ function DependencyRow({
             </button>
           </div>
         ) : null}
-        {/* Or drop an external list. */}
         <input
           ref={inputRef}
           type="file"

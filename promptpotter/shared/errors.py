@@ -6,7 +6,7 @@ import logging
 import re
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
@@ -20,9 +20,11 @@ class ErrorCategory(enum.StrEnum):
     CLIENT = "CLIENT"
     SERVER = "SERVER"
     CONNECTION = "CONNECTION"
-    # A wallet refused the cell's calls — the provider account's credit, or the run's spend or token
-    # ceiling. A hole, like CONNECTION: every later cell meets the same refusal.
+    # A send refused by what no retry clears — the provider account's credit, the provider's
+    # throttle outlasting every wait, or the run's spend or token ceiling. A hole, like CONNECTION:
+    # every later cell meets the same refusal.
     PROVIDER_CREDIT = "PROVIDER_CREDIT"
+    PROVIDER_THROTTLED = "PROVIDER_THROTTLED"
     SPEND_CEILING = "SPEND_CEILING"
     TOKEN_CEILING = "TOKEN_CEILING"
     PIPELINE = "PIPELINE"
@@ -70,9 +72,19 @@ class CellInfrastructureError(CellUnscoreableError):
     category = ErrorCategory.CONNECTION
 
 
-class CellWalletExhaustedError(CellInfrastructureError):
-    """A wallet behind the cell refused it — the provider account's credit, or a ceiling the run
-    holds; ``category`` names which. No backoff refills either, so it is raised on the first
+class CellThrottledError(CellUnscoreableError):
+    """The model provider throttled the cell's own calls, where no client of ours sends them (an
+    in-process agent), so the cell measured the provider's load and nothing else. The message is
+    the provider's. ``BackendClient.run_query`` catches it and re-sends the cell under the run's
+    ``Backpressure``, so it is never a row; one reaching ``measure_sample`` would bank as a hole
+    halting the walk, the same stop the backpressure itself ends a run on."""
+
+    category = ErrorCategory.PROVIDER_THROTTLED
+
+
+class CellSendRefusedError(CellInfrastructureError):
+    """A refusal no retry clears reached the cell — the provider account's credit, the provider's
+    throttle, or a ceiling the run holds; ``category`` names which. It is raised on the first
     refusal and the walk halts on the hole."""
 
     def __init__(
@@ -87,10 +99,10 @@ class CellWalletExhaustedError(CellInfrastructureError):
         self.category = category
 
 
-# The refusals once an account's credit or a key's limit is spent: OpenRouter's two (HTTP 402 /
+# The refusals once an account's credit or a key's limit is spent: OpenRouter's three (HTTP 402 /
 # 403) and Anthropic's, which arrives as an HTTP 400 `invalid_request_error`.
 _PROVIDER_CREDIT_REFUSAL = re.compile(
-    r"requires more credits|Key limit exceeded|credit balance is too low"
+    r"requires more credits|[Ii]nsufficient credits|Key limit exceeded|credit balance is too low"
 )
 
 
@@ -98,11 +110,12 @@ def is_provider_credit_refusal(detail: str) -> bool:
     return _PROVIDER_CREDIT_REFUSAL.search(detail) is not None
 
 
-class WalletExhaustedError(RuntimeError):
-    """A wallet refused one of our paid calls — the provider account's credit, or a ceiling the run
-    holds (``infrastructure/llm/spend_book.py``), which refuses BEFORE sending. Nothing but the
-    operator refills either, so a run ends on the stop ``category`` maps to
-    (``domain/phases.py::WALLET_STOPS``) rather than crashing."""
+class SendRefusedError(RuntimeError):
+    """One of our paid sends was refused by what no retry clears — the provider account's credit, a
+    ceiling the run holds (``infrastructure/llm/spend_book.py``, which refuses BEFORE sending), or
+    the provider's throttle outlasting every wait (``infrastructure/llm/rate_limit.py::
+    Backpressure``). Only the operator clears any of them, so a run ends on the stop ``category``
+    maps to (``domain/phases.py::REFUSAL_STOPS``) rather than crashing."""
 
     def __init__(self, message: str, *, category: ErrorCategory) -> None:
         super().__init__(message)
@@ -184,6 +197,37 @@ class MachineBusyError(PotterError):
         )
 
 
+class CycleBusyError(PotterError):
+    """The cycle a launch targets already has an unfinished job — 409, naming that job. Two
+    producers on one cycle interleave one ledger and mint the same candidates twice."""
+
+    http_status = 409
+    code = "cycle_busy"
+
+    def __init__(
+        self,
+        *,
+        job_id: str,
+        status: str,
+        holder_user: str,
+        campaign_id: str,
+        cycle_id: str,
+        started_at: str | None,
+    ) -> None:
+        super().__init__(
+            f"Cycle {cycle_id} of {campaign_id} already has a {status} run (job {job_id}, "
+            f"started {started_at or 'not yet'}). Pause or cancel it, or wait for it to finish.",
+            details={
+                "job_id": job_id,
+                "status": status,
+                "holder_user": holder_user,
+                "campaign_id": campaign_id,
+                "cycle_id": cycle_id,
+                "started_at": started_at,
+            },
+        )
+
+
 class ContentTooLargeError(PotterError):
     """Request/target exceeds a hard size cap (too many file entries) — 413."""
 
@@ -241,7 +285,7 @@ class RequestTooLargeError(RuntimeError):
             f"count (parallel calls), NOT a single-request lever — lowering it does "
             f"not shrink this request. Biggest lever first:\n"
             f"  - point the optimizer node `provider` in "
-            f"`promptpotter/assets/optimizer/pipeline.yaml` at a tier whose per-minute cap "
+            f"`promptpotter/assets/optimizers/potter/pipeline.yaml` at a tier whose per-minute cap "
             f"exceeds {requested} tokens (e.g. OpenRouter, or a paid Groq tier) — "
             f"the free Groq on_demand tier caps at {limit}\n"
             f"  - or shorten the optimizer prompt (task_description.md)."
@@ -274,9 +318,8 @@ class RulerUnpersistedError(PotterError):
     """This cycle's rounds were read on a WARM δ ruler that its ledger cannot reproduce.
 
     ``write_ruler`` appends the ``RulerRecord`` BEFORE the round document that names it, so a
-    live run cannot reach this: it means the ledger was truncated, or the rounds predate the
-    record existing at all. Resuming would re-derive a ruler from an archive that has grown since
-    the lock, putting a second scale under one cycle — two ``ruler_id``s across its rounds, and
+    live run cannot reach this: it means the ledger was truncated. Resuming would re-derive a
+    ruler from an archive that has grown since the lock, putting a second scale under one cycle — two ``ruler_id``s across its rounds, and
     every θ read on the later one incomparable with the earlier. Refuse, and name the campaign.
     """
 
@@ -323,10 +366,16 @@ class ResumeDivergenceError(RuntimeError):
         return "\n".join(lines)
 
 
+class PromptCompositionError(Exception):
+    """An optimizer node's prompt could not be composed. The run halts with ``RENDER_ERROR`` — the
+    composition is at fault, not the search — rather than sending a degraded prompt."""
+
+
 class DatasetIdentityError(RuntimeError):
-    """The rows under this dataset name changed. ``sample_id`` is a POSITION within a name, so the
-    archive can only answer "what was measured at slot N" — replaying it would attribute a score to a
-    question that did not produce it, with no error anywhere. Re-cut rows need a new name."""
+    """The rows under this dataset name changed. Replay matches a sample by content and cannot be
+    fooled, but ``sample_id`` is a POSITION within a name, and the readers keyed on it — the δ
+    ruler, the sample index, hard samples — would pool two questions' history in one slot with no
+    error anywhere. Re-cut rows need a new name."""
 
     _PREVIEW = 160
 
@@ -352,10 +401,10 @@ class DatasetIdentityError(RuntimeError):
                 lines.append(f"  {field} measured: {was[: self._PREVIEW]!r}")
                 lines.append(f"  {field} now:      {now[: self._PREVIEW]!r}")
         lines.append(
-            "The measurement cache keys on (dataset_name, node_configs, sample_id) — the query "
-            "text is not in the key, so serving these priors would carry a score for one question "
-            "onto another. Cut the changed rows under a NEW dataset name; the old name keeps its "
-            "measurements and stays replayable."
+            "Per-sample history (difficulty, hit rates, hard samples) is keyed on (dataset_name, "
+            "sample_id), so continuing under this name would pool two questions in one slot. Cut "
+            "the changed rows under a NEW dataset name: every sample it shares with this one "
+            "still replays, because replay matches on content."
         )
         super().__init__("\n".join(lines))
 
@@ -377,10 +426,10 @@ def has_pipeline_warnings(result: Mapping[str, Any]) -> bool:
 @contextmanager
 def graceful(msg: str) -> Iterator[None]:
     """Suppress non-interrupt exceptions with a log message. ``KeyboardInterrupt``,
-    ``asyncio.CancelledError`` and a spent provider account re-raise: each ends the run."""
+    ``asyncio.CancelledError`` and a refused send re-raise: each ends the run."""
     try:
         yield
-    except (KeyboardInterrupt, asyncio.CancelledError, WalletExhaustedError):
+    except (KeyboardInterrupt, asyncio.CancelledError, SendRefusedError):
         raise
     except Exception:
         logger.warning(msg, exc_info=True)
@@ -401,6 +450,33 @@ def error_category(result: Mapping[str, Any]) -> ErrorCategory | None:
         return None
 
 
+# Whether an error is the configuration's own doing. A provider or machine fault says nothing about
+# the prompt, nor does a cell that ran to its end with nothing to grade; the rest are its to answer.
+ERROR_IS_CHARGED: Annotated[dict[ErrorCategory, bool], shapes_optimizer_prompt] = {
+    ErrorCategory.CLIENT: True,
+    ErrorCategory.SERVER: False,
+    ErrorCategory.CONNECTION: False,
+    ErrorCategory.PROVIDER_CREDIT: False,
+    ErrorCategory.PROVIDER_THROTTLED: False,
+    ErrorCategory.SPEND_CEILING: False,
+    ErrorCategory.TOKEN_CEILING: False,
+    ErrorCategory.PIPELINE: True,
+    ErrorCategory.HALTED: True,
+    ErrorCategory.UNSCOREABLE: False,
+    ErrorCategory.UNKNOWN: True,
+}
+assert set(ERROR_IS_CHARGED) == set(ErrorCategory), "every ErrorCategory must take a side"
+
+
+@shapes_optimizer_prompt
+def is_charged_error(result: Mapping[str, Any]) -> bool:
+    """Whether the row errored for a reason the configuration under test answers for. A category
+    this build cannot read is charged: an unexplained failure is never a reason to leave a count."""
+    if not is_error_result(result):
+        return False
+    return ERROR_IS_CHARGED[error_category(result) or ErrorCategory.UNKNOWN]
+
+
 def is_repairable_hole(result: Mapping[str, Any]) -> bool:
     """A hole a re-measure could plug. ``HALTED`` is not one: the bound that cut the cell is
     declared, so the next attempt is cut at the same place and the measurement is paid for twice."""
@@ -408,30 +484,35 @@ def is_repairable_hole(result: Mapping[str, Any]) -> bool:
 
 
 __all__ = [
+    "ERROR_IS_CHARGED",
     "BadRequestError",
     "CellHaltedError",
     "CellInfrastructureError",
+    "CellSendRefusedError",
+    "CellThrottledError",
     "CellUnscoreableError",
-    "CellWalletExhaustedError",
     "ConflictError",
     "ContentTooLargeError",
+    "CycleBusyError",
     "DatasetIdentityError",
     "ErrorCategory",
     "MachineBusyError",
     "NotFoundError",
     "PayloadInvalidError",
     "PotterError",
+    "PromptCompositionError",
     "RequestTooLargeError",
     "ResumeDivergenceError",
     "RulerCoverageError",
     "RulerUnpersistedError",
+    "SendRefusedError",
     "ServiceUnavailableError",
     "StoredConfigInvalidError",
     "UnauthorizedError",
-    "WalletExhaustedError",
     "error_category",
     "graceful",
     "has_pipeline_warnings",
+    "is_charged_error",
     "is_error_result",
     "is_provider_credit_refusal",
     "is_repairable_hole",

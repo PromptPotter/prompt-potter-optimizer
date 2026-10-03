@@ -56,7 +56,6 @@ describe("SegmentedControl", () => {
         ariaLabel="Pipeline mode"
       />,
     );
-    // Still discoverable — the operator sees the mode exists.
     const research = screen.getByRole("button", { name: "Research + Match" });
     fireEvent.click(research);
     expect(onChange).not.toHaveBeenCalled();

@@ -79,7 +79,7 @@ invariants:
                       finished** into the chat above a card saying the run was holding.
                       COROLLARY (the time-ray). run_phase provably cannot express running vs
                       WEDGED: every await outlasting RUN_FRESH_S must heartbeat (heartbeat.py
-                      states the rule, four callers), so a live cycle can never go stale and a
+                      states the rule), so a live cycle can never go stale and a
                       wedged process reads "running" forever. Freshness proves ATTACHMENT,
                       never PROGRESS. The ray head derives `wedged` from the other input —
                       progress = a non-heartbeat ledger append — gated on the server still
@@ -110,13 +110,13 @@ invariants:
   I8_floor_named:     'A rendered Δ NAMES which floor it cleared, and the two floors are not
                       interchangeable. ORIGIN is C0 — the campaign root, or a fork''s branch
                       point: `origin_accuracy` on the campaign index (ForestRows, PanelCellRow,
-                      DatasetPickList, CandidatesCard), `ability_delta` (headline-stats,
+                      DatasetPickList, CandidatesCard), `bench_score.lift` (headline-stats,
                       run-summary), and run_card.flips'' per-sample rows. PARENT is the round''s
                       own floor — the origin at round 0, the prior winner after: every
-                      `matched_parent_*` field, wherever it surfaces (the searchpoint drill-in,
+                      `reference_*` field, wherever it surfaces (the searchpoint drill-in,
                       OuterSignalPanel, RoundFileView, run_card''s percent pair). The engine
                       elects on the parent (architecture.md § Origin, parent, and check-in), so
-                      a pane labelling a `matched_parent_*` value "origin" states a comparison
+                      a pane labelling a `reference_*` value "origin" states a comparison
                       the run never made.
                       Two references may share a box only when BOTH are labelled — run_card is
                       the sanctioned case and says so at its own seam.'

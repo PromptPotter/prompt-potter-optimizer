@@ -3,11 +3,11 @@ import { configOverridesFromDefaults, forkReconcileDefaults } from "../forkRecon
 import type { DashboardSnapshot } from "@/lib/poll";
 
 // "3 of 6 rounds used → 3 left"; "$4 of $10 spent → $6 left". The cap lives in
-// run_limits (the authoritative, gate-sourced field); `spend` only carries used.
+// run_limits (the authoritative, gate-sourced field); `spend_metered` carries what it counted.
 const dash = {
   rounds: [{ round: 1 }, { round: 2 }, { round: 3 }],
   run_limits: { max_rounds: 6, spend_budget_usd: 10 },
-  spend: { total_used_usd: 4 },
+  spend_metered: { meter: "search_incurred", usd: 4 },
 } as unknown as DashboardSnapshot;
 
 describe("forkReconcileDefaults", () => {

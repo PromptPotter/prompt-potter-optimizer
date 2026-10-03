@@ -2,12 +2,8 @@ import type { CSSProperties, ReactNode } from "react";
 import { cx } from "@/lib/cx";
 import s from "./Chip.module.css";
 
-// A single pressable toggle — independently on/off, unlike a `SegmentedControl`
-// segment (which is one of an exclusive set). Carries its own `aria-pressed`, so
-// the state is never conveyed by colour alone.
-//
-// This is the old global `.fitness-chip`, which had leaked out of the fitness
-// card into every surface that wanted a small toggle.
+// An independent on/off toggle (a `SegmentedControl` is the exclusive set). A lit chip wears the ink
+// of what it put ON SCREEN (webapp/CLAUDE.md § Component conventions).
 export function Chip({
   on,
   onClick,
@@ -22,15 +18,10 @@ export function Chip({
   onClick: () => void;
   title?: string;
   disabled?: boolean;
-  // REQUIRED when `icon` is set: an icon-only control has no text to name it, so
-  // this is the only accessible name it gets.
+  // REQUIRED when `icon` is set — the only accessible name an icon-only chip gets.
   ariaLabel?: string;
-  // Square, icon-sized. The label then lives in `title` + `ariaLabel` only.
   icon?: boolean;
-  // A colour this chip's lit state should wear instead of the accent — for a chip that
-  // switches something DRAWN, so the control carries the same ink as the thing it turns
-  // on and needs no legend entry of its own. Only the `joined` underline reads it; state
-  // is still carried by `aria-pressed`, never by colour.
+  // Only the `joined` underline reads it; state is still `aria-pressed`, never colour.
   ink?: string;
   children: ReactNode;
 }) {
@@ -50,14 +41,8 @@ export function Chip({
   );
 }
 
-// A cluster of related chips. `label` is the group's ACCESSIBLE name and is never
-// drawn — the chips inside don't restate it, and a row of icons is dense precisely
-// because it spends no width on words.
-//
-// `joined` fuses them into one framed bar with no internal borders and an
-// underline on whatever is on. Use it when the chips are facets of ONE concept
-// (the metric axis: % / ∑ / θ) rather than unrelated switches — three separately
-// outlined pill buttons say "three things", and they aren't.
+// `label` is the ACCESSIBLE name, drawn only with `showLabel`. `joined` is for facets of ONE concept
+// (% / ∑ / θ), never unrelated switches.
 export function ChipGroup({
   label,
   joined,
@@ -66,9 +51,6 @@ export function ChipGroup({
 }: {
   label: string;
   joined?: boolean;
-  // Draw the group's own name beside the chips. The accessible name is there either way;
-  // this says the operator needs it on screen too, because the chips are bare numbers that
-  // do not name their axis.
   showLabel?: boolean;
   children: ReactNode;
 }) {

@@ -43,6 +43,7 @@ ProjectionKind = Literal[
     "round_warning",
     "ruler",
     "snapshot",
+    "run_limits",
     "spend_hold",
     "spend_tombstone",
     "token_usage",
@@ -66,7 +67,7 @@ if _declared != _record_types:
 # Whether a kind can EVER become an item in the activity feed — the ONE declaration of the
 # feed's vocabulary, which is why the ray needs none of its own. ``False`` is the licence not to
 # serve the record at all (``store/family_ray_queries.py``); ``True`` still renders conditionally
-# on the payload — a ``snapshot`` that is a ``p_best_update`` yields nothing — and THAT decision
+# on the payload — a ``snapshot`` that is a ``race_standing`` yields nothing — and THAT decision
 # belongs to the renderer. Total over the RECORD kinds: ``stream_snapshot`` is synthesized by
 # the tail, reaches its own translator, and is on no ledger for the ray to filter.
 RENDERS_AS_ACTIVITY: dict[ProjectionKind, bool] = {
@@ -84,6 +85,7 @@ RENDERS_AS_ACTIVITY: dict[ProjectionKind, bool] = {
     "round_warning": True,
     "ruler": False,
     "snapshot": True,
+    "run_limits": False,
     "spend_hold": False,
     "spend_tombstone": False,
     "token_usage": False,
@@ -126,7 +128,9 @@ NON_ACTIVITY_KINDS: frozenset[ProjectionKind] = frozenset(
 RAY_PAYLOAD_FIELDS: dict[ProjectionKind, frozenset[str]] = {
     # The attempt as it was proposed. `changes_description` is the prose the round document
     # and the tree both carry, and it is the largest thing on this record.
-    "candidate_minted": frozenset({"round", "idx", "candidate_id", "parent_id", "label", "source"}),
+    "candidate_minted": frozenset(
+        {"round", "idx", "candidate_id", "parent_ids", "label", "source"}
+    ),
     # WHO fired WHAT. `payload` is the command's arguments (a steer carries whole prompt
     # fields) and `idempotency_key` is transport.
     "command": frozenset({"command_id", "kind", "issued_by_user_id"}),

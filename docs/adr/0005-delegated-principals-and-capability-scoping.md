@@ -65,10 +65,10 @@ Every control-plane verb requires a capability, checked in **one place**: the co
 | Cap | Gates (real command kinds) | Kind |
 |---|---|---|
 | `campaign.step` | `skip-searchpoint`, `pause-cycle`, `origin-gate-decision`, `step-cycle` | stepwise / bounded |
-| `campaign.run` | `start-run`, `fork-cycle`, `start-checkin` | autonomous |
+| `campaign.run` | `start-run`, `fork-cycle`, `start-checkin`, `verify-candidate`, `cancel-queued-run` | autonomous |
 | `campaign.create` | `mint-campaign`, `register-backend`, `edit-draft-campaign`, `resolve-origin` | create |
-| `campaign.budget` | `change-spend-budget` (raise a ceiling) | budget |
-| `campaign.lifecycle` | `archive-/delete-/unarchive-campaign`, `delete-cycle`, `cleanup-empty-cycles`, `set-campaign-label`, `replace-dataset` | destructive |
+| `campaign.budget` | `change-run-limits` (raise a ceiling), `set-concurrent-cycles` | budget |
+| `campaign.lifecycle` | `archive-/delete-/unarchive-campaign`, `delete-cycle`, `cleanup-empty-cycles`, `set-campaign-label`, `replace-dataset`, `compact-archive` | destructive |
 | `campaign.babysit` | a **direct edit** of an optimizer-owned / origin-locked value — wired to the `fork-cycle` axis-unlock (§4) | privileged / provenance-tainting |
 | `campaign.lookahead` | `set-sample-lookahead` — **its own rung, not a share of `babysit`**: it spends the BOX's shared provider rate bucket rather than the campaign's budget, which makes it the one power a host may withhold from a delegate while still granting the run. Not `babysit`, because it taints nothing. See [`../operations/access-model.md`](../operations/access-model.md) § host-admin ↔ user | `lookahead` |
 
@@ -96,9 +96,9 @@ A steer to a PERMITTED model is a clean human fork: no cap, no taint. The done C
 
 ### 5. Per-grant spend ceiling — SHIPPED
 
-Each grant carries a spend ceiling enforced by the existing spend-cap probe (ADR-0003): `admit_launch` reads a sub-principal's declaration down to `grant_ceiling`, and the host wallet then admits or refuses that declaration whole. The ceiling comes from the identity claims the sub-principal carries — no new spend machinery, a narrower input to the one that exists. Per-*channel* ceilings await §2.
+Each grant carries a spend ceiling enforced by the existing spend-cap probe (ADR-0003): `admit_launch` reads a sub-principal's declaration down to the grant (`quota.py::_delegated_spend_ceiling`), and the host wallet then admits or refuses that declaration whole. The ceiling comes from the identity claims the sub-principal carries — no new spend machinery, a narrower input to the one that exists. Per-*channel* ceilings await §2.
 
-**The grant is a bound, never a declaration, and both directions of that were wrong once.** A launch declaring NOTHING declares the account's headroom bounded by the grant; composed the other way the grant became the declaration, and a delegate whose headroom had fallen below its grant was refused the last of its own allowance. And `clamp_budget_change` composes the grant only into an arm the request SUPPLIED — folded into an absent one it wrote a ceiling the caller asked to leave alone, which the `spend_cap` file merge then made stick for the rest of the run.
+**The grant is a bound, never a declaration, and both directions of that were wrong once.** A launch declaring NOTHING declares the account's headroom bounded by the grant; composed the other way the grant became the declaration, and a delegate whose headroom had fallen below its grant was refused the last of its own allowance. And `clamp_budget_change` composes the grant only into an arm the request SUPPLIED — folded into an absent one it wrote a ceiling the caller asked to leave alone, which the `run_limits` file merge then made stick for the rest of the run.
 
 ### 6. The bounded step verb — SHIPPED as `step-cycle`
 

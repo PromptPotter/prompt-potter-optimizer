@@ -1,12 +1,6 @@
-/* One value list per enumerable axis — model, reasoning effort, any enum alike. Drawn PLAIN:
-   native checkboxes, no accent fills and no custom glyphs. Closed it is ONE LINE; open, the
-   panel drops OVER that line (`Popover side="over"`), so the value is on screen exactly once.
-   Square corners and a hard 1px frame, deliberately: this is the dropdown LIST, not a card. */
-
 @layer ui {
-/* Doubled deliberately. `Popover` composes its own `.wrap` with this one, and two single-class
-   selectors in one layer tie on specificity — so which wins would depend on bundle order rather
-   than on intent. The axis list fills its column; the toolbar popovers stay shrink-to-fit. */
+/* Doubled: `Popover` composes its own `.wrap` with this one, and a tie in one layer would be
+   decided by bundle order. */
 .wrap.wrap {
   display: block;
   flex: 1 1 auto;
@@ -57,9 +51,6 @@
   color: var(--color-text-tertiary);
 }
 
-/* The panel overrides `Popover`'s rounded card: square, hard-edged, and scrolling past a long
-   catalogue rather than running off the viewport. `Popover side="over"` already pins it over the
-   trigger and floors its width at the trigger's. */
 .panel {
   display: flex;
   flex-direction: column;
@@ -79,21 +70,13 @@
   min-width: 0;
 }
 
-/* Last in the row, so the ticks line up in a column down the RIGHT edge: the value is what the
-   eye scans, and a leading checkbox pushes every name off the panel's own left margin. */
 .tick {
   flex: 0 0 auto;
   margin: 0 var(--space-4) 0 0;
 }
 
-/* The value itself is the pick control: clicking it pulls the value to the front, and the front
-   IS the origin. No radio, no dot — position is the state. Full-bleed so the whole row highlights,
-   which is what a 90s list does under the cursor.
-
-   Shared with the permissions-only host, where the same markup is a `<span>` and the value is
-   NOT this list's to set. Everything the cursor promises — pointer, hover wash, focus ring — is
-   therefore scoped to the button: a span that lit under the mouse would advertise a click that
-   goes nowhere, which is exactly what dropping `onPick` exists to prevent. */
+/* Cursor affordances are scoped to the button: on a permissions-only host the same class is a
+   `<span>`, and lighting it would advertise a click that goes nowhere. */
 .name {
   flex: 1 1 auto;
   min-width: 0;
@@ -122,16 +105,13 @@ button.name:focus-visible {
   outline-offset: -2px;
 }
 
-/* Row 1 — where the axis starts, and where the closed line sat. Its pick button is inert
-   (already there), so it must not read as disabled. */
+/* Row 1's pick button is disabled (already there) but must not read as disabled. */
 .start .name {
   color: var(--color-text-primary);
   font-weight: 600;
   cursor: default;
 }
 
-/* A value the operator typed. Small, uppercase, in the tertiary wash — it marks provenance, not
-   state, so it must not compete with the struck-through and italic marks beside it. */
 .tag {
   margin-left: var(--space-6);
   font-family: var(--font-sans);
@@ -144,15 +124,13 @@ button.name:focus-visible {
   padding: 0 3px;
 }
 
-/* Ruled out reads as struck rather than merely dim: dimming alone is the signal a disabled
-   control already uses, and the two mean opposite things here. */
+/* Struck, not dimmed: dim is the disabled signal, which means the opposite here. */
 .out .name {
   opacity: 0.55;
   text-decoration: line-through;
 }
 
-/* What the current selection refuses, as opposed to what the operator ruled out. Both are
-   unavailable and they are not the same fact, so they do not wear the same mark. */
+/* Refused by the selection, distinct from ruled out by the operator — never the same mark. */
 .inert {
   opacity: 0.45;
 }
@@ -169,8 +147,6 @@ button.name:focus-visible {
   line-height: 1.4;
 }
 
-/* The escape hatch: a value the catalogue does not carry. `+` leads the row, aligned with the
-   value names above it rather than with the ticks, which now sit at the far edge. */
 .add {
   display: flex;
   align-items: center;

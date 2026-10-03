@@ -1,44 +1,54 @@
 "use client";
+import { useMemo } from "react";
+import { fetchOptimizerRoster, type DraftCampaignWire, type DraftPatch } from "@/lib/api";
 import { measurementNode } from "@/lib/derivations";
+import { StaticConnectorProvider, useConnector } from "@/lib/hooks/useConnector";
 import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
+import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useSelection } from "@/lib/SelectionContext";
-import { Toolbar, ToolbarSpacer } from "@/components/ui";
+import { SegmentedControl, Toolbar, ToolbarSpacer } from "@/components/ui";
 import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
+import { NodeKnobsPanel } from "@/components/dashboard/control/NodeKnobsPanel";
 import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 
-// The OPTIMIZER, on the setup surface — the loop that is about to search, shown while
-// the operator is still deciding what to search over. `PipelineSetupSection` beside it
-// answers "what gets optimized"; this one answers "what does the optimizing".
-//
-// It draws through `PipelineFlow` — the SAME renderer the chat hero uses for the
-// optimizer level of its stack — rather than a list of its own. Not `PipelineStack`,
-// which is the zoom CHAIN: the level below the optimizer is this campaign's pipeline,
-// and that is already on screen in `PipelineSetupSection` directly underneath. Drawing
-// the chain here would render it twice.
-//
-// `/optimizer-pipeline` is a static manifest with no campaign in it, which is what makes
-// this reachable before mint — a draft has no cycle to read a pipeline from.
-//
-// The picked node opens the ONE `NodeDetail` — the same panel the chat hero and the
-// dashboard canvas open, so config and the prompt each node STARTS from read here
-// exactly as they do there, and it reads the served schema itself.
-//
-// Node config is READ-ONLY here, and that is a boundary rather than an omission:
-// `OptimizationConfig` declares no optimizer-node field and `assets/optimizer/
-// pipeline.yaml` is one repo-wide operator-owned file, so there is no per-campaign
-// optimizer overlay for an edit to land in. Offering an input would be a control that
-// writes nowhere.
+// The check-in's optimizer: which manifest this campaign runs, its loop, and its knobs. Not
+// `PipelineStack`: the level below is `PipelineSetupSection`'s. The roster is served, never listed.
 
-export function OptimizerSetupSection() {
-  const { doc, error } = useOptimizerPipeline();
+export function OptimizerSetupSection({
+  draft,
+  onApply,
+}: {
+  draft: DraftCampaignWire;
+  onApply: (patch: DraftPatch) => void;
+}) {
+  const { optimizer } = draft.optimization_overrides;
+  // The draft response's own field, so the node detail below reads the manifest this draft picked.
+  const fields = useMemo(() => ({ optimizer, pipelineStatus: "ok" as const }), [optimizer]);
+  return (
+    <StaticConnectorProvider fields={fields}>
+      <OptimizerSetupInner draft={draft} onApply={onApply} />
+    </StaticConnectorProvider>
+  );
+}
+
+function OptimizerSetupInner({
+  draft,
+  onApply,
+}: {
+  draft: DraftCampaignWire;
+  onApply: (patch: DraftPatch) => void;
+}) {
+  const { optimizer, nodes } = draft.optimization_overrides;
+  const { doc, error } = useOptimizerPipeline(useConnector().optimizer);
+  const rosterRead = useRead(
+    { key: "optimizers", fetch: (signal) => fetchOptimizerRoster(signal) },
+    { surface: "optimizer-roster" },
+  );
+  const roster = readyData(rosterRead);
   const { node: selected, setSelectionForNode } = useSelection();
-
-  const view = doc?.view ?? null;
-  // The selection axis is app-global and node ids are not disjoint across pipelines, so
-  // match on the SCOPE as well as the id — a `target` click in the section below must
-  // not open an optimizer node that happens to share its name (on a self-optimizing
-  // campaign every one of them does).
+  // Match on SCOPE too: node ids are not disjoint across pipelines (self-optimization shares all).
   const shown = selected?.scope === "optimizer" ? selected : null;
+  const entry = roster?.optimizers.find((o) => o.name === optimizer);
 
   return (
     <section className="setup-preview">
@@ -48,13 +58,46 @@ export function OptimizerSetupSection() {
         <span className="setup-preview-sub">the loop that searches</span>
       </Toolbar>
       <p className="bnode-role">
-        The evolution loop itself — generate, score, critique, and the two escalation
-        steps it reaches for when a round stalls. Pick a node to read what it runs on.
-        These are set once for this install, not per campaign.
+        Which optimizer searches this campaign. Every one is scored, stopped and billed by the
+        same bench, so their results compare. Switching drops the knobs you changed on the
+        previous one.
       </p>
 
+      {roster ? (
+        <div className="optimizer-pick">
+          <SegmentedControl<string>
+            options={roster.optimizers.map((o) => ({
+              value: o.name,
+              label: o.name === roster.default ? `${o.name} · default` : o.name,
+            }))}
+            value={optimizer}
+            onChange={(name) => {
+              if (name === optimizer) return;
+              setSelectionForNode(null);
+              onApply({ optimization_overrides: { optimizer: name } });
+            }}
+            ariaLabel="Optimizer"
+          />
+          <p className="optimizer-pick-cite">
+            {!entry
+              ? null
+              : entry.paper
+                ? `Runs ${entry.paper} at its paper configuration, version ${entry.version}.`
+                : entry.origin === null
+                  ? `PromptPotter's own optimizer, version ${entry.version}.`
+                  : `Installed from ${entry.origin}, version ${entry.version}.`}
+          </p>
+        </div>
+      ) : (
+        <p className="mech-empty">
+          {rosterRead.status === "failed"
+            ? "Could not load the optimizers this install runs."
+            : "Loading optimizers…"}
+        </p>
+      )}
+
       <PipelineFlow
-        view={view}
+        view={doc?.view ?? null}
         status={doc ? "ok" : error ? "error" : "loading"}
         connector="PromptPotter"
         reach={doc?.reach ?? null}
@@ -65,9 +108,18 @@ export function OptimizerSetupSection() {
         tone="neutral"
       />
 
-      {shown ? (
-        <NodeDetail node={shown} onClose={() => setSelectionForNode(null)} />
-      ) : null}
+      {shown ? <NodeDetail node={shown} onClose={() => setSelectionForNode(null)} /> : null}
+
+      <details className="new-campaign-optional">
+        <summary>{optimizer} knobs</summary>
+        <div className="new-campaign-optional-body">
+          <NodeKnobsPanel
+            optimizer={optimizer}
+            nodes={nodes}
+            onChange={(patch) => onApply({ optimization_overrides: { nodes: patch } })}
+          />
+        </div>
+      </details>
     </section>
   );
 }

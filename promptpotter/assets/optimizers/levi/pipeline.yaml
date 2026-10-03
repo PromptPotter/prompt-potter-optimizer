@@ -1,0 +1,142 @@
+# levi — LEVI (Tanveer, "LEVI: Stronger Search Architectures Can Substitute for Larger LLMs in
+# Evolutionary Search", arXiv 2605.09764) at its prompt-optimization configuration, as a manifest
+# the bench runs like any other. A campaign selects it with `optimization.optimizer: levi` and
+# adjusts it with `optimization.nodes.{node}.config`.
+#
+# Every value below cites the section it comes from. Where the bench runs LEVI differently from
+# the paper, `docs/methods/candidate-elimination.md` § LEVI mapping and deviations lists it.
+#
+# Round 1 is the calibration round (Alg. 1): the seeds and the origin are scored on the whole
+# search pool, the proxy is chosen from those rows and the archive is seeded. Every later round is
+# one paradigm-shift period (Alg. 2, App. F): `interval - 1` refinements and one paradigm shift.
+#
+# Editing a `resolved_prompts` field below changes what every LEVI call reads; the text is the
+# paper's own (App. E.6, E.7), with its `{placeholder}`s spelled as `{{placeholder}}`.
+name: levi
+version: v1.0
+# Served to the optimizer picker: every knob value below is this paper's configuration.
+paper: 'Tanveer, "LEVI: Stronger Search Architectures Can Substitute for Larger LLMs in Evolutionary Search", arXiv 2605.09764'
+available_models:
+  - qwen/qwen3-8b
+  - google/gemini-3-flash-preview
+  - openai/gpt-6-luna
+  - deepseek/deepseek-v4-flash:nitro
+  - openai/gpt-oss-20b:nitro
+  - openai/gpt-oss-120b:nitro
+nodes:
+  # The refinement route (§3.2): the small model, most of the calls. Qwen3-8B is the prompt runs'
+  # model (§4.2); max_tokens 16,384 (App. B, Table 5). The paper states no decoding temperature;
+  # 1.0 is OpenRouter's default, which it billed through (App. C).
+  levi_refine:
+    type: llm
+    config:
+      prompt_family: levi_refine
+      prompt_version: 1
+      temperature: 1.0
+      max_tokens: 16384
+      provider: openrouter
+      model: qwen/qwen3-8b
+      # The parent's softmax temperatures, one drawn per call (App. A, App. B).
+      sampler_temperatures: [0.3, 0.7, 1.0, 1.2]
+      # One inspiration, dropped 20% of the time (App. B, Table 5).
+      n_inspirations: 1
+      inspiration_drop: 0.2
+      # NOT the paper's: it passes per-instance failure traces without a count (App. E.6); 3 is
+      # GEPA's reflection minibatch (arXiv 2507.19457), whose suite its prompt runs use (§4.2).
+      feedback_failures: 3
+  # The paradigm-shift route (§3.2, App. F): the large model, one call per period. Gemini 3 Flash
+  # is the paper's paradigm-shift model (App. A); max_tokens 4,096 (App. F). The seed pass sends
+  # this node's template too: the paper publishes no seed template for a prompt (App. E.1 is code).
+  levi_paradigm_shift:
+    type: llm
+    config:
+      prompt_family: levi_paradigm_shift
+      prompt_version: 1
+      temperature: 1.0
+      max_tokens: 4096
+      provider: openrouter
+      model: google/gemini-3-flash-preview
+      # Every 10 evaluations, over k = 3 clusters of the occupied cells (App. B, App. F).
+      interval: 10
+      n_clusters: 3
+      # n_diverse_seeds = 4 (App. B, Table 5): with the origin, the 5 calibration prompts (App. A).
+      n_diverse_seeds: 4
+  # K_proxy = 30 of {30, 40}, weights (r, s, c) = (0.5, 0.5, 0.15) (§3.3, App. A).
+  proxy_css:
+    type: sampler
+    config:
+      size: 30
+      rank_weight: 0.5
+      separation_weight: 0.5
+      redundancy_weight: 0.15
+  score:
+    type: measurement
+    config: {}
+  # 50 centroids (App. A). The descriptors are the prompt's length and its per-cell score profile
+  # on the proxy (§3.1, "especially useful for prompt optimization"); the paper names none for its
+  # prompt runs. NOT the paper's: `cvt_samples`, the uniform draws k-means places the centroids
+  # among, which it does not state (Vassiliades et al. 2017 construct the CVT this way).
+  map_elites:
+    type: selector
+    config:
+      centroids: 50
+      cvt_samples: 5000
+      descriptors: [target_prompt_chars, cell_objectives]
+pipelines:
+  default:
+    - proxy_css
+    - levi_refine
+    - levi_paradigm_shift
+    - score
+    - map_elites
+resolved_prompts:
+  # App. E.6: "Prompt-optimization mutation (single-prompt artifact)".
+  levi_refine/1:
+    instruction: |-
+      # Prompt Optimization
+
+      ## Objective
+      {{problem_description}}
+
+      ## Current Best Prompt
+      Score: {{parent_score}}
+      --- PROMPT START ---
+      {{parent_prompt}}
+      --- PROMPT END ---
+
+      {{feedback_section}}{{inspirations_section}}{{meta_advice_section}}## Task
+      Rewrite the prompt to score higher on the evaluation.
+
+      Treat the failures above as the only window you'll get into the task -- anything they reveal about the inputs, desired outputs, failure modes, or strategies that worked must end up encoded in the new prompt itself, because the assistant won't see this feedback at evaluation time.
+
+      Be concrete. When the failures show specific terms, formats, edge cases, or substitution patterns ("replace X with Y"), bake representative examples and explicit rules into the prompt instead of abstract directives. When the feedback suggests a generalizable strategy that worked, name it as a reusable rule. Detailed, factually grounded prompts that capture observed patterns reliably outperform short generic ones.
+
+      Keep the same overall task and goal, but make the new prompt richer and more specific than the current best.
+
+      ## Output
+      Wrap the new prompt inside `<prompt>` tags exactly as shown. Put NOTHING outside the tags -- no preamble, no explanation, no markdown fences, no quotes. Only the literal prompt text between the tags will be used.
+
+      <prompt>
+      your new prompt text here
+      </prompt>
+  # App. E.7: "Prompt-optimization paradigm shift".
+  levi_paradigm_shift/1:
+    instruction: |-
+      # Prompt Paradigm Shift
+
+      ## Objective
+      {{problem_description}}
+
+      ## Current Representatives
+      {{representatives}}
+
+      ## Task
+      Write a fundamentally different prompt strategy that could outperform the current prompt family.
+      Change the framing, structure, or reasoning strategy substantially rather than making a tiny edit.
+
+      ## Output
+      Wrap the new prompt inside `<prompt>` tags exactly as shown. Put NOTHING outside the tags -- no preamble, no explanation, no markdown fences, no quotes. Only the literal prompt text between the tags will be used.
+
+      <prompt>
+      your new prompt text here
+      </prompt>

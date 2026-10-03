@@ -18,25 +18,16 @@ interface Props {
 
 type ViewKind = "delta" | "series";
 
-// Queue-mechanism objective label — hardcoded since the adaptive queue
-// mechanism is a single function (decision_information_gain in
-// adaptive_queue_mechanism.py). If objective variants land, source this
-// from a new RoundSummary field.
+// `adaptive_queue_mechanism.py` has a single objective; a variant needs a RoundSummary field.
 const OBJECTIVE_LABEL = "by decision_information_gain";
 
-// Interior box a mini button's tile grid must fit — 57x22px button minus its
-// 3px padding on every side (`.hs-mini-btn`).
+// 57x22px `.hs-mini-btn` minus its 3px padding.
 const MINI_BOX_W = 51;
 const MINI_BOX_H = 16;
 const MINI_GAP = 1;
 const MINI_MAX_TILE = 4;
 
-// Largest tile size (in px, capped at MINI_MAX_TILE) that fits `n` tiles inside
-// the mini box without any spilling past the fixed 57x22 button — the strip used
-// to hold every tile at a flat 4px regardless of count, so a round x sample
-// matrix wider than the box lost tiles with no scrollbar and no ellipsis to say
-// so (`webapp/CLAUDE.md` § Stylesheet organization). Scaling the tile GEOMETRY
-// down, never the CSS `transform`/`viewBox`, is what keeps every tile visible.
+// Shrink the tile GEOMETRY to fit, never a CSS scale — an overflowing tile vanishes silently.
 function miniTileSize(n: number): number {
   if (n <= 0) return MINI_MAX_TILE;
   for (let s = MINI_MAX_TILE; s > 1; s--) {
@@ -47,9 +38,7 @@ function miniTileSize(n: number): number {
   return 1;
 }
 
-// Mini-button trigger — fixed dimensions matching `.hs-mini-btn` (57 × 22 px,
-// no resize). Inner texture is a miniature Series-view grid (tiles scaled to
-// fit) so the button itself previews what's inside.
+// Fixed to `.hs-mini-btn` (57 × 22 px); its texture previews the Series grid.
 export function SampleTrajectoryMiniButton({
   expanded,
   rounds,
@@ -82,7 +71,6 @@ export function SampleTrajectoryMiniButton({
         style={{ "--hs-mini-tile": `${tile}px` } as CSSProperties}
       >
         {sorted.rounds.map((r, i) => {
-          // `positions` and `everSeen` are built one-per-round, parallel to `sorted.rounds`.
           const pos = sorted.positions[i]!;
           const prev = i > 0 ? sorted.positions[i - 1]! : null;
           const everPrev = i > 0 ? everSeen[i - 1]! : new Set<number>();
@@ -96,8 +84,6 @@ export function SampleTrajectoryMiniButton({
   );
 }
 
-// Content panel — Delta or Series view. Pure renderer; parent owns the
-// expand toggle (the mini-button above).
 export function SampleTrajectory({ rounds }: Props) {
   const [view, setView] = useState<ViewKind>("delta");
   const sorted = useMemo(() => buildSorted(rounds), [rounds]);
@@ -132,11 +118,7 @@ export function SampleTrajectory({ rounds }: Props) {
   );
 }
 
-// Standalone Series grid, reusable outside the trajectory card (the
-// per-candidate fitness "Sample set" detail embeds it). Builds the sorted
-// rounds, then renders the same hover-popup + click-to-select grid. `maxHeight`
-// makes it vertically scrollable (≈5 rounds by default); `selectMode` controls
-// whether a click selects measured-only or the whole round.
+// Also embedded by the per-candidate fitness "Sample set" detail.
 export function SampleTrajectorySeries({
   rounds,
   selectMode = "measured",

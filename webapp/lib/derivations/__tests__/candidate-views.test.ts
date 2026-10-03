@@ -2,15 +2,11 @@ import { describe, expect, it } from "vitest";
 import { barsAreCourses, candidateViews, forkKeysOf } from "../candidate-views";
 import type { DashboardCandidate, LineageNode, OverlapMember } from "@/lib/api";
 
-// `candidateViews` decides WHICH served number each bar is allowed to show. Every rule it
-// applies is a suppression or a source choice, and every one of them was prose until now —
-// the card assembled these rows inline, where no test could reach them.
-
 function node(
   over: Partial<LineageNode> & Pick<LineageNode, "kind" | "id" | "label">,
 ): LineageNode {
   return {
-    parent_id: null,
+    parent_ids: [],
     course_label: over.label,
     path: [],
     children: [],
@@ -19,10 +15,9 @@ function node(
     composite_fitness: null,
     status: "",
     election_held: true,
-    is_winner: false,
+    is_selected: false,
     theta: null,
     theta_se: null,
-    evaluators: {},
     mean_fitness_ci_lo: null,
     mean_fitness_ci_hi: null,
     scored_samples: null,
@@ -43,8 +38,7 @@ function node(
     task: null,
     best_accuracy: null,
     origin_accuracy: null,
-    hearts: null,
-    lives_cap: null,
+    run_standing: null,
     ...over,
   } as unknown as LineageNode;
 }
@@ -54,23 +48,22 @@ function live(over: Partial<DashboardCandidate> & Pick<DashboardCandidate, "labe
     candidate_id: null,
     accuracy: null,
     composite_fitness: null,
-    invalid: false,
+    outcome: null,
     scored_samples: 0,
     cached_samples: 0,
     expected_samples: null,
     evaluators: {},
     changes_description: "",
-    partial_reason: "",
     theta: null,
     theta_se: null,
     mean_fitness_ci_lo: null,
     mean_fitness_ci_hi: null,
-    matched_parent_accuracy: null,
-    matched_parent_composite: null,
-    matched_parent_lift: null,
-    matched_parent_lift_ci_lo: null,
-    matched_parent_lift_ci_hi: null,
-    is_winner: false,
+    reference_accuracy: null,
+    reference_composite: null,
+    reference_lift: null,
+    reference_lift_ci_lo: null,
+    reference_lift_ci_hi: null,
+    is_selected: false,
     ...over,
   } as DashboardCandidate;
 }
@@ -78,10 +71,10 @@ function live(over: Partial<DashboardCandidate> & Pick<DashboardCandidate, "labe
 const EMPTY = {
   inflightByLabel: new Map<string, DashboardCandidate>(),
   sampleSet: null,
-  lensSubsetExact: false,
   diagByLabel: new Map(),
   overlapByCandidate: new Map(),
   overlapSize: null,
+  stampsTheta: true,
 };
 
 const course = (kids: LineageNode[]) => node({ kind: "course", id: "c0", label: "root", children: kids });
@@ -100,6 +93,19 @@ describe("the half choice — tree unless it holds no measurement", () => {
     expect(views[0]?.source).toBe("history");
   });
 
+  it("nulls θ outright when the selector never stamps one — never a bare blank cell", () => {
+    const views = candidateViews({
+      ...EMPTY,
+      stampsTheta: false,
+      viewedNode: course([
+        node({ kind: "candidate", id: "a", label: "C1.1", round: 1, accuracy: 0.7, theta: 1.2 }),
+      ]),
+    });
+    expect(views[0]?.theta).toBeNull();
+    expect(views[0]?.theta_se).toBeNull();
+    expect(views[0]?.thetaCaveat).toBeNull();
+  });
+
   it("takes the WHOLE live row when the tree has nothing — never field by field", () => {
     const views = candidateViews({
       ...EMPTY,
@@ -107,7 +113,7 @@ describe("the half choice — tree unless it holds no measurement", () => {
       inflightByLabel: new Map([
         [
           "C1.1",
-          live({ label: "C1.1", accuracy: 0.4, theta: 0.9, is_winner: true, scored_samples: 8 }),
+          live({ label: "C1.1", accuracy: 0.4, theta: 0.9, is_selected: true, scored_samples: 8 }),
         ],
       ]),
     });
@@ -116,20 +122,19 @@ describe("the half choice — tree unless it holds no measurement", () => {
       source: "inflight",
       accuracy: 0.4,
       theta: 0.9,
-      is_winner: true,
+      is_selected: true,
       n_samples: 8,
     });
   });
 
-  // The one that matters: `INVALID_SCORES` reports a synthetic 0.0 for a candidate rejected
-  // before it cost a sample. The tree withholds it; falling back to the live half would put
-  // the fabricated number back on the bar and render it as "got everything wrong".
+  // `INVALID_SCORES` reports a synthetic 0.0 the tree withholds; falling back to the live half
+  // would render it as "got everything wrong".
   it("does NOT fall back to an invalid live row's synthetic 0.0", () => {
     const views = candidateViews({
       ...EMPTY,
       viewedNode: course([node({ kind: "candidate", id: "a", label: "C1.1", round: 1 })]),
       inflightByLabel: new Map([
-        ["C1.1", live({ label: "C1.1", accuracy: 0, invalid: true })],
+        ["C1.1", live({ label: "C1.1", accuracy: 0, outcome: "invalid" })],
       ]),
     });
     expect(views[0]?.accuracy).toBeNull();
@@ -165,7 +170,7 @@ describe("course bars carry no verdict", () => {
       overlapAccuracy: null,
       overlapN: null,
       // A run is not a scored row, so no promotion gate ever judged it against a parent.
-      matchedParentLift: null,
+      referenceLift: null,
       // A run is not a round, so it has no election to be pending on.
       electionPending: false,
     });
@@ -194,16 +199,13 @@ describe("a picked sample set moves the overlap bars, and nothing else", () => {
       composite_fitness: 0.65,
       cached_samples: 4,
       scored_samples: 12,
-      matched_parent_lift: 0.09,
+      reference_lift: 0.09,
       sample_set_accuracy: 0.5,
       sample_set_n: 6,
     }),
   ]);
 
-  // The whole point of the split: before the overlap series existed, "compare these on one
-  // basis" could only be said by re-basing the metric bars themselves, which then forced θ,
-  // the composite and the lift to be suppressed wholesale. They are on this candidate's OWN
-  // cells and stay there whatever is picked here.
+  // Metric bars stay on the candidate's OWN cells whatever is picked; only overlap re-bases.
   it("leaves every metric bar on the candidate's own cells", () => {
     const views = candidateViews({ ...EMPTY, viewedNode: arm, sampleSet: [1, 2, 3, 4, 5, 6] });
     expect(views[0]).toMatchObject({
@@ -212,7 +214,7 @@ describe("a picked sample set moves the overlap bars, and nothing else", () => {
       composite: 0.65,
       cached_samples: 4,
       n_samples: 12,
-      matchedParentLift: 0.09,
+      referenceLift: 0.09,
       // The one bar that moves — the SERVED re-score over the picked cells.
       overlapAccuracy: 0.5,
       overlapN: 6,
@@ -246,36 +248,6 @@ describe("a picked sample set moves the overlap bars, and nothing else", () => {
     expect(on(19)).toMatchObject({ overlapAccuracy: null, overlapN: null });
   });
 
-  // The one channel a picked set still moves besides the overlap bars, because the route
-  // composes `lens` and `samples` in the same read. The silent harm is the FALSE arm: a
-  // criterion naming an evaluator that only exists in the full-set snapshot re-scores partly on
-  // the subset and partly on everything, and renders as a subset number either way. The TRUE arm
-  // is pinned beside it so a future edit cannot collapse the pair back into "suppress whenever a
-  // set is picked" — that dropped a value the server had already computed over these very cells.
-  it("keeps a masked value that re-derives whole from the picked rows, drops one that cannot", () => {
-    const lensed = course([
-      node({
-        kind: "candidate",
-        id: "a",
-        label: "C1.1",
-        round: 1,
-        sample_set_accuracy: 0.5,
-        sample_set_n: 6,
-        lens_value: 0.42,
-        lens_rank: 1,
-      }),
-    ]);
-    const picked = { ...EMPTY, viewedNode: lensed, sampleSet: [1, 2, 3, 4, 5, 6] };
-    expect(candidateViews({ ...picked, lensSubsetExact: true })[0]).toMatchObject({
-      lensValue: 0.42,
-      lensRank: 1,
-    });
-    expect(candidateViews({ ...picked, lensSubsetExact: false })[0]).toMatchObject({
-      lensValue: null,
-      lensRank: null,
-    });
-  });
-
   it("gives a run no basis at all — the server decorates candidates only", () => {
     const runs = course([node({ kind: "course", id: "r1", label: "run-1", best_accuracy: 0.6 })]);
     const views = candidateViews({ ...EMPTY, viewedNode: runs, sampleSet: [1, 2] });
@@ -295,17 +267,17 @@ it("carries the election's lift verdict straight off the tree", () => {
         label: "C1.1",
         round: 1,
         accuracy: 0.6,
-        matched_parent_lift: 0.12,
-        matched_parent_lift_ci_lo: 0.04,
-        matched_parent_lift_ci_hi: 0.2,
+        reference_lift: 0.12,
+        reference_lift_ci_lo: 0.04,
+        reference_lift_ci_hi: 0.2,
       }),
     ]),
   });
   // Served, never differenced here — `accuracy` minus anything is not this number.
   expect(views[0]).toMatchObject({
-    matchedParentLift: 0.12,
-    matchedParentLiftCiLo: 0.04,
-    matchedParentLiftCiHi: 0.2,
+    referenceLift: 0.12,
+    referenceLiftCiLo: 0.04,
+    referenceLiftCiHi: 0.2,
   });
 });
 
@@ -334,6 +306,6 @@ it("says an uncrowned bar has not been judged yet, off the SERVED election flag"
       node({ kind: "candidate", id: "b", label: "C1.2", round: 1, accuracy: 0.4, election_held: true }),
     ]),
   });
-  // A round that HELD reads exactly like one still scoring on `is_winner` alone.
+  // A round that HELD reads exactly like one still scoring on `is_selected` alone.
   expect(views.map((v) => v.electionPending)).toEqual([true, false]);
 });

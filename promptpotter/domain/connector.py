@@ -48,9 +48,14 @@ class BackendUnreachableError(PotterError):
         self.backend_type = backend_type
         self.backend_url = backend_url
         self.detail = detail
+        # A connector that DIAGNOSED the fault leads with what to do about it; the URL and "start
+        # the backend" belong to a wire backend that said nothing, and name a port nothing serves
+        # for an in-process one.
         super().__init__(
-            f"Backend '{backend_type}' at {backend_url} is not reachable. "
-            f"Start the backend and try again." + (f" ({detail})" if detail else ""),
+            f"Backend '{backend_type}' is not ready: {detail}"
+            if detail
+            else f"Backend '{backend_type}' at {backend_url} is not reachable. "
+            f"Start the backend and try again.",
             details={"backend_type": backend_type, "backend_url": backend_url},
         )
 

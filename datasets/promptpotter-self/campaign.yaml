@@ -1,12 +1,11 @@
 campaign_config:
   dataset_name: promptpotter-self
-  # What an operator may steer the inner optimizer TO on a babysat fork. It listed only
-  # gpt-oss-120b while `assets/optimizer/pipeline.yaml` ran deepseek-v4-flash:nitro on all
-  # four nodes — so the model actually in use was outside its own campaign's allow-list, and
-  # every run silently sat in the taints-the-branch case the gate exists to mark. The list
-  # now names what runs; gpt-oss-120b stays because `pipeline.yaml::available_models` still
-  # offers it as a sanctioned alternative. Move this list in the SAME commit as the manifest —
-  # it and `_MODEL_PROFILES` are the two that do not fail loudly when they lag behind it.
+  # What an operator may steer the inner optimizer TO on a babysat fork. It must name the model
+  # `assets/optimizers/potter/pipeline.yaml` runs on every node (gpt-6-luna), or every run
+  # silently sits in the taints-the-branch case the gate exists to mark; the others stay because
+  # `pipeline.yaml::available_models` still offers them as sanctioned alternatives. Move this list
+  # in the SAME commit as the manifest — it and `_MODEL_PROFILES` are the two that do not fail
+  # loudly when they lag behind it.
   #
   # It rides `optimizer_narrowing` now, which is the ONE permitted set — what the optimizer may
   # pick where an axis is open, and what a human may steer to un-tainted where it is not. A
@@ -18,6 +17,7 @@ campaign_config:
     l1_generate: &pp_self_models
       param_allowed_values:
         model:
+          - openai/gpt-6-luna
           - deepseek/deepseek-v4-flash:nitro
           - qwen/qwen3.8-27b:nitro
           - openai/gpt-oss-120b
@@ -61,16 +61,10 @@ campaign_config:
   scoring:
     per_sample: max(0.0, min(1.0, (mean_round_delta + 1.0) / 3.0))
     per_cell: max(0.0, min(1.0, fitness * 500.0 / max(1.0, latency)))
-  headline_metric: ability
-  # = the panel size in inner_tasks.yaml. Above it the engine warns and the adaptive queue is
-  # inert (there is nothing to select from); below it a variant is judged on a subset of cells.
-  sp_budget_round: 6
+  display_metric: ability
   exclude_nodes: []
   pipeline_overlay: {}
   optimization:
-    optimizer_set: self_optimizing
-    prompt_block_catalogue: 'off'
-    l1_patience: 2
     # Priced against `spend_budget_usd`, not intuition: C0 costs ~$0.47 for the 6-cell panel and a
     # 3-variant round runs ~2.3 arms to completion (PoBB refunds the rest), so an optimizing round
     # is ~$1.08. 4 lands at ~$3.7 of the $5.00 ceiling; 5 would halt mid-round on budget rather
@@ -80,19 +74,6 @@ campaign_config:
     # `mean_round_delta` by >0.113 to read as real, and ONE optimizing round is a coin toss rather
     # than a test of that.
     max_rounds: 4
-    # No `lives` block, and its absence is deliberate rather than an omission. It read
-    # `start: 2` against `max_rounds: 2`, so the bank could not reach zero before the
-    # calendar did: hearts NEVER bound, they only relabelled the stop. `af6252` stopped
-    # `lives_exhausted` on round 2, which is also exactly where `max_rounds` would have
-    # ended it, and nothing in the record says which fact stopped the run. Deleting the
-    # inert knob changes no round, only the reason it reports. Re-add it with real
-    # headroom (`start` well under `max_rounds`) when the outer loop runs long enough for
-    # a measurement-driven brake to mean something — `run_preflight_checks` warns
-    # (`config.lives_no_headroom`) if it goes back in without it.
-    # Affordable rather than merely tolerable, and the inner cycles are why: PoBB cut an arm in
-    # 14 of 17 inner rounds, so a 3-variant round runs ~2 arms to completion and the third is
-    # mostly refunded. That is `elimination_n_min` earning its keep.
-    n_variants: 3
     # On the fitness scale, so it moves with the re-anchor above: the window widened from 1.5 to
     # 3.0, which halves the fitness distance a given logit lift covers. Carrying the old value
     # across would have silently doubled the bar. Calibration for what it must NOT reject, from
@@ -101,15 +82,50 @@ campaign_config:
     # Improvement here is granular and infrequent by nature; a bar that rejects a 1-row win
     # rejects most real wins.
     degradation_threshold: 0.4
-    l2_patience: 2
-    l3_patience: 1
     elimination_n_min: 4
-    # Per-campaign, NOT the global default (0.15, whose false-cut curve was measured on the
-    # general round corpus). Here one candidate-cell is a whole inner campaign, so the two
-    # errors are priced very differently: a false cut loses one arm of a 3-variant round,
-    # while a false survival spends the rest of a 6-cell panel on an arm already losing.
-    # Racing at the global epsilon captured about a quarter of the headroom its own p_best
-    # stream offered on `promptpotter-self__af6252`.
-    pobb_epsilon: 0.30
     spend_budget_usd: 5.0
     token_budget: null
+    # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
+    nodes:
+      # = the panel size in inner_tasks.yaml, which run init refuses to differ. Above it the
+      # queue has nothing to select from; below it a variant is judged on a subset of cells.
+      adaptive_queue:
+        config:
+          sp_budget_round: 6
+      l1_generate:
+        config:
+          prompt_family: l1_generate_self_optimizing
+          prompt_block_catalogue: 'off'
+          # Affordable rather than merely tolerable, and the inner cycles are why: PoBB cut an arm in
+          # 14 of 17 inner rounds, so a 3-variant round runs ~2 arms to completion and the third is
+          # mostly refunded. That is `elimination_n_min` earning its keep.
+          n_variants: 3
+      l1_critique:
+        config:
+          prompt_family: l1_critique_self_optimizing
+      l2_context:
+        config:
+          prompt_family: l2_context_self_optimizing
+      pobb:
+        config:
+          # Per-campaign, NOT the global default (0.15, whose false-cut curve was measured on the
+          # general round corpus). Here one candidate-cell is a whole inner campaign, so the two
+          # errors are priced very differently: a false cut loses one arm of a 3-variant round,
+          # while a false survival spends the rest of a 6-cell panel on an arm already losing.
+          # Racing at the global epsilon captured about a quarter of the headroom its own p_best
+          # stream offered on `promptpotter-self__af6252`.
+          epsilon: 0.30
+      escalation:
+        config:
+          # No `lives`, and its absence is deliberate rather than an omission. It read
+          # `start: 2` against `max_rounds: 2`, so the bank could not reach zero before the
+          # calendar did: hearts NEVER bound, they only relabelled the stop. `af6252` stopped
+          # `lives_exhausted` on round 2, which is also exactly where `max_rounds` would have
+          # ended it, and nothing in the record says which fact stopped the run. Deleting the
+          # inert knob changes no round, only the reason it reports. Re-add it with real
+          # headroom (`start` well under `max_rounds`) when the outer loop runs long enough for
+          # a measurement-driven brake to mean something — the `lives_no_headroom` coupling
+          # warns if it goes back in without it.
+          l1_patience: 2
+          l2_patience: 2
+          l3_patience: 1

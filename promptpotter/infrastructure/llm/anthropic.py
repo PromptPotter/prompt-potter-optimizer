@@ -21,7 +21,7 @@ from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.spend_book import Billed, CallLabel
 from promptpotter.shared.errors import (
     ErrorCategory,
-    WalletExhaustedError,
+    SendRefusedError,
     is_provider_credit_refusal,
 )
 
@@ -145,7 +145,7 @@ class AnthropicClient(LLMClientBase):
                 if getattr(exc, "status_code", None) == 400 and is_provider_credit_refusal(
                     str(exc)
                 ):
-                    raise WalletExhaustedError(
+                    raise SendRefusedError(
                         f"Anthropic refused the call for lack of credit: {str(exc)[:300]}",
                         category=ErrorCategory.PROVIDER_CREDIT,
                     ) from exc

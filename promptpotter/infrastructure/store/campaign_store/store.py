@@ -8,9 +8,11 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.bench import BankPartition
+from promptpotter.domain.campaign import Campaign, CampaignResult, HeadToHeadRecord
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.export import PromptExport, parse_prompt_export
+from promptpotter.domain.launch_limits import RoundsCap
 from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.domain.results import RoundResult, best_round_on_shared_cells, overlap_row
 from promptpotter.domain.ruler import DeltaRuler
@@ -21,15 +23,22 @@ from promptpotter.domain.run_records import (
     ForkTrigger,
     MintKind,
     RulerRecord,
+    RunLimitsRecord,
 )
+from promptpotter.domain.spend import BudgetChange
 from promptpotter.domain.value_tree import ValueLeaf
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.runtime_flags import derive_run_phase, is_checkin
+from promptpotter.infrastructure.runtime_flags import (
+    derive_run_phase,
+    is_checkin,
+    write_run_limits_mirror,
+)
 from promptpotter.infrastructure.store.account_spend import bank_spend, sandbox_cycle_dirs
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_cycle_seed,
     scan_ledger_round_closes,
     scan_ledger_rulers,
+    scan_ledger_run_limits,
 )
 from promptpotter.infrastructure.store.io import (
     iter_files,
@@ -46,6 +55,7 @@ from promptpotter.infrastructure.store.io import (
     write_yaml,
 )
 from promptpotter.infrastructure.store.layout import (
+    CAMPAIGN_RESULT,
     ROUND_GLOB,
     CycleLayout,
     campaign_cycles_dir,
@@ -53,6 +63,7 @@ from promptpotter.infrastructure.store.layout import (
     campaigns_root_dir_for,
     classify,
     cycle_dir_for,
+    head_to_head_path,
     inner_sandbox_key,
     root_cycle_id,
     round_number,
@@ -300,6 +311,26 @@ class CampaignStore:
         path = self._manifest_path(campaign.campaign_id)
         write_json(path, campaign.model_dump(mode="json"))
         return path
+
+    def load_result(self, campaign_id: str) -> CampaignResult | None:
+        """``None`` until the campaign's line first banks one — no launch has reached its origin."""
+        data = read_json_optional(self.campaign_root_dir(campaign_id) / CAMPAIGN_RESULT)
+        return None if data is None else CampaignResult.model_validate(data)
+
+    def write_result(self, campaign_id: str, result: CampaignResult) -> None:
+        write_json(
+            self.campaign_root_dir(campaign_id) / CAMPAIGN_RESULT, result.model_dump(mode="json")
+        )
+
+    def load_head_to_head(self, head_to_head_id: str) -> HeadToHeadRecord | None:
+        data = read_json_optional(head_to_head_path(self._base_dir, head_to_head_id))
+        return None if data is None else HeadToHeadRecord.model_validate(data)
+
+    def declare_head_to_head(self, record: HeadToHeadRecord) -> None:
+        write_json(
+            head_to_head_path(self._base_dir, record.head_to_head_id),
+            record.model_dump(mode="json"),
+        )
 
     def update_campaign(self, campaign_id: str, updates: dict[str, Any]) -> None:
         path = self._manifest_path(campaign_id)
@@ -694,9 +725,8 @@ class CampaignStore:
         """The finished cycle's export artifact, or ``None`` when it wrote none.
 
         The reader half of "we write a file and provide a reader" (`roadmap.md` § Application
-        radius). It lives here so a consumer never has to know where the file sits — every caller
-        that re-derived the winner from `CycleResult` instead built it out of the wire-side
-        `winner_prompt_fields`, which cannot be rebuilt into a `PromptTemplate`.
+        radius), so no consumer re-derives the winner from `CycleResult`'s wire-side
+        `result_prompt_fields`, which cannot be rebuilt into a `PromptTemplate`.
         """
         text = read_text_optional(self._layout(hop).export)
         return parse_prompt_export(text) if text else None
@@ -730,6 +760,18 @@ class CampaignStore:
         with graceful("Supersede relation write failed"):
             self.update(hop, {"superseded_by": successor_cycle_id})
         self._stamp_terminal(hop, StopReason.REBASED)
+
+    def line(self, hop: CycleHop) -> list[CycleHop]:
+        """*hop* and every cycle a supersede cut handed its line to since, oldest first."""
+        out = [hop]
+        while (data := self.load(hop)) is not None and (successor := data.get("superseded_by")):
+            hop = CycleHop(campaign_id=hop.campaign_id, cycle_id=successor)
+            out.append(hop)
+        return out
+
+    def line_holder(self, hop: CycleHop) -> CycleHop:
+        """The cycle answering for *hop*'s line now — itself unless a supersede cut moved it."""
+        return self.line(hop)[-1]
 
     def _stamp_terminal(self, hop: CycleHop, reason: StopReason) -> bool:
         data = read_json_optional(self._index_path(hop))
@@ -1051,18 +1093,11 @@ class CampaignStore:
         self,
         hop: CycleHop,
         round_num: int,
-    ) -> tuple[list[dict[str, Any]], str | None] | None:
-        """``consumed`` is ``None`` for a cache written before the digest was recorded —
-        unvouched, which is a state to act on rather than a detail to shrug at."""
+    ) -> tuple[list[dict[str, Any]], str] | None:
         raw = read_json_optional(self._layout(hop).candidate_file(round_num))
         if raw is None:
             return None
-        if isinstance(raw, dict):
-            consumed = raw.get("consumed")
-            return list(raw.get("candidates") or []), consumed if isinstance(
-                consumed, str
-            ) else None
-        return list(raw), None
+        return list(raw["candidates"]), str(raw["consumed"])
 
     def delete_round_candidates(
         self,
@@ -1086,6 +1121,21 @@ class CampaignStore:
 
     def read_cycle_seed(self, hop: CycleHop) -> CycleSeed | None:
         return scan_ledger_cycle_seed(self._layout(hop).ledger)
+
+    def write_run_limits(
+        self, hop: CycleHop, ceiling: BudgetChange, *, rounds: RoundsCap | None
+    ) -> None:
+        """Land the cycle's standing operator ceiling — the record, then its polled mirror. The ONE
+        writer of both, so the mirror a running gate reads can never name a ceiling the ledger does
+        not. WHOLE: the last record wins, so ``rounds=None`` drops a standing round cap."""
+        cycle_dir = self.cycle_dir(hop)
+        CycleEventLog.open(CycleDir(cycle_dir)).append(
+            RunLimitsRecord(usd=ceiling.usd, tokens=ceiling.tokens, rounds=rounds)
+        )
+        write_run_limits_mirror(cycle_dir, ceiling, rounds=rounds)
+
+    def read_run_limits(self, hop: CycleHop) -> RunLimitsRecord:
+        return scan_ledger_run_limits(self._layout(hop).ledger)
 
     def write_resolved_pipeline(self, hop: CycleHop, declaration: dict[str, Any]) -> None:
         """Record the declaration this cycle RUNS — the merge of the live backend and the dataset
@@ -1128,6 +1178,20 @@ class CampaignStore:
         yet to pin anything."""
         raw = read_yaml_optional(self._layout(hop).resolved_experiment)
         return raw if isinstance(raw, dict) else None
+
+    def write_bank_partition(self, hop: CycleHop, partition: BankPartition) -> None:
+        """Re-written every run init: the partition is a pure function of the bank and the frozen
+        declaration, so a disagreement between runs is a changed bank, which the id lists show."""
+        split = partition.split
+        write_json(
+            self._layout(hop).bank_partition,
+            {
+                "split": None if split is None else split.model_dump(mode="json"),
+                "search_ids": [s.id for s in partition.search],
+                "bench_ids": [s.id for s in partition.bench],
+                "demo_ids": [s.id for s in partition.demo],
+            },
+        )
 
     def write_optimized_surface(self, hop: CycleHop, leaves: Sequence[ValueLeaf]) -> None:
         """Record WHAT this cycle optimizes, and how each value reaches the model.

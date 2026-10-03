@@ -13,9 +13,7 @@ describe("draftForCampaign", () => {
   });
 
   it("withholds a draft belonging to a DIFFERENT campaign", () => {
-    // The reported shape: open New-campaign, reach `ready`, then click a running campaign in the
-    // sidebar. The ingest thread still holds its draft, and nothing used to compare the two ids —
-    // so the running campaign's node panel rendered the draft's searchpoint over the run.
+    // A running campaign selected while the ingest thread still holds a draft must not show it.
     expect(draftForCampaign(draft("swiss__09daf6"), "swiss__3ace04")).toBeNull();
   });
 

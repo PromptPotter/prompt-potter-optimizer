@@ -1,0 +1,41 @@
+name: fixture
+version: v1.0
+available_models:
+  - openai/gpt-oss-20b:nitro
+nodes:
+  fixture_draw:
+    type: sampler
+    config:
+      size: 8
+  fixture_rephrase:
+    type: llm
+    description: Rephrases the parent's instruction.
+    config:
+      prompt_family: fixture_rephrase
+      prompt_version: 1
+      temperature: 1.0
+      max_tokens: 8000
+      provider: openrouter
+      model: openai/gpt-oss-20b:nitro
+      variants: 2
+  score:
+    type: measurement
+    config: {}
+  fixture_keep:
+    type: selector
+    description: Keeps the best-scoring arm when it beats its parent.
+    config: {}
+pipelines:
+  default:
+    - fixture_draw
+    - fixture_rephrase
+    - score
+    - fixture_keep
+resolved_prompts:
+  fixture_rephrase/1:
+    instruction: |-
+      Rephrase this prompt for the task: {{task_description}}
+      Prompt: {{instruction}}
+
+      Return the new prompt in the following format:
+      <prompt>new prompt</prompt>

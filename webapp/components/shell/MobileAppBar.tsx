@@ -6,15 +6,8 @@ import { cx } from "@/lib/cx";
 import { CampaignMenu } from "@/components/shell/sidebar/CampaignMenu";
 import s from "./MobileAppBar.module.css";
 
-// The phone's app bar — the CAMPAIGN screen's chrome: back to the list, the campaign's
-// name, and its verbs. The LIST screen is the sidebar at full width, which carries its
-// own brand, CTA, filter and footer, so it gets no bar and `←` moves between the two.
-//
-// The VIEW axis is not here — ViewTabs owns it, as the bottom tab bar at this
-// width, so this bar has no segments and no views in its `⋯`.
-//
-// `←` also carries the live-run dot, off the same `runningCycles` the desktop
-// sidebar-edge dock reads (I6, one server-owned answer) — not a second dock.
+// The phone CAMPAIGN screen's app bar. The VIEW axis is not here — ViewTabs owns it; the `←`
+// dot reads the same `runningCycles` as JobsDock (I6), not a second dock.
 
 interface Props {
   listScreen: boolean;
@@ -26,18 +19,15 @@ export function MobileAppBar({ listScreen, onBack, onNewCycle }: Props) {
   const { status, openAuthPrompt } = useAuth();
   const { campaignId, campaigns, runningCycles } = useWorkspace();
 
-  // The list screen is the sidebar; it is its own header.
   if (listScreen) return null;
 
   const campaign = campaigns.find((c) => c.campaign_id === campaignId);
-  // With no campaign at all there is no name to say, so the bar rests on the product's.
   const title = campaign ? campaignDisplayName(campaign) : "PromptPotter";
   const anon = status === "unauthed";
   const running = runningCycles.length;
 
   return (
-    // `mobile-appbar` is the global marker shell.css keys the ≤bp-md reveal on;
-    // `s.bar` carries only the look.
+    // `mobile-appbar` is the global marker shell.css keys the ≤bp-md reveal on.
     <div className={cx("mobile-appbar", s.bar)}>
       <div className={s.row}>
         <button
@@ -62,7 +52,6 @@ export function MobileAppBar({ listScreen, onBack, onNewCycle }: Props) {
           </>
         ) : (
           <>
-            {/* ONE campaign menu in the app — the same component the sidebar rows use. */}
             {campaign ? <CampaignMenu campaign={campaign} variant="standalone" /> : null}
             <button
               type="button"

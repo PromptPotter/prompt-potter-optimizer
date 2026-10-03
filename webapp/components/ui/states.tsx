@@ -1,7 +1,4 @@
-// Shared placeholder states — the muted "nothing here yet" note and the red
-// "something failed" note a panel shows before (or instead of) its data.
-// Styled inline so they render correctly even if component CSS hasn't loaded;
-// `SignInPrompt` takes a `className` because the sidebar gives it a layout slot.
+// Styled inline so they render even if component CSS hasn't loaded.
 
 import type { CSSProperties, ReactNode } from "react";
 
@@ -23,10 +20,8 @@ export function ErrorNote({ children }: { children: ReactNode }) {
   );
 }
 
-// The anon resting state for an auth-gated surface — what a panel shows
-// instead of firing a read that would 401 (frontend-surface-contract.md § I1).
-// The CTA links to the full-page sign-in (`/login`, the same route logout
-// redirects to); trailing slash matches `next.config.ts::trailingSlash`.
+// What an auth-gated panel shows instead of firing a read that would 401
+// (frontend-surface-contract.md § I1). Trailing slash matches `next.config.ts::trailingSlash`.
 export function SignInPrompt({
   message,
   className,

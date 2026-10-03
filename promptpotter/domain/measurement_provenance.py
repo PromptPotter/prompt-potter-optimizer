@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import enum
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -13,12 +14,26 @@ if TYPE_CHECKING:
 MEASUREMENT_GRADES = ("A", "B", "C")
 """Ordinal quality grades, best first."""
 
-# Sources the optimizer stamps when it deliberately explores the search space.
-# `origin` = round-0 origin scoring; `optimization_loop` = an L1/L2/L3 candidate;
-# `feedback_cycle` = an operator-driven re-score. Anything else (a connector
-# backfill, a degradation re-check, a row written outside the loop) is incidental.
-# This is the quality-of-exploration taxonomy.
-DELIBERATE_SOURCES = frozenset({"origin", "optimization_loop", "feedback_cycle"})
+
+class RunSource(enum.StrEnum):
+    """What bought a run's rows. The origin and the loop's candidates explore the search space on
+    purpose, whichever optimizer proposed them; a diagnostic verb re-measures outside the loop."""
+
+    ORIGIN = "origin"
+    OPTIMIZATION_LOOP = "optimization_loop"
+    VERIFY = "verify"
+    AB = "ab"
+    NOISE_FLOOR = "noise_floor"
+    SEED_SCREEN = "seed_screen"
+
+    @property
+    def deliberate(self) -> bool:
+        match self:
+            case RunSource.ORIGIN | RunSource.OPTIMIZATION_LOOP:
+                return True
+            case RunSource.VERIFY | RunSource.AB | RunSource.NOISE_FLOOR | RunSource.SEED_SCREEN:
+                return False
+
 
 # Fraction of a run's samples that must have run the deliberate LLM path for the
 # run to count as a real evaluation rather than a connector-retrieval batch.
@@ -51,10 +66,6 @@ class RunProvenance:
         }
 
 
-def is_deliberate_source(source: str) -> bool:
-    return source in DELIBERATE_SOURCES
-
-
 def llm_terminal_nodes(schema: PipelineSchema | None) -> frozenset[str]:
     """Names of the schema's LLM nodes — the nodes a deliberate evaluation ends at."""
     if schema is None:
@@ -85,7 +96,7 @@ def llm_path_fraction(
 
 
 def grade_run(
-    source: str,
+    source: RunSource,
     measurements: Iterable[Mapping[str, Any]],
     schema: PipelineSchema | None,
     *,
@@ -93,7 +104,7 @@ def grade_run(
 ) -> RunProvenance:
     """``A`` deliberate source AND LLM path, ``B`` one of the two, ``C`` neither. A ``human_intervened`` run is forced to
     ``C`` regardless: deliberate, but no longer a clean autonomous datapoint."""
-    deliberate = is_deliberate_source(source)
+    deliberate = source.deliberate
     frac = llm_path_fraction(measurements, llm_terminal_nodes(schema))
     full_path = frac >= LLM_PATH_FLOOR
     if human_intervened:
@@ -129,6 +140,7 @@ def meets_grade(grade: str, min_grade: str) -> bool:
 
 __all__ = [
     "REUSABLE_MIN_GRADE",
+    "RunSource",
     "entry_grade",
     "grade_run",
     "meets_grade",

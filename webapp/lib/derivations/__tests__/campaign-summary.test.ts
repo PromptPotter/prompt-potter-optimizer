@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { campaignLineParts } from "../campaign-summary";
+import {
+  benchReading,
+  campaignLineParts,
+  campaignModels,
+  campaignTitle,
+  campaignVendors,
+} from "../campaign-summary";
+import { vendorOf } from "@/lib/format";
 import type { RunGroup } from "../campaign-forest";
-import type { CampaignRunsWith, CampaignSummary, CycleListEntry } from "@/lib/api";
+import type { BenchScore, CampaignRunsWith, CampaignSummary, CycleListEntry } from "@/lib/api";
 
-// The rounds part is read in the CAP's unit — `rounds_closed` counts rounds after the origin,
-// which is what `max_rounds` bounds. Every other state of that part (a campaign still at its
-// check-in, a declared origin-only run, a fork holding the line) renders a different sentence
-// off the same two numbers, and each was a different wrong reading before.
+// `rounds_closed` counts rounds after the origin, the unit `max_rounds` bounds. The row is a NAME
+// and a reading, never a config dump.
 
 function cycle(over: Partial<CycleListEntry> = {}): CycleListEntry {
   return {
@@ -24,13 +29,14 @@ function run(over: {
   runsWith?: CampaignRunsWith | null;
   root?: CycleListEntry;
   answering?: CycleListEntry;
+  label?: string;
 }): RunGroup {
   const root = over.root ?? cycle();
   return {
     campaign: {
       campaign_id: root.campaign_id,
       dataset_name: "spreadsheetbench-s10",
-      label: "",
+      label: over.label ?? "",
       runs_with: over.runsWith === undefined ? null : over.runsWith,
     } as CampaignSummary,
     root,
@@ -44,41 +50,26 @@ function run(over: {
 const runsWith = (
   params: CampaignRunsWith["params"],
   max_rounds: number | null,
-): CampaignRunsWith => ({ params, max_rounds });
+): CampaignRunsWith => ({ params, optimizer: "potter", max_rounds });
 
 describe("campaignLineParts", () => {
-  it("leads with the models, de-duplicated and cut to their own name", () => {
+  // No served setting reaches the row: models ride the vendor mark, the rest the hover card.
+  it("carries no resolved setting at all — the card is where a setup is read", () => {
     const parts = campaignLineParts(
       run({
         runsWith: runsWith(
           [
             { node: "solve", key: "model", value: "openai/gpt-oss-20b:nitro", source: "campaign" },
-            { node: "judge", key: "model", value: "openai/gpt-oss-20b:nitro", source: "dataset" },
-          ],
-          6,
-        ),
-      }),
-    );
-    expect(parts[0]).toBe("gpt-oss-20b:nitro");
-    expect(parts.filter((p) => p === "gpt-oss-20b:nitro")).toHaveLength(1);
-  });
-
-  it("prints the settings this run chose, never the ones every sibling shares", () => {
-    const parts = campaignLineParts(
-      run({
-        runsWith: runsWith(
-          [
+            { node: "solve", key: "temperature", value: 0, source: "campaign" },
+            { node: "solve", key: "reasoning_effort", value: "high", source: "seed" },
             { node: "solve", key: "route_order", value: ["inception"], source: "campaign" },
             { node: "solve", key: "max_turns", value: 20, source: "dataset" },
-            { node: "solve", key: "reasoning_effort", value: "high", source: "seed" },
           ],
           6,
         ),
       }),
     );
-    expect(parts).toContain("route_order inception");
-    expect(parts).toContain("reasoning_effort high");
-    expect(parts.some((p) => p.startsWith("max_turns"))).toBe(false);
+    expect(parts).toEqual(["R3/6", expect.stringContaining("ago")]);
   });
 
   it("counts rounds against the declared cap while the root answers", () => {
@@ -86,11 +77,12 @@ describe("campaignLineParts", () => {
     expect(parts).toContain("R3/6");
   });
 
-  it("says origin only when the cap declares no round after C0", () => {
+  // `R0` would read as a run that went nowhere, not one declared never to leave its origin.
+  it("says origin when the cap declares no round after C0", () => {
     const parts = campaignLineParts(
       run({ runsWith: runsWith([], 0), root: cycle({ rounds_closed: 0 }) }),
     );
-    expect(parts).toContain("origin only");
+    expect(parts).toContain("origin");
   });
 
   it("drops the cap when a FORK answers — the cap on screen would be the root's", () => {
@@ -101,17 +93,124 @@ describe("campaignLineParts", () => {
       }),
     );
     expect(parts).toContain("R2");
-    expect(parts).not.toContain("origin only");
+    expect(parts).not.toContain("origin");
   });
 
   it("says nothing about rounds while the campaign is still at its check-in", () => {
     const parts = campaignLineParts(
       run({ runsWith: runsWith([], 6), root: cycle({ run_phase: "checkin", rounds_closed: 0 }) }),
     );
-    expect(parts.some((p) => p.startsWith("R") || p === "origin only")).toBe(false);
+    expect(parts.some((p) => p.startsWith("R") || p === "origin")).toBe(false);
   });
 
   it("says the pipeline is unreadable rather than printing an empty setup", () => {
     expect(campaignLineParts(run({ runsWith: null }))[0]).toBe("pipeline unreadable");
+  });
+});
+
+describe("vendorOf", () => {
+  it("reads the namespace, which is who TRAINED the model", () => {
+    expect(vendorOf("openai/gpt-oss-120b")).toBe("openai");
+    expect(vendorOf("meta-llama/llama-4-70b")).toBe("meta-llama");
+  });
+
+  // Two colons, told apart only by POSITION: a gateway sits left of the slash and names who
+  // SERVED the call, the `:nitro` routing suffix sits right of it on the model's own name.
+  it("looks past a gateway prefix and through a routing suffix", () => {
+    expect(vendorOf("groq:openai/gpt-oss-120b")).toBe("openai");
+    expect(vendorOf("qwen/qwen3.7-flash:nitro")).toBe("qwen");
+  });
+
+  it("answers with the id itself when it carries no namespace", () => {
+    expect(vendorOf("GPT-4")).toBe("gpt-4");
+    expect(vendorOf("gpt-4:nitro")).toBe("gpt-4");
+  });
+});
+
+describe("campaignModels / campaignVendors", () => {
+  const twoVendors = run({
+    runsWith: runsWith(
+      [
+        { node: "solve", key: "model", value: "openai/gpt-oss-20b:nitro", source: "campaign" },
+        { node: "judge", key: "model", value: "openai/gpt-oss-120b", source: "dataset" },
+        { node: "l1_generate", key: "model", value: "deepseek/deepseek-v4-flash", source: "backend" },
+        { node: "l1_critique", key: "model", value: "openai/gpt-oss-20b:nitro", source: "backend" },
+      ],
+      6,
+    ),
+  });
+
+  it("lists every model whole, de-duplicated — the suffix routes and bills, so it stays", () => {
+    expect(campaignModels(twoVendors)).toEqual([
+      "openai/gpt-oss-20b:nitro",
+      "openai/gpt-oss-120b",
+      "deepseek/deepseek-v4-flash",
+    ]);
+  });
+
+  // Three OpenAI models are ONE brand to count.
+  it("collapses models to their vendors, each keeping the ids it stands for", () => {
+    expect(campaignVendors(twoVendors)).toEqual([
+      { vendor: "openai", models: ["openai/gpt-oss-20b:nitro", "openai/gpt-oss-120b"] },
+      { vendor: "deepseek", models: ["deepseek/deepseek-v4-flash"] },
+    ]);
+  });
+
+  it("has nothing to draw when the pipeline did not resolve", () => {
+    expect(campaignVendors(run({ runsWith: null }))).toEqual([]);
+  });
+});
+
+describe("benchReading", () => {
+  // Two silences, two remedies: a split holding nothing out never grades; one that does, will.
+  it("tells nothing held out apart from a pass not taken", () => {
+    const unheld: BenchScore = {
+      bench_size: 0,
+      scorer_id: "default_hit",
+      origin: null,
+      selected: null,
+      missing_reason: "nothing held out: the campaign's dataset_split declares no bench rows",
+      lift: null,
+      lift_ci_lo: null,
+      lift_ci_hi: null,
+    };
+    expect(benchReading(unheld, "terminal").sub).toBe(unheld.missing_reason);
+    expect(benchReading(null, "running").sub).toBe("graded when the run ends");
+    expect(benchReading(null, "terminal").sub).toBe("not graded — the run ended first");
+  });
+
+  // The headline is the composite, a 0–1 score: printed as a percent it reads as accuracy, and a
+  // pick that solved nothing still shows its misses' cost share as "20%".
+  it("reads the composite as a score, with the served accuracy beside it", () => {
+    const reading = {
+      sp_hash: "s",
+      ci_lo: null,
+      ci_hi: null,
+      n_scored: 10,
+    };
+    const graded: BenchScore = {
+      bench_size: 10,
+      scorer_id: "default_hit",
+      origin: { ...reading, round: 0, accuracy: 0.0, composite_fitness: 0.2 },
+      selected: { ...reading, round: 3, accuracy: 0.5, composite_fitness: 0.62 },
+      missing_reason: null,
+      lift: 0.42,
+      lift_ci_lo: null,
+      lift_ci_hi: null,
+    };
+    const stat = benchReading(graded, "terminal");
+    expect(stat.value).toBe("0.62");
+    expect(stat.sub?.startsWith("accuracy 50% · origin 0.20")).toBe(true);
+  });
+});
+
+describe("campaignTitle", () => {
+  // The id tail renders exactly while it is all that tells one dataset's runs apart.
+  it("keeps the id tail while nothing human distinguishes the campaign", () => {
+    expect(campaignTitle(run({}).campaign).suffix).toBe("00b7d7");
+  });
+
+  it("drops the id tail once the campaign carries a label", () => {
+    expect(campaignTitle(run({ label: "Sheets agent, alibaba pin" }).campaign).suffix).toBeNull();
   });
 });

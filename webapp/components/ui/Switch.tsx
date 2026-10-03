@@ -1,8 +1,5 @@
-// Pill toggle switch — the one switch primitive. `locked` renders a
-// disabled, clearly-unavailable control (a coming-soon feature) rather than
-// a dead element styled like a live one (frontend-surface-contract.md § I3).
-// Styling rides the existing `.toggle` / `.toggle.on` / `.toggle.locked`
-// rules in app/styles/domains/chat.css.
+// The one switch. `locked` is a visibly unavailable control, never a dead one styled live
+// (frontend-surface-contract.md § I3); styling is `.toggle` in app/styles/domains/chat.css.
 
 import { cx } from "@/lib/cx";
 
@@ -11,9 +8,7 @@ export function Switch({
   onChange,
   label,
   locked = false,
-  // WHY it is locked, for the accessible name. Defaults to the common case; a
-  // switch held for a passing reason (a command in flight, a run still warming)
-  // passes its own, or a screen reader hears "coming soon" about a live feature.
+  // Pass one for a passing lock (command in flight), or a screen reader hears "coming soon".
   lockedNote = "coming soon",
 }: {
   checked: boolean;

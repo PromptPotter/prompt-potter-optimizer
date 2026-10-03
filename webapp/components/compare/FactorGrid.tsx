@@ -1,20 +1,6 @@
 "use client";
-// The factorial read: what this selection varies on, crossed two factors at a time.
-//
-// Every number here is served. The cells are `evidence.grid.cells[].value` — POOLED over every
-// subject at that coordinate — and the margins are `FactorReading.levels[].value`. Nothing on this
-// side averages, and that is not a stylistic choice: a cell holding three subjects IS an aggregate,
-// so computing one here would re-answer under the browser's guess at the weighting
-// (`webapp/CLAUDE.md` § Scoring authority). It is also why changing an axis REFETCHES rather than
-// regrouping what is already in hand.
-//
-// Why a grid stays two-dimensional however many factors there are. A third factor does not need a
-// third visual dimension; it needs a decision about what happens to it, and there are exactly two:
-// it is MARGINALISED (pooled into the served cells, and named as such) or it is FIXED (only its
-// chosen level is read). Marginalising is what the server already did. Fixing is a change to WHICH
-// SUBJECTS are read, so it belongs in the selection, not in a client-side filter — filter here and
-// the cells would still be pooled over subjects the grid no longer shows, which is the one way this
-// panel could lie. So 2 factors and 5 cost the same surface, and a 4th raises no new question.
+// The factorial read, two factors crossed at a time. Cells and margins are served and pooled server-side
+// (`webapp/CLAUDE.md` § Scoring authority); fixing a third factor belongs in the selection, never a client filter.
 
 import { useMemo, useState } from "react";
 import { CardFrame } from "@/components/ui";
@@ -22,15 +8,11 @@ import type { Evidence, FactorReading } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 import { fmtMetricInterval, fmtMetricValue } from "@/lib/format";
 
-// A level string can be a whole prompt field — a paragraph. The grid is a table, so it gets a
-// head, and `title` carries the rest. Clipping rather than wrapping keeps a row one row.
 function clip(value: string, width: number): string {
   return value.length <= width ? value : `${value.slice(0, width - 1)}…`;
 }
 
-// One spelling of a cell's (row, col) address — the map is built on it and read on it, and two
-// spellings of one key is a lookup that silently misses. JSON rather than a delimiter: a level is
-// arbitrary operator text, so no separator character is reserved for us.
+// JSON, not a delimiter: a level is arbitrary operator text, so no separator is safe.
 function cellKey(row: string, col: string): string {
   return JSON.stringify([row, col]);
 }
@@ -67,13 +49,11 @@ export function FactorGrid({
   onGrid,
 }: {
   evidence: Evidence;
-  /** The server's `row,col`, empty until the operator crosses a pair. */
   grid: string;
   onGrid: (grid: string) => void;
 }) {
   const factors = evidence.factors;
-  // Separable first: an aliased factor cuts the roster the same way another does, so putting one
-  // on an axis draws the other one's grid under the wrong heading.
+  // Separable first: an aliased factor on an axis draws another factor's grid under the wrong heading.
   const ordered = useMemo(
     () => [...factors].sort((a, b) => a.confounded_with.length - b.confounded_with.length),
     [factors],
@@ -83,8 +63,6 @@ export function FactorGrid({
 
   const served = evidence.grid;
   const unit = evidence.metric.spec.unit;
-  // Re-crossing on every pick once a grid is up, so it tracks the selects; before the first press
-  // it stays unfetched, because most reads of this pane do not want a second round trip.
   const cross = (row: string, col: string) => {
     setRowKey(row);
     setColKey(col);

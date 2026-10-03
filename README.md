@@ -14,7 +14,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/promptpotter)](https://pypi.org/project/promptpotter/)
 [![License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/LICENSE)
 
-**PromptPotter evolves better prompts.** Most prompt engineering is manual. PromptPotter automates the generate → score → critique cycle: it tries many prompt and pipeline variations together, keeps memory across runs, and recovers on its own when a generated prompt produces broken output. Weak candidates are eliminated early on statistical confidence (*Posterior-of-Being-Best — [PoBB](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/methods/candidate-elimination.md)*), so the budget stops going to losers. Built for RAG pipelines, LLM agents and multi-step LLM workflows — drop in via CLI, Python, the `/potter-run` Claude Code skill, or as a [**DSPy optimizer**](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/dspy-optimizer.md) where you would reach for GEPA.
+**PromptPotter evolves better prompts.** Most prompt engineering is manual. PromptPotter automates the generate → score → critique cycle: it tries many prompt and pipeline variations together, keeps memory across runs, and recovers on its own when a generated prompt produces broken output. Weak candidates are eliminated early on a posterior probability (*Posterior-of-Being-Best — [PoBB](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/methods/candidate-elimination.md)*), so the budget stops going to losers. Built for RAG pipelines, LLM agents and multi-step LLM workflows — drop in via CLI, Python, the `/potter-run` Claude Code skill, or as a [**DSPy optimizer**](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/dspy-optimizer.md) where you would reach for GEPA.
 
 ## Quickstart
 
@@ -127,9 +127,9 @@ A percentage in a round banner is an **in-campaign reading, computed on the rows
 
 ## Where it sits
 
-PromptPotter belongs to the **LLM-driven evolution** family — an LLM proposes variants, a scorer ranks them, the winners breed. Every prompt system in that family mutates one artifact, the prompt; the code-side systems mutate source. **PromptPotter evolves the prompt and the pipeline parameters around it, jointly.**
+PromptPotter belongs to the **LLM-driven evolution** family — an LLM proposes variants, a scorer ranks them, the winners breed. Most prompt systems in that family mutate the prompt alone; Opik also moves sampling parameters and tool schemas; the code-side systems mutate source. **PromptPotter moves a whole declared pipeline jointly with the prompt.**
 
-Who else is in the family, the line behind it, why test-time compute belongs in tuning rather than in the request, and a capability table against GEPA and AlphaEvolve: [`docs/research/related-work.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md).
+Who else is in the family, the line behind it, why test-time compute belongs in tuning rather than in the request, and a capability table against GEPA and AlphaEvolve: [`docs/research/related-work.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md). The closest *product* rival is Comet's Opik, which sells a menu of prompt optimizers behind one API.
 ## Benchmarks
 
 [![PromptWizard](https://img.shields.io/badge/inspired_by-PromptWizard-blue)](https://arxiv.org/abs/2405.18369)
@@ -137,7 +137,7 @@ Who else is in the family, the line behind it, why test-time compute belongs in 
 [![DSPy](https://img.shields.io/badge/compared_against-DSPy-green)](https://github.com/stanfordnlp/dspy)
 [![CAPO](https://img.shields.io/badge/compared_against-CAPO-orange)](https://arxiv.org/abs/2504.16005)
 
-A head-to-head against DSPy's optimizers (**GEPA**, MIPROv2, BootstrapFewShot) and CAPO on *BIG-Bench Extra Hard (BBEH)*, held to a standard this literature mostly does not hold itself to: every method scored on the same held-out rows, one published split seed, one export schema for every method, and no cross-paper number mixing. Split, seed, metric and export schema are pinned in [`docs/research/bbeh-comparison/`](https://github.com/PromptPotter/prompt-potter-optimizer/tree/main/docs/research/bbeh-comparison/) — Colab notebooks for the peers, local for PromptPotter — and **numbers publish once** the target model and the optimization budget are held constant across every method too. What we measure on, what we refuse to measure on, and why: [`docs/research/benchmarks.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/benchmarks.md).
+A head-to-head against DSPy's optimizers (**GEPA**, MIPROv2, BootstrapFewShot) and CAPO on *BIG-Bench Extra Hard (BBEH)*, held to a standard this literature mostly does not hold itself to: every method scored on the same held-out rows, one published split seed, one export schema for every method, and no cross-paper number mixing. Split, seed, metric and export schema are pinned in [`docs/research/bbeh-comparison/`](https://github.com/PromptPotter/prompt-potter-optimizer/tree/main/docs/research/bbeh-comparison/) — Colab notebooks for the peers, local for PromptPotter — and **numbers publish once** the target model and the optimization budget are held constant across every method too — the budget in calls, reported beside tokens, dollars (priced at run date) and wall clock. What we measure on, what we refuse to measure on, and why: [`docs/research/benchmarks.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/benchmarks.md).
 
 ## Documentation
 

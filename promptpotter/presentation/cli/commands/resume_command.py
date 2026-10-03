@@ -8,14 +8,14 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.bench.resume_and_fork.fork_siblings import (
+    _mint_fork,
+    mint_operator_fork,
+)
 from promptpotter.application.datasets.dataset_replace import recover_pending_replacements
 from promptpotter.application.jobs.launcher.admission import probe_backend
 from promptpotter.application.jobs.mint import resolve_cycle_plan
 from promptpotter.application.knobs import DiffScope, classify_config_diff
-from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
-    _mint_fork,
-    mint_operator_fork,
-)
 from promptpotter.application.runner.entry import RunMode
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.connector import BackendUnreachableError
@@ -29,20 +29,20 @@ from promptpotter.infrastructure.runtime_flags import is_checkin
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
-    _DIVERGENCE_HINT,
     CommandResult,
     backend_unreachable_result,
-    bind_session_identity,
     confirm_tty,
     cycle_result_command,
+    divergence_hint,
     drive_cycle,
     get_verbose,
     identity_from_args,
     init_services_cli,
     log_startup_summary,
+    resolve_target,
 )
 from promptpotter.presentation.cli.commands.new import cmd_new
-from promptpotter.presentation.cli.session import load_session
+from promptpotter.presentation.cli.session import load_session, no_dataset_hint
 from promptpotter.shared.errors import ResumeDivergenceError
 from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, has_capability
 
@@ -416,7 +416,7 @@ async def _run_loop(
                     "recorded_outcome": div.recorded_outcome,
                     "current_outcome": div.current_outcome,
                 },
-                human=f"{div}\n\n{_DIVERGENCE_HINT}",
+                human=f"{div}\n\n{divergence_hint()}",
             )
         # Interactive: show context + ask y/N; non-TTY falls through to the structured error (scripts get exit-code).
         print()
@@ -435,7 +435,7 @@ async def _run_loop(
                     "recorded_outcome": div.recorded_outcome,
                     "current_outcome": div.current_outcome,
                 },
-                human=f"{div}\n\n{_DIVERGENCE_HINT}",
+                human=f"{div}\n\n{divergence_hint()}",
             )
         if not answer:
             return CommandResult(
@@ -458,18 +458,20 @@ async def _run_loop(
 
 
 async def cmd_resume(args: argparse.Namespace) -> CommandResult:
-    ctx = load_session(args)
-    if not ctx.cycle_id:
+    _stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
+    campaign_id, cycle_id = resolve_target(args, _stores)
+    if not campaign_id:
         raise SystemExit(
-            "ERROR: no active campaign to resume. Run `python -m promptpotter new <dataset>` first."
+            "ERROR: No active session.\n\n"
+            "To start a campaign, run `new` against a dataset:\n\n" + no_dataset_hint()
         )
+    ctx = load_session(_stores, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id))
 
     # A check-in campaign (origin still being authored — no committed dataset, no
     # rounds) isn't resumable: there's nothing to run until it's Started. Guard
     # cheaply before init_services so the operator gets a clear next step instead of
     # a confusing dataset-not-found deep in the loop.
 
-    _stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
     # The same guard both web launchers open with: a crashed version-and-repoint leaves the
     # campaign pointing at a name whose data has moved to `-vN`, so heal before resolving the pin.
     # Cheap no-op when nothing is pending — and the terminal was the one door that skipped it.
@@ -523,7 +525,9 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
         )
         return await cmd_new(new_args)
 
-    bind_session_identity(session, ctx)
+    session.session_id = ctx.session_id
+    session.campaign_id = ctx.campaign_id
+    session.state.cycle_id = ctx.cycle_id
 
     _maybe_fork_diag_sibling(args, ctx, session)
     _maybe_fork_operator_rewind(args, ctx, session)

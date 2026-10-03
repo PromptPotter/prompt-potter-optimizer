@@ -12,16 +12,13 @@ from pydantic import Field
 from promptpotter import connectors
 from promptpotter.application.campaign_config import (
     CampaignConfig,
-    EscalationLadder,
-    MechanismConfig,
     OptimizationConfig,
-    PromptBlockCatalogue,
     load_campaign_config,
 )
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
-from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
+from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeSearchNarrowing
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
@@ -30,7 +27,7 @@ from promptpotter.shared.identity import TenantId, safe_name
 if TYPE_CHECKING:
     from promptpotter.connectors.protocol import Connector
 
-DEFAULT_SCORING_COMPOSITE = "exact_match"
+DEFAULT_SCORING_COMPOSITE = "label_match"
 """Only universally-applicable scorer for ``(query, ground_truth)`` shape."""
 
 DEFAULT_MAX_ROUNDS = 5
@@ -50,23 +47,15 @@ class OptimizationOverrides(StrictModel):
         le=100,
         description="Round ceiling for the campaign. 0 = measure the origin and stop.",
     )
-    prompt_block_catalogue: PromptBlockCatalogue = Field(
-        # The config field's own default — the draft never re-spells it.
-        OptimizationConfig.model_fields["prompt_block_catalogue"].default,
-        description="How the reusable prompt block library reaches the "
-        "optimizer: ``guidance`` (suggest blocks, it may still invent), "
-        "``restrict`` (blocks only), ``off`` (no library).",
+    # The config fields' own defaults and descriptions — the draft never re-spells them.
+    optimizer: str = Field(
+        OptimizationConfig.model_fields["optimizer"].default,
+        min_length=1,
+        description=OptimizationConfig.model_fields["optimizer"].description,
     )
-    escalation_ladder: EscalationLadder = Field(
-        OptimizationConfig.model_fields["escalation_ladder"].default,
-        description="How far the loop may escalate: ``full`` (L1→L2→L3), "
-        "``l1_l2`` (no replan), ``l1`` (no escalation at all — the L1-only "
-        "ablation arm, where a stall is simply another L1 round).",
-    )
-    mechanisms: MechanismConfig = Field(
-        default_factory=MechanismConfig,
-        description="Pluggable orchestration mechanism toggles "
-        "(sorting/selection + early-abort groups).",
+    nodes: dict[str, ManifestNodeOverlay] = Field(
+        default_factory=dict,
+        description=OptimizationConfig.model_fields["nodes"].description,
     )
 
 
@@ -111,7 +100,7 @@ class DraftCampaign:
     # field reaches mint while UNSET or PROPOSED.
     field_provenance: dict[str, Provenance] = field(default_factory=dict)
     source_file: str = ""
-    # ``PromptTemplate.prompt_field_dict()`` shape. Seeded by the check-in node's
+    # ``OptSearchPoint.prompt_field_dict()`` shape. Seeded by the check-in node's
     # decomposition half or an authored dataset's prompt, operator-editable before commit,
     # written verbatim to ``prompts/default.yaml`` at mint.
     origin_prompt_fields: dict[str, Any] = field(default_factory=dict)
@@ -139,7 +128,7 @@ class DraftCampaign:
     # reading the live schema, had the axis open. Captured rather than fetched per response
     # because it is a material fact about THIS check-in, and one an operator can read back off
     # disk. Empty = never fetched or the backend was unreachable, which is why the wire carries
-    # `backend_reachable` beside the schema rather than letting empty mean "locked".
+    # `schema_source` (`unreachable`) beside the schema rather than letting empty mean "locked".
     backend_nodes: dict[str, Any] = field(default_factory=dict)
     # The chosen origin's content id when this draft reused a prior origin. Non-empty routes
     # ``prepare_checkin_run`` through the ``origin_override`` seed, so C0 resolves via the
@@ -153,11 +142,9 @@ class DraftCampaign:
             "draft_id": self.draft_id,
             "slug": self.slug,
             # Raw header-keyed rows, same as ``to_disk`` and the resolver's ``sample_rows``.
-            # This used to project through ``column_query``/``column_ground_truth``, which
-            # are "" until the operator confirms them — so every row served blank on any CSV
-            # whose headers are not literally query/ground_truth, and the preview an operator
-            # would read to CHOOSE the mapping was erased by the mapping being unchosen. The
-            # browser has ``headers`` beside this and renders the columns itself.
+            # Never projected through ``column_query``/``column_ground_truth``: those are "" until
+            # the operator confirms them, off this very preview. The browser has ``headers``
+            # beside this and renders the columns itself.
             "sample_preview": [dict(row) for row in self.sample_preview],
             "n_samples": self.n_samples,
             "connector": self.connector,
@@ -392,9 +379,9 @@ def declared_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
 
     The resolver needs both: ``narrow`` REPLACES ``param_allowed_values``, so a value the operator
     unticked is gone from the narrowed schema, and a menu built from that could never offer it
-    back. Union the two and unticking stays reversible (``pipeline_resolve::_enum_menu``). Reading
-    it off :func:`rendered_pipeline_json` cannot work — that one has already folded the narrowing
-    in, which is exactly the layer this omits."""
+    back. Union the two and unticking stays reversible (``PipelineSchema.node_config_schema``).
+    Reading it off :func:`rendered_pipeline_json` cannot work — that one has already folded the
+    narrowing in, which is exactly the layer this omits."""
     connector = connectors.get(draft.connector)
     return draft_pipeline_json(
         draft, merge_node_blocks(dict(draft.backend_nodes), dict(connector.default_node_config))
@@ -403,14 +390,13 @@ def declared_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
 
 def default_campaign_config(draft: DraftCampaign) -> CampaignConfig:
     """The campaign config a draft mints WITHOUT its node overlay — the floor the split below
-    layers onto, and the same one ``_campaign_config_for_launch`` starts from at Start."""
+    layers onto, and the same one ``build_cycle_config`` starts from at Start."""
     connector = connectors.get(draft.connector)
     overrides = draft.optimization_overrides
     optimization: dict[str, Any] = {"max_rounds": overrides["max_rounds"]}
     optimization.update(dict(connector.default_optimization))
-    optimization["prompt_block_catalogue"] = overrides["prompt_block_catalogue"]
-    optimization["escalation_ladder"] = overrides["escalation_ladder"]
-    optimization["mechanisms"] = dict(overrides["mechanisms"])
+    optimization["optimizer"] = overrides["optimizer"]
+    optimization["nodes"] = dict(overrides["nodes"])
     return load_campaign_config(
         {
             "dataset_name": draft.slug,
@@ -426,7 +412,7 @@ def draft_campaign_config(draft: DraftCampaign) -> CampaignConfig:
     two flat fields a campaign carries.
 
     The resolver reads this so the answer an operator sees while authoring IS the answer their
-    campaign runs; ``mint_and_start._campaign_config_for_launch`` performs the same merge onto the
+    campaign runs; ``mint_and_start.build_cycle_config`` performs the same merge onto the
     committed snapshot. The two agreeing is the point — a setup screen showing something the mint
     will not reproduce is the defect this whole seam exists to close."""
     base = default_campaign_config(draft)

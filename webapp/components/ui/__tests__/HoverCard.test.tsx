@@ -12,8 +12,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-// jsdom measures everything as zero, so placement needs a stubbed trigger rect —
-// here a row low in the viewport (768 tall), on the roomy left.
+// jsdom measures everything as zero, so placement needs a stubbed trigger rect.
 function stubTriggerLowLeft() {
   vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
     top: 700,
@@ -28,7 +27,6 @@ function stubTriggerLowLeft() {
   });
 }
 
-// Past the close grace period — the card closes on a timer, never immediately.
 function settle() {
   act(() => {
     vi.advanceTimersByTime(1000);
@@ -44,7 +42,6 @@ describe("HoverCard", () => {
         <button type="button">row</button>
       </HoverCard>,
     );
-    // Closed: content absent (so lazy content never fetches until pointed at).
     expect(screen.queryByRole("note")).toBeNull();
 
     fireEvent.mouseEnter(wrapOf("row"));
@@ -65,8 +62,6 @@ describe("HoverCard", () => {
     expect(screen.getByRole("note").textContent).toContain("meta");
   });
 
-  // The whole point of the card: the operator crosses the gap between trigger
-  // and card to select an id out of it.
   it("stays open when the pointer crosses into the card", () => {
     render(
       <HoverCard content={<span>cycle_62839439e429</span>}>
@@ -100,8 +95,6 @@ describe("HoverCard", () => {
     expect(screen.getByText("copy")).toBeTruthy();
   });
 
-  // A row 700px down would hang the card off the bottom, where the operator
-  // cannot reach the ids it exists to hand over — so it grows upward instead.
   it("grows away from the nearer viewport edge, and re-entering does not move it", () => {
     stubTriggerLowLeft();
     render(
@@ -111,14 +104,10 @@ describe("HoverCard", () => {
     );
     fireEvent.mouseEnter(wrapOf("row"));
     const card = screen.getByRole("note");
-    // Bottom-anchored off the trigger's lower edge (768 − 720), and on the left
-    // half nothing flips: the card hangs off the right edge plus the gap.
     expect(card.style.bottom).toBe("48px");
     expect(card.style.top).toBe("");
     expect(card.style.left).toBe("208px");
 
-    // The position is a function of the trigger alone, so pointing into the card
-    // cannot move it out from under the pointer.
     fireEvent.mouseEnter(card);
     expect(card.style.bottom).toBe("48px");
   });

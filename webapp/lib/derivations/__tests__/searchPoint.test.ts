@@ -8,9 +8,11 @@ import {
   observeOptions,
 } from "../searchPoint";
 import type { DashboardSnapshot } from "@/lib/poll";
+import type { LiveCandidate } from "@/lib/types";
 import {
   currentRound,
   dash,
+  liveRow,
   roundDoc,
   scored,
   servedLabel,
@@ -18,17 +20,8 @@ import {
   summaryRound,
 } from "@/lib/test-fixtures";
 
-type InputCandidate = {
-  idx?: number;
-  label?: string;
-  prompt_fields?: Record<string, unknown>;
-  resolved_pipeline_params?: Record<string, unknown> | null;
-};
-
-const liveDash = (candidates: InputCandidate[]): DashboardSnapshot =>
-  dash({
-    current_round: currentRound({ round: 1, nodes: { l1_score: { input: { candidates } } } }),
-  });
+const liveDash = (candidates: Partial<LiveCandidate>[]): DashboardSnapshot =>
+  dash({ current_round: currentRound({ round: 1, candidates: candidates.map(liveRow) }) });
 
 describe("liveObserveConfig", () => {
   it("returns null with no live candidates", () => {
@@ -36,12 +29,12 @@ describe("liveObserveConfig", () => {
     expect(liveObserveConfig(liveDash([]))).toBeNull();
   });
 
-  it("picks the latest-seeded (max idx) candidate's resolved config", () => {
+  it("picks the latest-seeded candidate — the last served row — and its resolved config", () => {
     const r = liveObserveConfig(
       liveDash([
-        { idx: 0, label: "C1.1", prompt_fields: { instruction: "a" }, resolved_pipeline_params: { llm: { model: "x" } } },
-        { idx: 2, label: "C1.3", prompt_fields: { instruction: "c" }, resolved_pipeline_params: { llm: { model: "z" } } },
-        { idx: 1, label: "C1.2", prompt_fields: { instruction: "b" } },
+        { label: "C1.1", prompt_fields: { instruction: "a" }, resolved_pipeline_params: { llm: { model: "x" } } },
+        { label: "C1.2", prompt_fields: { instruction: "b" } },
+        { label: "C1.3", prompt_fields: { instruction: "c" }, resolved_pipeline_params: { llm: { model: "z" } } },
       ]),
     );
     expect(r?.label).toBe("live — C1.3");
@@ -50,15 +43,15 @@ describe("liveObserveConfig", () => {
   });
 
   it("defaults config to {} when the candidate carries none yet", () => {
-    const r = liveObserveConfig(liveDash([{ idx: 0, label: "C1.1", prompt_fields: { instruction: "a" } }]));
+    const r = liveObserveConfig(liveDash([{ label: "C1.1", prompt_fields: { instruction: "a" } }]));
     expect(r?.config).toEqual({});
   });
 });
 
 describe("liveCandidateObserveConfig", () => {
   const snap = liveDash([
-    { idx: 0, label: "C1.1", prompt_fields: { instruction: "a" }, resolved_pipeline_params: { llm: { model: "x" } } },
-    { idx: 1, label: "C1.2", prompt_fields: { instruction: "b" }, resolved_pipeline_params: { llm: { model: "y" } } },
+    { label: "C1.1", prompt_fields: { instruction: "a" }, resolved_pipeline_params: { llm: { model: "x" } } },
+    { label: "C1.2", prompt_fields: { instruction: "b" }, resolved_pipeline_params: { llm: { model: "y" } } },
   ]);
 
   it("locates the in-flight candidate by label (not the latest-seeded one)", () => {
@@ -79,11 +72,8 @@ describe("liveCandidateObserveConfig", () => {
   });
 });
 
-// The origin has no reader of its own. C0 is a candidate of round 0, so it resolves through
-// the SAME join every other candidate does — the whole premise of deleting
-// `originObserveConfig`. The join is POSITIONAL, and C0 is where that matters most: a resume
-// re-scores the origin and mints a new lineage id, while `round_0000.json` keeps the id the
-// first run wrote.
+// C0 resolves through the same POSITIONAL join as every candidate: a resume re-scores the origin
+// under a new lineage id, while `round_0000.json` keeps the first run's.
 describe("the origin as an ordinary candidate", () => {
   const round0 = roundDoc({
     round: 0,
@@ -132,9 +122,8 @@ describe("candidateObserveConfig", () => {
   });
 });
 
-// The two observe TARGETS. Both read served facts only — a crown (`is_winner`) and a
-// position — so neither may re-rank, and a round that crowned nobody must not have one
-// invented for it.
+// Both targets read served facts only (a crown, a position): neither may re-rank, and a round
+// that crowned nobody must not have one invented for it.
 describe("bestObserveTarget — the parent", () => {
   const crowned = (round: number, winnerIdx: number, n: number) =>
     summaryRound({
@@ -143,7 +132,7 @@ describe("bestObserveTarget — the parent", () => {
         summaryCandidate({
           candidate_id: `r${round}c${i}`,
           label: servedLabel(round, i),
-          is_winner: i === winnerIdx,
+          is_selected: i === winnerIdx,
         }),
       ),
     });
@@ -189,13 +178,13 @@ describe("latestClosedTarget — the newest searchpoint that closed", () => {
           summaryRound({
             round: 1,
             candidates: [
-              summaryCandidate({ candidate_id: "a", label: servedLabel(1, 0), is_winner: true }),
+              summaryCandidate({ candidate_id: "a", label: servedLabel(1, 0), is_selected: true }),
             ],
           }),
           summaryRound({
             round: 2,
             candidates: [
-              summaryCandidate({ candidate_id: "b", label: servedLabel(2, 0), is_winner: true }),
+              summaryCandidate({ candidate_id: "b", label: servedLabel(2, 0), is_selected: true }),
               summaryCandidate({ candidate_id: "c", label: servedLabel(2, 1) }),
             ],
           }),

@@ -1,17 +1,13 @@
 """Every check CI runs, in one invocation — the single declaration of the gate.
 
-The list used to exist four times and agree nowhere: root ``CLAUDE.md`` named
-five tools, the PR template a sixth combination, ``.githooks/pre-commit`` a
-different five, and ``ci.yml`` fourteen. The layering guard, the three
-generated-surface diffs, the webapp tests, the anti-rot scan and the deploy
-build appeared in no local command at all, so "green locally, red in `main`"
-was structural rather than careless. All four are callers of this file now.
+Root ``CLAUDE.md``, the PR template, ``.githooks/pre-commit`` and ``ci.yml`` are all
+callers of this file, so no check runs in one of them and not at the desk.
 
 Two properties the shape buys, neither of them speed:
 
-- **Nothing masks anything.** GitHub steps fail-fast, so a red ``ruff`` hid the
-  other eight results and each fix cost another full push. Every selected check
-  runs here, always, and the verdict names all of them.
+- **Nothing masks anything.** GitHub steps fail-fast, so a red ``ruff`` would hide
+  the other results. Every selected check runs here, always, and the verdict names
+  all of them.
 - **The tools run from the already-resolved interpreter** (``sys.executable -m``),
   so the ~3.5s ``uv run`` toll is paid once for the whole gate instead of once
   per tool, and the independent checks run concurrently.
@@ -106,7 +102,7 @@ def _node(exe: str, *args: str) -> list[str]:
     return [shutil.which(exe) or exe, *args]
 
 
-def _generated(script: str, path: str) -> Callable[[Sel], Outcome]:
+def _generated(script: str, *paths: str) -> Callable[[Sel], Outcome]:
     """Regenerate a surface, then fail if the generator moved it.
 
     All three come off the Pydantic models. Ungated, a drifted model ships a stale
@@ -118,13 +114,14 @@ def _generated(script: str, path: str) -> Callable[[Sel], Outcome]:
     """
 
     def check(_sel: Sel) -> Outcome:
-        target = _REPO / path
-        before = target.read_bytes() if target.exists() else None
+        targets = [_REPO / path for path in paths]
+        before = [t.read_bytes() if t.exists() else None for t in targets]
         rc, out = _run([sys.executable, f"scripts/{script}"], _REPO)
         if rc:
             return rc, out
-        if target.read_bytes() != before:
-            return 1, f"{path} was stale — regenerated in place; re-run to confirm."
+        stale = [p for p, t, b in zip(paths, targets, before, strict=True) if t.read_bytes() != b]
+        if stale:
+            return 1, f"{', '.join(stale)} stale — regenerated in place; re-run to confirm."
         return 0, ""
 
     return check
@@ -140,13 +137,13 @@ def _scan(
     """Grep with an exemption, and the two exemptions are not interchangeable.
 
     An allowed LINE is a sanctioned use (the CLI-seam imports); an allowed PATH is a
-    file exempt whatever it says (the migration-debt components). Honouring a path
-    pattern against line text would exempt any line that merely names one of those
-    files — a comment pointing at the spine would hide a real violation beside it.
+    file exempt whatever it says (`_MAY_IMPORT_POTTER`). Honouring a path pattern
+    against line text would exempt any line that merely names one of those files — a
+    comment pointing at one would hide a real violation beside it.
 
     Split on ``\\n`` rather than ``splitlines()``, which also breaks on five of the characters
-    ``_CONTROL_CHAR`` hunts — a needle matching one of those consumed it as a line terminator and
-    never saw it. ``read_text`` already translates newlines, so the two agree everywhere else.
+    ``_CONTROL_CHAR`` hunts and would consume them as line terminators. ``read_text`` already
+    translates newlines, so the two agree everywhere else.
     """
     hits = []
     for path in files:
@@ -169,13 +166,24 @@ _IMPORTS_PRESENTATION = re.compile(r"(?:from|import) promptpotter\.presentation"
 _LAYERING_ALLOW = re.compile(r"presentation\.terminal\.live\.display import LiveDisplay")
 
 
+# The bench reaches an optimizer only through the registry (`application/optimizers/__init__.py`)
+# and the contract it checks (`optimizers/nodes.py`).
+_IMPORTS_POTTER = re.compile(r"(?:from|import) promptpotter\.application\.optimizers\.potter\b")
+_MAY_IMPORT_POTTER = re.compile(r"^promptpotter/application/optimizers/")
+
+
 def _layering(_: Sel) -> Outcome:
     hits = _scan(
         _sources(_REPO / "promptpotter" / "application", "*.py"),
         _IMPORTS_PRESENTATION,
         allow_line=_LAYERING_ALLOW,
     )
-    return (1, "application must not import presentation:\n" + "\n".join(hits)) if hits else (0, "")
+    if hits:
+        return 1, "application must not import presentation:\n" + "\n".join(hits)
+    hits = _scan(
+        _sources(_REPO / "promptpotter", "*.py"), _IMPORTS_POTTER, allow_path=_MAY_IMPORT_POTTER
+    )
+    return (1, "the bench must not import potter:\n" + "\n".join(hits)) if hits else (0, "")
 
 
 # A control character makes git call the whole FILE binary — the stat line reads `Bin 13089 ->
@@ -206,25 +214,21 @@ def _undiffable(_: Sel) -> Outcome:
     )
 
 
-_LIVE_L1 = re.compile(r"liveL1Candidates")
-# Two surfaces re-deriving the candidate list is what produced the
-# lineage/fitness alignment bug. New consumers go through useRoundCandidates() /
-# lib/derivations/round-candidates.ts; the named components are migration debt,
-# each owing its own derivation.
-_ANTI_ROT_ALLOW = re.compile(
-    r"__tests__/|FreqChart\.tsx|HardSamplesHeatmap\.tsx|CandidatesCard\.tsx"
-    r"|lib/poll\.tsx|lib/derivations/round-candidates\.ts"
-)
+# A CLAUDE.md loads into every session beneath it. A CAP, not a ratchet: prose moves freely under
+# it, and only a page grown past it has to be trimmed or split.
+_CLAUDE_MD_MAX_WORDS = 7000
 
 
-def _anti_rot(_: Sel) -> Outcome:
-    files = [
-        p
-        for root in ("components", "lib", "app")
-        for p in _sources(_WEBAPP / root, "*.ts", "*.tsx")
+def _claude_md_size(_: Sel) -> Outcome:
+    code, listed = _run(["git", "ls-files", "*CLAUDE.md"], _REPO)
+    if code:
+        return code, listed
+    over = [
+        f"{rel}: {n} words"
+        for rel in listed.splitlines()
+        if (n := len((_REPO / rel).read_text(encoding="utf-8").split())) > _CLAUDE_MD_MAX_WORDS
     ]
-    hits = _scan(files, _LIVE_L1, allow_path=_ANTI_ROT_ALLOW)
-    return (1, "liveL1Candidates outside the spine:\n" + "\n".join(hits)) if hits else (0, "")
+    return (1, f"over {_CLAUDE_MD_MAX_WORDS} words:\n" + "\n".join(over)) if over else (0, "")
 
 
 # What ruff lints when the run is not scoped to staged files. ``scripts/`` is here for the
@@ -435,6 +439,7 @@ CHECKS: tuple[Check, ...] = (
     Check("deptry", "py", lambda _: _run(_py("deptry", "."), _REPO)),
     Check("mypy", "py", _mypy),
     Check("layering", "py", _layering, staged=True),
+    Check("claude-md-size", "py", _claude_md_size, staged=True),
     # "py" so it runs without `webapp/node_modules`, which is routinely absent — a guard that
     # cannot run on the machine that would trip it is not a guard.
     Check("undiffable", "py", _undiffable, staged=True),
@@ -444,11 +449,23 @@ CHECKS: tuple[Check, ...] = (
         _generated("build_ts_types.py", "webapp/lib/api/types.generated.ts"),
         staged=True,
     ),
+    # "web", not "py" like its siblings: this one reads `simple-icons` out of `webapp/node_modules`,
+    # so it cannot run on a machine that has not installed the webapp's deps. A brand mark is an
+    # asset rather than a schema — the check is here so a mark can never change shape without
+    # showing up in a diff someone reads.
+    Check(
+        "vendor-marks",
+        "web",
+        _generated("build_vendor_marks.py", "webapp/components/ui/vendor-marks.generated.ts"),
+        staged=True,
+    ),
     Check(
         "optimizer-schemas",
         "py",
         _generated(
-            "build_optimizer_schemas.py", "promptpotter/assets/optimizer/resolved_schemas.json"
+            "build_optimizer_schemas.py",
+            "promptpotter/assets/optimizers/potter/resolved_schemas.json",
+            "promptpotter/assets/checkin/resolved_schemas.json",
         ),
         staged=True,
     ),
@@ -469,7 +486,6 @@ CHECKS: tuple[Check, ...] = (
     # concurrently, tsc either read that directory mid-rewrite (TS2307 on 3 of 6 runs) or won
     # the race and typechecked the PREVIOUS build's route signatures. Behind it, both ways.
     Check("tsc", "web", _tsc, staged=True, after="next-build"),
-    Check("anti-rot", "web", _anti_rot, staged=True),
     # vitest.config.ts keeps its own `maxWorkers` for a standalone `npm run test`;
     # under the gate the budget decides, because here it shares the box.
     Check(
@@ -555,10 +571,9 @@ _PINNED_EXTRAS = ("stats", "dev", "api", "harbor")
 def _reexec_pinned() -> None:
     """The gate picks its own interpreter, because a verdict must not depend on the caller.
 
-    Launched from the system Python instead of the locked environment, ``mypy`` resolved
-    different stubs and reported two errors that do not exist under ``uv.lock`` — a green
-    CI and a red desk, from the same commit and the same command. Only the Python half
-    needs it: the webapp checks shell out to node, and CI's `webapp` job has no uv.
+    Launched from another interpreter, ``mypy`` resolves different stubs than ``uv.lock`` pins,
+    so one commit reads green in CI and red at the desk. Only the Python half needs it: the
+    webapp checks shell out to node, and CI's `webapp` job has no uv.
     """
     if Path(sys.prefix) == _PINNED or os.environ.get(_REEXEC):
         return

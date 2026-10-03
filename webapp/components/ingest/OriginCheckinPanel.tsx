@@ -8,16 +8,8 @@ import type {
 } from "@/lib/api";
 import { QuestionAnswer } from "./QuestionAnswer";
 
-// The check-in's conversational output: the resolver's plain-language
-// assessment, the proposals it left for the operator to click, plus any
-// follow-up questions for fields it couldn't confirm on its own. The check-in
-// runs automatically on a fresh draft (no "Set up with AI" button) and the
-// closed-set config it proposes lives in the optional Advanced expander.
-//
-// A proposal is offered, never applied. The server derives each one from the
-// turn's findings and hands it over already shaped as the `edit-draft-campaign`
-// a click will fire, so this panel renders an action rather than reconstructing
-// one from a field name.
+// The check-in's assessment, proposals and follow-up questions. A proposal is offered, never
+// applied; it arrives already shaped as the `edit-draft-campaign` a click fires — never rebuild one.
 export function OriginCheckinPanel({
   draft,
   lastResolution,

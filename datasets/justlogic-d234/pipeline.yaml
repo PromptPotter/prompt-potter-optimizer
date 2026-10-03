@@ -15,7 +15,7 @@ nodes:
     node_role: ranker
     description: >-
       Direct LLM generation on the TermNorm backend at JustLogic depths 2-4 (iid mix) — a wider inner
-      instrument than d23. reasoning_effort=low, ':nitro' for throughput. Adds depth 4 below the d2-3
+      instrument than d23. ':nitro' for throughput. Adds depth 4 below the d2-3
       cut to lower the origin and widen the optimizable band. The 2026-07-13 recon read d3+ as collapsed-to-Uncertain
       and called it a capability wall; this cut RE-TESTS that as an addressable hedging behaviour the
       loop can correct in the first 2-3 rounds — 'Uncertain' is reserved for genuine indeterminacy, never
@@ -24,26 +24,19 @@ nodes:
       provider: openrouter
       model: openai/gpt-oss-20b:nitro
       temperature: 0.0
-      reasoning_effort: low
       output_schema:
         type: object
         properties:
           reasoning:
             type: string
-            description: >-
-              Work the logical chain step by step. Identify each premise; track negations, quantifiers
-              (all/some/no) and conditionals explicitly; trace premises to the claim. Recheck each step
-              against the stated premises before moving on.
+            description: At most five short steps, one line each.
           answer:
             type: string
             enum:
               - 'TRUE'
               - 'FALSE'
               - Uncertain
-            description: >-
-              TRUE when the premises strictly entail the claim; FALSE when they strictly entail its negation;
-              Uncertain ONLY when the premises genuinely do not determine the claim either way — never
-              as a hedge against difficulty.
+            description: The label.
         required:
           - reasoning
           - answer
@@ -64,9 +57,6 @@ nodes:
         - instruction
         - thinking_style
         - answer_format
-      param_allowed_values:
-        reasoning_effort:
-          - low
       observation_name: llm_only
       observation_mappings:
         - pipeline_key: final_ranking

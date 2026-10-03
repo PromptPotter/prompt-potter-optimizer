@@ -7,12 +7,11 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import Field
 
-from promptpotter.config.settings import (
-    DEFAULT_ORIGIN_BUDGET,
-    POBB_DEFAULT_EPSILON,
-)
-from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
-from promptpotter.domain.results import HardSampleOrder, HeadlineMetric
+from promptpotter.config.settings import DEFAULT_ORIGIN_BUDGET
+from promptpotter.domain.bench import DatasetSplit
+from promptpotter.domain.campaign import ArmBudget
+from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeSearchNarrowing
+from promptpotter.domain.results import DisplayMetric, HardSampleOrder
 from promptpotter.domain.strict_model import StrictModel
 
 # From the LEAF, never `promptpotter.judges`: importing the package would pull the registry (and
@@ -20,32 +19,33 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.judges.protocol import JudgeSpec
 
 if TYPE_CHECKING:
-    from promptpotter.domain.run_records import CycleSeed
+    from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
 
 __all__ = [
     "CampaignConfig",
     "DeterminismClamp",
-    "EscalationLadder",
     "Estimand",
     "Knob",
-    "LivesConfig",
     "OptimizationConfig",
     "Scope",
-    "apply_inherited_overlay",
+    "apply_config_overrides",
+    "apply_cycle_seed",
     "estimand_doc",
     "freeze_campaign_config",
     "knob_label",
     "load_campaign_config",
     "merge_config_layers",
+    "merge_node_overlays",
 ]
 
 
 class Scope(StrEnum):
-    """What a knob shapes — ``POLICY`` leaves past measurements valid and governs unevaluated
-    rounds; ``DATA`` shapes the trace itself, so resume runs divergence detection."""
+    """What a knob shapes — ``POLICY`` governs unevaluated rounds only; ``DATA`` shapes the trace, and
+    ``IDENTITY`` names what runs (a new treatment), so resume runs divergence detection on both."""
 
     POLICY = "policy"
     DATA = "data"
+    IDENTITY = "identity"
 
 
 class Estimand(StrEnum):
@@ -58,7 +58,7 @@ class Estimand(StrEnum):
     ABILITY = "ability"
     GATE = "gate"
     STOPPING = "stopping"
-    ESCALATION = "escalation"
+    CONTROLLER = "controller"
     SEARCH = "search"
     SPEND = "spend"
     DISPLAY = "display"
@@ -71,7 +71,7 @@ _ESTIMAND_DOC: dict[Estimand, str] = {
     Estimand.ABILITY: "The candidate ability θ — difficulty-adjusted skill, the metric the gate compares.",
     Estimand.GATE: "The round-promotion / improvement gate — what counts as 'better' and is kept.",
     Estimand.STOPPING: "The early-abort / elimination rules that stop measuring a candidate before budget.",
-    Estimand.ESCALATION: "The L1/L2/L3 patience ladder — when the loop escalates strategy or halts.",
+    Estimand.CONTROLLER: "An optimizer's controller — when it changes strategy or halts (potter's L1/L2/L3 patience ladder).",
     Estimand.SEARCH: "The optimizer search space + data binding the loop explores.",
     Estimand.SPEND: "The budget ceilings (USD / tokens) that halt the cycle.",
     Estimand.DISPLAY: "What number the operator reads — no effect on the data or the decision.",
@@ -83,10 +83,12 @@ def estimand_doc(estimand: Estimand) -> str:
 
 
 def knob_label(path: str) -> str:
-    """Shared by the CLI diagnostic and the webapp config-map, so both name a knob identically."""
+    """Shared by the CLI diagnostic and the webapp config-map, so both name a knob identically.
+    A node's knob reads ``{node}.{knob}``."""
     short = path.removeprefix("optimization.")
-    if short.startswith("mechanisms."):
-        short = short.split(".", 2)[-1]
+    if short.startswith("nodes."):
+        node, _, knob = short.removeprefix("nodes.").partition(".config.")
+        return f"{node}.{knob}"
     return short
 
 
@@ -101,94 +103,6 @@ class Knob:
     def __init__(self, scope: Scope, *estimands: Estimand) -> None:
         object.__setattr__(self, "scope", scope)
         object.__setattr__(self, "estimands", estimands)
-
-
-class SelectionMechanisms(StrictModel):
-    """Turn BOTH off to freeze the sample basis at campaign start: one fixed subset, fixed order,
-    identical for every round and candidate."""
-
-    per_round_resubset: Annotated[bool, Knob(Scope.POLICY, Estimand.SELECTION, Estimand.GATE)] = (
-        Field(
-            True,
-            description=(
-                "Re-pick the most-informative scoring subset every round from the "
-                "train bank (adaptive Rasch selection). On (default) — safe because "
-                "every cross-round comparator (election, PoBB, c0_ok, the stall ladder) "
-                "measures on one fixed θ ruler, so a shifting per-round subset stays "
-                "comparable — but it is warm-gated: while the δ ruler is still cold (a "
-                "fresh dataset's early rounds) the subset stays FROZEN to the campaign-start "
-                "selection, so those rounds are comparable AND concentrate measurements to "
-                "warm the ruler fastest; it thaws to adaptive once the ruler locks. Off → "
-                "the campaign-start selection (deterministic bank prefix) for every round, "
-                "the whole campaign."
-            ),
-        )
-    )
-
-
-class EliminationMechanisms(StrictModel):
-    """Off → the mechanism never fires and candidates run their full budget; numeric tuning for an
-    enabled one lives on the sibling ``OptimizationConfig`` fields."""
-
-    epsilon_elimination: Annotated[bool, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
-        True,
-        description=(
-            "PoBB ε-stop: drop a candidate once its posterior probability of being "
-            "the round's best falls below `pobb_epsilon`. The main loser-elimination rule."
-        ),
-    )
-    degradation_fatal_fastpath: Annotated[bool, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
-        True,
-        description=(
-            "End a candidate at the first FATAL sample (empty response, "
-            "content-filtered, structurally broken) without spending the rest of "
-            "its budget. Active while the degradation check runs "
-            "(`degradation_threshold` > 0); the rate-based check stays governed by "
-            "that threshold."
-        ),
-    )
-    # INVESTIGATED AND KEPT — do not re-file the lock-in mechanism as dead. This knob and its
-    # siblings (`pobb_lock_in`, `pobb_lock_in_n_min`, `PoBBConfig.lock_in`) default off and no
-    # committed campaign sets them, so the whole path reads as unreachable. It is not: the
-    # `LEADER_LOCKED` `EscalationTarget`/`CandidateOutcome`, the `abort:lock_in_off`
-    # lineage-overlay lens (the candidates card's Lens select, "No lock-in") and
-    # `tests/test_numerics.py` all exercise it. Deleting it removes a shipped analysis feature,
-    # not dead code. (The unreachable significance gate that sat beside it WAS deleted — that one
-    # had no live surface.)
-    leader_lock_in: Annotated[bool, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
-        False,
-        description=(
-            "Crown a decisive leader EARLY: stop measuring a candidate as the winner "
-            "once its P(best) against every prior reaches `pobb_lock_in`, before it "
-            "spends its full budget. Off (default) → only losers are eliminated "
-            "early; a leader measures its full budget."
-        ),
-    )
-
-
-class MechanismConfig(StrictModel):
-    """Add a mechanism by adding a bool to the right group — it auto-surfaces to the webapp via
-    the schema. Which LAYERS the loop may escalate to is ``OptimizationConfig.escalation_ladder``;
-    the patiences beside it only PACE a ladder, they never shorten one."""
-
-    selection: SelectionMechanisms = Field(default_factory=SelectionMechanisms)
-    elimination: EliminationMechanisms = Field(default_factory=EliminationMechanisms)
-
-
-class LivesConfig(StrictModel):
-    """Improvement-banked round budget: banks a life each round that improves, loses one each round
-    that doesn't, on the SAME ``improved`` verdict. ``max_rounds`` and spend stay the ceilings."""
-
-    start: Annotated[int, Knob(Scope.POLICY, Estimand.ESCALATION, Estimand.SPEND)] = Field(
-        2,
-        ge=1,
-        description="Lives a run starts with (a fully-stalling run does exactly this many L1 rounds).",
-    )
-    cap: Annotated[int, Knob(Scope.POLICY, Estimand.ESCALATION, Estimand.SPEND)] = Field(
-        4,
-        ge=1,
-        description="Bank ceiling — lives never exceed this no matter how long the improving streak runs.",
-    )
 
 
 class DeterminismClamp(StrictModel):
@@ -227,158 +141,65 @@ class DeterminismClamp(StrictModel):
     )
 
 
-# The prompt-block-library modes — named once so the draft override
-# (``OptimizationOverrides``) references the same closed set instead of
-# re-spelling it (a 4th mode added there-but-not-here silently never
-# reached check-in, and vice versa).
-PromptBlockCatalogue = Literal["guidance", "restrict", "off"]
-
-
-class EscalationLadder(StrEnum):
-    """How far up the L1 → L2 → L3 ladder a cycle may climb. The two predicates are the ONE
-    question every fire site asks, so no site re-derives depth from a patience."""
-
-    L1 = "l1"
-    L1_L2 = "l1_l2"
-    FULL = "full"
-
-    @property
-    def fires_l2(self) -> bool:
-        return self is not EscalationLadder.L1
-
-    @property
-    def fires_l3(self) -> bool:
-        return self is EscalationLadder.FULL
-
-
 class OptimizationConfig(StrictModel):
-    max_rounds: Annotated[int | None, Knob(Scope.POLICY, Estimand.ESCALATION, Estimand.SPEND)] = (
-        Field(
-            50,
-            ge=0,
-            description=(
-                "Max L1 rounds. 0 = measure the origin (round 0) and stop — the "
-                "origin-only run; None = unlimited, bounded only by ``HARD_CAP``."
-            ),
-        )
-    )
-    # No `Knob` — the walk descends into LivesConfig, so `start` + `cap` are the knobs.
-    lives: LivesConfig | None = Field(
-        None,
-        description=(
-            "Opt-in improvement-banked round budget ('hearts'). When set, replaces the "
-            "fixed ``max_rounds`` boundary: +1 life per improving round, -1 per "
-            "non-improving one, stop at 0, banked up to ``cap``. ``None`` (default) → "
-            "``max_rounds`` governs, behaviour unchanged. ``max_rounds`` still caps from "
-            "above, so a lives run wanting the full bank sets ``max_rounds: null``."
-        ),
-    )
-    l1_patience: Annotated[int, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(
-        3, description="Stop after N consecutive non-improving L1 rounds"
-    )
-    n_variants: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
-        5, description="Candidates per round"
-    )
-    optimizer_set: Annotated[str, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
-        "",
-        description=(
-            "Which optimizer prompt set this cycle uses. Empty (default) → the "
-            "standard `promptpotter/assets/optimizer/` task-tuning loop. `self_optimizing` → the "
-            "L4 outer set `promptpotter/assets/optimizer/sets/self_optimizing.yaml`, whose L1 emits per-node "
-            "edits to the INNER optimizer's own prompts (`pipeline_overlay`) "
-            "instead of tuning its own template. Applied per-cycle at the runner seam "
-            "through the same per-node override channel the inner runner uses, so an "
-            "outer cycle and the inner (default) cycles it spawns stay isolated "
-            "by task. See docs/specs/l4-outer-loop.md."
-        ),
-    )
+    """The bench's own loop config, plus which optimizer runs and its overlay. An optimizer's knobs
+    are its nodes' ``config`` in its manifest, never fields here."""
 
-    escalation_ladder: Annotated[EscalationLadder, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(
-        EscalationLadder.FULL,
+    optimizer: Annotated[str, Knob(Scope.IDENTITY, Estimand.SEARCH)] = Field(
+        "potter",
+        min_length=1,
         description=(
-            "How far up the L1 → L2 → L3 ladder this campaign may climb — the ablation "
-            "switch. ``full`` (default) is the whole ladder. ``l1_l2`` lets L2 re-frame "
-            "but never reaches L3, including the post-L2 layout-breach force-trigger. "
-            "``l1`` is the L1-only arm: no escalation rule can return a fire, so "
-            "``escalate_l2`` is never called and neither the ``l2_context`` nor the "
-            "``l3_plan`` prompt is ever composed. A patience PACES a ladder and can "
-            "never shorten one, so a large ``l1_patience`` is a deferral bounded by the "
-            "round budget rather than a suppression. L1's own prompt is bit-for-bit "
-            "identical across all three arms (the property "
-            "``rebase_capability`` / ``terminate_capability`` also have), so the arms "
-            "differ in what the loop DOES and in nothing it says: a stalled ``l1`` round "
-            "simply continues until ``max_rounds`` / ``lives`` / spend binds."
+            "The optimizer manifest this campaign runs — a directory under "
+            "``promptpotter/assets/optimizers/``. Every entry point selects it here; nothing "
+            "selects it install-wide."
         ),
     )
-    l2_patience: Annotated[int, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(
-        2,
-        ge=0,
+    nodes: Annotated[dict[str, ManifestNodeOverlay], Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+        default_factory=dict,
         description=(
-            "Consecutive non-improving L2 fires before the cycle escalates to L3. "
-            "How DEEP the ladder runs is ``escalation_ladder``, never a patience."
+            "This campaign's overlay on the selected manifest, keyed by node name — "
+            "``{node: {config: {...}}}``, the shape a target pipeline's overlay takes. An "
+            "optimizer's knobs, a paper's configuration and each llm node's ``config.model`` "
+            "all ride here; each node validates its own knobs when the optimizer is selected."
         ),
     )
-    l3_patience: Annotated[int | None, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(
-        1,
+    max_rounds: Annotated[int | None, Knob(Scope.POLICY, Estimand.SPEND)] = Field(
+        50,
         ge=0,
         description=(
-            "Consecutive non-improving L3 fires before the cycle stops on "
-            "``L3_PATIENCE``. ``None`` replans without limit, leaving the round and "
-            "spend ceilings as the only stops."
+            "Max rounds. 0 = measure the origin (round 0) and stop — the "
+            "origin-only run; None = unlimited, bounded only by ``HARD_CAP_ARMS``, the arms "
+            "raced across the run."
         ),
     )
     degradation_threshold: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(...)
-
+    degradation_fatal_fastpath: Annotated[bool, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
+        True,
+        description=(
+            "End a candidate at the first FATAL sample (empty response, "
+            "content-filtered, structurally broken) without spending the rest of "
+            "its budget. Active while the degradation check runs "
+            "(`degradation_threshold` > 0); the rate-based check stays governed by "
+            "that threshold. The bench's, run on every optimizer's arms."
+        ),
+    )
     elimination_n_min: Annotated[
         int, Knob(Scope.POLICY, Estimand.STOPPING, Estimand.ABILITY, Estimand.DIFFICULTY)
     ] = Field(
         6,
-        description="Minimum samples before PoBB starts firing (floor on n for "
-        "the Normal-CLT posterior to be meaningful).",
-    )
-    pobb_epsilon: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
-        POBB_DEFAULT_EPSILON,
-        description="Stop a candidate when its posterior probability of being the "
-        "round's best drops below this threshold. Default 15%; smaller → fewer stops.",
-    )
-    pobb_epsilon_floor: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
-        POBB_DEFAULT_EPSILON,
-        description=(
-            "The ε applied at exactly ``elimination_n_min``, ramping linearly up to "
-            "``pobb_epsilon`` by twice that depth. Equal to ``pobb_epsilon`` — the "
-            "default — leaves the bar flat and elimination unchanged, so it grades "
-            "only where ε was deliberately raised above it. At the floor a single "
-            "discordant sample already puts P(best) near 0.2, so one scalar ε is "
-            "either too eager there or too permissive deep; grading keeps a raised "
-            "ε's aggression at depth while giving a one-sample-behind arm a few more "
-            "cells to recover. Aggression belongs here and never in "
-            "``elimination_n_min``, which also gates the δ ruler's warmth. Set ABOVE "
-            "``pobb_epsilon`` and the bar goes flat at ``pobb_epsilon`` instead — the "
-            "``epsilon_floor_inverted`` coupling reports it."
-        ),
-    )
-    pobb_lock_in: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
-        0.95,
-        description="Leader lock-in threshold — the P(best) at which a leading "
-        "candidate is crowned early and stops measuring. Applies only when "
-        "`mechanisms.elimination.leader_lock_in` is on (that bool owns the on/off); "
-        "this is purely the threshold. Lower = lock in sooner on less evidence.",
-    )
-    pobb_lock_in_n_min: Annotated[int, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
-        8,
-        description="Samples-floor for lock-in — a leader can only lock in after at "
-        "least this many measurements. Applies only when "
-        "`mechanisms.elimination.leader_lock_in` is on.",
+        description="Minimum distinct samples before θ is read as ability: the δ ruler stays "
+        "flat below it, and no eliminator cuts an arm (nor a selector crowns one) on fewer — "
+        "the floor on n for a posterior to be meaningful.",
     )
 
     spend_budget_usd: Annotated[float | None, Knob(Scope.POLICY, Estimand.SPEND)] = Field(
         0.025,
         description=(
             "Halt this cycle when cumulative spend (optimizer + backend) ≥ this "
-            "value in USD. A launch flag (CLI ``--spend-budget``) only LOWERS it — it "
-            "arrives in the wallet slot, which may never be trusted upward; raising a "
-            "ceiling is ``set-budget``, whose value is clamped against the account and "
-            "then SETS. Default ≈ a 5-round run on the free-backend setup "
+            "value in USD. The campaign's own layer of the run's budget: a fork seed, "
+            "a standing ``set-limits`` and a launch flag (CLI ``--spend-budget``) each "
+            "SET over it, raise or lower, and the account admits the result whole or "
+            "refuses the launch. Default ≈ a 5-round run on the free-backend setup "
             "(measured ~$0.019) with headroom; raise ``max_rounds`` and let this be "
             "the binding limit. ``None`` disarms the USD ceiling. Tenant-wide "
             "enforcement is M12 / JobRegistry work; this gate halts the current "
@@ -416,6 +237,21 @@ class OptimizationConfig(StrictModel):
         ),
     )
 
+    lift_reference: Annotated[
+        Literal["best_so_far", "parents"], Knob(Scope.POLICY, Estimand.GATE)
+    ] = Field(
+        "best_so_far",
+        description=(
+            "What each arm's lift is read against — its `reference_id` and every `reference_*` "
+            "number, the round's `separable` and its `p_value`. ``best_so_far`` (default): the "
+            "round's selected best-so-far individual, re-scored on the round's panel and paired "
+            "with the arm on the cells both measured. ``parents``: the arm's own `parent_ids`, "
+            "each re-measured on exactly the cells the arm measured; a crossover child is read "
+            "against the better of its parents there, the bar it must clear to have added "
+            "anything over what it recombined. An arm with no parent has no reference."
+        ),
+    )
+
     origin_gate: Annotated[
         Literal["strict", "critical_only", "off"], Knob(Scope.POLICY, Estimand.GATE)
     ] = Field(
@@ -429,82 +265,6 @@ class OptimizationConfig(StrictModel):
             "gate. The operator overrides knowingly with a plain ``resume`` — "
             "round 0 is already on disk, so the loop skips the gate and goes "
             "straight to L1."
-        ),
-    )
-
-    prompt_block_catalogue: Annotated[PromptBlockCatalogue, Knob(Scope.POLICY, Estimand.SEARCH)] = (
-        Field(
-            "guidance",
-            description=(
-                "How the prompt block library (``promptpotter/config/"
-                "prompt_variants.json`` — reusable ``persona`` / ``task_intent`` / "
-                "``thinking_style`` / ``answer_format`` values adopted from PromptWizard "
-                "and PromptPotter's own runs) is offered to ``l1_generate``. ``guidance`` "
-                "(default) shows the blocks adopted from this project's own runs — the "
-                "value space stays open, so L1 may reuse one verbatim, adapt one, or write "
-                "its own, and the imported Self-Discover tail would only be menu. "
-                "``restrict`` narrows the field's value space to the *whole* library (which "
-                "it therefore renders in full) — an off-library value is a forbidden value, "
-                "rejected by "
-                "``validate_overrides`` exactly as a forbidden axis is (synthetic-0, no "
-                "backend spend, healed via the L2 wound). ``off`` renders nothing, so the "
-                "prompt is bit-for-bit identical to a no-library ablation run."
-            ),
-        )
-    )
-
-    schema_field_rename: Annotated[bool, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
-        False,
-        description=(
-            "Whether THIS campaign's L1 may PROPOSE renaming a field on the inner "
-            "``l1_generate``'s output schema (``L1Variant``). Off by default: "
-            "``build_l1_response_schema`` never grafts ``output_schema_field_names``, so the "
-            "LLM cannot emit a key the schema omits — the same structural lock "
-            "the model/provider axes use, not a per-round rejection. A field NAME is the "
-            "wire contract; a ``description`` is not, which is why descriptions are always "
-            "free and names are not. It gates the PROPOSAL only: an inner cycle honours a "
-            "rename it is handed unconditionally (it loads its own ``campaign.json``, so "
-            "gating there would silently drop every rename the outer emits). The rename is "
-            "a presentation transform — ``build_l1_response_model`` aliases the wire key "
-            "back onto the real field, so no downstream reader observes it, and a rename the "
-            "model fails to honour makes the round unparseable, scoring it "
-            "``problem_rate = 1.0``. Unlocking changes the search space: it is ``policy`` "
-            "and bound to ``Estimand.SEARCH``, so it must ride a fork, never a resume."
-        ),
-    )
-
-    rebase_capability: Annotated[bool, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(
-        True,
-        description=(
-            "L2/L3 fork_proposal emission. When True, the ``rebase_capability`` "
-            "injection renders the rare-escape-hatch instruction into L2 + L3 "
-            "prompts and the runner auto-mints a sibling cycle on each fired "
-            "fork_proposal (capped at ``MAX_AUTO_REBASES`` per session). When "
-            "False, the injection renders empty — L2/L3 prompts contain no "
-            "fork_proposal guidance, the LLM never emits one, the runner's "
-            "rebase loop never fires. Flip to ``false`` for ablation runs "
-            "that need a fixed-trajectory baseline without the rebase prompt "
-            "text distorting the input. The schema field itself is invariant "
-            "(default None) so on-disk audit shape doesn't drift between modes."
-        ),
-    )
-
-    terminate_capability: Annotated[bool, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(
-        True,
-        description=(
-            "L2/L3 terminate_proposal emission. When True, the "
-            "``terminate_capability`` injection renders the stop-the-cycle "
-            "instruction into L2 + L3 prompts; a terminate_proposal NAMING A "
-            "REASON raises ``StopReason.ABORT`` and the cycle finalizes HALTED "
-            "on the current cycle_id (no fork), while a blank one is ignored "
-            "like any volunteered field. The intended user is an unrecoverable "
-            "upstream fault — e.g. an evidence-starved enricher (backend quota "
-            "exhausted) — that no framing refinement or replan can fix. When "
-            "False, the injection renders empty — L2/L3 prompts contain no "
-            "terminate guidance and the LLM never emits one. Flip to ``false`` "
-            "for an ablation run whose input distribution must match a "
-            "no-terminate baseline. The schema field is invariant (default "
-            "None) so on-disk audit shape doesn't drift between modes."
         ),
     )
 
@@ -543,28 +303,27 @@ class OptimizationConfig(StrictModel):
             "`inner_optimizer_temperature` and its cell seed arrive here."
         ),
     )
-    mechanisms: MechanismConfig = Field(default_factory=MechanismConfig)
 
-
-class DatasetSplit(StrictModel):
-    test: int = Field(description="Held-out test fold size — not in the bank or the table")
+    @property
+    def arm_budget(self) -> ArmBudget:
+        """What a head-to-head declares equal per arm, read off these knobs."""
+        return ArmBudget(
+            usd=self.spend_budget_usd,
+            max_rounds=self.max_rounds,
+            determinism=None
+            if self.determinism is None
+            else self.determinism.model_dump(mode="json"),
+        )
 
 
 class CampaignConfig(StrictModel):
     dataset_name: Annotated[str, Knob(Scope.DATA, Estimand.SEARCH)] = Field("")
-    sp_budget_round: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
-        20,
-        description="Per-round eval budget — how many samples each candidate is "
-        "scored on per round. The full train split is the bank; each round the "
-        "adaptive queue mechanism (`select_round_subset`) selects this many "
-        "informative samples from it. Not the dataset/pool size.",
-    )
-    sp_budget_origin: Annotated[int | None, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
+    sp_budget_origin: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
         DEFAULT_ORIGIN_BUDGET,
         ge=1,
         description="Origin eval budget — how many bank samples the origin (C0) is "
-        "scored on at check-in. Explicit `null` ⇒ `sp_budget_round`. Defaults ABOVE "
-        "`sp_budget_round` because origin breadth is the one breadth that is nearly "
+        "scored on at check-in. The bench's, whatever the optimizer: a round's own panel is "
+        "its sampler's knob. Wide because origin breadth is the one breadth that is nearly "
         "free: θ_origin is the term EVERY delta subtracts, and its rows are "
         "content-addressed cache replayed into every candidate arm, fork and resume — "
         "paid once per config. Candidate breadth is paid per candidate, per round. "
@@ -574,6 +333,14 @@ class CampaignConfig(StrictModel):
     )
     exclude_nodes: Annotated[list[str], Knob(Scope.DATA, Estimand.SEARCH)] = Field(
         default_factory=list
+    )
+    task_framing: Annotated[Literal["committed", "off"], Knob(Scope.DATA, Estimand.SEARCH)] = Field(
+        "committed",
+        description="Which task framing every target render splices in. `committed` "
+        "(default) runs under the dataset's `task_context.yaml`, which the first mint "
+        "decomposes from `task_description.md` when none is committed yet. `off` runs "
+        "UNFRAMED on purpose — the ablation arm — even where framing exists, and the campaign "
+        "manifest keeps the delta, so the result never reads as a framed one.",
     )
     # ONE name for the per-node delta at every layer that carries one: this campaign's, a check-in
     # draft's (`DraftCampaign.pipeline_overlay`) and a cycle seed's.
@@ -614,15 +381,16 @@ class CampaignConfig(StrictModel):
         "LLMs. A judge is a ruler, and a ruler that moved with whatever the search was last "
         "steered to would not be one.",
     )
-    headline_metric: Annotated[HeadlineMetric, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(
+    display_metric: Annotated[DisplayMetric, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(
         "accuracy",
-        description="Which fitness number headlines the operator's text surfaces "
-        "(lineage node value, Best tile, sidebar) by default. DISPLAY config, not "
-        "search state — the gate is always difficulty-adjusted ability θ; this only "
-        "picks the number the human READS, client-overridable per session. `ability` "
-        "shows θ (a logit, jargon) — defaults to `accuracy` so θ is never forced on "
-        "an operator who didn't ask for it. Rides the `composite_fitness_formula` "
-        "serve path to `dashboard.json::headline_metric`; never on `OptSearchPoint`.",
+        description="Which fitness number the operator's round and candidate views display "
+        "first (lineage node value, Best tile, sidebar). DISPLAY config, not search state — "
+        "the optimizer's selector decides on its own objective, and the campaign's headline "
+        "is the bench score; this only picks the number the human READS, client-overridable "
+        "per session. `ability` shows θ (a logit, jargon) where the selector stamps one — "
+        "defaults to `accuracy` so θ is never forced on an operator who didn't ask for it. "
+        "Rides the `composite_fitness_formula` serve path to "
+        "`dashboard.json::display_metric`; never on `OptSearchPoint`.",
     )
     hard_sample_order: Annotated[HardSampleOrder, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(
         "info_gain",
@@ -632,7 +400,7 @@ class CampaignConfig(StrictModel):
         "learning gain), contested-at-the-leader samples first; `difficulty` sorts by the "
         "Rasch ruler δ_s alone, hardest first. DISPLAY config: it picks the order the human "
         "READS and never what the engine scores, which is `build_round_order` and reaches no "
-        "knob. Client-overridable per session, like `headline_metric`.",
+        "knob. Client-overridable per session, like `display_metric`.",
     )
     accuracy_ceiling: Annotated[float | None, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(
         None,
@@ -647,18 +415,24 @@ class CampaignConfig(StrictModel):
         "guessed value makes every campaign on it publish a round count nobody can defend. "
         "DISPLAY config — it moves no gate, no selection and no stop.",
     )
-    # Carries a `Knob`, so the walk STOPS here: the split is one knob, not two.
-    dataset_split: Annotated[DatasetSplit | None, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(
+    # Carries a `Knob`, so the walk STOPS here: the partition is one knob, not three.
+    dataset_split: Annotated[DatasetSplit | None, Knob(Scope.DATA, Estimand.SELECTION)] = Field(
         None,
-        description="Canonical train/test fold sizes for the dashboard footer. "
-        "None when the dataset declares no split.",
+        description="How run init partitions the bank into the search pool every optimizer draw "
+        "reads, the held-out bench set the headline is scored on, and a demo pool. `None` "
+        "holds nothing out: the whole bank is the search pool and there is no bench score.",
+    )
+    bench_each_round: Annotated[bool, Knob(Scope.POLICY, Estimand.SPEND)] = Field(
+        False,
+        description="Grade each round's declared selection on the bench set too, so the trend "
+        "carries a held-out series beside the round composite. A round that selects a new "
+        "individual costs one more bench pass, `dataset_split.bench` cells, which is on the "
+        "order of the round's own panel; a held round costs nothing. Off: only the origin and "
+        "the final selection are graded, which the headline needs either way.",
     )
 
     # No `Knob` — the walk descends into OptimizationConfig.
     optimization: OptimizationConfig
-
-    def origin_budget(self) -> int:
-        return self.sp_budget_origin or self.sp_budget_round
 
 
 def load_campaign_config(raw: dict[str, Any] | CampaignConfig) -> CampaignConfig:
@@ -668,65 +442,81 @@ def load_campaign_config(raw: dict[str, Any] | CampaignConfig) -> CampaignConfig
 
 
 def merge_config_layers(base: dict[str, Any], over: Mapping[str, Any]) -> dict[str, Any]:
-    """Depth-first, so overriding one knob under ``optimization`` keeps its siblings. A shallow
-    ``{**base, **over}`` replaces the whole sub-block, which is how a harness meaning to set
-    ``max_rounds`` silently dropped every other loop knob the dataset declared."""
+    """Depth-first, so overriding one knob under ``optimization`` keeps its siblings; a shallow
+    ``{**base, **over}`` would drop every other loop knob the dataset declared.
+
+    ``optimization.nodes`` addresses the manifest its OWN layer selects, so a layer naming another
+    ``optimizer`` drops the base's node overlay rather than laying it onto a manifest it never named."""
+    base_opt = base.get("optimization")
+    over_opt = over.get("optimization")
+    if isinstance(base_opt, dict) and isinstance(over_opt, Mapping) and "optimizer" in over_opt:
+        held = base_opt.get("optimizer", OptimizationConfig.model_fields["optimizer"].default)
+        if over_opt["optimizer"] != held:
+            base = {**base, "optimization": {k: v for k, v in base_opt.items() if k != "nodes"}}
+    return _merge_dicts(base, over)
+
+
+def _merge_dicts(base: dict[str, Any], over: Mapping[str, Any]) -> dict[str, Any]:
     out = dict(base)
     for key, value in over.items():
         current = out.get(key)
         out[key] = (
-            merge_config_layers(current, value)
+            _merge_dicts(current, value)
             if isinstance(current, dict) and isinstance(value, Mapping)
             else value
         )
     return out
 
 
+def merge_node_overlays(
+    base: Mapping[str, ManifestNodeOverlay], over: Mapping[str, ManifestNodeOverlay]
+) -> dict[str, ManifestNodeOverlay]:
+    """Key by key within each node, so a later layer naming one knob keeps the node's others."""
+    out = dict(base)
+    for node, overlay in over.items():
+        held = out[node].config if node in out else {}
+        out[node] = ManifestNodeOverlay(config={**held, **overlay.config})
+    return out
+
+
 def freeze_campaign_config(config: CampaignConfig) -> dict[str, Any]:
-    """Sole writer of the snapshot's shape, and it persists only the DELTA from defaults, so a knob
-    nobody set cannot make it unloadable. A set-then-renamed knob is re-stamped, never shimmed."""
-    return config.model_dump(mode="json", exclude_defaults=True)
+    """Sole writer of ``campaign.json::config``: the WHOLE config the campaign was minted to run,
+    so no later edit to its dataset's files reaches a resume, a fork or a served read of it."""
+    return config.model_dump(mode="json")
 
 
-# The snapshot fields that MERGE with the live file rather than replace it, because the file holds
-# no version of them to replace — every other frozen key is the campaign's word over the file's.
-_MERGED_INHERITED_FIELDS = frozenset({"pipeline_overlay", "optimizer_narrowing"})
+def _scoring_block(scoring: str | dict[str, str] | None) -> dict[str, str]:
+    if isinstance(scoring, dict):
+        return dict(scoring)
+    return {"per_sample": scoring} if scoring else {}
 
 
-def apply_inherited_overlay(
-    config: CampaignConfig,
-    frozen_config: dict[str, Any],
-    seed: CycleSeed | None,
-) -> CampaignConfig:
-    """The campaign's own DECLARATION over the LIVE dataset file. Resume/fork rebuild from the file
-    so declaration edits stay drift-detected, then the snapshot wins wherever it SPOKE — it is the
-    delta from defaults (:func:`freeze_campaign_config`), so a knob nobody set keeps coming from
-    the file and an operator edit still reaches a resume. Read off the snapshot DICT, so one
-    renamed leaf cannot block a resume."""
-    frozen_narrowing = {
-        node: NodeSearchNarrowing.model_validate(raw)
-        for node, raw in (frozen_config.get("optimizer_narrowing") or {}).items()
-    }
-    narrowing = {**config.optimizer_narrowing, **frozen_narrowing}
-    if seed is not None:
-        narrowing.update(seed.optimizer_narrowing)
-    frozen_overlay: dict[str, Any] = frozen_config.get("pipeline_overlay") or {}
-    # The frozen snapshot wins over the live dataset file, which is a mint-time SEED — so the
-    # runner's grade-C stamp reads the SAME permitted model set the fork-cycle cap-gate reads off
-    # `campaign.config`, and the two cannot disagree. That is why `frozen_narrowing` is merged
-    # SECOND above, and the seed's own declaration last of all.
-    #
-    # Everything ELSE the campaign froze — its loop ceilings above all. Only the two fields above
-    # MERGE rather than replace, so they are the two lifted out here and the rest re-validates as
-    # one layer. Without this a `--config` (or any mint-time declaration) reached `campaign.json`
-    # and not the loop: the run enforced the dataset file's `max_rounds` and `spend_budget_usd`
-    # while every surface reading the campaign showed the operator's.
-    rest = {k: v for k, v in frozen_config.items() if k not in _MERGED_INHERITED_FIELDS}
-    if rest:
-        config = load_campaign_config(merge_config_layers(config.model_dump(mode="json"), rest))
+def apply_config_overrides(config: CampaignConfig, overrides: ConfigOverrides) -> CampaignConfig:
+    """ABSOLUTE values over *config*, ``nodes`` and a ``scoring`` map key by key (a lens's
+    ``{per_cell: F}`` keeps ``per_sample``). A seed's budget is admitted before launch, not here."""
+    opt_updates: dict[str, Any] = (
+        {"max_rounds": overrides.max_rounds} if overrides.max_rounds is not None else {}
+    )
+    if overrides.nodes:
+        opt_updates["nodes"] = merge_node_overlays(config.optimization.nodes, overrides.nodes)
+    top_updates: dict[str, Any] = {}
+    if isinstance(overrides.scoring, dict):
+        top_updates["scoring"] = {**_scoring_block(config.scoring), **overrides.scoring}
+    elif overrides.scoring:
+        top_updates["scoring"] = overrides.scoring
+    if not opt_updates and not top_updates:
+        return config
+    if opt_updates:
+        top_updates["optimization"] = config.optimization.model_copy(update=opt_updates)
+    return config.model_copy(update=top_updates)
+
+
+def apply_cycle_seed(config: CampaignConfig, seed: CycleSeed | None) -> CampaignConfig:
+    """A cycle's config: its campaign's frozen one under the seed the cycle was minted with, whose
+    narrowing replaces the campaign's node by node."""
+    if seed is None:
+        return config
+    config = apply_config_overrides(config, seed.config_overrides)
     return config.model_copy(
-        update={
-            "pipeline_overlay": {**config.pipeline_overlay, **frozen_overlay},
-            "optimizer_narrowing": narrowing,
-        }
+        update={"optimizer_narrowing": {**config.optimizer_narrowing, **seed.optimizer_narrowing}}
     )

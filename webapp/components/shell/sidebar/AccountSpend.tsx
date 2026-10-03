@@ -8,12 +8,11 @@ import { useRead } from "@/lib/hooks/useRead";
 import { useRevalidation } from "@/lib/revalidate";
 import { useWorkspace } from "@/lib/workspace";
 
-// The quota read sums every ledger the account owns, so it polls slowly and re-ticks early when
-// the campaign list's SERVED spend moves — a round that bills is what changes the total.
+// The quota read sums every ledger the account owns: it polls slowly and re-ticks early when the
+// campaign list's served spend moves.
 const QUOTA_POLL_MS = 60_000;
 
-// What this ACCOUNT has spent, against its ALLOWANCE — pinned to the sidebar in every state,
-// the collapsed rail included. Both numbers are `/auth/quota-status`'s.
+// What this ACCOUNT has spent against its ALLOWANCE, pinned in every sidebar state.
 export function AccountSpend() {
   const { campaigns } = useWorkspace();
   const generation = useRevalidation();
@@ -67,6 +66,12 @@ export function AccountSpend() {
         <p>
           {fmtTokens(data.spend_unpriced_tokens)} were billed by a model with no known price, so
           the dollar figure undercounts and the token allowance is the one holding.
+        </p>
+      ) : null}
+      {data.spend_unreported_usd > 0 ? (
+        <p>
+          Up to {fmtUsd(data.spend_unreported_usd)} more is unreported — sends that ended with no
+          bill (cancelled, timed out, killed). Not spent, unknown; the allowance holds it anyway.
         </p>
       ) : null}
     </div>

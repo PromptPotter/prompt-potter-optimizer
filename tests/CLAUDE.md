@@ -18,19 +18,17 @@ every refactor.
 
 ## Why three and not one
 
-The rule used to be axis 2 alone. Every test this charter's own pass deleted had passed that
-rule honestly, one bug at a time — and roughly half the suite ended up coupled to filenames,
-YAML keys and rendered prose, breaking on benign renames forever and on wrong behaviour never.
-A rule with too few axes, applied faithfully, *is* the mechanism of organic growth. These
-corollaries are the parts that were being got wrong:
+Axis 2 alone admits, one honest bug at a time, a suite coupled to filenames, YAML keys and
+rendered prose — breaking on benign renames forever and on wrong behaviour never. A rule with
+too few axes, applied faithfully, *is* the mechanism of organic growth. The corollaries:
 
-- **A well-argued docstring does not admit a test.** Every deleted test had one. The argument
-  establishes axis 2 and then stops.
+- **A well-argued docstring does not admit a test.** The argument establishes axis 2 and then
+  stops.
 - **"A reader or a tool is lied to" is not an admissible class.** Doc-pointer rot, spec-vs-model
   drift, name censuses: caught by reading the diff when the thing moves. That is where this
   project does that work — not in a standing test that re-breaks on every reorganisation.
-- **There are no sanctioned repo-wide scans.** The old charter sanctioned two; four had
-  accumulated. Under axis 1 the correct number is zero, and a carve-out is how two becomes four.
+- **There are no sanctioned repo-wide scans.** Under axis 1 the correct number is zero, and a
+  carve-out is how zero becomes four.
 - **A rejected structural invariant is relocated, not dropped** — see below.
 - **Where the coupling sits decides delete vs REWIRE.** A test whose *assertion* reads a name or
   a path is dead. A test whose assertion is a number and whose *setup* happens to load a fixture
@@ -38,12 +36,11 @@ corollaries are the parts that were being got wrong:
 
 ## What each file is for
 
-A file states its subject and holds only that. A test that fits no section does not belong —
-which is a thing a flat file can never say, and is why `test_integrity.py` became the sink.
+A file states its subject and holds only that. A test that fits no section does not belong.
 
 | File | Its subject |
 |------|-------------|
-| `test_numerics.py` | A wrong score or a wrong selection. The run completes, the dashboard looks fine, every result is subtly wrong. Ten sections: scorer formulas · composite fitness · the δ ruler · electing a round winner · PoBB elimination · which cells a round buys · paired readings · the L4 outer proxy · L1 proposal validators · escalation and spend. |
+| `test_numerics.py` | A wrong score or a wrong selection. The run completes, the dashboard looks fine, every result is subtly wrong. Ten sections: scorer formulas · composite fitness · the δ ruler · electing a round winner · candidate elimination · which cells a round buys · paired readings · the L4 outer proxy · L1 proposal validators · escalation and spend. |
 | `test_integrity.py` | A wrong identity or a quiet cross-contamination. Eight sections: measurement identity · replay eligibility · contamination of a scored prompt · the searchpoint's param surface · the dispatch frame · L4 steering · money · where the package reads and writes. |
 | `test_security.py` | A leak, or money. A key reaching the logs, dataset content reaching the optimizer LLM unfenced, a path segment escaping its tenant dir, a spend ceiling that stops binding. Irreversible in a multi-tenant product. |
 | `test_resume.py` | Lost or corrupted measurement. A rescore that corrupts prior fitness, a replay that misses a flipped outcome, a fork that inherits the wrong origin, a compaction that drops a paid row. |
@@ -64,15 +61,17 @@ enforcing becomes a **check in the module that owns the registry** — in the ac
 it, or at import for a table built there (`application/CLAUDE.md` § Subpackages says which) — so it
 fails loud before a run spends, costs nothing to maintain, and needs no
 test to update. They exist across the package, e.g.
-`RESUME_CHECKPOINT_GATING` exhaustiveness (`application/optimization/resume_and_fork/decisions.py`),
+`resume_checkpoint_gating` exhaustiveness (`application/bench/resume_and_fork/decisions.py`),
 `L1_POSSIBLE ⊆ injection_table()` (`dispatch/injections/registry.py`), the `L1_MANDATORY`/origin-layout
-subset checks (`domain/l1_layout.py`), the unread/abandoned row-key checks (`domain/scoring.py`),
+subset checks (`optimizers/potter/dispatch/layout.py`), the unread/abandoned row-key checks (`domain/scoring.py`),
 the divergence-hint exhaustiveness (`cli/commands/_shared.py`). Add new ones the same way — beside
 the thing they validate, never as a repo-wide structure scan.
 
 ## Adding a test
 
-Answer the three axes in order. The first "no" ends it. If all three are yes, it rides an
+**"This change moves no decision" is not a test** — prove it once with the offline run
+([`../docs/developer/offline-run.md`](../docs/developer/offline-run.md)) and put the diff in the
+commit body. Answer the three axes in order. The first "no" ends it. If all three are yes, it rides an
 existing file's existing section by adding a function — **never a new file**, and never a new
 section invented to house it. Both counts are ledger rows (`test_files`, `test_functions`), so the
 function costs a baseline edit naming its invariant, and a file goes red.
@@ -96,19 +95,18 @@ is not a validated document — a `Stores`-shaped stub, a session object.
 
 `factories.py` is not a test file (no `test_` prefix, collects nothing). It holds builders that
 return REAL models — `round_result`, `cycle_result`, `scored_candidate`, `degradation_health`,
-`lost_round`, `cycle_slice`, `injection_bundle`, plus `measurement` / `measurements`, the one
+`lost_history`, plus `measurement` / `measurements`, the one
 MEASURED-CELL row (`QueryMeasurement` is a `TypedDict`, so the dict *is* the model). Domain models
 and the few application models the dispatch seam needs.
 
 Each builder takes only the fields a test bends. **Add a parameter when a test needs to bend one;
-never add a builder for a shape an existing one can express** — eight local copies of the cell row
-had drifted apart here before, and adding `objective` to the loop had to find every one of them.
+never add a builder for a shape an existing one can express** — local copies of a row drift apart,
+and a new field then has to find every one.
 
 **`measurement` stamps an `objective` that DIVERGES from `fitness`, deliberately** — pass
 `objective=fitness` where a test means them equal. Under no `per_cell` composite the two really are
-one float, and fixtures built on that identity are why two live confusions of correctness against
-the composite were invisible to this suite: `is_hit` thresholding the composite, and the
-campaign-ending stop reading accuracy.
+one float, and fixtures built on that identity hide every confusion of correctness with the
+composite (a hit threshold reading the composite, a stop reading accuracy).
 
 ## Frozen cycle fixtures (`tests/fixtures/cycles/`)
 
@@ -116,8 +114,6 @@ campaign-ending stop reading accuracy.
 owned by [`../webapp/CLAUDE.md`](../webapp/CLAUDE.md) § Testing posture. It sits here rather than
 under `webapp/` for that reason.
 
-The two Python frozen manifests that used to live beside it were deleted with their loaders: both
-were engineered to fire on a **field rename** (axis 1) and the harm they named was an
-`extra_forbidden` exception **raised at load** (axis 2 — loud). The on-disk-compat guarantee, if
-it is wanted back, belongs in `deploy-linux/update.sh`'s existing `restamp` step as a
-load-every-manifest smoke check, not as a pytest fixture.
+**No Python frozen manifests** — one fires on a **field rename** (axis 1), and the harm it names,
+an `extra_forbidden` **raised at load**, is loud (axis 2). An on-disk-compat guarantee belongs in
+`deploy-linux/update.sh`'s `restamp` step as a load-every-manifest smoke check, not a pytest fixture.

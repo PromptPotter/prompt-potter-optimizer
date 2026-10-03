@@ -1,11 +1,5 @@
 "use client";
-// Local edit buffer for an "edit then Apply" field. Holds the operator's
-// in-progress value and re-syncs to the committed `value` prop whenever it
-// changes — the render-phase guarded reset (webapp/CLAUDE.md "State reset on
-// prop change"), so a server-applied patch flows back into the input without a
-// stale frame. `dirty` is true while the buffer diverges from the committed
-// value, driving the Apply button's disabled state. Shared by every ingest
-// form field (slug, task, max-rounds, optimizer provider/model).
+// Edit buffer for an "edit then Apply" field; a server-applied `value` overwrites it.
 
 import { useState } from "react";
 

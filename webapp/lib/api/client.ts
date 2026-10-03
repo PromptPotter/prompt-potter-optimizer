@@ -1,18 +1,9 @@
-// API base + the shared GET helper. Internal to the api layer — `reads`
-// and `mutations` import it; it is not part of the `@/lib/api` surface.
+// The transport seam. Internal to `lib/api`, except the failure vocabulary `index.ts` re-exports.
 
 export const API = "/api/v1";
 
-// A non-2xx read. Carries the server's own classification so callers branch on
-// data instead of parsing the message string. The message stays technical for
-// logs — a user-facing surface must render its own copy, never `err.message`
-// raw (frontend-surface-contract.md § I2).
-//
-// `code` and `errorId` come from the `ErrorEnvelope` the API serializes at ONE
-// seam (`main.py::_error_response`, schema in api-openapi.yaml). The server
-// already classifies every failure precisely; this type is what stops that
-// classification being thrown away on arrival. `errorId` is the handle that
-// reaches the server log line — quote it in a bug report.
+// Never render `message` to an operator (frontend-surface-contract.md § I2). `errorId` greps the
+// server log line (`main.py::_error_response`).
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -26,14 +17,8 @@ export class ApiError extends Error {
   }
 }
 
-// How a caller must REACT to a failure — the five reactions that differ, not a
-// restatement of HTTP. Deliberately coarse: a poll needs to know "retry",
-// "re-probe auth" or "stop, this address is dead", and nothing finer changes
-// what it does.
-//
-// `transient` is the SAFE DEFAULT, and that direction matters: an unrecognised
-// failure keeps retrying rather than destroying client state. Only an explicit
-// 404 — the server answering, definitively, "no such thing" — is `gone`.
+// `transient` is the SAFE default: an unrecognised failure retries rather than destroying client
+// state. Only an explicit 404 is `gone`.
 export type FailureKind = "transient" | "auth" | "gone" | "denied" | "invalid";
 
 export function failureKind(e: unknown): FailureKind {
@@ -45,9 +30,7 @@ export function failureKind(e: unknown): FailureKind {
   return "transient"; // 5xx and anything unmapped
 }
 
-// Parse the `ErrorEnvelope` off a failed response. Tolerant by construction: a
-// proxy 502 or a static-export 404 answers HTML, and a transport helper that
-// throws while building an error is how one failure becomes two.
+// Tolerant: a proxy 502 or a static-export 404 answers HTML, not an envelope.
 async function toApiError(r: Response, url: string): Promise<ApiError> {
   try {
     const body = (await r.json()) as {
@@ -69,9 +52,6 @@ async function toApiError(r: Response, url: string): Promise<ApiError> {
   }
 }
 
-// All reads are live (poll-driven). Pairs with the server-side
-// `Cache-Control: no-store` header on `/api/v1/*` so neither layer can
-// serve a stale response — the webapp is a real-time view of disk.
 export async function jget<T>(url: string, signal?: AbortSignal): Promise<T> {
   const init: RequestInit = { cache: "no-store" };
   if (signal) init.signal = signal;
@@ -80,9 +60,7 @@ export async function jget<T>(url: string, signal?: AbortSignal): Promise<T> {
   return (await r.json()) as T;
 }
 
-// A READ whose subject will not fit in a URL — an in-progress overlay, not a resource id.
-// Same seam, same `ApiError`, so `failureKind` classifies it like any other read; it mints no
-// `Idempotency-Key`, because nothing it reaches writes.
+// A READ whose subject will not fit in a URL, so it mints no `Idempotency-Key`.
 export async function jpost<T>(
   url: string,
   body: unknown,
@@ -100,28 +78,12 @@ export async function jpost<T>(
   return (await r.json()) as T;
 }
 
-// Conditional GET — for poll loops over slow-changing files. The caller stores the
-// validator the server issued and passes it back next tick; the server answers
-// `304 Not Modified` (no body) when nothing changed. Returns a discriminated union
-// so the caller cleanly skips work on the 304 path.
-//
-// TWO wrappers, because the two polls validate different things:
-//   `jgetIfModified`  — `Last-Modified` / `If-Modified-Since`. The dashboard poll, whose
-//                       body IS one file: an mtime says everything there is to say.
-//   `jgetIfNoneMatch` — `ETag` / `If-None-Match`. The tree/ray polls, whose bodies depend
-//                       on mtimes AND the request's query (lens/samples mask, ray window).
-//                       A time validator cannot express query-dependence, which is why
-//                       masked tree reads used to be rebuilt on every single poll.
-// One body, one 304 path; the wrapper picks the header pair. The stored value is called
-// a `validator` rather than a `lastModified` because under ETag it is not a date, and a
-// field that lies about what it holds is how the two got conflated.
+// An ETag where the body depends on the query (tree/ray masks, windows), since a date cannot say
+// so; `Last-Modified` where the body is one file (the dashboard).
 export type Conditional<T> =
   | { kind: "ok"; data: T; validator: string | null }
-  // No validator on this arm, deliberately. A 304 asserts that the one the caller SENT is
-  // still current, so there is nothing new to report and the caller already holds the answer.
-  // Carrying a field here meant a response whose header a proxy stripped handed back `null`,
-  // and a caller that stored it went out unconditional forever after — a permanent full-body
-  // refetch every tick, with no error anywhere. Absent, that is unrepresentable.
+  // No validator here on purpose: a caller storing a proxy-stripped `null` would go unconditional
+  // forever. A 304 means keep the one you sent.
   | { kind: "not_modified" };
 
 async function jgetWithValidator<T>(

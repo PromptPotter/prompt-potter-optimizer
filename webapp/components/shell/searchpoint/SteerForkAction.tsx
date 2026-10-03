@@ -1,10 +1,5 @@
 "use client";
-// The AFFORDANCE for steering a searchpoint — the button, the modal it opens, and the one case
-// where there is nothing to offer. `SteerForkPanel` is the form; this is how a surface reaches it.
-//
-// It exists because both hosts of the drill-in were building the same three things by hand, down
-// to a byte-identical `title` string — and only one of them carried the refusal below, which made
-// the same click safe on Records and wrong on the dashboard.
+// The affordance for steering a searchpoint — button, modal, and the refusal below the top level.
 
 import { useState } from "react";
 import type { NodeConfigParam, NodeOutputSchema } from "@/lib/api/types";
@@ -26,31 +21,19 @@ export function SteerForkAction({
   outputSchema,
 }: {
   candidate: SelectedCandidate;
-  // The searchpoint's own address. ONE address, not two: the fork verb and the round file it
-  // seeds from both name this cycle, because the refusal below is what removes the case where
-  // they could differ. `null` where the host has no address at all — there is then no point to
-  // steer, and offering the button would open a form that could only fail on confirm.
   path: CyclePath | null;
-  // The live snapshot for that cycle, or `null` where this browser holds no stream for it —
-  // exactly one cycle streams, so a surface reading another branch seeds from the round file.
+  // `null` where this browser holds no stream for the cycle; the form then seeds from the round file.
   dash: DashboardSnapshot | null;
   parentIsLive: boolean;
   schema: Record<string, NodeConfigParam[]> | null;
-  // How the read that produced `schema` went, from the same source. See `NodeConfigEditor`.
   schemaStatus: PipelineStatus;
-  // Served beside `schema`, by the same read. See `NodeConfigEditor`.
   isSingleNode: boolean;
   outputSchema: Record<string, NodeOutputSchema | null> | null;
 }) {
   const [open, setOpen] = useState(false);
 
-  // **It refuses below the top level, and that is a WIRE fact rather than a policy.**
-  // `ForkCyclePayload` extends `CyclePayload`, not `DescendableCyclePayload` — it carries no
-  // `descend`, so the only `(round, candidate_id)` it can name is one of the addressed cycle's
-  // own. Asked to fork an L4 inner searchpoint it would either resolve nothing or match a
-  // coincidental id in the outer cycle and cut the wrong point, which is worse than refusing.
-  // Making it reachable means widening the command contract, declared in `api-openapi.yaml`
-  // first.
+  // A wire fact, not a policy: `ForkCyclePayload` carries no `descend`, so an L4 inner point would
+  // match a coincidental id in the outer cycle. Widen the command in `api-openapi.yaml` first.
   if (path && path.length > 1) {
     return (
       <p className="l4-note">
@@ -72,9 +55,6 @@ export function SteerForkAction({
       >
         Steer &amp; fork
       </button>
-      {/* Steering is its own act with its own home — a modal that opens straight from the
-          drill-in (no tab hop). The fork continues from this searchpoint (always
-          `operator_steered`); edits are optional. */}
       {open && (
         <Dialog
           open

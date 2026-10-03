@@ -14,6 +14,7 @@ from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.authored import load_dataset_campaign_config
 from promptpotter.application.datasets.loaders import samples_from_dicts
 from promptpotter.application.embedded_run import open_session, run_campaign
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.runner.entry import RunMode
 from promptpotter.application.scoring.formula import SCORING_FUNCTIONS
@@ -48,18 +49,18 @@ def build_campaign_config(
 
     Overrides are ad-hoc notebook conveniences; the file stays the project default and the SoT
     for CLI runs. The optimizer LLM is install-global
-    (``promptpotter/assets/optimizer/pipeline.yaml``) — edit that to change the optimizer
+    (``promptpotter/assets/optimizers/potter/pipeline.yaml``) — edit that to change the optimizer
     model/provider, not the campaign config.
     """
     # Rasch-validation scaffolding: the L1-only arm, so the per-round adaptive queue accumulates
     # δ evidence with no L2/L3 fire in the window.
-    optimization: dict[str, Any] = {"max_rounds": 5, "escalation_ladder": "l1"}
-    optimization.update(
-        {k: v for k, v in {"max_rounds": max_rounds, "n_variants": n_variants}.items() if v}
-    )
-    overrides: dict[str, Any] = {"optimization": optimization}
+    nodes: dict[str, Any] = {"escalation": {"config": {"escalation_ladder": "l1"}}}
+    if n_variants:
+        nodes["l1_generate"] = {"config": {"n_variants": n_variants}}
     if sp_budget_round is not None:
-        overrides["sp_budget_round"] = sp_budget_round
+        nodes["adaptive_queue"] = {"config": {"sp_budget_round": sp_budget_round}}
+    optimization: dict[str, Any] = {"max_rounds": max_rounds or 5, "nodes": nodes}
+    overrides: dict[str, Any] = {"optimization": optimization}
     return load_dataset_campaign_config(_BBEH_CAMPAIGN_YAML, overrides=overrides)
 
 
@@ -79,7 +80,7 @@ async def run_bbeh_campaign(
     already saved to disk by the loop's finalizer; the test-eval / export
     phase is skipped because the user signalled stop.
     """
-    exact_match = SCORING_FUNCTIONS["exact_match"]
+    label_match = SCORING_FUNCTIONS["label_match"]
     tasks = sorted(test_by_task.keys())
     train_norm = _normalize(train_pool)
     test_norm_by_task = {t: _normalize(v) for t, v in test_by_task.items()}
@@ -122,13 +123,13 @@ async def run_bbeh_campaign(
         if stop_reason_outcome(cycle_result.stop_reason) is not StopOutcome.SUCCESS:
             return None
 
-        # The winner comes off the ARTIFACT, not off `CycleResult.winner_prompt_fields`: that one
+        # The winner comes off the ARTIFACT, not off `CycleResult.result_prompt_fields`: that one
         # is the wire-side projection and carries a rendered `few_shot_block`, which
         # `PromptTemplate` rejects outright (`extra="forbid"`) — a crash that waits for the first
         # winner with demonstrations and lands after the whole campaign is paid for.
         export = session.store.campaigns.read_export(session.hop)
-        winner_pipeline_params = cycle_result.winner_pipeline_params
-        train_acc = cycle_result.best_accuracy
+        result_pipeline_params = cycle_result.result_pipeline_params
+        train_acc = cycle_result.result_accuracy
 
         print(f"\n{'=' * 60}")
         print("PER-TASK TEST EVALUATION")
@@ -136,19 +137,19 @@ async def run_bbeh_campaign(
 
         per_task_results: dict[str, Record] = {}
         # Outside the run, so under a book of its own: every cell is still admitted and metered.
-        bound = await cell_bound(session, winner_pipeline_params or {})
-        billed = cell_billing(session.pipeline_schema, winner_pipeline_params or {})
+        bound = await cell_bound(session, result_pipeline_params or {})
+        billed = cell_billing(session.pipeline_schema, result_pipeline_params or {})
         with spending_under(unbounded_spend_book()):
             for i, task in enumerate(tasks, start=1):
                 test_items = test_norm_by_task[task]
                 hits = 0
                 for ex in test_items:
                     resp = await session.backend_client.run_query(
-                        ex.query, pipeline_params=winner_pipeline_params, bound=bound, billed=billed
+                        ex.query, pipeline_params=result_pipeline_params, bound=bound, billed=billed
                     )
                     ranking = resp.get("data", {}).get("final_ranking") or []
                     predicted = ranking[0].get("candidate", "") if ranking else ""
-                    hits += int(exact_match(predicted, ex.ground_truth))
+                    hits += int(label_match(predicted, ex.ground_truth))
                 acc = hits / len(test_items) if test_items else 0.0
                 per_task_results[task] = {"accuracy": round(acc, 4), "n_test": len(test_items)}
                 print(
@@ -170,15 +171,15 @@ async def run_bbeh_campaign(
             config={
                 "optimizer": "promptpotter",
                 "max_rounds": opt_cfg.max_rounds,
-                "n_variants": opt_cfg.n_variants,
-                "sp_budget_round": campaign_config.sp_budget_round,
+                "n_variants": select_optimizer(opt_cfg).pacing.arms_per_round,
+                "sp_budget_round": select_optimizer(opt_cfg).round_cells(len(train_pool)),
                 "model_id": target_model,
                 "n_train": len(train_pool),
                 "train_accuracy": round(train_acc, 4) if train_acc is not None else None,
                 "origin_train_accuracy": (
                     round(origin_train_acc, 4) if origin_train_acc is not None else None
                 ),
-                "rounds": cycle_result.n_l1_rounds,
+                "rounds": cycle_result.n_rounds_after_origin,
                 "methodology": (
                     "Single global prompt optimized on the pooled per-task train halves of "
                     "BBEH mini; evaluated on the held-out test halves, the same rows every "

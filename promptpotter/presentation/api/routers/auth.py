@@ -65,7 +65,7 @@ class ConnectedAccount(StrictModel):
 
     Stage-1 beta is single-account-per-user — the list is always length 1.
     The Clerk-style "connected accounts" surface in the webapp displays this
-    list; multi-account linking ships post-M13.
+    list; multi-account linking ships with ADR-0002 Stage 2.
     """
 
     provider: str
@@ -85,9 +85,17 @@ class QuotaStatus(StrictModel):
     ``spend_used_total_usd`` a floor and leave the token pair as the binding one.
     """
 
-    spend_used_total_usd: float
+    spend_used_total_usd: float = Field(
+        description="What the providers BILLED this account, over its whole life. Never an "
+        "estimate: a send whose bill never came is `spend_unreported_usd`, not this."
+    )
     spend_budget_usd_total: float | None
     spend_unpriced_tokens: int
+    spend_unreported_usd: float = Field(
+        description="The most that sends which ended with no bill (cancelled, timed out, killed "
+        "with a run) may have cost, at the bounds they were admitted on. Not spent — unknown. It "
+        "binds the ceiling beside `spend_used_total_usd`."
+    )
     tokens_used_total: int
     token_budget_total: int | None
     concurrent_running: int
@@ -520,6 +528,7 @@ def quota_status(request: Request, stores: StoresDep) -> QuotaStatus:
         spend_used_total_usd=round(spent.used_usd, 6),
         spend_budget_usd_total=ceilings.usd,
         spend_unpriced_tokens=spent.unpriced_tokens,
+        spend_unreported_usd=round(spent.unreported_usd, 6),
         tokens_used_total=spent.used_tokens,
         token_budget_total=ceilings.tokens,
         concurrent_running=len(running),
@@ -686,7 +695,12 @@ def activity(
 
 def _provider_from_model(model: str) -> str:
     """Derive the API-key axis from a model string, by the ``<provider>/<model>`` convention. A string with no slash falls
-    back to ``unknown``."""
+    back to ``unknown``.
+
+    The browser draws the same axis as a vendor MARK beside a model, off its own twin of this rule
+    (``webapp/lib/format.ts::vendorOf``) — the surfaces that need it there hold a raw model string
+    off ``CampaignSummary.runs_with`` rather than anything this serves, so the rule lives at both
+    ends and the coupling is commented at both."""
     if "/" in model:
         return model.split("/", 1)[0]
     if ":" in model:  # e.g. "groq:openai/gpt-oss-120b"

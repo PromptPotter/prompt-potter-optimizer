@@ -5,7 +5,7 @@ package** — `pip install promptpotter[dspy]` — for an audience that never cl
 runs a server, or opens the operator webapp. A plain install is already just the engine, so
 the DSPy dependency and this module are the only things the extra adds.
 
-> CAPO ships in [promptolution](https://github.com/finitearth/promptolution), not DSPy —
+> CAPO ships in [promptolution](https://github.com/gepromptet/promptolution), not DSPy —
 > DSPy's own are MIPROv2, COPRO, GEPA and BootstrapFewShot. The swap reads the same either way.
 
 ## What you trade away
@@ -48,6 +48,12 @@ from promptpotter.presentation.teleprompter import PromptPotterOpt
 optimizer = PromptPotterOpt(metric=my_metric, dataset_name="my-task")
 compiled = optimizer.compile(my_program, trainset=trainset)
 ```
+
+The contract, as DSPy's source states it (`dspy/teleprompt/teleprompt.py`), is
+`Teleprompter.compile(self, student: Module, *, trainset, teacher=None, valset=None, **kwargs) -> Module`.
+`dspy.GEPA` ([paper](https://arxiv.org/abs/2507.19457)) sets its budget with `auto` (light / medium /
+heavy), `max_full_evals` or `max_metric_calls`; the last is the knob a budget-matched comparison
+against this optimizer holds equal.
 
 Every field below has a default, so that is a complete run. The rest of this page is what
 you override once you want the search shaped to your task.
@@ -93,20 +99,27 @@ each layer tolerates before handing up (full mechanism:
 from promptpotter.presentation.teleprompter import Loop
 
 loop = Loop(
+    optimizer="potter",       # which optimizer proposes — any name optimizer_roster() lists
+    nodes={                   # that optimizer's node knobs; omitted keeps its manifest's
+        "adaptive_queue": {"sp_budget_round": 20},  # rows each candidate is scored on — the cost knob
+        "l1_generate": {"n_variants": 6},       # candidates generated per round
+        "escalation": {"l1_patience": 0,        # L1 mutates the winner
+                       "l2_patience": 2,        # L2 observes the history, re-aims L1
+                       "l3_patience": 1},       # L3 replans the strategy L1 works within
+        "pobb": {"epsilon": 0.2},               # how aggressively trailing candidates are killed
+    },
     max_rounds=5,
-    n_variants=6,             # candidates generated per round
-    samples_per_round=20,     # rows each candidate is scored on — the cost knob
-    l1_patience=0,            # L1 mutates the winner
-    l2_patience=2,            # L2 observes the history, re-aims L1
-    l3_patience=1,            # L3 replans the strategy L1 works within
     elimination_n_min=4,      # samples a candidate gets before it may be pruned
-    pobb_epsilon=0.2,         # how aggressively trailing candidates are killed
     spend_budget_usd=None,    # a ceiling the run stops at; None runs uncapped
 )
 ```
 
-The values above are an illustration, not the defaults — those live on the `Loop` dataclass
-itself and move without this page hearing about it. Read them off the fields.
+The three layers are potter's. `optimizer="capo"` (or `gepa`, `levi`) swaps the proposer and
+keeps everything around it; its `nodes` are that manifest's knobs, which
+`GET /optimizers/{name}/knobs` lists, and a knob the manifest does not take is refused when the
+`Loop` is built. The values above are an illustration, not the defaults: omitting `nodes` runs
+the named manifest as declared, the same defaults every other entry point runs it at, and the loop
+fields' own defaults live on the `Loop` dataclass. Read them off the fields.
 
 ## The node is your program
 

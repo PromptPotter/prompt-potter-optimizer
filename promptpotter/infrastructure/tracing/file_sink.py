@@ -364,7 +364,7 @@ class FileSink:
             "family": family,
             "version": version,
             "lineage_id": event.lineage_id,
-            "parent_id": event.parent_id,
+            "parent_ids": list(event.parent_ids),
             "layer1_fields": event.layer1_fields,
             "created_at": utcnow_iso(),
         }
@@ -375,7 +375,7 @@ class FileSink:
                 "lineage_id": event.lineage_id,
                 "family": family,
                 "version": version,
-                "parent_id": event.parent_id,
+                "parent_ids": list(event.parent_ids),
             }
         )
 
@@ -386,23 +386,23 @@ class FileSink:
             trace_data = read_json_optional(trace_path)
             if trace_data is not None:
                 trace_data["output"] = {
-                    "best_accuracy": event.best_accuracy,
-                    "n_l1_rounds": event.n_l1_rounds,
+                    "result_accuracy": event.result_accuracy,
+                    "n_rounds_after_origin": event.n_rounds_after_origin,
                     "stop_reason": event.stop_reason,
                 }
                 write_json(trace_path, trace_data)
-            if event.best_accuracy is not None:
-                self._write_score(trace_id, "best_accuracy", event.best_accuracy)
+            if event.result_accuracy is not None:
+                self._write_score(trace_id, "result_accuracy", event.result_accuracy)
 
         self._log_event(
             {
                 "event": "campaign_end",
                 "trace_id": trace_id,
                 "campaign_id": event.campaign_id,
-                "best_accuracy": event.best_accuracy,
-                "n_l1_rounds": event.n_l1_rounds,
+                "result_accuracy": event.result_accuracy,
+                "n_rounds_after_origin": event.n_rounds_after_origin,
                 "stop_reason": event.stop_reason,
-                "best_round": event.best_round,
+                "result_round": event.result_round,
             }
         )
 

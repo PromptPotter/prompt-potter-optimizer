@@ -1,19 +1,5 @@
-// Canonical candidate label reader. After the round-numbering rework
-// every persisted candidate (in `round_NNNN.json::candidate_scores[]`,
-// `dashboard.json::current_round.nodes.l1_score.{input,output}.candidates[]`,
-// and snapshot events) carries a `label` field set once at score creation —
-// "C0" for origin (round 0), "C{round}.{n}" (n=1..N) for L1 round
-// candidates. Display sites read it verbatim.
-//
-// The fallback computes the same shape from round + idx, used only when a
-// caller hands over a partial record during a write-window race or for the
-// rare in-flight candidate slot that hasn't been seeded with a label yet.
-//
-// Defensive: round 0 SHOULD only ever have a single origin candidate
-// ("C0"). If we see idx>0 for round 0, the contract is broken (stale
-// data from before the canonical-numbering refactor, or a future bug).
-// Emit a disambiguated label rather than silently collapsing all bars
-// to "C0" — a colliding fallback hides the data-integrity issue.
+// Fallback only: display sites read the served `label` verbatim. Round 0 has one arm, so idx>0
+// there is a broken contract and renders `C0.n!` rather than colliding on "C0".
 
 export function candidateLabel(
   round: number | null | undefined,
@@ -27,13 +13,8 @@ export function candidateLabel(
   return `C${r}.${i + 1}`;
 }
 
-// The in-flight candidate id `r{round}_{idx}` — a BROWSER-LOCAL selection-routing key for
-// a candidate still scoring, which has no persisted hash id yet. No Python produces this
-// string: `RoundBuffer` (`live_dashboard/round_buffer.py`) seeds the slot positionally and
-// stores no id for it, so a served row cannot be joined on one. Peer of `candidateLabel` —
-// the id↔label pair is the candidate's identity projection, so both live here and no caller
-// hand-builds the string. Used to construct ids for in-flight candidates and to match a
-// selection against the live candidate slots.
+// Browser-local routing key for a still-scoring candidate: no Python mints it (`RoundBuffer`
+// stores no id), so a served row is never joined on one. No caller hand-builds the string.
 export function liveCandidateId(
   round: number | null | undefined,
   idx: number | null | undefined,
