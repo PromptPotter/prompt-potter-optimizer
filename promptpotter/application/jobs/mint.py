@@ -24,7 +24,10 @@ from promptpotter.application.pipeline_resolve import (
     configure_and_apply_pipeline,
     resolved_dataset_name,
 )
-from promptpotter.application.preflight import check_search_pool_holds_round
+from promptpotter.application.preflight import (
+    check_search_pool_holds_round,
+    refuse_below_reasoning_floor,
+)
 from promptpotter.application.runner.campaign_ids import build_origin_cycle_id, mint_campaign_id
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import (
@@ -38,6 +41,7 @@ from promptpotter.domain.campaign import (
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.l4.inner_origin import instrument_of
+from promptpotter.domain.launch_limits import LaunchLimits, refuse_arm_limits
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.io import read_json_tolerant
@@ -112,6 +116,7 @@ def resolve_cycle_plan(
     treatment = select_optimizer(campaign_config.optimization).treatment()
     schema = session.pipeline_schema
     pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=log or _noop_log)
+    refuse_below_reasoning_floor(campaign_config, pipeline_params)
     origin = resolve_origin_opt_search_point(
         prompt_node_names=schema.prompt_node_names(),
         dataset_dir=session.dataset_config_dir,
@@ -419,16 +424,20 @@ async def mint_framed_cycle(
     campaign_id: str,
     task_text: str | None,
     arm: ArmRequest | None,
+    limits: LaunchLimits,
     origin_override: dict[str, Any] | None = None,
     log: Callable[..., None] | None = None,
 ) -> MintedCycle:
     """:func:`prepare_fresh_cycle` behind the dataset's framing — the mint of every entry point
     that starts a campaign. An L4 inner cell mints through ``prepare_fresh_cycle`` alone, so a
-    round's cells never race to decompose. ``task_text`` is an operator's own description."""
-    if arm is not None and (task_text or origin_override):
-        raise PayloadInvalidError(
-            "an arm runs the head-to-head's origin and framing: no task text, no origin override"
-        )
+    round's cells never race to decompose. ``task_text`` is an operator's own description, and
+    ``limits`` what the launch asked for, which an arm may not."""
+    if arm is not None:
+        if task_text or origin_override:
+            raise PayloadInvalidError(
+                "an arm runs the head-to-head's origin and framing: no task text, no origin override"
+            )
+        refuse_arm_limits(limits.budgets, limits.halt_at_accuracy)
     # Before the check-in below bills: the plan that refuses the same things needs its framing.
     _refuse_unrunnable(_under_declaration(session, campaign_config, arm), dataset)
     description = _description_to_decompose(session, campaign_config, task_text)

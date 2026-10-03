@@ -272,6 +272,7 @@ async def mint_campaign_command(
             campaign_id=fresh_campaign_id(session, campaign_config),
             task_text=None,
             arm=arm,
+            limits=limits,
             origin_override=origin_override,
         )
         campaign_id, cycle_id = minted.campaign_id, minted.cycle_id

@@ -1,6 +1,6 @@
 """The embedded launch entry — a host Python program driving one campaign inside its own event loop.
 
-Peer of ``jobs/launcher/mint_and_start.py``, which detaches the run onto a background task and takes
+Peer of ``jobs/launcher/mint_and_start.py``, which hands the run to its own process and takes
 a machine slot or queues for one; this one blocks in the caller's loop and takes no slot. Two steps
 rather than one because every caller does its own work between them — build the config, resolve the
 pipeline, slice the trainset.
@@ -113,6 +113,7 @@ async def run_campaign(
             campaign_id=fresh_campaign_id(session, campaign_config),
             task_text=None,
             arm=arm,
+            limits=limits,
         )
         campaign_config = minted.campaign_config
     held = unadmitted_limits(

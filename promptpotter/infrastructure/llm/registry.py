@@ -34,7 +34,7 @@ class ModelProfile:
     never assumed to reason and can block no run."""
 
     # Below this floor a reasoning model spends its whole output budget thinking and emits nothing;
-    # `preflight.check_model_reasoning_floors` turns that paid-for silence into a block.
+    # `preflight.refuse_below_reasoning_floor` turns that paid-for silence into a block.
     min_max_tokens: int = 0
     # Rungs the endpoint REFUSES — the only thing that narrows the offered ladder, since no
     # catalogue publishes a value set. Applied in `capabilities.py`.

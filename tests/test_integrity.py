@@ -5145,6 +5145,7 @@ def test_first_mint_decomposes_once_and_bills_the_run_it_frames(
     from promptpotter.application.bench import task_context
     from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
     from promptpotter.application.jobs import mint
+    from promptpotter.domain.launch_limits import LaunchLimits
     from promptpotter.domain.run_records import TokenUsageRecord
     from promptpotter.domain.spend import TokenAccount
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -5190,7 +5191,13 @@ def test_first_mint_decomposes_once_and_bills_the_run_it_frames(
     for campaign_id in ("c1", "c2"):
         asyncio.run(
             mint.mint_framed_cycle(
-                session, config, bank, campaign_id=campaign_id, task_text=None, arm=None
+                session,
+                config,
+                bank,
+                campaign_id=campaign_id,
+                task_text=None,
+                arm=None,
+                limits=LaunchLimits(),
             )
         )
 

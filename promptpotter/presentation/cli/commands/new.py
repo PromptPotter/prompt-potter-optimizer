@@ -355,6 +355,7 @@ async def _mint_fresh_session(
         if args.task_file
         else args.task_text,
         arm=_arm_request(args.arm),
+        limits=launch_limits_from_args(args),
         log=logger.info if get_verbose() else None,
     )
 

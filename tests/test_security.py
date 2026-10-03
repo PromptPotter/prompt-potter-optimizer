@@ -1716,6 +1716,7 @@ async def test_a_refused_mint_bills_no_check_in(monkeypatch: pytest.MonkeyPatch)
     from promptpotter.application.datasets.authored import load_dataset_campaign_config
     from promptpotter.application.initialization.wiring import complete_registries
     from promptpotter.application.jobs import mint
+    from promptpotter.domain.launch_limits import LaunchLimits
     from promptpotter.domain.sample import Sample
     from promptpotter.shared.errors import PayloadInvalidError
 
@@ -1728,8 +1729,8 @@ async def test_a_refused_mint_bills_no_check_in(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(mint, "commit_task_framing", _framing)
     template = Path(__file__).parents[1] / "datasets" / "justlogic-d234" / "campaign.yaml"
     session: Any = types.SimpleNamespace()
-    # The split holds 100 rows out, so the search keeps 20: under CAPO's block of 30.
-    bank = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(120)]
+    # The split holds 150 rows out, so the search keeps 20: under CAPO's block of 30.
+    bank = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(170)]
     for optimization in (
         {"optimizer": "capo", "nodes": {"l1_generate": {"config": {}}}},
         {"optimizer": "capo", "nodes": {}},
@@ -1737,6 +1738,12 @@ async def test_a_refused_mint_bills_no_check_in(monkeypatch: pytest.MonkeyPatch)
         config = load_dataset_campaign_config(template, overrides={"optimization": optimization})
         with pytest.raises(PayloadInvalidError):
             await mint.mint_framed_cycle(
-                session, config, bank, campaign_id="c", task_text="what the task is", arm=None
+                session,
+                config,
+                bank,
+                campaign_id="c",
+                task_text="what the task is",
+                arm=None,
+                limits=LaunchLimits(),
             )
     assert billed == []

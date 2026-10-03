@@ -63,7 +63,7 @@ from promptpotter.domain.bench import BenchPasses, BenchScore, partition_bank
 from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import PromptExport, build_prompt_export
-from promptpotter.domain.launch_limits import HeldLimits
+from promptpotter.domain.launch_limits import HeldLimits, refuse_arm_limits
 from promptpotter.domain.phases import STOP_REASON_INFO, RunPhase, StopOutcome, StopReason
 from promptpotter.domain.pipeline_overlay import (
     overlay_sets_model_outside_allowed,
@@ -100,7 +100,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.judges import judge_instrument
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import ConflictError, ResumeDivergenceError
+from promptpotter.shared.errors import ResumeDivergenceError
 from promptpotter.shared.hashing import dataset_hash
 
 logger = logging.getLogger(__name__)
@@ -274,14 +274,8 @@ async def _prepare_run(
     limits: HeldLimits,
 ) -> _PreparedRun:
     cb = observers.callbacks
-    if session.controlled and (
-        limits.operator != BudgetChange(None, None) or limits.halt_at_accuracy is not None
-    ):
-        raise ConflictError(
-            "an arm runs its head-to-head's declared budget: no launch ceiling, no halt accuracy. "
-            "`set-limits --max-usd` on a stopped arm moves it for every arm; then `resume`",
-            code="arm_budget_declared",
-        )
+    if session.controlled:
+        refuse_arm_limits(limits.operator, limits.halt_at_accuracy)
 
     # A fresh launch supersedes any prior run-control intent: a stale `pause.flag` would pause
     # this very resume on its first poll, so a paused cycle could never be resumed. Binding

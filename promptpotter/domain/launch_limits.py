@@ -6,8 +6,9 @@ from pydantic import ConfigDict, Field
 
 from promptpotter.domain.spend import BudgetChange, SpendCeilings
 from promptpotter.domain.strict_model import StrictModel, WireFloat, WireInt
+from promptpotter.shared.errors import ConflictError
 
-__all__ = ["HeldLimits", "LaunchLimits", "RoundsCap"]
+__all__ = ["HeldLimits", "LaunchLimits", "RoundsCap", "refuse_arm_limits"]
 
 
 class RoundsCap(StrictModel):
@@ -35,6 +36,19 @@ class LaunchLimits(StrictModel):
     @property
     def budgets(self) -> BudgetChange:
         return BudgetChange(self.spend_budget_usd, self.token_budget)
+
+
+def refuse_arm_limits(budgets: BudgetChange, halt_at_accuracy: float | None) -> None:
+    """An arm's budget is its head-to-head's declaration, so a launch that states its own is
+    refused: at the mint, before anything exists, and again where a resume holds its limits."""
+    if budgets != BudgetChange(None, None) or halt_at_accuracy is not None:
+        raise ConflictError(
+            "an arm runs its head-to-head's declared budget: no launch ceiling, no halt accuracy. "
+            "The first arm declares it in its config (`optimization.spend_budget_usd`, "
+            "`max_rounds`); `set-limits --max-usd` on a stopped arm moves it for every arm; "
+            "then `resume`",
+            code="arm_budget_declared",
+        )
 
 
 class HeldLimits(NamedTuple):

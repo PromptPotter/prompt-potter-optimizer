@@ -26,8 +26,10 @@ campaign_config:
   pipeline_overlay: {}
   # The bench set the headline is read on; the search draws only the rest of the bank. An L4
   # inner cell ignores it — its drawn rows are its whole bank.
+  # `demo` opens the shot surface, CAPO's `few_shot` and potter's `l1_generate.k_max` alike.
   dataset_split:
     bench: 100
+    demo: 50
   optimization:
     max_rounds: 5
     degradation_threshold: 0.4

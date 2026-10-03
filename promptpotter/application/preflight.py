@@ -7,9 +7,11 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.knobs import check_couplings
-from promptpotter.application.optimizer_manifest import select_optimizer
+from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
+from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.search_point import has_framing
 from promptpotter.infrastructure.llm.registry import model_profile
+from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
@@ -17,8 +19,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "PreflightWarning",
-    "check_model_reasoning_floors",
     "check_search_pool_holds_round",
+    "refuse_below_reasoning_floor",
     "run_preflight_checks",
 ]
 
@@ -218,12 +220,19 @@ def run_preflight_checks(
     return warnings
 
 
-def check_model_reasoning_floors(
-    node_configs: Iterable[tuple[str, Mapping[str, Any]]],
-) -> list[str]:
+def refuse_below_reasoning_floor(
+    config: CampaignConfig, pipeline_params: Mapping[str, Any] | None
+) -> None:
     """Below ``ModelProfile.min_max_tokens`` a reasoning model can spend its whole budget thinking
     and emit nothing. An ABSENT ``max_tokens`` is the sanctioned default, never a violation."""
-
+    selected = select_optimizer(config.optimization)
+    node_configs: Iterable[tuple[str, Mapping[str, Any]]] = [
+        *node_config_items(dict(pipeline_params or {})),
+        # Every llm node the optimizer DECLARES, off its `default` chain too, or an escalation
+        # node escapes.
+        *((n, selected.node_config(n)) for n in selected.llm_nodes),
+        *((n.name, n.current_config) for n in checkin_manifest().schema.config_nodes),
+    ]
     violations: list[str] = []
     for node, cfg in node_configs:
         model = cfg.get("model")
@@ -240,4 +249,9 @@ def check_model_reasoning_floors(
                 f"budget reasoning and emit zero content (reasoning_budget_exhausted). Raise "
                 f"max_tokens to >= {profile.min_max_tokens} and keep reasoning_effort low."
             )
-    return violations
+    if violations:
+        raise PayloadInvalidError(
+            "a reasoning model is configured below its token floor and would emit zero content:"
+            "\n  - " + "\n  - ".join(violations),
+            code="model_below_reasoning_floor",
+        )

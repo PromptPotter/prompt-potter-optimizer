@@ -13,9 +13,8 @@ from promptpotter.application.bench.resume_and_fork.resume import (
 )
 from promptpotter.application.initialization.session import Session, open_cycle_ledger
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
-from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
-from promptpotter.application.preflight import check_model_reasoning_floors, run_preflight_checks
+from promptpotter.application.preflight import refuse_below_reasoning_floor, run_preflight_checks
 from promptpotter.application.runner.campaign_ids import cycle_config_identity
 from promptpotter.application.runner.inner.spawn_context import retarget_inner_spawn
 from promptpotter.application.scoring.classification import build_degradation_checks
@@ -292,23 +291,8 @@ async def _emit_preflight_and_init_session(
     target_node_configs = list(node_config_items(session.pipeline_params))
     target_models = tuple(str(v["model"]) for _, v in target_node_configs if v.get("model"))
 
-    # HARD block before any spend: a reasoning model pinned below its token floor (e.g. the
-    # inner optimizer's l1_critique) burns its whole budget reasoning and emits zero content,
-    # stalling the loop silently. Three surfaces carry model+max_tokens: the dataset/target nodes,
-    # every llm node the selected optimizer DECLARES (off its `default` chain too, or an escalation
-    # node escapes the check) and the bench's check-in node.
-    selected = select_optimizer(config.optimization)
-    optimizer_node_configs = [
-        *((n, selected.node_config(n)) for n in selected.llm_nodes),
-        *((n.name, n.current_config) for n in checkin_manifest().schema.config_nodes),
-    ]
-    if floor_violations := check_model_reasoning_floors(
-        target_node_configs + optimizer_node_configs
-    ):
-        raise ValueError(
-            "Model-profile preflight block — a reasoning model is configured below its token "
-            "floor and would emit zero content:\n  - " + "\n  - ".join(floor_violations)
-        )
+    # A resume plans no cycle, so the block a mint already passed is asked again here.
+    refuse_below_reasoning_floor(config, session.pipeline_params)
 
     bound = await cell_bound(session, session.pipeline_params or {})
     preflight_warnings = run_preflight_checks(
