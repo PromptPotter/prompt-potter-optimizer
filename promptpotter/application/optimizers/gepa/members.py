@@ -24,7 +24,13 @@ from promptpotter.application.optimizers.gepa.state import (
     GepaState,
     gepa_state,
 )
-from promptpotter.application.optimizers.paper_templates import ask, unmarked, walk_rng
+from promptpotter.application.optimizers.paper_templates import (
+    ask,
+    prompt_text,
+    rewritten,
+    unmarked,
+    walk_rng,
+)
 from promptpotter.application.runner.measurement import measure_as_parent
 from promptpotter.config.paths import optimizers_root
 from promptpotter.domain.opt_search_point import OptSearchPoint, node_source
@@ -190,7 +196,7 @@ class GepaReflect:
             panel.order[: panel.block_size],
         )
         prompt = operators.reflection_prompt(
-            cycle, self.name, instruction=parent.instruction, rows=rows
+            cycle, self.name, instruction=prompt_text(parent), rows=rows
         )
         raw = await ask(ctx, self.name, 0, prompt)
         text = operators.fenced(raw)
@@ -198,7 +204,7 @@ class GepaReflect:
             [parent],
             source=node_source(GEPA_MANIFEST, self.name),
             changes_description=f"reflect on {parent.lineage.id[:6]}",
-            instruction=parent.instruction if text is None else text,
+            **({} if text is None else rewritten(text)),
         )
         state.bars = {child.lineage.id: (parent.lineage.id, cell_objectives(rows))}
         if (ledger := cycle.session.state.ledger) is not None:

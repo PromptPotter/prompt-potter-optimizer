@@ -3,30 +3,37 @@ manifest's ``resolved_prompts``, and the answer read off the ``<prompt>`` marker
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import random
 import re
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bench.llm_call import LLMCallContext, llm_call
 from promptpotter.application.optimizer_manifest import running_prompt
 from promptpotter.application.optimizers import other_optimizer_packages
+from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED, PARSE_FAILURE_TOOLING
 from promptpotter.domain.wounds import ValidationFailure
 from promptpotter.shared.hashing import module_source_digest, optimizer_prompt_shapers
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from types import ModuleType
 
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.optimizers.nodes import RoundContext
+    from promptpotter.domain.opt_search_point import OptSearchPoint
 
 __all__ = [
     "ask",
+    "ask_each",
     "fill",
     "marked",
     "preset_source_digest",
+    "prompt_text",
+    "rewritten",
     "task_description",
     "unmarked",
     "walk_rng",
@@ -51,6 +58,18 @@ def task_description(cycle: Cycle) -> str:
     return "\n".join(parts)
 
 
+def prompt_text(individual: OptSearchPoint) -> str:
+    """What a paper's operator reads as an individual's prompt: its own fields as they render, so
+    the origin's several read as the one text a child's ``instruction`` is."""
+    return individual.render()
+
+
+def rewritten(text: str) -> dict[str, Any]:
+    """The prompt fields of a child whose whole prompt is *text*: it rides ``instruction`` and
+    every other field empties, so an operator replaces what ``prompt_text`` showed it."""
+    return {**dict.fromkeys(PROMPT_STRING_FIELDS, ""), "instruction": text}
+
+
 def fill(cycle: Cycle, node: str, **values: str) -> str:
     selected = cycle.optimizer
     template = running_prompt(node, selected.node_config(node), selected.document)
@@ -73,6 +92,18 @@ async def ask(ctx: RoundContext, node: str, idx: int | None, prompt: str) -> str
         seed=seed,
     )
     return response.content
+
+
+async def ask_each(ctx: RoundContext, node: str, prompts: Mapping[int, str]) -> list[str]:
+    """One reply per prompt, keyed by its candidate index. Every send lands before one's refusal is
+    raised: a sibling cut mid-flight is never billed, so its hold binds the ceiling at full bound."""
+    replies = await asyncio.gather(
+        *(ask(ctx, node, idx, prompt) for idx, prompt in prompts.items()), return_exceptions=True
+    )
+    for reply in replies:
+        if isinstance(reply, BaseException):
+            raise reply
+    return [reply for reply in replies if isinstance(reply, str)]
 
 
 def marked(text: str) -> str | None:

@@ -130,9 +130,11 @@ keeps the race's survivors, best first by mean objective on the cells all of the
 document, so a resume or a fork re-seats it; the round advances when its best is not the
 incumbent. Where the bench runs CAPO differently from the paper:
 
-- **The prompt.** CAPO evolves the individual's `instruction`; its other fields stay the origin's,
-  `answer_format` among them, so the evaluated prompt is the origin's scaffolding around CAPO's
-  instruction and shots, where the paper's is the instruction and shots alone.
+- **The prompt** is the individual's whole text: an operator reads an individual's fields as they
+  render (`paper_templates.py::prompt_text`) and its reply replaces them, riding `instruction` with
+  every other field emptied (`rewritten`). So the evaluated prompt is CAPO's instruction and shots
+  inside the campaign's framing, and the origin's own fields are a starting text, never scaffolding
+  a child keeps.
 - **The shots** render the demo row's ground truth; the paper asks the evaluation model for a
   reasoning chain and falls back to the label only when it answers wrong (§4).
 - **The task description** is the campaign's framing and the origin's `answer_format`, where the
@@ -144,7 +146,7 @@ incumbent. Where the bench runs CAPO differently from the paper:
   optimizer model, and matching it to the target's is an overlay. Its `max_tokens` is that model's
   floor, where the paper caps output at 2048 (App. C.1); the paper states no temperature, and the
   manifest's 1.0 is vLLM's sampling default.
-- **The length** is counted in characters of the scored prompt, the origin's scaffolding
+- **The length** is counted in characters of the scored prompt, the campaign's framing
   included, where the paper counts the prompt's tokens (§4) — no tokenizer ships.
 - **The 5M-input-token budget** (§5) is the campaign's `token_budget`, which counts output tokens
   too.
@@ -203,7 +205,7 @@ Where the bench runs LEVI differently from the paper:
 - **A calibration that spans no descriptor volume halts the run** — one prompt placed, or every
   one on one point: the uniform draws, and so every centroid, would land there and the archive
   hold one cell. The paper's CVT has no answer for a zero-width bound either.
-- **The artifact** is the individual's `instruction` and `{problem_description}` CAPO's task
+- **The artifact** is the individual's whole prompt and `{problem_description}` CAPO's task
   description, as § CAPO's population and operators states for CAPO; the failures shown ride
   `fence_untrusted`.
 - **f** is the mean of the campaign's per-cell objective on the proxy — the task's scoring
@@ -223,7 +225,7 @@ Alg. 1 per round, and its eliminator is Alg. 1's acceptance test.
 | Split D_train into D_feedback and D_pareto (Alg. 1 line 1) | `minibatch.pareto_share` 0.5 — AIME, LiveBench-Math and PUPA split equally (App. E.1); the Pareto set rides `GepaRoundState.pareto_set` |
 | P ← [Φ], Φ scored on D_pareto (lines 2-5) | round 1 mutates the incumbent, the origin; `pareto` seats it with its Pareto-set scores off the bench's re-score of the round's panel |
 | SELECTCANDIDATE (line 7, Alg. 2) | `pareto`, at each round's close: per-cell fronts, the dominated removed, the next parent drawn ∝ cells led — `GepaRoundState.parent_id` |
-| SELECTMODULE, round-robin (line 8, §3) | an individual renders one prompt, so the module is its `instruction` every round |
+| SELECTMODULE, round-robin (line 8, §3) | an individual renders one prompt, so the module is its whole prompt every round |
 | A minibatch of b from D_feedback (line 9), b = 3 (App. E.4) | `minibatch.size` 3, the panel's first block |
 | Feedback, scores and traces on M through μ_f (line 10) | `gepa_reflect` runs the parent on the minibatch through the scoring gateway, filed as a parent's reading; μ_f's text is `row_diagnostics.py::cell_feedback` |
 | UPDATEPROMPT (line 11, App. C) | `gepa_reflect/1`, verbatim; the reply's fenced block is the child's instruction |
@@ -238,8 +240,8 @@ Where the bench runs GEPA differently from the paper:
 - **No merge.** Alg. 3 admits a pair only where one descendant kept the ancestor's module, and
   Alg. 4 then hands the child the other descendant's module — on a one-module individual that
   child IS the other descendant. The bench runs the paper's GEPA row, not GEPA+Merge.
-- **The prompt** is the individual's `instruction`, its other fields the origin's, as § CAPO's
-  population and operators states for CAPO.
+- **The prompt** is the individual's whole text, as § CAPO's population and operators states for
+  CAPO: round 1's reflection reads the origin's fields as one instruction.
 - **Unstated values, chosen:** the Pareto set is the pool's first half in the bank's order; the
   minibatch is drawn uniformly each round by the run's seed, where the reference implementation
   walks a once-per-epoch shuffle; dominance is read as the reference implementation reads it — a

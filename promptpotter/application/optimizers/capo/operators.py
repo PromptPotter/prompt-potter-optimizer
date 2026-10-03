@@ -5,7 +5,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from promptpotter.application.optimizers.paper_templates import fill, task_description
+from promptpotter.application.optimizers.paper_templates import (
+    fill,
+    prompt_text,
+    task_description,
+)
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
@@ -25,12 +29,15 @@ def crossover_prompt(
         cycle,
         node,
         task_description=task_description(cycle),
-        mother=mother.instruction,
-        father=father.instruction,
+        mother=prompt_text(mother),
+        father=prompt_text(father),
     )
 
 
 def mutation_prompt(cycle: Cycle, node: str, individual: OptSearchPoint) -> str:
     return fill(
-        cycle, node, task_description=task_description(cycle), instruction=individual.instruction
+        cycle,
+        node,
+        task_description=task_description(cycle),
+        instruction=prompt_text(individual),
     )

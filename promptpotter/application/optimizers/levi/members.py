@@ -3,7 +3,6 @@ manifest uses, and its runtime, registered under the manifest's."""
 
 from __future__ import annotations
 
-import asyncio
 import math
 import random
 from collections.abc import Mapping, Sequence
@@ -34,7 +33,14 @@ from promptpotter.application.optimizers.levi.state import (
     LeviState,
     levi_state,
 )
-from promptpotter.application.optimizers.paper_templates import ask, marked, unmarked, walk_rng
+from promptpotter.application.optimizers.paper_templates import (
+    ask,
+    ask_each,
+    marked,
+    rewritten,
+    unmarked,
+    walk_rng,
+)
 from promptpotter.config.paths import optimizers_root
 from promptpotter.domain.opt_search_point import OptSearchPoint, node_source
 from promptpotter.domain.pipeline_schema import NodeKind
@@ -375,7 +381,7 @@ def _proposal(
         parents,
         source=node_source(LEVI_MANIFEST, node),
         changes_description=changes,
-        instruction=parents[0].instruction if text is None else text,
+        **({} if text is None else rewritten(text)),
     )
     return CandidateProposal(
         opt_sp=child, validation_failures=[] if text is not None else [unmarked(node, raw)]
@@ -529,7 +535,12 @@ class LeviRefine:
         shift = cast("LeviParadigmShiftKnobs", cycle.optimizer.knobs(LeviParadigmShift.name))
         # The calibration round refines nothing: its seeds are the evaluations it spends.
         n = 0 if state.calibration is None else shift.interval - 1
-        children = list(await asyncio.gather(*(self._refine(ctx, state, i) for i in range(n))))
+        asked = [self._refinement(ctx, state, i) for i in range(n)]
+        replies = await ask_each(ctx, self.name, {i: p for i, (_, p) in enumerate(asked)})
+        children = [
+            _proposal(self.name, [parent], raw, f"refine {parent.lineage.id[:6]}")
+            for (parent, _), raw in zip(asked, replies, strict=True)
+        ]
         assert cycle.tracking.current_sp is not None
         return nodes.Population(
             proposals=children,
@@ -543,7 +554,10 @@ class LeviRefine:
             ),
         )
 
-    async def _refine(self, ctx: RoundContext, state: LeviState, idx: int) -> CandidateProposal:
+    def _refinement(
+        self, ctx: RoundContext, state: LeviState, idx: int
+    ) -> tuple[OptSearchPoint, str]:
+        """The parent one rewrite descends from, and the prompt that asks for it."""
         cycle = ctx.cycle
         assert state.calibration is not None
         knobs = cast("LeviRefineKnobs", cycle.optimizer.knobs(self.name))
@@ -565,12 +579,7 @@ class LeviRefine:
             n_failures=knobs.feedback_failures,
             rng=rng,
         )
-        return _proposal(
-            self.name,
-            [parent.individual],
-            await ask(ctx, self.name, idx, prompt),
-            f"refine {parent.individual.lineage.id[:6]}",
-        )
+        return parent.individual, prompt
 
 
 def _replay_proxy_selected(

@@ -4,7 +4,6 @@ runtime, registered under the manifest's."""
 from __future__ import annotations
 
 import ast
-import asyncio
 import random
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -27,7 +26,9 @@ from promptpotter.application.optimizers.capo.state import (
 )
 from promptpotter.application.optimizers.paper_templates import (
     ask,
+    ask_each,
     marked,
+    rewritten,
     unmarked,
     walk_rng,
 )
@@ -138,7 +139,23 @@ class FewShot:
     name: ClassVar[str] = "few_shot"
     kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
     knobs: ClassVar[type[StrictModel]] = FewShotKnobs
-    couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
+    couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = (
+        nodes.MemberCoupling(
+            name="shots_without_demo_pool",
+            knobs=("k_max",),
+            bench_knobs=("dataset_split",),
+            estimand=Estimand.SEARCH,
+            relation="An individual's shots are drawn from the demo pool `dataset_split.demo` holds out.",
+            consequence=(
+                "The campaign declares no demo pool, so every individual carries no shot and "
+                "k_max is inert: CAPO runs as an instruction-only search."
+            ),
+            severity="inert",
+            predicate=lambda c, k, d: (
+                k.k_max > 0 and (c.dataset_split is None or c.dataset_split.demo == 0)
+            ),
+        ),
+    )
 
     async def propose(
         self, ctx: RoundContext, panel: Panel, population: Population | None
@@ -501,7 +518,7 @@ the population empty, so the manifest declares it in a one-step pipeline of its 
 
 async def initial_population(ctx: RoundContext, *, size: int, k_max: int) -> list[OptSearchPoint]:
     """App. D.2's instructions, ``size`` of them drawn at random, each given 0..k_max demo-pool
-    shots at random (Alg. 1 lines 3-8). Every one derives from the origin, keeping its other fields."""
+    shots at random (Alg. 1 lines 3-8). Every one derives from the origin and replaces its prompt."""
     cycle = ctx.cycle
     origin = cycle.origin_round.opt_sp
     assert origin is not None, "round 0 closes with the origin's individual"
@@ -519,7 +536,7 @@ async def initial_population(ctx: RoundContext, *, size: int, k_max: int) -> lis
             [origin],
             source=node_source(CAPO_MANIFEST, INIT_NODE),
             changes_description=f"initial instruction {n + 1}",
-            instruction=text,
+            **rewritten(text),
             shot_ids=rng.sample(pool, min(rng.randint(0, k_max), len(pool))),
         )
         for n, text in enumerate(drawn)
@@ -569,11 +586,13 @@ class CapoCrossover:
         rng = walk_rng(cycle, ctx.round_num, self.name)
         pairs = [rng.sample(state.population, 2) for _ in range(crossovers)]
         shots = [cross_shots([a.shot_ids, b.shot_ids], rng=rng) for a, b in pairs]
-        answers = await asyncio.gather(
-            *(
-                ask(ctx, self.name, i, operators.crossover_prompt(cycle, self.name, a, b))
+        answers = await ask_each(
+            ctx,
+            self.name,
+            {
+                i: operators.crossover_prompt(cycle, self.name, a, b)
                 for i, (a, b) in enumerate(pairs)
-            )
+            },
         )
         proposals: list[CandidateProposal] = []
         for (a, b), child_shots, raw in zip(pairs, shots, answers, strict=True):
@@ -582,7 +601,7 @@ class CapoCrossover:
                 [a, b],
                 source=node_source(CAPO_MANIFEST, self.name),
                 changes_description=f"crossover {a.lineage.id[:6]}+{b.lineage.id[:6]}",
-                instruction=a.instruction if text is None else text,
+                **({} if text is None else rewritten(text)),
                 shot_ids=child_shots,
             )
             failures = [] if text is not None else [unmarked(self.name, raw)]
@@ -627,16 +646,13 @@ class CapoMutate:
             for i, p in enumerate(population.proposals)
             if not fatal_validation_failures(p.validation_failures)
         ]
-        answers = await asyncio.gather(
-            *(
-                ask(
-                    ctx,
-                    self.name,
-                    i,
-                    operators.mutation_prompt(ctx.cycle, self.name, population.individuals[i]),
-                )
+        answers = await ask_each(
+            ctx,
+            self.name,
+            {
+                i: operators.mutation_prompt(ctx.cycle, self.name, population.individuals[i])
                 for i in live
-            )
+            },
         )
         proposals = list(population.proposals)
         for i, raw in zip(live, answers, strict=True):
@@ -651,7 +667,7 @@ class CapoMutate:
                 source=node_source(CAPO_MANIFEST, self.name),
                 changes_description=f"{child.lineage.changes_description}, rephrased",
             )
-            mutated = child.model_copy(update={"instruction": text, "lineage": lineage})
+            mutated = child.model_copy(update={**rewritten(text), "lineage": lineage})
             proposals[i] = proposal.model_copy(update={"opt_sp": mutated})
         return replace(population, proposals=proposals, individuals=[p.opt_sp for p in proposals])
 
