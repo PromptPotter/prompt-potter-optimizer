@@ -10,7 +10,13 @@ from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.metrics import fold_cells
 from promptpotter.domain.measurement_provenance import entry_grade
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import CellScorer, QueryMeasurement, is_hit, is_unscored
+from promptpotter.domain.scoring import (
+    CellScorer,
+    QueryMeasurement,
+    is_graded,
+    is_hit,
+    is_unscored,
+)
 from promptpotter.infrastructure.store import archive_queries
 from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -278,9 +284,32 @@ class SampleIndex:
 
     # ----- ingest / refresh -----
 
-    def _seed_from_fold(self, stores: Stores, dataset_name: str | None, formula_key: str) -> bool:
-        """Replay the persisted per-run fold; ``True`` if it was whole enough to trust. Validation is
-        all-or-nothing so the replay ORDER matches ingest — ``persistent_failures`` reads a tail streak."""
+    def _fold_run(
+        self, run_id: str, detail: dict[str, Any], scorer: CellScorer, stamp: dict[str, Any]
+    ) -> tuple[dict[str, Any], str | None]:
+        """The WHOLE run goes on the first ungradable row: a per-row skip would fold a partial run
+        under a ``scorer_id`` claiming it scored entire, and no reader could tell them apart."""
+        reading, unscored = _graded_reading(detail, scorer)
+        self.mark_seen(run_id)
+        # Each graded cell's objective, by ROW: what a δ ruler is fit on, so the launch that fits
+        # one reads it here instead of re-grading every detail (`hard_sample_archive`).
+        graded = [
+            [int(sid), float(row["objective"])]
+            for row in detail.get("measurements") or []
+            if (sid := row.get("sample_id")) is not None and is_graded(row)
+        ]
+        stamp = {**stamp, "graded": graded}
+        if reading is None:
+            self._unscoreable_runs.add(run_id)
+            return {"run_id": run_id, "unscoreable": True, **stamp}, unscored
+        self._readings[run_id] = (stamp["sig"], reading)
+        return {**self.ingest_run(detail), "reading": reading, **stamp}, None
+
+    def _seed_from_fold(
+        self, stores: Stores, dataset_name: str | None, scorer: CellScorer, formula_key: str
+    ) -> bool:
+        """``True`` if the fold is trusted: another formula's, or one naming a run the archive
+        lacks, is rejected whole. A grown run is re-derived IN PLACE, the replay order kept."""
         if not dataset_name:
             return False
         rows = archive_queries.sample_fold_rows(stores, dataset_name=dataset_name)
@@ -288,21 +317,31 @@ class SampleIndex:
             return False
 
         signatures = archive_queries.run_signatures(stores)
-        for row in rows:
-            run_id = row.get("run_id") or ""
-            if row.get("fk") != formula_key:
-                return False
-            if list(signatures.get(run_id) or ()) != list(row.get("sig") or ()):
-                return False
+        if any(r.get("fk") != formula_key or r.get("run_id") not in signatures for r in rows):
+            return False
 
-        for row in rows:
+        grown = 0
+        for at, row in enumerate(rows):
             run_id = row["run_id"]
-            if row.get("unscoreable"):
+            sig = list(signatures[run_id])
+            if sig != list(row.get("sig") or ()) or "graded" not in row:
+                detail = archive_queries.load_run(stores, run_id)
+                if detail is None:
+                    continue
+                stamp = {"fk": formula_key, "sig": sig}
+                rows[at], _ = self._fold_run(run_id, detail, scorer, stamp)
+                grown += 1
+            elif row.get("unscoreable"):
                 self._unscoreable_runs.add(run_id)
+                self.mark_seen(run_id)
             else:
                 self.replay_row(row)
                 self._readings[run_id] = (row["sig"], row["reading"])
-            self.mark_seen(run_id)
+                self.mark_seen(run_id)
+        if grown:
+            archive_queries.write_sample_fold(
+                stores, dataset_name=dataset_name, rows=rows, append=False
+            )
         logger.debug("SampleIndex seeded %d run(s) from the persisted fold", len(rows))
         return True
 
@@ -320,7 +359,7 @@ class SampleIndex:
         The fold is stamped with ``scorer_id`` alone: it hashes both formulas
         (`compiler.py::auto_scorer_id`), so a second spelling here could only disagree with it."""
         if self._fold_seeded is None:
-            self._fold_seeded = self._seed_from_fold(stores, dataset_name, scorer_id)
+            self._fold_seeded = self._seed_from_fold(stores, dataset_name, scorer, scorer_id)
 
         # Captured BEFORE the details are read, never after: a run whose log grows between the
         # two must end up stamped with the OLDER signature, so the next process re-derives it.
@@ -333,17 +372,11 @@ class SampleIndex:
         for run_id, detail in archive_queries.runs_since(
             stores, self._seen_runs, dataset_name=dataset_name
         ):
-            sig = list(signatures.get(run_id) or ())
-            stamp = {"fk": scorer_id, "sig": sig}
-            reading, unscored = _graded_reading(detail, scorer)
-            # The WHOLE run goes, on the first row that could not be graded. A per-row skip
-            # would fold a partial run under a `scorer_id` claiming it scored entire, and no
-            # reader can tell one from the other afterwards.
-            if reading is None:
+            stamp = {"fk": scorer_id, "sig": list(signatures.get(run_id) or ())}
+            row, unscored = self._fold_run(run_id, detail, scorer, stamp)
+            folded.append(row)
+            if row.get("unscoreable"):
                 skipped.append(run_id)
-                self._unscoreable_runs.add(run_id)
-                self.mark_seen(run_id)
-                folded.append({"run_id": run_id, "unscoreable": True, **stamp})
                 logger.warning(
                     "sample refresh: archived run %r is unscoreable under the active formula "
                     "— skipping it (it predates the current observation vocabulary). %s",
@@ -351,9 +384,6 @@ class SampleIndex:
                     unscored,
                 )
                 continue
-            self._readings[run_id] = (sig, reading)
-            folded.append({**self.ingest_run(detail), "reading": reading, **stamp})
-            self.mark_seen(run_id)
             added += 1
 
         # A run seen earlier that has GROWN since is read again, so every reader ranks a run on

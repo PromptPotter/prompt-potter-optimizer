@@ -203,7 +203,7 @@ def main() -> None:
 
     # Every verb may read a round document, whose optimizer payload only a completed registry
     # can type.
-    complete_registries()
+    complete_registries(every_treatment=False)
 
     # Reconcile liveness before dispatch. The reaper had exactly two call sites, both bound
     # to the API server's lifespan — so on a CLI-only install nothing ever ran it, and a

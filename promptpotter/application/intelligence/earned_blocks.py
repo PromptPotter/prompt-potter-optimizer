@@ -3,6 +3,7 @@ never lands on another. The long task-specific fields are excluded — that is w
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
@@ -14,6 +15,8 @@ from promptpotter.infrastructure.store.layout import ROUND_GLOB, CycleLayout, ca
 from promptpotter.shared.instrument import instrument_mode
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from promptpotter.infrastructure.store.stores import Stores
 
 __all__ = ["answer_space_signature", "earned_library_for", "mine_earned_blocks"]
@@ -62,6 +65,19 @@ def _answer_space_signature(round_doc: dict[str, Any], dataset: str) -> str:
         ),
         dataset=dataset,
     )
+
+
+# `_credible_lift`'s interval bound as it sits in a round file, read before the document is
+# parsed: most rounds earned nothing.
+_LIFT_BOUND = re.compile(rb'"reference_lift_ci_lo": *(-?[0-9][0-9.eE+-]*)')
+
+
+def _may_have_earned(round_file: Path) -> bool:
+    try:
+        raw = round_file.read_bytes()
+    except OSError:
+        return False
+    return any(float(bound) > 0 for bound in _LIFT_BOUND.findall(raw))
 
 
 def _credible_lift(cand: dict[str, Any]) -> float | None:
@@ -118,6 +134,8 @@ def mine_earned_blocks(stores: Stores) -> dict[str, list[EarnedBlock]]:
             if not rounds_dir.is_dir():
                 continue
             for round_file in sorted(rounds_dir.glob(ROUND_GLOB)):
+                if not _may_have_earned(round_file):
+                    continue
                 doc = read_json_optional(round_file)
                 if isinstance(doc, dict):
                     _accumulate(doc, dataset, acc)

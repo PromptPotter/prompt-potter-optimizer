@@ -1478,6 +1478,35 @@ def test_rows_banked_under_one_formula_read_under_another_as_a_fresh_run_would(
     assert {r["sample_id"]: r["objective"] for r in replayed.results} == worth
     assert replayed.scores["composite_fitness"] == pytest.approx(fresh.scores["composite_fitness"])
 
+    # The sample fold carries each run's graded cells and the ruler reads them from there, so a
+    # run that grew after it was folded must read at its present length, never the folded one.
+    from promptpotter.application.intelligence.indexes.sample import SampleIndex
+
+    def ruler_cells() -> dict[int, float]:
+        observed = build_archive_observations(
+            shared.store,
+            dataset_name="claims",
+            scorer=fresh_scorer(*read_under),
+            scorer_id="read_under",
+            sample_ids=None,
+        )
+        return {o.sample_id: o.response for o in observed}
+
+    SampleIndex.ensure_for(
+        shared.store,
+        scorer=fresh_scorer(*read_under),
+        scorer_id="read_under",
+        dataset_name="claims",
+        sample_ids=None,
+    )
+    assert ruler_cells() == pytest.approx(worth), "the fold's cells are the regraded ones"
+    wider = [*panel, *(Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(6, 10))]
+    _walk_panel(tmp_path / "shared", wider, *banked_under)
+    _, fresh_wider = _walk_panel(tmp_path / "fresh", wider, *read_under)
+    assert ruler_cells() == pytest.approx(
+        {r["sample_id"]: r["objective"] for r in fresh_wider.results}
+    )
+
 
 def test_concurrent_walks_on_one_run_buy_each_cell_once(tmp_path: Path, monkeypatch) -> None:
     """Processes walking one configuration over one panel — four campaigns scoring the same origin —

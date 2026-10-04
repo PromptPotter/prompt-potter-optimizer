@@ -164,6 +164,11 @@ class FileSink:
                 continue
             seen.add(query)
             item_id = dataset_item_id(event.dataset_name, query)
+            n_registered += 1
+            # Every launch registers the whole panel again, and a dataset's rows are never
+            # re-cut under a name it already used: a file already there is this item.
+            if (ds_dir / f"{item_id}.json").exists():
+                continue
             item_data = {
                 "id": item_id,
                 "dataset_name": event.dataset_name,
@@ -171,7 +176,6 @@ class FileSink:
                 "expected_output": ground_truth,
             }
             write_json(ds_dir / f"{item_id}.json", item_data)
-            n_registered += 1
 
         n_input = len(event.items)
         n_skipped = n_input - n_registered

@@ -263,15 +263,18 @@ def diagnostic_trace(stores: Stores, hop: CycleHop | None) -> Iterator[None]:
         reset_cycle_ledger(token)
 
 
+_PRICED_RUNS = 32
+
+
 def _measured_cell_usd(
     session: Session, node_configs: list[tuple[str, dict[str, Any]]]
 ) -> float | None:
-    """What a cell of this dataset billed on the models it runs on now, as the archive priced it;
-    ``None`` where no archived row answers."""
+    """What a cell of this dataset billed on the models it runs on, ``None`` where no archived row
+    answers. The latest runs only, never all of them: a price is a recent fact."""
     on_models = {name: {"model": cfg["model"]} for name, cfg in node_configs if cfg.get("model")}
     total, cells = 0.0, 0
     for m in archive_queries.measurements_for_config(
-        session.store, on_models, dataset_name=session.dataset_name
+        session.store, on_models, dataset_name=session.dataset_name, newest=_PRICED_RUNS
     ):
         cost = cell_channels_of(m.row).get("cost")
         if cost is not None:

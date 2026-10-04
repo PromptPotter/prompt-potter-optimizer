@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import threading
+from collections import OrderedDict
 from collections.abc import Callable, Iterable, Iterator
 from functools import partial
 from pathlib import Path
@@ -140,6 +141,25 @@ def _cell_key(node_configs: list[tuple[str, dict[str, Any]]], sample_key: str) -
     return hashlib.blake2b(blob.encode(), digest_size=16).hexdigest()
 
 
+_APPENDED_MAX = 32
+
+
+def _append_alone(path: Path, *rows: dict[str, Any]) -> tuple[os.stat_result, int] | None:
+    """Append *rows* and return the file's stat after it with the byte the append began at —
+    ``None`` where anything else wrote to the file meanwhile, or replaced it. Read off the two
+    stats rather than assumed: another process banks into the same logs."""
+    try:
+        before: os.stat_result | None = path.stat()
+    except FileNotFoundError:
+        before = None
+    added = append_row(path, *rows)
+    after = path.stat()
+    start = 0 if before is None else before.st_size
+    if (before is not None and before.st_ino != after.st_ino) or after.st_size != start + added:
+        return None
+    return after, start
+
+
 def _tail_from(st: os.stat_result, cursor: tuple[int, int] | None) -> int:
     """Where a tail of the file *st* describes resumes: the cursor's ``(inode, offset)`` only while
     it is still that file, else 0 — a compaction swaps the file, and ext4 reuses a freed inode."""
@@ -196,6 +216,12 @@ class MeasurementArchive:
         # the runs banked since its own mark.
         self._ticks: dict[str, int] = {}
         self._clock = 0
+        self._replays: OrderedDict[tuple[str, Any], _ConfigReplay] = OrderedDict()
+        # run_id -> (inode, start, [(end, rows)]): the unbroken span of a run's log THIS process
+        # appended, so a feed whose cursor sits inside it reads the rows here, not off disk.
+        self._appended: OrderedDict[str, tuple[int, int, list[tuple[int, list[Any]]]]] = (
+            OrderedDict()
+        )
 
     # -- path helpers ---------------------------------------------------------
 
@@ -272,6 +298,22 @@ class MeasurementArchive:
                     changed.append(rows[run_id])
             return changed, self._clock
 
+    def _replay(
+        self,
+        node_configs: list[tuple[str, dict[str, Any]]],
+        is_fatal: Callable[[dict[str, Any]], bool] | None,
+    ) -> _ConfigReplay:
+        key = (_cell_key(node_configs, ""), is_fatal)
+        with self._lock:
+            replay = self._replays.get(key)
+            if replay is None:
+                replay = self._replays[key] = _ConfigReplay(self, node_configs, is_fatal)
+                while len(self._replays) > _REPLAYS_MAX:
+                    self._replays.popitem(last=False)
+            else:
+                self._replays.move_to_end(key)
+            return replay
+
     # -- complete runs --------------------------------------------------------
 
     def append_run(
@@ -283,14 +325,67 @@ class MeasurementArchive:
         """The caller passes ONLY the rows it has not appended yet; rewriting the accumulated detail per
         sample is O(samples²). Measurements land before the header, so the header is the commit marker."""
         detail_path = self._detail_path(run_id)
-        for item in new_measurements:
-            append_row(detail_path, {_FOLD_KEY: _measurement_key(item), **measured_facts(item)})
+        rows = [
+            {_FOLD_KEY: _measurement_key(item), **measured_facts(item)} for item in new_measurements
+        ]
         header = {_FOLD_KEY: _HEADER_KEY, **{k: v for k, v in data.items() if k != "measurements"}}
-        append_row(detail_path, header)
-
-        append_row(self._index_path(), _summary(data))
-
+        summary = _summary(data)
+        with self._lock:
+            if (span := _append_alone(detail_path, *rows, header)) is not None:
+                self._keep_appended(run_id, span, rows)
+            else:
+                self._appended.pop(run_id, None)
+            if (span := _append_alone(self._index_path(), summary)) is not None:
+                self._fold_appended(span, summary)
         return detail_path
+
+    def _keep_appended(
+        self, run_id: str, span: tuple[os.stat_result, int], rows: list[dict[str, Any]]
+    ) -> None:
+        st, start = span
+        # As a reader parses them off the log, so a row read here is the row read there.
+        batch = (st.st_size, json.loads(json.dumps(rows, ensure_ascii=False)))
+        held = self._appended.get(run_id)
+        if held is not None and held[0] == st.st_ino and held[2][-1][0] == start:
+            held[2].append(batch)
+        else:
+            self._appended[run_id] = (st.st_ino, start, [batch])
+        self._appended.move_to_end(run_id)
+        while len(self._appended) > _APPENDED_MAX:
+            self._appended.popitem(last=False)
+
+    def _appended_since(self, run_id: str, st: os.stat_result, start: int) -> list[Any] | None:
+        """The rows of *run_id*'s log from byte *start* to its end, where this process appended
+        every one of them; ``None`` where it did not, and the log itself must be read."""
+        held = self._appended.get(run_id)
+        if held is None or held[0] != st.st_ino or held[2][-1][0] != st.st_size:
+            return None
+        _, at, batches = held
+        rows: dict[str, Any] | None = None
+        for end, batch in batches:
+            if at == start:
+                rows = {}
+            if rows is not None:
+                rows.update((row[_FOLD_KEY], row) for row in batch)
+            at = end
+        # ``None`` still: the cursor sits before the span, or inside one of its appends.
+        return None if rows is None else list(rows.values())
+
+    def _fold_appended(self, span: tuple[os.stat_result, int], summary: dict[str, Any]) -> None:
+        """Take this process's own index append into the fold it already holds, where that fold
+        was current to the byte the append began at: the next read then finds the file as it
+        left it, and opens nothing."""
+        st, start = span
+        if self._rows is None or self._cursor != (st.st_ino, start):
+            return
+        row = json.loads(json.dumps(summary, ensure_ascii=False))
+        run_id = row[_INDEX_FOLD_KEY]
+        self._rows = {**self._rows, run_id: row}
+        self._cursor = (st.st_ino, st.st_size)
+        self._stat = (st.st_mtime_ns, st.st_size)
+        self._ticks.pop(run_id, None)
+        self._clock += 1
+        self._ticks[run_id] = self._clock
 
     def compact_run(self, run_id: str) -> bool:
         """``factor=1`` is required, not a tuning choice: a walk of S samples leaves S header rows
@@ -525,20 +620,26 @@ class MeasurementArchive:
         *,
         run_ids: set[str] | list[str] | None = None,
         dataset_name: str | None = None,
+        newest: int | None = None,
     ) -> Iterator[Measurement]:
         """Every measurement under configs matching *predicate*, across samples; an empty predicate
         yields none. *run_ids* hint turns O(N) into O(K + matches); must be dataset-scoped at source.
+        *newest* reads only that many of the latest matching runs.
 
         One run at a time, never the lot: a dataset's archive outgrows memory long before it
         outgrows disk, and a reader averaging one channel held every row's node I/O to do it."""
         if not predicate:
             return
         if run_ids is None:
-            run_ids = [
-                entry["run_id"]
+            matching = [
+                entry
                 for entry in self.list_all(dataset_name=dataset_name)
                 if (stored := entry.get("node_configs")) and _matches_subset(stored, predicate)
             ]
+            if newest is not None:
+                matching.sort(key=lambda entry: entry.get("created_at") or "", reverse=True)
+                del matching[newest:]
+            run_ids = [entry["run_id"] for entry in matching]
         for run_id in run_ids:
             detail = self.load_by_id(run_id)
             if detail is None:
@@ -584,21 +685,20 @@ def _drop_row(path: Path) -> None:
         unlink_robust(path)
 
 
-class ReplayFeed:
-    """Every banked row one configuration may replay, keyed by ``sample_key`` and drawn from EVERY
-    dataset: a cell is the sample's content under the instrument's configuration, never the panel it
-    sat in, so widening a panel or renaming a dataset re-measures nothing already measured. A config
-    change at node N re-measures past N.
+_REPLAYS_MAX = 64
 
-    Read FORWARD — each :meth:`advance` returns only the rows banked since the last, so a walk sees a
-    cell a concurrent walk banked after it opened — and :meth:`claim` holds a cell while it is being
-    measured, so no two walks buy one. The grade floor is `REUSABLE_MIN_GRADE`, never a caller's."""
+
+class _ConfigReplay:
+    """The rows one configuration may replay, read off disk ONCE per process: every walk on that
+    configuration reads the same runs, and a feed per walk re-parsed all of them at each opening.
+    ``served`` is append-only — a later entry for a key is the one upgrade, a fatal row for a live
+    one — so each feed keeps only how far into it it has read."""
 
     def __init__(
         self,
         archive: MeasurementArchive,
         node_configs: list[tuple[str, dict[str, Any]]],
-        is_fatal: Callable[[dict[str, Any]], bool] | None = None,
+        is_fatal: Callable[[dict[str, Any]], bool] | None,
     ) -> None:
         self._archive = archive
         self._node_configs = node_configs
@@ -607,11 +707,10 @@ class ReplayFeed:
         # run_id -> (inode, bytes folded), the cursor `_tail_from` resumes a run's log at.
         self._read: dict[str, tuple[int, int]] = {}
         # sample_key -> whether the row already served is fatal, the one row an upgrade replaces.
-        self._served: dict[str, bool] = {}
+        self._fatal: dict[str, bool] = {}
+        self.served: list[tuple[str, ReplayableRow]] = []
 
-    def advance(self) -> dict[str, ReplayableRow]:
-        if not self._node_configs:
-            return {}
+    def refresh(self) -> None:
         entries, self._mark = self._archive._entries_since(self._mark)
         ranked = [
             (entry, n)
@@ -622,7 +721,6 @@ class ReplayFeed:
         # serve the row matching the FEWEST nodes.
         ranked.sort(key=lambda t: (t[1], t[0].get("item_count", 0)), reverse=True)
         chain_len = len(self._node_configs)
-        fresh: dict[str, ReplayableRow] = {}
         for entry, match_length in ranked:
             if not meets_grade(entry_grade(entry), REUSABLE_MIN_GRADE):
                 continue
@@ -644,12 +742,65 @@ class ReplayFeed:
                     )
                 fatal = self._is_fatal is not None and self._is_fatal(item)
                 # The one upgrade allowed: a fatal row, which is not an answer, for a live one.
-                if (served_fatal := self._served.get(key)) is not None and not (
+                if (served_fatal := self._fatal.get(key)) is not None and not (
                     served_fatal and not fatal
                 ):
                     continue
-                self._served[key] = fatal
-                fresh[key] = ReplayableRow(_entry_dataset(entry), item)
+                self._fatal[key] = fatal
+                self.served.append((key, ReplayableRow(_entry_dataset(entry), item)))
+
+    def _banked_since(self, run_id: str) -> list[dict[str, Any]]:
+        path = self._archive._detail_path(run_id)
+        try:
+            st = path.stat()
+        except FileNotFoundError:
+            return []
+        start = _tail_from(st, self._read.get(run_id))
+        if start and start == st.st_size:
+            return []
+        if (own := self._archive._appended_since(run_id, st, start)) is not None:
+            self._read[run_id] = (st.st_ino, st.st_size)
+            return [{k: v for k, v in row.items() if k != _FOLD_KEY} for row in own]
+        rows, offset = fold_jsonl_from(path, _FOLD_KEY, start)
+        if start == 0 and _HEADER_KEY not in rows:
+            # A log with no header yet is a walk that died before its first commit — not a run.
+            return []
+        self._read[run_id] = (st.st_ino, offset)
+        return [
+            {k: v for k, v in row.items() if k != _FOLD_KEY}
+            for k, row in rows.items()
+            if k != _HEADER_KEY
+        ]
+
+
+class ReplayFeed:
+    """Every banked row one configuration may replay, keyed by ``sample_key`` and drawn from EVERY
+    dataset: a cell is the sample's content under the instrument's configuration, never the panel it
+    sat in, so widening a panel or renaming a dataset re-measures nothing already measured. A config
+    change at node N re-measures past N.
+
+    Read FORWARD — each :meth:`advance` returns only the rows banked since the last, so a walk sees a
+    cell a concurrent walk banked after it opened — and :meth:`claim` holds a cell while it is being
+    measured, so no two walks buy one. The grade floor is `REUSABLE_MIN_GRADE`, never a caller's."""
+
+    def __init__(
+        self,
+        archive: MeasurementArchive,
+        node_configs: list[tuple[str, dict[str, Any]]],
+        is_fatal: Callable[[dict[str, Any]], bool] | None = None,
+    ) -> None:
+        self._archive = archive
+        self._node_configs = node_configs
+        self._replay = archive._replay(node_configs, is_fatal)
+        self._seen = 0
+
+    def advance(self) -> dict[str, ReplayableRow]:
+        if not self._node_configs:
+            return {}
+        with self._archive._lock:
+            self._replay.refresh()
+            fresh = dict(self._replay.served[self._seen :])
+            self._seen = len(self._replay.served)
         return fresh
 
     def claim(
@@ -680,24 +831,6 @@ class ReplayFeed:
         except PermissionError:
             # Windows: a holder is unlinking or replacing it this instant — the next poll reads again.
             return None
-
-    def _banked_since(self, run_id: str) -> list[dict[str, Any]]:
-        path = self._archive._detail_path(run_id)
-        try:
-            st = path.stat()
-        except FileNotFoundError:
-            return []
-        start = _tail_from(st, self._read.get(run_id))
-        rows, offset = fold_jsonl_from(path, _FOLD_KEY, start)
-        if start == 0 and _HEADER_KEY not in rows:
-            # A log with no header yet is a walk that died before its first commit — not a run.
-            return []
-        self._read[run_id] = (st.st_ino, offset)
-        return [
-            {k: v for k, v in row.items() if k != _FOLD_KEY}
-            for k, row in rows.items()
-            if k != _HEADER_KEY
-        ]
 
 
 def _fold_detail(path: Path) -> dict[str, Any] | None:

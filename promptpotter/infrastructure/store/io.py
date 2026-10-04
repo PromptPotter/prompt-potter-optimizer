@@ -290,9 +290,14 @@ def read_yaml_optional(path: Path) -> Any | None:
 
 def append_line(path: Path, line: str) -> None:
     """Reopened per call, never held: a held handle blocks a stub fork's delete on Windows."""
-    ensure_parent_dir(path)
-    with open(_long_path(path), "a", encoding="utf-8") as f:
-        f.write(line + "\n")
+    target = _long_path(path)
+    try:
+        with open(target, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except FileNotFoundError:
+        ensure_parent_dir(path)
+        with open(target, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
 
 
 def append_jsonl(path: Path, item: dict[str, Any]) -> Path:

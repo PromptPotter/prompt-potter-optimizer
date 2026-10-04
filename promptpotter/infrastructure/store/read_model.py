@@ -10,6 +10,7 @@ from zero — every rewriter here goes tmp + ``os.replace``, so a rewrite is alw
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 from collections import OrderedDict
@@ -20,7 +21,7 @@ from typing import Any, ClassVar, Protocol, cast
 from filelock import FileLock
 
 from promptpotter.config.settings import LOCK_TIMEOUT
-from promptpotter.infrastructure.store.io import append_jsonl, ensure_parent_dir, write_jsonl
+from promptpotter.infrastructure.store.io import append_line, ensure_parent_dir, write_jsonl
 
 
 def iter_jsonl(path: Path, *, record_types: frozenset[str] | None = None) -> list[dict[str, Any]]:
@@ -108,11 +109,14 @@ def _lock_for(path: Path) -> FileLock:
     return FileLock(str(lock_path), timeout=LOCK_TIMEOUT)
 
 
-def append_row(path: Path, row: dict[str, Any]) -> None:
-    """Append one upsert row — one ``O_APPEND`` write, no read, no rewrite. Held under the log's lock only
-    to serialise against a concurrent :func:`compact`, which truncates and replaces."""
+def append_row(path: Path, *rows: dict[str, Any]) -> int:
+    """Append upsert rows in order — one ``O_APPEND`` write, no read, no rewrite. Held under the log's
+    lock only to serialise against a concurrent :func:`compact`, which truncates and replaces.
+    Returns the bytes it added, which is how a writer tells its own append from one that raced it."""
+    lines = [json.dumps(row, ensure_ascii=False) for row in rows]
     with _lock_for(path):
-        append_jsonl(path, row)
+        append_line(path, "\n".join(lines))
+    return sum(len(line.encode("utf-8")) + len(os.linesep) for line in lines)
 
 
 Signature = tuple[int, int, int]

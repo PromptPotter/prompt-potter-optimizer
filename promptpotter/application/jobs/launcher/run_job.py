@@ -295,7 +295,7 @@ def main() -> None:
         level=logging.INFO, format="%(asctime)s %(levelname)-8s [%(name)s] %(message)s"
     )
     spec = JobSpec.model_validate_json(sys.stdin.buffer.read())
-    complete_registries()
+    complete_registries(every_treatment=False)
     asyncio.run(run_job(spec))
 
 

@@ -78,6 +78,14 @@ def build_archive_observations(
     that campaign's bench set sits here too and must reach no ruler it selects on. ``None`` reads all."""
     obs: list[Observation] = []
     sigs = archive_queries.run_signatures(stores)
+    # A run the sample fold already graded under this formula, and that has not grown since.
+    folded = {
+        row["run_id"]: row["graded"]
+        for row in archive_queries.sample_fold_rows(stores, dataset_name=dataset_name or "")
+        if row.get("fk") == scorer_id
+        and "graded" in row
+        and list(sigs.get(row["run_id"]) or ()) == list(row.get("sig") or ())
+    }
     entries = archive_queries.list_runs(stores, dataset_name=dataset_name)
     for entry in sorted(entries, key=lambda e: (e.get("created_at") or "", e.get("run_id") or "")):
         if not meets_grade(entry_grade(entry), _RULER_GRADE):
@@ -90,8 +98,12 @@ def build_archive_observations(
             candidate_id = ORIGIN_ABILITY_ID
         obs.extend(
             Observation(candidate_id, sample_id, response)
-            for sample_id, response in _run_cells(
-                stores, run_id, sigs.get(run_id), scorer=scorer, scorer_id=scorer_id
+            for sample_id, response in (
+                folded[run_id]
+                if run_id in folded
+                else _run_cells(
+                    stores, run_id, sigs.get(run_id), scorer=scorer, scorer_id=scorer_id
+                )
             )
             if sample_ids is None or sample_id in sample_ids
         )

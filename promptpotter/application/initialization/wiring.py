@@ -323,7 +323,9 @@ def _resolve_backend_id(
     return backend_id
 
 
-def complete_registries() -> None:
+def complete_registries(*, every_treatment: bool = True) -> None:
+    """*every_treatment* is the boot guard a server and the gate take. A process that runs ONE
+    campaign or one verb passes ``False``: its own optimizer's treatment is read at the mint."""
     table = connectors.registered()
     judges.registered()
     optimizers.registered()
@@ -332,7 +334,8 @@ def complete_registries() -> None:
         runtime.complete()
         # Every campaign's mint reads it, and its source digest raises on a prompt-shaping helper
         # nothing hashes — so a half-hashed optimizer stops the server at boot.
-        resolve_optimizer(runtime.name, {}).treatment()
+        if every_treatment:
+            resolve_optimizer(runtime.name, {}).treatment()
     # Every decision kind gated once, and a replayer for exactly the REPLAYED ones.
     replayers()
     for connector in table.values():
@@ -357,7 +360,7 @@ async def init_services(
         if on_status:
             on_status(msg)
 
-    complete_registries()
+    complete_registries(every_treatment=False)
 
     resolved_identity = identity if identity is not None else default_identity()
 

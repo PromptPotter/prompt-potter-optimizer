@@ -19,6 +19,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 )
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
 from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.read_model import derived, file_sig
 
 
 def is_paused(cycle_dir: Path) -> bool:
@@ -39,6 +40,7 @@ def write_sample_lookahead(cycle_dir: Path, cells: int, *, auto: bool = False) -
     ``cells <= 1`` without ``auto`` removes the file, so "back to sequential" and "never set" are
     one on-disk state rather than two that read alike."""
     path = CycleLayout(cycle_dir).sample_lookahead
+    _POLLS.pop(path, None)
     if cells <= 1 and not auto:
         path.unlink(missing_ok=True)
         return
@@ -48,7 +50,7 @@ def write_sample_lookahead(cycle_dir: Path, cells: int, *, auto: bool = False) -
 
 def sample_lookahead_auto(cycle_dir: Path) -> bool:
     """Whether the arming outlives its round. A mode, where the plain press is a gesture."""
-    data = read_json_tolerant(CycleLayout(cycle_dir).sample_lookahead)
+    data = _polled(CycleLayout(cycle_dir).sample_lookahead)
     return isinstance(data, dict) and data.get("auto") is True
 
 
@@ -57,7 +59,27 @@ def spend_sample_lookahead(cycle_dir: Path) -> None:
     wastes at most one call per cut at any depth (``StopRule.earliest_stop``), which is what makes
     an arming that never ends safe to leave on."""
     if not sample_lookahead_auto(cycle_dir):
-        CycleLayout(cycle_dir).sample_lookahead.unlink(missing_ok=True)
+        path = CycleLayout(cycle_dir).sample_lookahead
+        _POLLS.pop(path, None)
+        path.unlink(missing_ok=True)
+
+
+_POLL_EVERY_S = 0.2
+_POLLS: dict[Path, tuple[float, Any]] = {}
+
+
+def _polled(path: Path) -> Any:
+    """A control file a walk asks at every cell and every paid call. A write from this process
+    drops the held answer, so only a write from ANOTHER process waits out ``_POLL_EVERY_S``."""
+    now = time.monotonic()
+    held = _POLLS.get(path)
+    if held is not None and now - held[0] < _POLL_EVERY_S:
+        return held[1]
+    value = derived(
+        ("control_file", path), sig=file_sig(path), compute=lambda: read_json_tolerant(path)
+    )
+    _POLLS[path] = (now, value)
+    return value
 
 
 def effective_lookahead(requested: int, ceiling: int) -> int:
@@ -84,7 +106,7 @@ def read_sample_lookahead(cycle_dir: Path) -> int:
 
     ``1`` when absent, unreadable or malformed: the failure direction is "run as normal", never
     "stall"."""
-    data = read_json_tolerant(CycleLayout(cycle_dir).sample_lookahead)
+    data = _polled(CycleLayout(cycle_dir).sample_lookahead)
     if not isinstance(data, dict):
         return 1
     if data.get("auto") is True:
@@ -107,6 +129,7 @@ def clear_run_control_flags(cycle_dir: Path) -> None:
     layout = CycleLayout(cycle_dir)
     layout.pause_flag.unlink(missing_ok=True)
     layout.skip_flag.unlink(missing_ok=True)
+    _POLLS.pop(layout.run_limits, None)
     layout.run_limits.unlink(missing_ok=True)
     spend_sample_lookahead(cycle_dir)
 
@@ -132,6 +155,7 @@ def write_run_limits_mirror(
         caps["max_tokens"] = change.tokens
     if rounds is not None:
         caps["max_rounds"] = rounds.max_rounds
+    _POLLS.pop(path, None)
     write_json(path, caps)
 
 
@@ -139,7 +163,7 @@ def read_run_limits_mirror(cycle_dir: Path) -> RunLimitsRecord:
     """The mirrored ceilings, ``None`` per arm when absent, unreadable or the wrong type — for the
     pollers only; a launch reads the ledger (`CampaignStore.read_run_limits`). The one place that
     knows this file's shape."""
-    data = read_json_tolerant(CycleLayout(cycle_dir).run_limits)
+    data = _polled(CycleLayout(cycle_dir).run_limits)
     if not isinstance(data, dict):
         return RunLimitsRecord()
     usd = data.get("max_usd")

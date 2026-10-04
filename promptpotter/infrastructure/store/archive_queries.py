@@ -120,11 +120,13 @@ def measurements_for_config(
     *,
     run_ids: set[str] | list[str] | None = None,
     dataset_name: str | None = None,
+    newest: int | None = None,
 ) -> Iterator[Measurement]:
     return stores.archive.measurements_for_config(
         predicate,
         run_ids=run_ids,
         dataset_name=dataset_name,
+        newest=newest,
     )
 
 
