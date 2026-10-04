@@ -37,7 +37,7 @@ nodes:
       prompt_version: 1
       schema_family: l1_generate
       schema_version: 1
-      reasoning_effort: medium
+      reasoning_effort: low
       # A truncated answer is a zero-candidate round, and 12000 was measured truncating.
       max_tokens: 20000
       provider: openrouter
@@ -81,9 +81,10 @@ nodes:
       schema_version: 1
       prompt_family: l1_critique
       prompt_version: 1
-      reasoning_effort: medium
-      # A truncated critique never lands; the measured tail at `low` was 11,370 tokens.
-      max_tokens: 16000
+      reasoning_effort: low
+      # A runaway critique spends whatever cap it is given, so the cap prices that call: it sits
+      # at the reasoning floor a launch refuses below.
+      max_tokens: 8000
       provider: openrouter
       model: openai/gpt-6-luna
     description: >-
@@ -95,7 +96,7 @@ nodes:
       temperature: 0.3
       prompt_family: l2_context
       prompt_version: 1
-      reasoning_effort: medium
+      reasoning_effort: low
       max_tokens: 8000
       provider: openrouter
       model: openai/gpt-6-luna
@@ -109,7 +110,7 @@ nodes:
       temperature: 0.5
       prompt_family: l3_plan
       prompt_version: 1
-      reasoning_effort: medium
+      reasoning_effort: low
       max_tokens: 8000
       provider: openrouter
       model: openai/gpt-6-luna
