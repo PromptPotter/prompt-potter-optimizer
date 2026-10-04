@@ -42,13 +42,13 @@
 
 .count {
   flex: 0 0 auto;
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   white-space: nowrap;
 }
 
 .caret {
   flex: 0 0 auto;
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
 }
 
 .panel {
@@ -118,7 +118,7 @@ button.name:focus-visible {
   font-size: var(--text-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   border: 0.5px solid var(--color-border);
   border-radius: 2px;
   padding: 0 3px;
@@ -140,7 +140,7 @@ button.name:focus-visible {
 }
 
 .note {
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   padding: var(--space-4) var(--space-6) 0;
   border-top: 0.5px solid var(--color-border);
   margin-top: var(--space-4);
@@ -157,7 +157,7 @@ button.name:focus-visible {
 .addMark {
   flex: 0 0 auto;
   padding-left: var(--space-6);
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
 }
 
 .addInput {

@@ -39,9 +39,9 @@ export const BRAND = {
   license:
     process.env.NEXT_PUBLIC_LICENSE ||
     "https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/LICENSE",
-  // Mirrors the dark-theme body background in `foundation/themes.css` and layout's themeColor.
-  themeColor: "#0d0d0d",
-  backgroundColor: "#0d0d0d",
+  // Mirrors the dark ground in `foundation/tokens.css` and layout's themeColor.
+  themeColor: "#181818",
+  backgroundColor: "#181818",
   // The About pane must never show a "verified" affordance while this says `self-declared`.
   verification: "self-declared" as "self-declared" | "verified",
 } as const;

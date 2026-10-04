@@ -3,7 +3,7 @@ h1{font-size:var(--text-4xl);font-weight:600;line-height:1.2}
 .avatar{width:18px;height:18px;border-radius:50%;background:var(--color-background-tint-icon);display:inline-flex;align-items:center;justify-content:center;font-size:var(--text-xs);color:var(--color-accent);font-weight:500}
 
 .topstrip{display:flex;align-items:center;gap:var(--space-12);flex-wrap:wrap;padding:2px 0;font-family:var(--font-mono)}
-.topstrip-label{font-size:var(--text-xs);letter-spacing:.08em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:600}
+.topstrip-label{font-size:var(--text-xs);letter-spacing:.08em;color:var(--color-text-secondary);text-transform:uppercase;font-weight:600}
 .topstrip-sep{width:1px;height:13px;background:var(--color-border);flex:0 0 auto}
 .topstrip-last{display:inline-flex;align-items:center;gap:var(--space-6);font-size:var(--text-xs);color:var(--color-text-secondary)}
 /* The hollow pips are the denominator, so they share the hue rather than fading to a neutral. */
@@ -30,18 +30,18 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .formula-row{font-family:var(--font-mono);font-size:var(--text-sm);color:var(--color-text-secondary);background:var(--color-background-secondary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-md);padding:var(--space-8) var(--space-12);margin-bottom:14px;overflow-x:auto;white-space:nowrap}
 .kv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:var(--space-12) var(--space-18)}
 .kv{display:flex;flex-direction:column;gap:2px;min-width:0}
-.kv-label{font-size:var(--text-xs);letter-spacing:.06em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:500}
+.kv-label{font-size:var(--text-xs);letter-spacing:.06em;color:var(--color-text-secondary);text-transform:uppercase;font-weight:500}
 .kv-val{font-size:var(--text-md);color:var(--color-text-primary);font-weight:500;font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.kv-val.muted{color:var(--color-text-tertiary);font-weight:400}
+.kv-val.muted{color:var(--color-text-secondary);font-weight:400}
 .kv-val.warn{color:var(--color-danger)}
 .kv-val.ok{color:var(--color-success)}
-.lsc-source{font-size:var(--text-xs);color:var(--color-text-tertiary);font-weight:400}
+.lsc-source{font-size:var(--text-xs);color:var(--color-text-secondary);font-weight:400}
 /* Both scroll rather than clip: a retry log and a query payload are each unbounded. */
-.var-label{margin-top:14px;font-size:var(--text-xs);letter-spacing:.06em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:500}
+.var-label{margin-top:14px;font-size:var(--text-xs);letter-spacing:.06em;color:var(--color-text-secondary);text-transform:uppercase;font-weight:500}
 .payload-block{margin-top:var(--space-6);padding:var(--space-8) var(--space-12);background:var(--color-background-secondary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-md);font-family:var(--font-mono);font-size:var(--text-xs);line-height:1.5;color:var(--color-text-secondary);max-height:220px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
-.payload-block.empty{color:var(--color-text-tertiary);font-style:italic}
+.payload-block.empty{color:var(--color-text-secondary);font-style:italic}
 .payload-block .log-row{margin-bottom:2px}
-.payload-block .log-dim{color:var(--color-text-tertiary)}
+.payload-block .log-dim{color:var(--color-text-secondary)}
 .payload-block .log-mark{color:var(--color-accent)}
 .payload-block .log-warn{color:var(--color-warn)}
 
@@ -52,6 +52,6 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
    "the candidate was wrong". */
 .tag-err{color:var(--color-warn);font-weight:600}
 /* Neutral: provenance is metadata, not a scoring signal; the glyph always pairs with the word. */
-.tag-cached{color:var(--color-text-tertiary);font-weight:500;font-size:var(--text-xs)}
-.samples-empty{color:var(--color-text-tertiary);font-size:var(--text-sm);font-style:italic;padding:var(--space-24) var(--space-12);text-align:center}
+.tag-cached{color:var(--color-text-secondary);font-weight:500;font-size:var(--text-xs)}
+.samples-empty{color:var(--color-text-secondary);font-size:var(--text-sm);font-style:italic;padding:var(--space-24) var(--space-12);text-align:center}
 

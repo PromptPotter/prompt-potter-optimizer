@@ -18,7 +18,7 @@ export type CompareView = "grouped" | "overlaid" | "lines" | "merged";
 // The y axis carries the metric's NAME, or a composed expression plots as bare numbers. Shape matches
 // `candidates/FitnessChart.tsx`, the only other titled axis.
 function axisScales(title: string, stacked: boolean) {
-  const tick = { color: getCss("--color-text-tertiary") };
+  const tick = { color: getCss("--color-text-secondary") };
   return {
     x: { stacked, ticks: tick },
     y: {
@@ -28,7 +28,7 @@ function axisScales(title: string, stacked: boolean) {
         display: true,
         text: title,
         align: "end" as const,
-        color: getCss("--color-text-tertiary"),
+        color: getCss("--color-text-secondary"),
         font: { size: 11 },
       },
     },

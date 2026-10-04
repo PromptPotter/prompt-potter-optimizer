@@ -22,7 +22,7 @@
 }
 .observe-toggle-label {
   font-size:var(--text-xs);
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -36,19 +36,19 @@
   letter-spacing: 0.04em;
   border: 0.5px solid var(--color-border);
   border-radius: var(--border-radius-sm);
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   vertical-align: middle;
 }
 .bnode-role {
   margin: 0 0 var(--space-4);
   font-size:var(--text-sm);
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
 }
 
 /* A level that failed says so where it sits, never in a footer. */
 .pipeline-stack-note {
   font-size:var(--text-xs);
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   text-align: center;
   margin: var(--space-8) 0 0;
 }
@@ -57,7 +57,7 @@
 .bnode-close {
   background: none;
   border: 0;
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   font-size:var(--text-2xl);
   line-height: 1;
   cursor: pointer;

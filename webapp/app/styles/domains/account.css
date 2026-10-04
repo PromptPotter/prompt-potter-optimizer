@@ -5,9 +5,9 @@
 .account-nav{flex:0 0 212px;border-right:0.5px solid var(--color-border);padding:var(--space-18) var(--space-12);background:var(--color-background-secondary);display:flex;flex-direction:column;gap:var(--space-18);overflow-y:auto}
 .account-nav-head{padding:0 var(--space-8)}
 .account-nav-head h2{margin:0 0 var(--space-4) 0;font-size:var(--text-lg);font-weight:600}
-.account-nav-head p{margin:0;font-size:var(--text-sm);color:var(--color-text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.account-nav-head p{margin:0;font-size:var(--text-sm);color:var(--color-text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .account-nav-group{display:flex;flex-direction:column;gap:var(--space-4)}
-.account-nav-group-label{padding:0 var(--space-8);font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--color-text-tertiary)}
+.account-nav-group-label{padding:0 var(--space-8);font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--color-text-secondary)}
 .account-nav-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
 .account-nav-item{position:relative;width:100%;text-align:left;padding:var(--space-8) var(--space-8) var(--space-8) var(--space-12);border:0;border-radius:var(--border-radius-md);background:transparent;color:var(--color-text-secondary);cursor:pointer;font-size:var(--text-base);white-space:nowrap}
 .account-nav-item:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
@@ -17,7 +17,7 @@
 .account-pane-head{display:flex;justify-content:space-between;align-items:center;padding:var(--space-16) var(--space-24);border-bottom:0.5px solid var(--color-border)}
 .account-pane-head h3{margin:0;font-size:var(--text-2xl);font-weight:600}
 .account-pane-body{padding:var(--space-4) var(--space-24) var(--space-24);display:flex;flex-direction:column;overflow-y:auto;flex:1 1 auto}
-.account-muted{color:var(--color-text-tertiary);font-size:var(--text-base)}
+.account-muted{color:var(--color-text-secondary);font-size:var(--text-base)}
 .account-error{color:var(--color-danger);font-size:var(--text-sm);margin:0 0 var(--space-12) 0}
 /* Label/value row (About this unit). flex-wrap, not a fixed grid track: when the value can no
    longer make its minimum it drops to its own line instead of both being crushed. */
@@ -39,15 +39,15 @@
 .account-empty-title{margin:0;font-size:var(--text-base);font-weight:600;color:var(--color-text-primary)}
 .account-empty-body{margin:var(--space-4) 0 0;font-size:var(--text-sm);line-height:1.5;color:var(--color-text-secondary);max-width:62ch}
 .account-failure{margin:var(--space-8) 0 0;padding-left:var(--space-10);border-left:2px solid var(--color-danger);font-size:var(--text-sm);line-height:1.5;color:var(--color-danger)}
-.account-loading{margin:var(--space-18) 0;color:var(--color-text-tertiary);font-size:var(--text-base)}
-.account-note{margin:0;font-size:var(--text-sm);line-height:1.5;color:var(--color-text-tertiary)}
+.account-loading{margin:var(--space-18) 0;color:var(--color-text-secondary);font-size:var(--text-base)}
+.account-note{margin:0;font-size:var(--text-sm);line-height:1.5;color:var(--color-text-secondary)}
 .account-note code,.account-identity-id code{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-secondary)}
 .account-warn{font-size:var(--text-sm);line-height:1.5;color:var(--color-warn)}
 .account-strong{font-weight:500;color:var(--color-text-primary)}
 .account-line{display:flex;align-items:center;gap:var(--space-10);flex-wrap:wrap}
-.account-kicker{font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--color-text-tertiary)}
+.account-kicker{font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--color-text-secondary)}
 .account-figure{margin:0;font-size:var(--text-3xl);font-weight:600;color:var(--color-text-primary);font-variant-numeric:tabular-nums;line-height:1.2}
-.account-figure-of{font-size:var(--text-sm);font-weight:400;color:var(--color-text-tertiary)}
+.account-figure-of{font-size:var(--text-sm);font-weight:400;color:var(--color-text-secondary)}
 
 .account-identity{display:flex;align-items:center;gap:var(--space-16);flex-wrap:wrap;padding:var(--space-18) 0;border-bottom:0.5px solid var(--color-border)}
 .account-avatar{flex:0 0 auto;width:52px;height:52px;border-radius:50%;background:var(--color-accent);color:var(--color-text-on-accent);display:inline-flex;align-items:center;justify-content:center;font-size:var(--text-xl);font-weight:600;letter-spacing:0.02em}
@@ -80,7 +80,7 @@
 .account-slot.running{background:var(--color-accent);border-color:var(--color-accent)}
 .account-slot.queued{border-color:var(--color-accent);background:repeating-linear-gradient(135deg,rgba(var(--color-accent-rgb),0.45) 0 2px,transparent 2px 4px)}
 .account-slot.held{border-style:dashed;background:var(--color-background-tint-strong);opacity:0.7}
-.account-legend{display:flex;flex-wrap:wrap;gap:var(--space-4) var(--space-14);padding-top:var(--space-8);border-top:0.5px solid var(--color-border);font-size:var(--text-xs);color:var(--color-text-tertiary)}
+.account-legend{display:flex;flex-wrap:wrap;gap:var(--space-4) var(--space-14);padding-top:var(--space-8);border-top:0.5px solid var(--color-border);font-size:var(--text-xs);color:var(--color-text-secondary)}
 .account-legend > span{display:inline-flex;align-items:center;gap:var(--space-6)}
 .account-legend .account-slot{width:10px;height:10px}
 .account-limit{display:flex;flex-direction:column;gap:var(--space-8)}
@@ -102,7 +102,7 @@
 }
 
 .activity-window-row{display:flex;align-items:center;flex-wrap:wrap;gap:var(--space-10);padding:var(--space-14) 0;border-bottom:0.5px solid var(--color-border);margin-bottom:var(--space-12)}
-.activity-window-row label{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-tertiary)}
+.activity-window-row label{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-secondary)}
 .activity-window-row select{padding:var(--space-6) var(--space-10);border:0.5px solid var(--color-border);border-radius:5px;background:var(--color-background-secondary);color:var(--color-text-primary);font-size:var(--text-base);cursor:pointer}
 .activity-legend{list-style:none;margin:0 0 var(--space-8) 0;padding:0;display:flex;flex-wrap:wrap;gap:var(--space-6) var(--space-14)}
 .activity-legend li{display:inline-flex;align-items:center;gap:var(--space-6);font-size:var(--text-xs);color:var(--color-text-secondary)}
@@ -111,17 +111,17 @@
 .activity-chart{display:flex;flex-direction:column;gap:var(--space-4);padding:var(--space-14) 0;border-bottom:0.5px solid var(--color-border)}
 .activity-chart:last-child{border-bottom:0}
 .activity-chart-head{display:flex;flex-direction:column;gap:0;align-items:flex-start;line-height:1.15}
-.activity-chart-head h4{margin:0;font-size:var(--text-sm);font-weight:500;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.05em}
+.activity-chart-head h4{margin:0;font-size:var(--text-sm);font-weight:500;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.05em}
 .activity-chart-total{font-size:var(--text-3xl);font-weight:600;color:var(--color-text-primary);font-variant-numeric:tabular-nums}
 .activity-chart-body{margin-top:4px}
 .activity-chart-svg{width:100%;height:90px;display:block}
-.activity-chart-empty{margin:var(--space-6) 0 var(--space-4) 0;font-size:var(--text-sm);color:var(--color-text-tertiary);font-style:italic}
+.activity-chart-empty{margin:var(--space-6) 0 var(--space-4) 0;font-size:var(--text-sm);color:var(--color-text-secondary);font-style:italic}
 
 .about-unit-head{display:flex;align-items:flex-start;gap:var(--space-14);padding:var(--space-18) 0;border-bottom:0.5px solid var(--color-border)}
 .about-unit-mark{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:9px;border:0.5px solid var(--color-border);background:var(--color-background-secondary);color:var(--color-accent)}
 .about-unit-id{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1 1 auto;padding-top:2px}
 .about-unit-name{font-size:var(--text-xl);font-weight:600;color:var(--color-text-primary)}
-.about-unit-tagline{font-size:var(--text-sm);line-height:1.45;color:var(--color-text-tertiary);max-width:46ch}
+.about-unit-tagline{font-size:var(--text-sm);line-height:1.45;color:var(--color-text-secondary);max-width:46ch}
 .about-unit-pill{flex:0 0 auto;display:inline-flex;align-items:center;gap:var(--space-4);padding:3px var(--space-8);border-radius:999px;font-size:var(--text-xs);font-weight:500;letter-spacing:0.01em;white-space:nowrap}
 .account-row-main > .about-unit-pill{align-self:flex-start}
 .about-unit-pill-icon{font-size:var(--text-xs);line-height:1}
@@ -158,7 +158,7 @@
 .wstorage-item{display:flex;flex-direction:column;gap:var(--space-4)}
 .wstorage-item-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-12)}
 .wstorage-name{font-size:var(--text-base);color:var(--color-text-primary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.wstorage-tag{margin-left:7px;font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.05em;padding:1px var(--space-6);border-radius:999px;background:var(--color-background-hover);color:var(--color-text-tertiary);border:0.5px solid var(--color-border)}
+.wstorage-tag{margin-left:7px;font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.05em;padding:1px var(--space-6);border-radius:999px;background:var(--color-background-hover);color:var(--color-text-secondary);border:0.5px solid var(--color-border)}
 .wstorage-tag.deleted{color:var(--color-danger)}
 .wstorage-aux{padding-top:var(--space-8);border-top:0.5px dashed var(--color-border)}
 .wstorage-aux + .wstorage-aux{padding-top:0;border-top:0}
@@ -170,5 +170,5 @@
 .wsmaint-actions{display:flex;gap:var(--space-8);flex-wrap:wrap}
 .wsmaint-report{display:flex;flex-wrap:wrap;gap:var(--space-14);margin:var(--space-12) 0 0}
 .wsmaint-report div{display:flex;flex-direction:column;gap:var(--space-2);min-width:0}
-.wsmaint-report dt{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.05em;color:var(--color-text-tertiary)}
+.wsmaint-report dt{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.05em;color:var(--color-text-secondary)}
 .wsmaint-report dd{margin:0;font-size:var(--text-base);color:var(--color-text-primary);font-variant-numeric:tabular-nums}

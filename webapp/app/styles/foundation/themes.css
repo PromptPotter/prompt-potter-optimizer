@@ -1,6 +1,7 @@
 /* Light = the buyer-facing editorial-cobalt register; no orange (that is the dark operator
    register). Source of truth: promptpotter-web/BRAND.md. */
 [data-theme="light"]{
+  color-scheme:light;
   --color-background-tertiary:#F5F1EA;
   --color-background-primary:#ECE7DC;
   --color-background-secondary:#E1DBCC;
@@ -8,8 +9,7 @@
   --color-background-tint-active:#C5AFA4;
   --color-background-tint-icon:#696047;
   --color-text-primary:#0a0a0a;
-  --color-text-secondary:#525252;
-  --color-text-tertiary:#737373;
+  --color-text-secondary:#454545;
   --color-text-on-accent:#ffffff;
   --color-border:#A89E8A;
   --color-accent:#090C9B;
@@ -17,7 +17,7 @@
   --color-accent-rgb:9,12,155;
   --color-accent-glow:rgba(var(--color-accent-rgb),0.28);
   --color-selection:#55251D;
-  --color-ci:#525252;
+  --color-ci:#454545;
   --color-cache:#6D28D9;                     /* the one hue that is neither cobalt, oxblood nor olive */
   --color-overlap:#0F766E;
   --color-background-tint:rgba(0,0,0,0.04);

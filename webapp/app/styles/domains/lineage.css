@@ -24,7 +24,7 @@
 .fork-button:disabled{opacity:0.5;cursor:not-allowed}
 
 .steer-fork{display:flex;flex-direction:column;gap:var(--space-12);min-width:min(440px,82vw);max-width:560px}
-.steer-fork-sub{font-size:var(--text-sm);color:var(--color-text-tertiary);margin:0 0 2px}
+.steer-fork-sub{font-size:var(--text-sm);color:var(--color-text-secondary);margin:0 0 2px}
 .steer-fork-note{font-size:var(--text-sm);color:var(--color-text-secondary);background:var(--color-background-tint);border-radius:5px;padding:var(--space-6) var(--space-8);margin:0}
 .steer-fork-err{color:var(--color-danger);font-size:var(--text-sm)}
 /* Editing a locked axis (model/provider) on the fork taints the branch grade C. */
@@ -44,7 +44,7 @@
 .node-output-row[data-depth="2"]{padding-left:var(--space-18)}
 .node-output-field{font-family:var(--font-mono);font-size:var(--text-sm);color:var(--color-text-primary)}
 .node-output-req{color:var(--color-accent);margin-left:2px}
-.node-output-desc{margin:0;font-size:var(--text-xs);color:var(--color-text-tertiary);display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--space-6)}
+.node-output-desc{margin:0;font-size:var(--text-xs);color:var(--color-text-secondary);display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--space-6)}
 .node-output-type{font-family:var(--font-mono);color:var(--color-text-secondary)}
 .node-output-limit,.node-output-enum{font-family:var(--font-mono);color:var(--color-text-secondary);border:0.5px solid var(--color-border);border-radius:4px;padding:0 var(--space-4)}
 
@@ -56,8 +56,8 @@
 .limit-label{font-size:var(--text-sm);color:var(--color-text-secondary)}
 .limit-input{width:100%;min-width:0;padding:var(--space-4) var(--space-8);border:0.5px solid var(--color-border);border-radius:5px;background:var(--color-background-secondary);color:var(--color-text-primary);font-size:var(--text-sm);font-family:var(--font-mono)}
 .limit-input-usd{display:flex;align-items:center;gap:var(--space-6)}
-.limit-usd-prefix{color:var(--color-text-tertiary);font-size:var(--text-sm)}
-.limit-note{grid-column:2;color:var(--color-text-tertiary);font-size:var(--text-xs);line-height:1.4}
-.limit-reconcile-foot{color:var(--color-text-tertiary);font-size:var(--text-xs);line-height:1.4}
+.limit-usd-prefix{color:var(--color-text-secondary);font-size:var(--text-sm)}
+.limit-note{grid-column:2;color:var(--color-text-secondary);font-size:var(--text-xs);line-height:1.4}
+.limit-reconcile-foot{color:var(--color-text-secondary);font-size:var(--text-xs);line-height:1.4}
 .limit-advanced > summary{font-size:var(--text-xs);color:var(--color-text-secondary);cursor:pointer}
 .limit-advanced-body{display:flex;flex-direction:column;gap:var(--space-6);padding-top:6px}

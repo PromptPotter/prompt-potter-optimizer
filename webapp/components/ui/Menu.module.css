@@ -31,7 +31,7 @@
 }
 
 .item:disabled {
-  opacity: 0.45;
+  opacity: 0.5;
   cursor: default;
 }
 
@@ -62,7 +62,7 @@
   font-size:var(--text-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   font-weight: 600;
   padding: var(--space-6) var(--space-8) 2px;
 }

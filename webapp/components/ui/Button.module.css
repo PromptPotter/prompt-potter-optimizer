@@ -14,7 +14,7 @@
   background: var(--color-background-hover);
 }
 .btn:disabled {
-  opacity: 0.55;
+  opacity: 0.5;
   cursor: default;
 }
 .btn:disabled:hover {

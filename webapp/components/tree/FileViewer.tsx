@@ -127,7 +127,7 @@ export function FileViewer({ campaignId, cycleId, selected }: Props) {
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {headerPath}
         </span>
-        <span style={{ color: "var(--color-text-tertiary)" }}>{state.meta}</span>
+        <span style={{ color: "var(--color-text-secondary)" }}>{state.meta}</span>
       </div>
       {state.roundDoc ? (
         <div className="viewer-body viewer-structured">

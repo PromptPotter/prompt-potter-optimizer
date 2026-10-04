@@ -6,7 +6,7 @@
   display:inline-flex;align-items:center;justify-content:center;
   width:26px;height:26px;padding:0;
   border:0.5px solid var(--color-border);border-radius:var(--border-radius-sm);
-  background:var(--color-background-secondary);color:var(--color-text-tertiary);
+  background:var(--color-background-secondary);color:var(--color-text-secondary);
   cursor:pointer;transition:color .12s,border-color .12s,background .12s
 }
 .pipeline-zoom-btn:hover{color:var(--color-accent);border-color:var(--color-accent)}
@@ -21,7 +21,7 @@
 .wf-hero .hs-heat-wrap:has(.hs-expand-wrap){flex-basis:100%;width:100%}
 .wf-hero-flow{display:flex;align-items:center;justify-content:center;gap:0;padding:var(--space-10) 0}
 .wf-hero-node{background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:10px;padding:var(--space-14) var(--space-24);text-align:left;min-width:140px;display:flex;flex-direction:row;align-items:center;gap:var(--space-12);position:relative;z-index:2}
-.wf-hero-node .ico{color:var(--color-text-tertiary);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.wf-hero-node .ico{color:var(--color-text-secondary);display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .wf-hero-node .text-col{display:flex;flex-direction:column;gap:2px;min-width:0}
 .wf-hero-node.llm{
   flex-direction:column;align-items:stretch;gap:var(--space-4);
@@ -34,7 +34,7 @@
 }
 .wf-hero-node.llm .head{display:flex;flex-direction:row;align-items:center;justify-content:center;gap:var(--space-10)}
 .wf-hero-node.llm .ico{color:var(--color-accent)}
-.wf-hero-node .lbl{font-size:var(--text-md);letter-spacing:.08em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:600}
+.wf-hero-node .lbl{font-size:var(--text-md);letter-spacing:.08em;color:var(--color-text-secondary);text-transform:uppercase;font-weight:600}
 .wf-hero-node.llm .lbl{font-size:var(--text-3xl);color:var(--color-text-primary);letter-spacing:.06em}
 .wf-hero-node .val{font-size:var(--text-md);font-weight:500;color:var(--color-text-primary);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
 .wf-hero-node-toggle{cursor:pointer;font:inherit;color:inherit;text-align:left;transition:border-color .15s,box-shadow .15s,background .15s}
@@ -68,7 +68,7 @@
 .connector-dot::before{
   content:'';position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   width:6px;height:6px;border-radius:50%;
-  background:var(--color-text-tertiary);
+  background:var(--color-text-secondary);
   transition:transform .15s ease,background .15s ease,box-shadow .15s ease
 }
 .connector.live .connector-dot::before{background:var(--color-success);box-shadow:0 0 4px var(--color-success)}
@@ -86,22 +86,22 @@
 }
 .connector:hover .connector-pop,.connector:focus-within .connector-pop{opacity:1;pointer-events:auto}
 .connector-pop-head{display:flex;align-items:center;gap:var(--space-6);font-size:var(--text-sm);color:var(--color-text-primary);margin-bottom:6px}
-.connector-pop-head .dot{width:6px;height:6px;border-radius:50%;background:var(--color-text-tertiary);flex-shrink:0}
+.connector-pop-head .dot{width:6px;height:6px;border-radius:50%;background:var(--color-text-secondary);flex-shrink:0}
 .connector.live .connector-pop-head .dot{background:var(--color-success);box-shadow:0 0 4px var(--color-success)}
 .connector.offline .connector-pop-head .dot{background:var(--color-danger);box-shadow:0 0 4px var(--color-danger)}
 .connector-pop-head .name{font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.connector-pop-head .kind{font-size:var(--text-xs);letter-spacing:.04em;text-transform:uppercase;padding:1px var(--space-4);border-radius:3px;background:var(--color-background-secondary);color:var(--color-text-tertiary);flex-shrink:0}
-.connector-pop-head .state{font-size:var(--text-xs);color:var(--color-text-tertiary);flex-shrink:0}
-.connector-pop-url{font-size:var(--text-xs);color:var(--color-text-tertiary);font-family:var(--font-mono);margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.connector-pop-head .kind{font-size:var(--text-xs);letter-spacing:.04em;text-transform:uppercase;padding:1px var(--space-4);border-radius:3px;background:var(--color-background-secondary);color:var(--color-text-secondary);flex-shrink:0}
+.connector-pop-head .state{font-size:var(--text-xs);color:var(--color-text-secondary);flex-shrink:0}
+.connector-pop-url{font-size:var(--text-xs);color:var(--color-text-secondary);font-family:var(--font-mono);margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .connector-pop-sec{display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;margin-bottom:8px}
-.connector-pop-sec .sec-chip{font-size:var(--text-xs);letter-spacing:.04em;text-transform:uppercase;padding:1px var(--space-4);border-radius:3px;background:var(--color-background-secondary);color:var(--color-text-tertiary)}
+.connector-pop-sec .sec-chip{font-size:var(--text-xs);letter-spacing:.04em;text-transform:uppercase;padding:1px var(--space-4);border-radius:3px;background:var(--color-background-secondary);color:var(--color-text-secondary)}
 .connector-pop-sec .sec-chip.ok{color:var(--color-success);background:rgba(var(--color-success-rgb),.12)}
 .connector-pop-sec .sec-chip.warn{color:var(--color-warn);background:var(--color-warn-bg)}
 .connector-pop-sec .sec-doc{margin-left:auto;font-size:var(--text-xs);color:var(--color-accent);text-decoration:none}
 .connector-pop-sec .sec-doc:hover{text-decoration:underline}
-.connector-pop-empty{margin:0;font-size:var(--text-xs);font-style:italic;color:var(--color-text-tertiary)}
+.connector-pop-empty{margin:0;font-size:var(--text-xs);font-style:italic;color:var(--color-text-secondary)}
 .connector-pop-switch{margin-top:8px;padding-top:8px;border-top:1px solid var(--color-border)}
-.connector-pop-switch .head{font-size:var(--text-xs);letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-tertiary);margin-bottom:4px}
+.connector-pop-switch .head{font-size:var(--text-xs);letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-secondary);margin-bottom:4px}
 .connector-pop-switch ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px}
 .connector-pop-switch .alt{
   appearance:none;border:1px solid var(--color-border);background:transparent;
@@ -111,8 +111,8 @@
   cursor:not-allowed;opacity:.7
 }
 .connector-pop-switch .alt-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
-.connector-pop-switch .alt-type{font-size:var(--text-xs);letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-tertiary)}
-.connector-pop-foot{margin-top:8px;padding-top:6px;border-top:1px dashed var(--color-border);font-size:var(--text-xs);color:var(--color-text-tertiary);font-style:italic;text-align:center}
+.connector-pop-switch .alt-type{font-size:var(--text-xs);letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-secondary)}
+.connector-pop-foot{margin-top:8px;padding-top:6px;border-top:1px dashed var(--color-border);font-size:var(--text-xs);color:var(--color-text-secondary);font-style:italic;text-align:center}
 .wf-hero-node.llm.wf-hero-node-multi{
   flex-direction:column;align-items:stretch;gap:0;
   padding:var(--space-10) var(--space-18) var(--space-8);
@@ -154,8 +154,8 @@
    shut, some searched; a node with nothing openable wears none. */
 /* `pulse-active` is declared in `workflow.css`, so the hero and the Optimizer card share one language. */
 .wf-hero-multi-node .node.active{fill:var(--color-success);stroke:var(--color-success);filter:drop-shadow(0 0 7px rgba(var(--color-success-rgb),0.55));animation:pulse-active 1.6s ease-in-out infinite}
-.wf-hero-multi-node .node-lock .body{fill:var(--color-text-tertiary)}
-.wf-hero-multi-node .node-lock .shackle{fill:none;stroke:var(--color-text-tertiary);stroke-width:1.5;stroke-linecap:round}
+.wf-hero-multi-node .node-lock .body{fill:var(--color-text-secondary)}
+.wf-hero-multi-node .node-lock .shackle{fill:none;stroke:var(--color-text-secondary);stroke-width:1.5;stroke-linecap:round}
 .wf-hero-multi-node .node-lock.is-open .body,
 .wf-hero-multi-node .node-lock.is-open .shackle{opacity:.7}
 .wf-hero-multi-node:hover .node-lock .body{fill:var(--color-text-secondary)}
@@ -167,8 +167,8 @@
 .wf-hero-multi-node:hover .node-reach{opacity:.9}
 .wf-hero-multi-node .node-reach.active{stroke:var(--color-success);opacity:.95}
 /* Not a lock in either state: the node's knobs are real, they just live in another cycle. */
-.wf-hero-multi-node .node-nest .frame{fill:none;stroke:var(--color-text-tertiary);stroke-width:1.4}
-.wf-hero-multi-node .node-nest .inner{fill:var(--color-text-tertiary);opacity:.7}
+.wf-hero-multi-node .node-nest .frame{fill:none;stroke:var(--color-text-secondary);stroke-width:1.4}
+.wf-hero-multi-node .node-nest .inner{fill:var(--color-text-secondary);opacity:.7}
 .wf-hero-multi-node .node-nest.selected .frame{stroke:var(--color-accent)}
 .wf-hero-multi-node .node-nest.selected .inner{fill:var(--color-accent)}
 .wf-hero-multi-node:hover .node-nest .frame{stroke:var(--color-text-secondary)}
@@ -179,13 +179,13 @@
 .wf-hero-multi-node .node-nest.active{animation:pulse-active 1.6s ease-in-out infinite}
 /* One rule set for the whole served kind vocabulary — every surface draws these dots, so a
    kind styled anywhere else is a kind styled on one surface and not the others. */
-.wf-hero-multi-node .node.kind-measurement{fill:var(--color-text-tertiary);stroke:var(--color-text-tertiary);filter:drop-shadow(0 0 3px rgba(var(--color-accent-rgb),0.25))}
+.wf-hero-multi-node .node.kind-measurement{fill:var(--color-text-secondary);stroke:var(--color-text-secondary);filter:drop-shadow(0 0 3px rgba(var(--color-accent-rgb),0.25))}
 .wf-hero-multi-node .node.kind-tool{fill:var(--color-accent);opacity:.85}
 .wf-hero-multi-node .node.kind-retriever{fill:var(--color-accent);opacity:.85}
-.wf-hero-multi-node .node.kind-cache{fill:var(--color-text-tertiary);stroke:var(--color-text-tertiary);filter:drop-shadow(0 0 2px rgba(var(--color-accent-rgb),0.25))}
+.wf-hero-multi-node .node.kind-cache{fill:var(--color-text-secondary);stroke:var(--color-text-secondary);filter:drop-shadow(0 0 2px rgba(var(--color-accent-rgb),0.25))}
 .wf-hero-multi-node .node-label{font-size:var(--text-xs);font-weight:500;fill:var(--color-text-primary);font-family:var(--font-mono);pointer-events:none}
-.wf-hero-multi-node .node-sub{font-size:var(--text-xs);fill:var(--color-text-tertiary);font-family:var(--font-mono);pointer-events:none}
-.wf-hero-multi-tag{font-size:var(--text-xs);font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--color-text-tertiary);text-align:center;padding-bottom:4px;font-family:var(--font-mono);opacity:.8}
+.wf-hero-multi-node .node-sub{font-size:var(--text-xs);fill:var(--color-text-secondary);font-family:var(--font-mono);pointer-events:none}
+.wf-hero-multi-tag{font-size:var(--text-xs);font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--color-text-secondary);text-align:center;padding-bottom:4px;font-family:var(--font-mono)}
 /* Runs ONCE, before the loop: it recedes so the eye lands on what repeats. */
 .wf-hero-multi-node.muted{opacity:.42}
 .wf-hero-multi-node.muted:hover,
@@ -251,25 +251,25 @@
 .chat-input-row{padding:var(--space-14) var(--space-18);display:flex;gap:var(--space-8);align-items:flex-end}
 .chat-attach{background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);padding:0;width:40px;height:40px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;transition:background .15s,color .15s,border-color .15s;flex-shrink:0}
 .chat-attach:hover:not(:disabled){background:var(--color-background-hover);color:var(--color-accent);border-color:var(--color-accent)}
-.chat-attach:disabled{opacity:.55;cursor:not-allowed}
+.chat-attach:disabled{opacity:.5;cursor:not-allowed}
 /* The FIELD is the frame and the textarea is bare, so Tools can sit in the input's corner. */
 .chat-field{flex:1;min-width:0;display:flex;align-items:flex-end;background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:8px;transition:border-color .15s}
 .chat-field:focus-within{border-color:var(--color-accent)}
 .chat-input{flex:1;min-width:0;background:transparent;border:0;padding:var(--space-10) var(--space-12);font-family:var(--font-sans);font-size:var(--text-md);color:var(--color-text-primary);resize:none;min-height:40px;max-height:120px;outline:none}
-.chat-input:disabled{opacity:.55;cursor:not-allowed}
+.chat-input:disabled{opacity:.5;cursor:not-allowed}
 /* In FLOW, not absolute: an absolute chip leaves the row, and the textarea loses both the chip's
    width and the padding reserved to clear it. */
 .chat-tools-wrap{margin:0 var(--space-6) var(--space-8) 0}
-.chat-tools{display:inline-flex;align-items:center;gap:var(--space-4);padding:2px var(--space-4);background:transparent;border:0;border-radius:5px;color:var(--color-text-tertiary);opacity:.55;font-family:var(--font-sans);font-size:var(--text-xs);line-height:1;cursor:pointer;white-space:nowrap;transition:opacity .15s,color .15s}
-.chat-tools:hover{opacity:1;color:var(--color-text-secondary)}
-.chat-tools[aria-expanded="true"]{opacity:1;color:var(--color-accent)}
-.chat-tools:focus-visible{opacity:1;outline:2px solid var(--color-accent);outline-offset:1px}
+.chat-tools{display:inline-flex;align-items:center;gap:var(--space-4);padding:2px var(--space-4);background:transparent;border:0;border-radius:5px;color:var(--color-text-secondary);font-family:var(--font-sans);font-size:var(--text-xs);line-height:1;cursor:pointer;white-space:nowrap;transition:color .15s}
+.chat-tools:hover{color:var(--color-text-primary)}
+.chat-tools[aria-expanded="true"]{color:var(--color-accent)}
+.chat-tools:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
 /* Capped to the viewport so a phone never opens it off-screen. */
 .chat-tools-panel{width:min(340px,calc(100vw - 32px));padding:var(--space-6) var(--space-12) var(--space-10)}
 .chat-tools-err{margin:var(--space-6) 0 0;font-size:var(--text-sm);color:var(--color-danger)}
 .chat-send{background:var(--color-accent);color:var(--color-text-on-accent);border:none;border-radius:8px;padding:var(--space-10) var(--space-18);font-size:var(--text-md);font-weight:600;cursor:pointer;transition:background .15s,color .15s}
 .chat-send:hover:not(:disabled){background:var(--color-accent-strong);color:#fff}
-.chat-send:disabled{opacity:.55;cursor:not-allowed}
+.chat-send:disabled{opacity:.5;cursor:not-allowed}
 /* Fires on touch tablets at desktop widths, above the 640px band. */
 @media (pointer:coarse){
   .chat-input{font-size:var(--text-xl);min-height:44px}
@@ -291,13 +291,13 @@
 }
 .chat-msg.user-file .file-chip svg{color:var(--color-text-primary);flex-shrink:0}
 .chat-msg.user-file .file-chip .name{font-weight:500}
-.chat-msg.user-file .file-chip .meta{color:var(--color-text-tertiary)}
+.chat-msg.user-file .file-chip .meta{color:var(--color-text-secondary)}
 .chat-input-row.is-dragover{outline:2px dashed var(--color-accent);outline-offset:-4px;border-radius:8px;background:var(--color-background-hover)}
 .chat-cta-btn{background:var(--color-accent);color:var(--color-text-on-accent);border:none;border-radius:8px;padding:var(--space-8) var(--space-16);font-size:var(--text-md);font-weight:600;cursor:pointer;transition:background .15s,color .15s}
 .chat-cta-btn:hover:not(:disabled){background:var(--color-accent-strong);color:#fff}
 .chat-cta-btn:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
 /* On touch a disabled CTA would otherwise look live, and a tap would die silently. */
-.chat-cta-btn:disabled{opacity:.55;cursor:not-allowed}
+.chat-cta-btn:disabled{opacity:.5;cursor:not-allowed}
 .chat-cta-btn.secondary{background:transparent;color:var(--color-accent);border:1px solid var(--color-accent)}
 .chat-cta-btn.secondary:hover:not(:disabled){background:var(--color-background-hover);color:var(--color-accent)}
 .chat-msg.chat-collision{display:flex;flex-direction:column;gap:var(--space-10)}
@@ -305,8 +305,8 @@
 /* "Replace" is data-safe but supersedes, so it reads as the cautionary choice, not a primary CTA. */
 .chat-cta-btn.chat-collision-replace{background:transparent;color:var(--color-text-secondary);border:1px solid var(--color-border)}
 .chat-cta-btn.chat-collision-replace:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
-.chat-collision-cancel{background:none;border:0;color:var(--color-text-tertiary);font-size:var(--text-base);cursor:pointer;padding:var(--space-6) var(--space-4)}
-.chat-collision-cancel:hover{color:var(--color-text-secondary)}
+.chat-collision-cancel{background:none;border:0;color:var(--color-text-secondary);font-size:var(--text-base);cursor:pointer;padding:var(--space-6) var(--space-4)}
+.chat-collision-cancel:hover{color:var(--color-text-primary)}
 .chat-collision-cancel:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:4px}
 .chat-msg.chat-msg-error{border:1px solid var(--color-danger-border);color:var(--color-danger)}
 .chat-msg.chat-msg-warn{border:1px solid var(--color-warn-border);background:var(--color-warn-bg);color:var(--color-warn)}
@@ -319,15 +319,15 @@
 .chat-msg.ingest-picklist,.chat-msg.ingest-ready{max-width:100%;width:100%;align-self:stretch;background:none;border:0;padding:0}
 .ingest-picklist{display:flex;flex-direction:column;gap:var(--space-12)}
 .ingest-picklist-group{display:flex;flex-direction:column;gap:var(--space-6)}
-.ingest-picklist-head{font-size:var(--text-sm);letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-tertiary);font-weight:600}
+.ingest-picklist-head{font-size:var(--text-sm);letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-secondary);font-weight:600}
 .ingest-picklist-items{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px}
 /* Cap each menu to 8 rows (row ≈ 33px + 3px gap); scroll beyond. */
 .ingest-picklist-scroll{max-height:284px;overflow-y:auto;padding-right:4px}
 .ingest-pick-btn{width:100%;display:flex;align-items:center;justify-content:space-between;gap:var(--space-12);background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:6px;padding:var(--space-6) var(--space-12);font-size:var(--text-md);color:var(--color-text-primary);cursor:pointer;text-align:left;transition:background .15s,border-color .15s}
 .ingest-pick-btn:hover:not(:disabled){background:var(--color-background-hover);border-color:var(--color-accent)}
 .ingest-pick-btn:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
-.ingest-pick-btn:disabled{opacity:.55;cursor:not-allowed}
-.ingest-pick-meta{flex-shrink:0;font-size:var(--text-sm);color:var(--color-text-tertiary)}
+.ingest-pick-btn:disabled{opacity:.5;cursor:not-allowed}
+.ingest-pick-meta{flex-shrink:0;font-size:var(--text-sm);color:var(--color-text-secondary)}
 .ingest-ready{display:flex;flex-direction:column;gap:var(--space-12)}
 /* A section here is a heading over a hairline, never a second card inside the panel. */
 .ingest-ready > :is(.setup-preview,.origin-checkin){padding:var(--space-14) 0 0;border:0;border-top:0.5px solid var(--color-border);border-radius:0;background:none}
@@ -343,11 +343,11 @@
 .ingest-dependency-title{font-weight:600;font-size:var(--text-md);color:var(--color-text-primary)}
 .ingest-dependency-status{flex-shrink:0;font-size:var(--text-sm);font-weight:600}
 .ingest-dependency-status.missing{color:var(--color-accent)}
-.ingest-dependency-status.ok{color:var(--color-text-tertiary)}
+.ingest-dependency-status.ok{color:var(--color-text-secondary)}
 .ingest-dependency-hint{font-size:var(--text-base);color:var(--color-text-secondary);margin:0;line-height:1.45}
 .ingest-dependency-actions{display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--space-10)}
 .ingest-dependency-build{display:flex;align-items:flex-end;gap:var(--space-8)}
-.ingest-dependency-build-label{display:flex;flex-direction:column;gap:var(--space-4);font-size:var(--text-sm);color:var(--color-text-tertiary);font-weight:600}
+.ingest-dependency-build-label{display:flex;flex-direction:column;gap:var(--space-4);font-size:var(--text-sm);color:var(--color-text-secondary);font-weight:600}
 .ingest-dependency-select{background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:6px;padding:var(--space-6) var(--space-8);font-size:var(--text-base);color:var(--color-text-primary);min-width:140px}
 .ingest-dependency-select:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
 .ingest-dependency .chat-cta-btn{align-self:flex-end}
@@ -370,15 +370,15 @@
 .toggle::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--color-text-secondary);transition:left .15s,background .15s}
 .toggle.on{background:var(--color-accent)}
 .toggle.on::after{left:16px;background:var(--color-text-on-accent)}
-.toggle.locked{cursor:not-allowed;opacity:.4;pointer-events:none}
+.toggle.locked{cursor:not-allowed;opacity:.5;pointer-events:none}
 /* Muted, not accent: it reads "later", not "new" (frontend-surface-contract.md § I3). */
-.soon-tag{display:inline-block;font-size:var(--text-xs);font-weight:700;letter-spacing:.08em;padding:1px var(--space-6);border-radius:4px;background:var(--color-border);color:var(--color-text-tertiary);margin-left:8px;text-transform:uppercase;vertical-align:middle}
+.soon-tag{display:inline-block;font-size:var(--text-xs);font-weight:700;letter-spacing:.08em;padding:1px var(--space-6);border-radius:4px;background:var(--color-border);color:var(--color-text-secondary);margin-left:8px;text-transform:uppercase;vertical-align:middle}
 
 .chat-live{display:flex;flex-direction:column;gap:var(--space-6)}
 .chat-activity{display:flex;align-items:baseline;gap:var(--space-8);font-family:var(--font-mono);font-size:var(--text-sm);line-height:1.5;color:var(--color-text-secondary)}
-.chat-activity-icon{flex-shrink:0;width:1.1em;text-align:center;color:var(--color-text-tertiary)}
+.chat-activity-icon{flex-shrink:0;width:1.1em;text-align:center;color:var(--color-text-secondary)}
 .chat-activity-label{color:var(--color-text-primary)}
-.chat-activity-detail{color:var(--color-text-tertiary)}
+.chat-activity-detail{color:var(--color-text-secondary)}
 .chat-activity.tone-good .chat-activity-icon{color:var(--color-success)}
 .chat-activity.tone-warn .chat-activity-icon{color:var(--color-accent)}
 .chat-activity.tone-bad .chat-activity-icon{color:var(--color-danger)}
@@ -402,7 +402,7 @@
 .chat-decision-btn{padding:var(--space-6) var(--space-14);border-radius:6px;font-size:var(--text-base);font-weight:500;cursor:pointer;border:1px solid var(--color-border);background:var(--color-background-secondary);color:var(--color-text-primary);transition:background .15s,border-color .15s}
 .chat-decision-btn:hover:not(:disabled){border-color:var(--color-accent)}
 .chat-decision-btn:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
-.chat-decision-btn:disabled{opacity:.55;cursor:not-allowed}
+.chat-decision-btn:disabled{opacity:.5;cursor:not-allowed}
 .chat-decision-btn.btn-primary{border-color:var(--color-accent);background:var(--color-accent);color:var(--color-text-on-accent)}
 .chat-decision-btn.btn-danger{border-color:var(--color-danger-border);color:var(--color-danger)}
 .chat-decision-err{margin:0;font-size:var(--text-sm);color:var(--color-danger)}
@@ -420,41 +420,41 @@
 /* Wraps rather than clips: `overflow:hidden` on a nowrap row cuts the numbers silently. */
 .run-box-head{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap;min-height:20px}
 .run-box-head>*{flex:0 0 auto}
-.run-box-note{margin:0;font-size:var(--text-sm);color:var(--color-text-tertiary)}
+.run-box-note{margin:0;font-size:var(--text-sm);color:var(--color-text-secondary)}
 
 .run-headline{flex:0 1 auto;margin:0;margin-right:auto;display:flex;align-items:baseline;gap:var(--space-4);flex-wrap:nowrap;min-width:0;font-size:var(--text-xs);color:var(--color-text-secondary)}
 .run-headline strong{font-family:var(--font-mono);font-size:var(--text-md);font-weight:600;color:var(--color-text-primary)}
-.run-headline-unit{font-size:var(--text-xs);color:var(--color-text-tertiary)}
+.run-headline-unit{font-size:var(--text-xs);color:var(--color-text-secondary)}
 .run-headline-sep{color:var(--color-border)}
 .run-headline-lift,.run-headline-acc{font-family:var(--font-mono);color:var(--color-text-primary)}
-.run-headline-was{color:var(--color-text-tertiary)}
+.run-headline-was{color:var(--color-text-secondary)}
 /* Quietest weight: a stopped arm is the normal outcome of elimination. */
-.run-headline-cut{font-size:var(--text-xs);color:var(--color-text-tertiary)}
+.run-headline-cut{font-size:var(--text-xs);color:var(--color-text-secondary)}
 /* A dotted rule, NOT `cursor:help`: the OS help cursor reads as an error state. */
 .run-headline-acc,.run-flip-line{text-decoration:underline dotted var(--color-border);text-underline-offset:3px}
 .run-headline-acc:focus-visible,.run-flip-line:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:3px}
 .run-lift-card{max-width:280px}
 .run-lift-bench{margin:0 0 3px;font-family:var(--font-mono);font-size:var(--text-sm);color:var(--color-text-primary)}
-.run-lift-note{margin:0;font-size:var(--text-xs);line-height:1.45;color:var(--color-text-tertiary)}
+.run-lift-note{margin:0;font-size:var(--text-xs);line-height:1.45;color:var(--color-text-secondary)}
 .run-lift-note+.run-lift-note{margin-top:4px}
 
 .run-diff>summary{cursor:pointer;display:flex;flex-direction:column;gap:2px;list-style:revert}
 .run-diff>summary:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:4px}
-.run-diff-label{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-tertiary)}
+.run-diff-label{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-secondary)}
 .run-diff-changes{display:flex;flex-wrap:wrap;gap:3px var(--space-10);font-size:var(--text-sm);line-height:1.45;color:var(--color-text-primary)}
 .run-diff-group{display:flex;align-items:baseline;gap:var(--space-4);min-width:0}
-.run-diff-key{flex:0 0 auto;font-size:var(--text-xs);color:var(--color-text-tertiary)}
-.run-diff-node{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-tertiary)}
-.run-diff-verdict{font-size:var(--text-xs);line-height:1.4;color:var(--color-text-tertiary)}
+.run-diff-key{flex:0 0 auto;font-size:var(--text-xs);color:var(--color-text-secondary)}
+.run-diff-node{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-secondary)}
+.run-diff-verdict{font-size:var(--text-xs);line-height:1.4;color:var(--color-text-secondary)}
 .run-diff[open]>summary{margin-bottom:6px}
 
 .run-facts{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 var(--space-4);font-size:var(--text-xs);line-height:1.6;color:var(--color-text-secondary)}
-.run-fact-label{color:var(--color-text-tertiary)}
+.run-fact-label{color:var(--color-text-secondary)}
 .run-fact-note{margin:0;white-space:pre-wrap}
 
 /* ONE wrapping row: the four segments are one partition, and stacked they read as four claims. */
 .run-flips{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 var(--space-4);font-size:var(--text-xs);line-height:1.6}
-.run-flip-ref,.run-flip-total,.run-flip-same,.run-flip-sep{color:var(--color-text-tertiary)}
+.run-flip-ref,.run-flip-total,.run-flip-same,.run-flip-sep{color:var(--color-text-secondary)}
 .run-flip-sep{color:var(--color-border)}
 .run-flip-line{margin:0;color:var(--color-text-secondary)}
 .run-flip-line strong{font-family:var(--font-mono);color:var(--color-text-primary)}
@@ -464,22 +464,22 @@
 .run-flip-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;font-size:var(--text-xs)}
 .run-flip-list li{display:flex;align-items:baseline;gap:var(--space-6);white-space:nowrap}
 .run-flip-id{font-family:var(--font-mono);color:var(--color-text-primary);flex:0 0 auto}
-.run-flip-was{font-family:var(--font-mono);color:var(--color-text-tertiary);text-decoration:line-through}
+.run-flip-was{font-family:var(--font-mono);color:var(--color-text-secondary);text-decoration:line-through}
 .run-flip-now{font-family:var(--font-mono);color:var(--color-text-primary)}
-.run-flip-gt{margin-left:auto;color:var(--color-text-tertiary)}
+.run-flip-gt{margin-left:auto;color:var(--color-text-secondary)}
 
 /* A WINDOW, not a list: three rows, a gutter to slide them, the roster's shape beside;
    `flex-wrap` folds the spread on a narrow thread, so no breakpoint of its own. */
 .hsp{display:flex;flex-direction:column;gap:var(--space-4)}
-.hsp-note{margin:0;font-size:var(--text-sm);color:var(--color-text-tertiary)}
+.hsp-note{margin:0;font-size:var(--text-sm);color:var(--color-text-secondary)}
 .hsp-walk{display:flex;align-items:stretch;gap:var(--space-10);flex-wrap:wrap}
 
 /* The gutter IS the axis: ▲ past, ▼ future. */
 .hsp-nav{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:1px}
 .hsp-nav-line{flex:1 1 auto;width:1px;background:var(--color-border);min-height:4px}
-.hsp-nav-btn{background:none;border:0;padding:0;width:14px;font:inherit;font-size:var(--text-xs);line-height:1;color:var(--color-text-tertiary);cursor:pointer}
+.hsp-nav-btn{background:none;border:0;padding:0;width:14px;font:inherit;font-size:var(--text-xs);line-height:1;color:var(--color-text-secondary);cursor:pointer}
 .hsp-nav-btn:hover:not(:disabled){color:var(--color-accent)}
-.hsp-nav-btn:disabled{opacity:.28;cursor:default}
+.hsp-nav-btn:disabled{opacity:.5;cursor:default}
 .hsp-nav-btn:focus-visible,.hsp-nav-home:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
 .hsp-nav-home{background:none;border:0;padding:0;width:14px;font:inherit;font-size:var(--text-xs);line-height:1;color:var(--color-accent);cursor:pointer}
 
@@ -489,7 +489,7 @@
 .hsp-row+.hsp-row{border-top:1px solid var(--color-border)}
 .hsp-row:nth-child(even){background:var(--color-background-tint)}
 .hsp-row.is-now{background:rgba(var(--color-accent-rgb),0.10)}
-.hsp-mark{flex:0 0 auto;width:1em;text-align:center;color:var(--color-text-tertiary)}
+.hsp-mark{flex:0 0 auto;width:1em;text-align:center;color:var(--color-text-secondary)}
 .hsp-row.is-now .hsp-mark{color:var(--color-accent)}
 .hsp-row.is-done .hsp-mark{color:var(--color-success)}
 .hsp-id{font-family:var(--font-mono);color:var(--color-text-primary);flex:0 0 auto;min-width:3.6em}
@@ -498,20 +498,20 @@
 .hsp-rate.is-never{color:var(--color-danger)}
 .hsp-rate.is-partly{color:var(--color-warn)}
 .hsp-rate.is-always{color:var(--color-success)}
-.hsp-tag{margin-left:auto;font-size:var(--text-xs);letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-tertiary);flex:0 0 auto}
+.hsp-tag{margin-left:auto;font-size:var(--text-xs);letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-secondary);flex:0 0 auto}
 .hsp-row.is-now .hsp-tag{color:var(--color-accent)}
 
 /* The spread IS the control that opens the roster. */
 .hsp-spread{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:1px var(--space-8);border:0;border-left:1px solid var(--color-border);background:none;font:inherit;text-align:left;cursor:pointer}
 .hsp-spread:hover{background:var(--color-background-hover)}
 .hsp-spread:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
-.hsp-b{display:flex;align-items:baseline;gap:var(--space-4);font-size:var(--text-xs);line-height:1.7;color:var(--color-text-tertiary)}
+.hsp-b{display:flex;align-items:baseline;gap:var(--space-4);font-size:var(--text-xs);line-height:1.7;color:var(--color-text-secondary)}
 .hsp-b strong{font-family:var(--font-mono);color:var(--color-text-primary)}
 .hsp-dot{width:6px;height:6px;border-radius:50%;align-self:center;flex:0 0 auto}
 .hsp-b.is-never .hsp-dot{background:var(--color-danger)}
 .hsp-b.is-partly .hsp-dot{background:var(--color-warn)}
 .hsp-b.is-always .hsp-dot{background:var(--color-success)}
-.hsp-of{font-size:var(--text-xs);color:var(--color-text-tertiary)}
+.hsp-of{font-size:var(--text-xs);color:var(--color-text-secondary)}
 .hsp-full{margin-top:var(--space-4)}
 
 .chat-msg.run-summary-item{max-width:100%;width:100%;align-self:stretch;display:flex;flex-direction:column;gap:var(--space-4)}

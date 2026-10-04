@@ -31,7 +31,7 @@
 .cmp-verdict-scorer {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
 }
 .cmp-verdict-notes {
   margin: 0;
@@ -84,7 +84,7 @@
 .cmp-channel-sub {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -100,7 +100,7 @@
 .cmp-channel-close {
   grid-column: 5;
   grid-row: 1;
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
 }
 /* Level with the metrics' labels: the cost is read against the headline beside it. */
 .cmp-channel-cost {
@@ -115,7 +115,7 @@
 }
 .cmp-metric-label {
   font-size: var(--text-xs);
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -184,7 +184,7 @@
   padding-left: 0;
   background: var(--color-background-primary);
   font-size: var(--text-xs);
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -229,7 +229,7 @@
   font-variant-numeric: tabular-nums;
 }
 .cmp-line-round {
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
 }
 .cmp-line-score {
   justify-self: end;
@@ -247,10 +247,10 @@
   color: var(--color-text-secondary);
 }
 .cmp-line-step.is-held {
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
 }
 .cmp-line-step.is-held .cmp-line-change {
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
 }
 /* The main line's key, taught on hover. */
 .cmp-line-key {
@@ -299,7 +299,7 @@
   gap: var(--space-4);
 }
 .cmp-channel-facts dt {
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
 }
 .cmp-channel-facts dd {
   margin: 0;
@@ -341,7 +341,7 @@
   font-family: var(--font-mono);
 }
 .cmp-button[disabled] {
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   cursor: default;
 }
 
@@ -367,7 +367,7 @@
   white-space: nowrap;
 }
 .cmp-cfg-band th {
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   font-weight: inherit;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -381,7 +381,7 @@
 }
 .cmp-cfg-val {
   font-family: var(--font-mono);
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   /* ONE line, the whole value on `title`. No line-clamp: a `-webkit-box` would take the restore
      button with it. */
   max-width: 22rem;
@@ -396,7 +396,7 @@
   gap: var(--space-6);
   cursor: pointer;
   font-size: var(--text-xs);
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   font-family: var(--font-mono);
 }
 /* Controls OUTSIDE `<summary>`, a label that may hold neither a menu's markup nor its words in its
@@ -449,7 +449,7 @@
 }
 /* Nothing ran at the edited value, so the level is not a small number — it is no number. */
 .cmp-channel-unknown .cmp-metric-num {
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
 }
 
 .cmp-spines {
@@ -467,7 +467,7 @@
   flex: 0 0 auto;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
 }
 .cmp-spine-chain {
   display: flex;
@@ -485,7 +485,7 @@
   gap: var(--space-4);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
 }
 .cmp-spine-node + .cmp-spine-node::before {
   content: "→";
@@ -517,7 +517,7 @@
   padding: var(--space-4) var(--space-10);
 }
 .cmp-link[disabled] {
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   cursor: default;
 }
 
@@ -551,7 +551,7 @@
   border: 1px solid var(--color-border);
   border-radius: 4px;
   padding: 0 var(--space-4);
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   font-size: var(--text-xs);
 }
 .cmp-row-muted {
@@ -565,7 +565,7 @@
 }
 .cmp-row-nested {
   padding-left: var(--space-16);
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
 }
 
 /* Wide by construction: it scrolls inside its own box rather than forcing the page wide. */
@@ -592,7 +592,7 @@
 .cmp-coverage-cell {
   width: 1.1rem;
   text-align: center;
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   border: 1px solid var(--color-border);
 }
 .cmp-coverage-cell.is-scored {

@@ -4,7 +4,7 @@
 
 /* Unconstrained: the viewport (family-tree.css) scrolls when the forks exceed the band. */
 .forest-card{margin-bottom:14px;width:100%}
-.forest-close{background:transparent;border:0;color:var(--color-text-tertiary);cursor:pointer;font-size:var(--text-xl);line-height:1;padding:0 var(--space-4)}
+.forest-close{background:transparent;border:0;color:var(--color-text-secondary);cursor:pointer;font-size:var(--text-xl);line-height:1;padding:0 var(--space-4)}
 .forest-close:hover{color:var(--color-text-primary)}
 /* A plain block: the shared card-title's space-between fights the toolbar's own spacer. */
 .cand-card > .card-title{display:block;margin-bottom:10px}
@@ -25,7 +25,7 @@
 .cand-view-count{font-size:var(--text-xs);font-weight:700;line-height:1;font-family:var(--font-mono)}
 .fitness-chart-frame{position:relative;height:160px;width:100%;max-width:100%;margin:0 auto;min-width:0}
 /* The swatch reads the series' `--ink`, set inline from the one token `series.ts` names. */
-.fitness-legend{display:flex;justify-content:center;gap:var(--space-14);font-size:var(--text-xs);color:var(--color-text-tertiary);font-family:var(--font-mono);margin-bottom:var(--space-8)}
+.fitness-legend{display:flex;justify-content:center;gap:var(--space-14);font-size:var(--text-xs);color:var(--color-text-secondary);font-family:var(--font-mono);margin-bottom:var(--space-8)}
 .fitness-legend .swatch{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:var(--space-4);vertical-align:middle;background:var(--ink)}
 /* Hollow, matching the bar: corroboration of a series, not a rival of it. */
 .fitness-legend .swatch.hollow{background:transparent;border:1.5px solid var(--ink)}
@@ -43,40 +43,40 @@
 /* Winner filled, eliminated hollow — the state pairs with the fill, never with
    colour alone (the aria-label carries it too). */
 .cand-dendro-dot.winner{fill:var(--color-accent);stroke:var(--color-accent)}
-.cand-dendro-dot.eliminated{fill:var(--color-background-primary);stroke:var(--color-text-tertiary)}
+.cand-dendro-dot.eliminated{fill:var(--color-background-primary);stroke:var(--color-text-secondary)}
 /* A fork bar's dot — a sibling course, not a candidate: dashed ring, no fill claim. */
-.cand-dendro-dot.fork{fill:var(--color-background-primary);stroke:var(--color-text-tertiary);stroke-dasharray:2 1.5}
+.cand-dendro-dot.fork{fill:var(--color-background-primary);stroke:var(--color-text-secondary);stroke-dasharray:2 1.5}
 .cand-dendro-hit:hover .cand-dendro-dot{r:4.5}
 .cand-dendro-hit.selected .cand-dendro-dot{fill:var(--color-selection);stroke:var(--color-selection)}
 .cand-dendro-hit:focus-visible .cand-dendro-dot{stroke:var(--color-accent);filter:drop-shadow(0 0 5px var(--color-accent-glow))}
 .cand-dendro-fork{cursor:pointer;outline:none}
-.cand-dendro-fork-glyph{fill:var(--color-text-tertiary);font-size:var(--text-xs);text-anchor:middle}
+.cand-dendro-fork-glyph{fill:var(--color-text-secondary);font-size:var(--text-xs);text-anchor:middle}
 .cand-dendro-fork:hover .cand-dendro-fork-glyph,.cand-dendro-fork:focus-visible .cand-dendro-fork-glyph{fill:var(--color-accent)}
 .ss-control{display:flex;flex-direction:column;gap:var(--space-6);padding:var(--space-6) var(--space-8);margin-bottom:var(--space-6);border:0.5px solid var(--color-new-border);border-radius:3px}
 .ss-strip{display:flex;flex-wrap:wrap;gap:3px}
 /* One cell carries THREE facts at once: selected is the fill, coverage the opacity, and a cell
    on the served overlap set is underlined in the overlap ink. */
-.ss-cell{min-width:22px;padding:1px var(--space-4);border:0.5px solid var(--color-border);border-radius:2px;background:var(--color-background-secondary);color:var(--color-text-tertiary);font-family:var(--font-mono);font-size:var(--text-xs);cursor:pointer;opacity:.55}
-.ss-cell.everywhere{color:var(--color-text-secondary);opacity:1}
+.ss-cell{min-width:22px;padding:1px var(--space-4);border:0.5px solid var(--color-border);border-radius:2px;background:var(--color-background-secondary);color:var(--color-text-secondary);font-family:var(--font-mono);font-size:var(--text-xs);cursor:pointer}
+.ss-cell.everywhere{color:var(--color-text-primary)}
 .ss-cell.on{border-color:var(--color-new-border);background:var(--color-new-bg);color:var(--color-new);font-weight:600}
 .ss-cell.shared{text-decoration:underline;text-decoration-color:var(--color-overlap);text-underline-offset:2px}
 .ss-row{display:flex;align-items:center;gap:var(--space-6);flex-wrap:wrap}
 .ss-action{padding:1px var(--space-8);border:0.5px solid var(--color-border);border-radius:2px;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-secondary)}
-.ss-label{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-tertiary)}
-.ss-count{margin-left:auto;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-tertiary)}
-.ss-detail-toggle{align-self:flex-start;padding:0;border:0;background:transparent;cursor:pointer;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-tertiary);text-decoration:underline}
+.ss-label{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-secondary)}
+.ss-count{margin-left:auto;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-secondary)}
+.ss-detail-toggle{align-self:flex-start;padding:0;border:0;background:transparent;cursor:pointer;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-secondary);text-decoration:underline}
 .ss-detail{display:flex;flex-direction:column;gap:var(--space-6)}
 .ability-help{max-width:260px;padding:2px var(--space-8) var(--space-6) var(--space-24);font-size:var(--text-xs);line-height:1.5;color:var(--color-text-secondary)}
 .ability-help p{margin:0 0 var(--space-8)}
 .ability-help p:last-child{margin-bottom:0}
 .ability-help strong{color:var(--color-text-primary)}
-.ability-help-calib{padding-top:6px;border-top:0.5px solid var(--color-border);color:var(--color-text-tertiary)}
+.ability-help-calib{padding-top:6px;border-top:0.5px solid var(--color-border);color:var(--color-text-secondary)}
 /* Rendered only while a caveat is live. Warn ink on the rule alone: a filled panel would
    outshout the bars it qualifies. */
 .theta-caveat{margin:0 0 var(--space-8);padding:var(--space-6) var(--space-8);border-left:2px solid var(--color-warn);font-size:var(--text-xs);line-height:1.5;color:var(--color-text-secondary)}
 .theta-caveat strong{color:var(--color-text-primary)}
-.theta-caveat-spans{color:var(--color-text-tertiary)}
-.theta-caveat-arms{margin:calc(var(--space-8) * -1) 0 var(--space-8);padding:0 var(--space-8) var(--space-6) calc(var(--space-8) + 2px);font-size:var(--text-xs);line-height:1.5;color:var(--color-text-tertiary)}
+.theta-caveat-spans{color:var(--color-text-secondary)}
+.theta-caveat-arms{margin:calc(var(--space-8) * -1) 0 var(--space-8);padding:0 var(--space-8) var(--space-6) calc(var(--space-8) + 2px);font-size:var(--text-xs);line-height:1.5;color:var(--color-text-secondary)}
 /* The wrap is locked to 432px (460px card − 28px padding) so the bars don't shift when the mask opens. */
 .fitness-chart-wrap{display:flex;flex-direction:column;width:100%;min-width:0}
 /* `.fitness-body` is display:contents so its children join the card's grid, letting the mask
@@ -105,8 +105,8 @@
 .mask-field{display:flex;flex-direction:column;gap:var(--space-4);margin-bottom:var(--space-10)}
 /* Set apart: pressing it mints a branch — the one control in this panel that spends. */
 .mask-apply{margin-top:var(--space-12);padding-top:var(--space-12);border-top:0.5px solid var(--color-border);display:flex;flex-direction:column;gap:var(--space-6);align-items:flex-start}
-.mask-legend{display:flex;flex-wrap:wrap;gap:var(--space-14);font-size:var(--text-xs);color:var(--color-text-tertiary);margin-bottom:14px;letter-spacing:.04em}
-.mask-legend .swatch{display:inline-block;width:13px;height:13px;border-radius:3px;vertical-align:middle;margin-right:5px;border:1.5px solid var(--color-text-tertiary);background:var(--color-background-secondary);text-align:center;line-height:11px;font-size:var(--text-xs);font-weight:900}
+.mask-legend{display:flex;flex-wrap:wrap;gap:var(--space-14);font-size:var(--text-xs);color:var(--color-text-secondary);margin-bottom:14px;letter-spacing:.04em}
+.mask-legend .swatch{display:inline-block;width:13px;height:13px;border-radius:3px;vertical-align:middle;margin-right:5px;border:1.5px solid var(--color-text-secondary);background:var(--color-background-secondary);text-align:center;line-height:11px;font-size:var(--text-xs);font-weight:900}
 .mask-legend .swatch.optional{border-style:dashed}
 .mask-legend .swatch.checked{color:var(--color-accent)}
 .mask-legend .swatch.active{
@@ -124,7 +124,7 @@
 .mask-dir{position:absolute;top:5px;right:6px;z-index:2;font-size:var(--text-sm);line-height:1}
 .mask-weight{display:flex;align-items:center;gap:var(--space-4);width:100%;min-height:18px;padding:0 var(--space-6) var(--space-8)}
 .mask-weight-range{flex:1;min-width:0;height:3px;accent-color:var(--color-accent);cursor:pointer}
-.mask-weight-val{font-size:var(--text-xs);font-family:var(--font-mono);color:var(--color-text-tertiary);min-width:22px;text-align:right}
+.mask-weight-val{font-size:var(--text-xs);font-family:var(--font-mono);color:var(--color-text-secondary);min-width:22px;text-align:right}
 /* Phone: one horizontally-scrolling row (the .wf-hero-flow pattern); tiles drop to ~70%. */
 @media (max-width:640px){
   .mask-grid-wrap{overflow-x:auto;overflow-y:hidden;max-height:none;padding:var(--space-6) 0;-webkit-overflow-scrolling:touch;scrollbar-width:none}

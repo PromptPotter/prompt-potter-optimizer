@@ -38,7 +38,7 @@ export const viewport: Viewport = {
   viewportFit: "cover",
   // `data-theme` cannot drive this; the OS scheme query is the closest signal.
   themeColor: [
-    { media: "(prefers-color-scheme: dark)", color: "#0d0d0d" },
+    { media: "(prefers-color-scheme: dark)", color: "#181818" },
     { media: "(prefers-color-scheme: light)", color: "#F5F1EA" },
   ],
 };

@@ -61,7 +61,7 @@
 
 .ms-dim,
 .cell-dim {
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   white-space: nowrap;
 }
 
@@ -104,7 +104,7 @@
 
 .ms-status.is-unsc,
 .cell-status.is-unsc {
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
 }
 
 
@@ -200,7 +200,7 @@
 
 .cell-span.terminal .cell-span-name::after {
   content: " ■";
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
 }
 
 .cell-span-name {

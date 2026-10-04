@@ -78,7 +78,7 @@ export const TrendChart = memo(function TrendChart({ compact = false }: { compac
     <CardFrame title={<span>Trend</span>} actions={<Badge>campaign</Badge>}>
       <div style={{ position: "relative", height: compact ? 64 : 140 }}>
         {points.length === 0 ? (
-          <div style={{ color: "var(--color-text-tertiary)", fontSize: "var(--text-sm)", padding: "var(--space-16)" }}>
+          <div style={{ color: "var(--color-text-secondary)", fontSize: "var(--text-sm)", padding: "var(--space-16)" }}>
             Trend builds up as rounds finish. Each completed round adds a point.
           </div>
         ) : (

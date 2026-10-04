@@ -84,7 +84,7 @@ const barCapsPlugin: Plugin<
       const topY = topOf(i);
       if (!Number.isFinite(topY)) return;
       ctx.font = `${getCss("--text-xs")} ${mono}`;
-      ctx.fillStyle = getCss("--color-text-tertiary");
+      ctx.fillStyle = getCss("--color-text-secondary");
       ctx.fillText(String(n), xScale.getPixelForValue(i), Math.max(topY - 4, chartArea.top + 10));
     });
     const w = opts?.parent;
@@ -432,7 +432,7 @@ export const FitnessChart = memo(function FitnessChart({
                 display: true,
                 text: "[θ]",
                 align: "end" as const,
-                color: getCss("--color-text-tertiary"),
+                color: getCss("--color-text-secondary"),
                 font: { size: 11 },
               },
             },

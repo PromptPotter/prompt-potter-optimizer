@@ -5,12 +5,12 @@
 .auth-chip-rust{background:var(--color-accent-strong);border-color:var(--color-accent-strong);color:#fff}
 .auth-link{color:var(--color-link);text-decoration:underline}
 .auth-link:hover{color:var(--color-link-hover)}
-.auth-legal-row{display:flex;justify-content:center;align-items:center;gap:var(--space-8);font-size:var(--text-sm);color:var(--color-text-tertiary)}
+.auth-legal-row{display:flex;justify-content:center;align-items:center;gap:var(--space-8);font-size:var(--text-sm);color:var(--color-text-secondary)}
 
 /* Shared by /login and the WelcomeLockoutModal overlay; owns its spacing so it drops into either. */
 .auth-core{display:flex;flex-direction:column;gap:var(--space-14);width:100%;text-align:left}
 .auth-note{margin:0;color:var(--color-text-secondary);line-height:1.55}
-.auth-fineprint{margin:-4px 0 0;font-size:var(--text-xs);color:var(--color-text-tertiary);line-height:1.5}
+.auth-fineprint{margin:-4px 0 0;font-size:var(--text-xs);color:var(--color-text-secondary);line-height:1.5}
 /* Popup-only: the showcase carries the pitch on /login. */
 .auth-headline{margin:0;font-size:var(--text-3xl);line-height:1.3;font-weight:500;color:var(--color-text-primary)}
 

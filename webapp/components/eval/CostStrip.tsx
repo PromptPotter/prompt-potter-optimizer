@@ -63,7 +63,7 @@ export const CostStrip = memo(function CostStrip() {
         {rounds.length === 0 ? (
           <div
             style={{
-              color: "var(--color-text-tertiary)",
+              color: "var(--color-text-secondary)",
               fontSize: "var(--text-sm)",
               padding: 16,
             }}

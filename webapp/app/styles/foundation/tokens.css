@@ -1,20 +1,23 @@
 /* A mirror of promptpotter-web/BRAND.md, never a second spec. */
 
 :root{
-  --color-background-primary:#1a1a1a; --color-background-secondary:#0d0d0d; --color-background-tertiary:#0d0d0d;
-  --color-background-hover:#1a1a1a;
+  color-scheme:dark;
+  /* Three steps: tertiary is the ground, primary a raised surface, secondary a well cut into either. */
+  --color-background-primary:#1f1f1f; --color-background-secondary:#141414; --color-background-tertiary:#181818;
+  --color-background-hover:#2a2a2a;
   --color-background-tint-active:#2a1f10;
   --color-background-tint-icon:#3a2a10;
-  --color-text-primary:#f3f4f6; --color-text-secondary:#9ca3af; --color-text-tertiary:#6b7280;
+  /* Two tiers, both clearing 4.5:1 on every background above, hover included. */
+  --color-text-primary:#ede9e1; --color-text-secondary:#b5afa5;
   --color-text-on-accent:#0d0d0d;
-  --color-border:#2a2a2a;
+  --color-border:#333333;
   --color-accent:#f59e0b; --color-accent-strong:#ea580c;
   --color-accent-rgb:245,158,11;
   --color-accent-glow:rgba(var(--color-accent-rgb),0.30);
   /* Cross-panel selection stroke; every panel highlight reads this one var. */
   --color-selection:#dc2626;
   /* A neutral mark, not a status colour: it reads as statistical range, not good/bad. */
-  --color-ci:#9ca3af;
+  --color-ci:#b5afa5;
   /* Violet sits outside the lava register on purpose: it rides the accuracy axis and must not
      read as a metric. */
   --color-cache:#a78bfa;
