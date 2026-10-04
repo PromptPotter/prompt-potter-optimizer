@@ -27,7 +27,8 @@ tree's interpreter answers for that other tree.
 capo by default) of one head-to-head, one of them after a foreign campaign on the dataset whose
 origin differs — the one layout that puts several optimizers' campaigns in ONE workspace, so the
 webapp's Compare tab can read them together. It fails
-unless a skip on an arm is refused, each arm's memory holds only runs it filed, and both arms'
+unless a skip on an arm is refused, an arm searches its prompt's fields alone, each arm's memory
+holds only runs it filed, and both arms'
 decisions are byte-identical with and without the foreign campaign; `head_to_head.json` beside
 them is the evidence read of all three.
 
@@ -83,9 +84,12 @@ re-key an inner cell leaves equal.
   it opens with, and answered in the form that template asks for — a `<prompt>` block, a fenced
   block, or an array.
 - **The knobs** are the dataset's `campaign.yaml` under the script's `BENCH` sizes. The template's
-  node overlay rides only the optimizer it selects; any other runs its manifest as declared, or
-  scaled down to the bank in `SCALED`, under a seeded determinism clamp: unseeded, its draws
-  follow the campaign's id, which every run mints anew, so two runs of one tree would differ.
+  node overlay rides only the optimizer it selects; any other takes its `SCALED` entry, which
+  sizes it to the bank, or runs its manifest as declared when it has none. A sampler that
+  declares a size knob draws `ROUND_CELLS` whichever optimizer runs. Any optimizer but the
+  template's runs under a seeded determinism clamp, and `--controlled` seeds every arm alike:
+  unseeded, draws follow the campaign's id, which every run mints anew, so two runs of one tree
+  would differ.
 
 **Adding an optimizer** needs nothing here: it runs as its manifest declares. `tests/test_numerics.py`
 § 4 runs one installed through its entry points alone, from `tests/fixtures/optimizer_plugin/`.

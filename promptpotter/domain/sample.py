@@ -44,6 +44,11 @@ class Sample(StrictModel):
     # the panel grew.
     source_pin: dict[str, JsonValue] | None = None
 
+    # Bench by DECLARATION: `partition_bank` holds the row out without ranking it, so a bank
+    # widened with these keeps the pools of the rows beside them. Where the row sits, never what
+    # it is — so it stays out of `key`, and a cell measured on it replays under any membership.
+    bench_only: bool = False
+
     # Cross-campaign metadata — accumulates via SampleIndex.ingest_run.
     run_ids: list[str] = Field(default_factory=list)
 

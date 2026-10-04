@@ -16,6 +16,7 @@ import { RoundAxis } from "@/components/workflow";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useSelection } from "@/lib/SelectionContext";
 import { useCycleEvents } from "@/lib/chat/useCycleEvents";
+import { benchPassActivity } from "@/lib/chat/activity";
 import { deriveDecision } from "@/lib/chat/decision";
 import { LiveSegment } from "@/components/chat/LiveSegment";
 import { RunCard } from "@/components/chat/RunCard";
@@ -67,7 +68,7 @@ export function ChatPane({ checkinCampaignId, onOpenDashboard }: Props) {
         campaignId={leafCampaignId}
         cycleId={leafCycleId}
         activity={live.activity}
-        progress={live.progress}
+        progress={(liveCycleKey ? benchPassActivity(dash?.bench_pass) : null) ?? live.progress}
         listening={live.connected && hasLiveProducer(dash?.run_phase)}
         decision={decision}
         hearts={dash?.run_standing?.stalls_left ?? null}

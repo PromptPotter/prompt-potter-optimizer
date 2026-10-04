@@ -85,6 +85,11 @@ def bank_campaign_result(
     )
 
 
+def _bench_counted(spend: SpendRollup) -> tuple[float, int]:
+    bench = spend.bench
+    return bench.incurred_usd, bench.input_tokens + bench.output_tokens
+
+
 async def bench_origin(
     session: Session,
     origin_sp: JobSearchPoint,
@@ -114,14 +119,16 @@ async def bench_origin(
     ):
         banked = held.model_copy(update={"selected": None})
     else:
-        usd_before, tokens_before = spend.total_incurred_usd, spend.total_tokens_used
-        origin_pass = await score_on_bench(session, origin_sp, round_num=0, cb=cb)
+        # The bench bucket's own delta: a search call landing while this pass is out is not reserve.
+        usd_before, tokens_before = _bench_counted(spend)
+        origin_pass = await score_on_bench(session, origin_sp, subject="origin", round_num=0, cb=cb)
         split = session.scoring.require_partition().split
+        usd_after, tokens_after = _bench_counted(spend)
         banked = BenchPasses(
             tolerance=split.tolerance if split is not None else 0,
             origin=origin_pass,
-            reserve_usd=spend.total_incurred_usd - usd_before,
-            reserve_tokens=spend.total_tokens_used - tokens_before,
+            reserve_usd=usd_after - usd_before,
+            reserve_tokens=tokens_after - tokens_before,
             selected=None,
         )
     bank_campaign_result(

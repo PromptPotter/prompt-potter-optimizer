@@ -36,8 +36,9 @@ from promptpotter.infrastructure.llm.rate_limit import throttle_stall_given_to
 from promptpotter.infrastructure.llm.registry import get_llm_client
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.spend_book import CallLabel
-from promptpotter.infrastructure.llm.telemetry import emit_token_usage
+from promptpotter.infrastructure.llm.telemetry import call_priced, emit_token_usage
 from promptpotter.infrastructure.store.stores import LLMReuseCache, hash_call
+from promptpotter.shared.errors import OptimizerTimeoutError
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
@@ -134,11 +135,10 @@ async def _chat_under_deadline(
 
             with throttle_stall_given_to(give_back):
                 return await llm_client.chat(**chat_kwargs)
-    except TimeoutError:
-        logger.error(
-            "optimizer call %s exceeded the %.0fs deadline — halting", node_label, budget_s
-        )
-        raise
+    except TimeoutError as exc:
+        raise OptimizerTimeoutError(
+            f"optimizer call {node_label} exceeded the {budget_s:.0f}s deadline"
+        ) from exc
 
 
 def _replay(cache: LLMReuseCache, key: str, *, label: str) -> LLMResponse | None:
@@ -358,7 +358,9 @@ async def llm_call(
     # A cache hit is metered too, flagged — it spends nothing, but the search still MADE the call,
     # so incurred cost stays invariant to our cache history and the always-warmest L4 origin arm
     # does not read as free. A fresh call was metered at its send, before anything here can fail.
-    if replayed is not None:
+    # Once per campaign: a resumed round replays the calls its own ledger already priced.
+    counted = cache_key is not None and call_priced(cache_key)
+    if replayed is not None and not counted:
         emit_token_usage(
             node=label,
             kind="optimizer",

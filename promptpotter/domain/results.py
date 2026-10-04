@@ -268,10 +268,9 @@ class ScoredCandidate(StrictModel):
     # candidate saw, so it explains a lower-accuracy winner. `None` outside the election fit.
     theta: float | None = None
     theta_se: float | None = None
-    # SERVED, never re-derived: this ARM's own reason θ is not ability, or ``None``. Only ever
-    # ``FLOOR_PINNED`` — the other three ``ThetaCaveat`` members are facts about the round's scale
-    # and ride ``RoundResult.ability`` instead, once, rather than copied onto every arm. Stamped at
-    # the election beside ``theta``, from the same rows the fit read.
+    # SERVED, never re-derived: this ARM's own reason θ is not ability, or ``None``.
+    # ``FLOOR_PINNED``, or ``UNMEASURED_DELTA`` where the ruler does not carry a cell the arm
+    # answered — the rest are facts about the round's scale and ride ``RoundResult.ability``.
     theta_caveat: ThetaCaveat | None = None
     # Normal-CLT CI on the mean per-cell FITNESS (``scoring/selection.py::mean_fitness_ci``) —
     # accuracy's own fold, so it brackets accuracy whatever the active composite formula is, which
@@ -1016,9 +1015,8 @@ class CycleResult(StrictModel):
     # This cycle's total spend, captured from the live dashboard state at
     # finalize. ``None`` only on an init-crash before any observer wired up.
     spend: SpendRollup | None = None
-    # Set when ``stop_reason`` ∈ ``{CRASHED, RENDER_ERROR, DIVERGED}``. The runner's ``except``
-    # sites carry ``emit_error_record``'s return straight here — the same record the ledger
-    # holds, no twin model.
+    # Set where the stop's ``STOP_REASON_INFO`` row is FAILED and ``ErrorRecord`` can name it
+    # (``runner/termination.py::end_run_on``) — the same record the ledger holds, no twin model.
     error: ErrorRecord | None = None
     # The headline, on the held-out bench set (`domain/bench.py`). `None` where the campaign holds
     # nothing out, and where the cycle ended before a selection could be graded.

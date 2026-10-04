@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { test as base, expect, type Page, type APIRequestContext } from "@playwright/test";
 import { STOP_REASON_OUTCOMES, type RoundSummary } from "@/lib/api/types.generated";
+import { isStopReason } from "@/lib/run-phase";
 
 // What every spec shares. A spec asks the API which campaigns exist and never names one; the
 // suite has no fixture campaign, and a world that cannot answer a spec makes it SKIP.
@@ -281,14 +282,14 @@ export async function assertBackendUp(request: APIRequestContext) {
 /** An empty `stopped` means still running and says nothing either way. */
 export function assertBoundedStop(label: string, stopped: string) {
   if (!stopped) return;
-  const outcome = STOP_REASON_OUTCOMES[stopped];
+  if (!isStopReason(stopped)) {
+    throw new Error(
+      `${label} stopped on '${stopped}', which STOP_REASON_OUTCOMES does not classify — the ` +
+        `generated mirror has drifted from domain/phases.py::STOP_REASON_INFO`,
+    );
+  }
   expect(
-    outcome,
-    `${label} stopped on '${stopped}', which STOP_REASON_OUTCOMES does not classify — the ` +
-      `generated mirror has drifted from domain/phases.py::STOP_REASON_INFO`,
-  ).toBeDefined();
-  expect(
-    outcome,
+    STOP_REASON_OUTCOMES[stopped],
     `${label} terminated on '${stopped}', which the engine classifies as a FAILURE rather than a ` +
       `bounded stop`,
   ).not.toBe("failed");

@@ -16,7 +16,7 @@ from promptpotter.application.datasets.loaders import build_dataset_run_data
 from promptpotter.application.run_phase_control import pause_requested
 from promptpotter.application.scoring.classification import is_deprecated
 from promptpotter.application.scoring.metrics import compute_composite_fitness
-from promptpotter.application.scoring.query_loop import QueryLoopState, Walk, run_walks
+from promptpotter.application.scoring.query_loop import QueryLoopState, Walk, WalkEnd, run_walks
 from promptpotter.application.scoring.selection import mean_fitness_ci
 from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE, grade_run, meets_grade
 from promptpotter.domain.results import ArmOutcome
@@ -58,20 +58,21 @@ __all__ = [
     "close_walk",
     "merge_with_unprocessed_priors",
     "open_walk",
+    "reread_cells",
     "score_search_point",
 ]
 
 
 @dataclass(frozen=True)
 class ScoredWalk:
-    """A decided walk, recorded. ``stopped`` is why it ended before its last cell — ``"skip"``,
-    ``"stop_rule"`` or an abort reason — and ``None`` once it took every cell, whatever decided
-    it there. A partial walk means something different to each caller, so each one says what."""
+    """A decided walk, recorded. ``stopped`` is why it ended before its last cell, and ``None``
+    once it took every cell, whatever decided it there. A partial walk means something different
+    to each caller, so each one says what."""
 
     results: list[QueryMeasurement]
     scores: dict[str, Any]
     signal: StopSignal | None
-    stopped: str | None
+    stopped: WalkEnd | None
     # The archive run the rows were filed under — what a score report carries so each of its cells
     # is addressable as ``(run_id, sample_id)``.
     run_id: str
@@ -106,8 +107,13 @@ def merge_with_unprocessed_priors(
 # The gateway's own stop: the query loop gave up on this walk. One of the bench's two BROKEN rules.
 SCORING_ERROR_ABORT = "scoring_error_abort"
 
+# The ends whose partial scores as it stands, carrying no signal.
+_UNSIGNALLED_ENDS = frozenset({WalkEnd.SKIP, WalkEnd.BUDGET})
 
-def _build_scoring_error_signal(*, results: list[QueryMeasurement], stop_reason: str) -> StopSignal:
+
+def _build_scoring_error_signal(
+    *, results: list[QueryMeasurement], ended_on: WalkEnd
+) -> StopSignal:
     # Every error row here is a cell that was actually SENT: an abort pads no synthetic tail.
     real_errors = [r for r in results if is_error_result(r)]
     warning_types: dict[str, int] = {}
@@ -116,13 +122,12 @@ def _build_scoring_error_signal(*, results: list[QueryMeasurement], stop_reason:
         warning_types[key] = warning_types.get(key, 0) + 1
     # Every ``real_error`` is an error row, so ``error`` is present + non-empty.
     last_error = str(real_errors[-1]["error"]) if real_errors else ""
-    dominant = last_error or stop_reason or "scoring_error"
     return StopSignal(
         check_name=SCORING_ERROR_ABORT,
         outcome=ArmOutcome.BROKEN,
         check_result={
-            "stop_reason": stop_reason,
-            "dominant_warning": dominant,
+            "walk_end": ended_on.value,
+            "dominant_warning": last_error or ended_on.value,
             "warning_types": warning_types,
             "degraded_count": len(real_errors),
             "total_scored": len(results),
@@ -267,13 +272,14 @@ async def _claim_cell(
 
 def _walk_stop_signal(batch: QueryLoopResult) -> StopSignal | None:
     """The stop signal a decided walk carries. A skip is the operator's early-abort of THIS
-    search point: its partial is on disk and scores like an eliminator's cut, with no signal. Any
-    other unsignalled stop is a scoring-error abort (consecutive 5xx, client 4xx, pipeline ERROR),
-    made a candidate-scoped signal so the caller can attach a RuntimeFailure and go on — never
-    killing the round."""
-    if batch.completed or batch.stop_signal is not None or batch.stop_reason == "skip":
+    search point: its partial is on disk and scores like an eliminator's cut, with no signal — as
+    does the partial a kept budget cut left. Any other unsignalled stop is a scoring-error abort
+    (consecutive 5xx, client 4xx, pipeline ERROR), made a candidate-scoped signal so the caller can
+    attach a RuntimeFailure and go on — never killing the round."""
+    ended_on = batch.ended_on
+    if ended_on is None or batch.stop_signal is not None or ended_on in _UNSIGNALLED_ENDS:
         return batch.stop_signal
-    return _build_scoring_error_signal(results=batch.results, stop_reason=batch.stop_reason or "")
+    return _build_scoring_error_signal(results=batch.results, ended_on=ended_on)
 
 
 def _emit_dataset_run(
@@ -334,8 +340,25 @@ async def score_search_point(
             measured=measured,
             force_fresh=force_fresh,
         )
-        await run_walks([walk], session)
+        await run_walks([walk], session, keep_cut=False)
     return close_walk(walk)
+
+
+def reread_cells(
+    search_point: JobSearchPoint, dataset: list[Sample], session: Session, *, label: str
+) -> list[Sample]:
+    """The cells of ``dataset`` the searchpoint replays at no price: all a tripped budget lets a
+    walk take (`query_loop.py::Walk.rereads_ahead`)."""
+    walk = open_walk(
+        search_point,
+        dataset,
+        session,
+        label=label,
+        on_sample_scored=None,
+        on_sample_starting=None,
+        measured=None,
+    )
+    return [sample for sample in dataset if sample.id in walk.ctx.rereads]
 
 
 def open_walk(
@@ -382,7 +405,7 @@ def open_walk(
         dataset, session, feed=feed, label=label
     )
     cell_keys = {} if feed is None else {s.id: feed.cell_key(s.key) for s in dataset}
-    counted = session.state.counted_cells
+    counted = session.state.priced_keys
     rereads = frozenset(s for s in cached_sample_results if cell_keys.get(s) in counted)
 
     def _shareable(row: dict[str, Any]) -> bool:
@@ -531,10 +554,10 @@ def close_walk(walk: Walk) -> ScoredWalk:
     assert outcome is not None, "close_walk needs a decided walk"
     results = outcome.results
     scores = walk.ctx.running_scores(results)
-    if outcome.stop_reason == "skip":
+    if outcome.ended_on is WalkEnd.SKIP:
         # Mark the partial as an operator early-abort so the candidate report carries the
         # provenance (the cycle is babysat).
-        scores["partial_reason"] = "skip"
+        scores["partial_reason"] = WalkEnd.SKIP.value
     walk.ctx.record_run(results, scores)
-    stopped = None if len(results) == walk.n else outcome.stop_reason
+    stopped = None if len(results) == walk.n else outcome.ended_on
     return ScoredWalk(results, scores, _walk_stop_signal(outcome), stopped, walk.ctx.run_id)

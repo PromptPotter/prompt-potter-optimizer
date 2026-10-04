@@ -4,8 +4,8 @@ round cap are polled EVERY clean round, so ``pause-cycle`` exits resumably and
 
 from __future__ import annotations
 
+import asyncio
 import logging
-import traceback
 from typing import NamedTuple
 
 from promptpotter.application.bench.cycle import Cycle
@@ -23,18 +23,16 @@ from promptpotter.application.runner.round import (
     round_plan,
 )
 from promptpotter.application.runner.termination import (
-    RUN_STOPS,
+    RUN_ENDS,
     BudgetGate,
+    end_run_on,
     origin_gate_tripped,
-    run_stop_reason,
     target_tripped,
 )
 from promptpotter.domain.phases import StopLoop, StopReason
 from promptpotter.domain.run_records import ErrorRecord, PhaseRecord, RebaseRequest
 from promptpotter.domain.sample import Sample
-from promptpotter.infrastructure.llm.telemetry import emit_error_record
 from promptpotter.infrastructure.runtime_flags import read_run_limits_mirror
-from promptpotter.shared.errors import PromptCompositionError
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +44,14 @@ HARD_CAP_ARMS: int = 500
 
 class LoopEnd(NamedTuple):
     """How the round loop ended: the stop, the error a crash left (so the caller need not re-read
-    the ledger), and the fork a rebase asks for."""
+    the ledger), the fork a rebase asks for, the round the stop left open — ``None`` when it
+    landed at a boundary — and the cancellation the caller still owes its asker."""
 
     stop_reason: StopReason
     error: ErrorRecord | None = None
     fork: RebaseRequest | None = None
+    interrupted_round: int | None = None
+    cancelled: asyncio.CancelledError | None = None
 
 
 def set_round_cap(config: CampaignConfig, max_rounds: int | None) -> CampaignConfig:
@@ -91,12 +92,15 @@ async def run_round_loop(
     # invocation (delta off `clean_rounds`), reusing the pause stop below rather than
     # the configured ceiling.
     clean_rounds_at_start = clean_rounds
+    open_round: int | None = None
 
     try:
         # Until an L1 round closes, every launch closes round 0 from the origin IT measured and
         # gates on that verdict — a round-0 file left by a stopped run has passed no gate.
         if not diag and clean_rounds == 0:
+            open_round = 0
             await emit_origin_round(cycle, session, cb)
+            open_round = None
             if origin_gate_tripped(cycle.origin_round.health, opt.origin_gate) is not None:
                 gate_stop = await run_origin_gate(
                     cycle, dataset, config, session, cb, opt.origin_gate
@@ -141,6 +145,7 @@ async def run_round_loop(
             )
 
             cb.set_round(round_num)
+            open_round = round_num
             ledger = session.state.ledger
             assert ledger is not None, (
                 "build_run_observers must bind state.ledger before the round loop"
@@ -154,10 +159,11 @@ async def run_round_loop(
             # can only be known after the round is scored, so `execute_round` asks it there.
             is_final_round = cap is not None and clean_rounds + 1 >= cap
 
-            round_result = await execute_round(
+            round_result, cut = await execute_round(
                 cycle, round_num, dataset, cb, is_final_round=is_final_round
             )
             cycle.absorb_round(round_result)
+            open_round = None
             await post_round(
                 cycle,
                 round_result,
@@ -165,7 +171,7 @@ async def run_round_loop(
                 session,
                 cb,
                 budget_gate,
-                is_final_round=is_final_round,
+                is_final_round=is_final_round or cut is not None,
             )
             round_num += 1
             clean_rounds += 1
@@ -173,7 +179,8 @@ async def run_round_loop(
             target_stop = target_tripped(cycle, halt_at_accuracy)
             if target_stop is not None:
                 return LoopEnd(target_stop)
-            budget_stop = budget_gate.tripped()
+            # A hold refusal cuts a round while the gate still reads clear, so the cut speaks first.
+            budget_stop = cut or budget_gate.tripped()
             if budget_stop is not None:
                 return LoopEnd(budget_stop)
 
@@ -186,52 +193,16 @@ async def run_round_loop(
                     )
                 return LoopEnd(StopReason.DIAG_COMPLETE)
 
-    except RUN_STOPS as stop:
+    except RUN_ENDS as exc:
+        stop_reason, error = end_run_on(exc, session, where=f"at round {round_num}")
         return LoopEnd(
-            run_stop_reason(stop), fork=stop.fork if isinstance(stop, StopLoop) else None
-        )
-    except KeyboardInterrupt as exc:
-        # The PAUSE FLAG's stop (`scoring/search_point_scorer.py`), not the terminal's — a
-        # Ctrl+C arrives as ``CancelledError`` and lands in `runner/entry.py`. Which is also why
-        # one is not caught here: a cancellation is our own machinery, and must reach its asker.
-        logger.warning(
-            "Optimization paused at round %d (%s).", round_num, str(exc) or "user-initiated"
-        )
-        return LoopEnd(StopReason.PAUSED)
-    except PromptCompositionError as exc:
-        # Distinct from CRASHED — the composition is at fault, not the search — and a HALT: a node
-        # handed no subject still answers, confidently, and every instrument downstream reads green.
-        tb = traceback.format_exc()
-        session.state.crash_traceback = tb
-        message = str(exc) or type(exc).__name__
-        kind = type(exc).__name__
-        logger.exception(
-            "Optimization halted at round %d — the optimizer prompt could not be composed. "
-            "Fix the composition and resume.",
-            round_num,
-        )
-        return LoopEnd(
-            StopReason.RENDER_ERROR,
-            emit_error_record(kind=kind, message=message, stop_reason="RENDER_ERROR", traceback=tb),
-        )
-    except TimeoutError:
-        # Optimizer LLM blew deadline twice (provider stalled mid-stream); plain ``resume`` re-fires.
-        logger.warning(
-            "Optimization halted at round %d — an optimizer LLM call exceeded "
-            "its deadline twice. Resume to retry.",
-            round_num,
-        )
-        return LoopEnd(StopReason.OPTIMIZER_TIMEOUT)
-    except Exception as exc:
-        # Escalation flows via return value, not exception; stash traceback for ``_finalize_run`` (sys.exc_info dead by then).
-        tb = traceback.format_exc()
-        session.state.crash_traceback = tb
-        message = str(exc) or type(exc).__name__
-        kind = type(exc).__name__
-        logger.exception("Optimization crashed at round %d.", round_num)
-        return LoopEnd(
-            StopReason.CRASHED,
-            emit_error_record(kind=kind, message=message, stop_reason="CRASHED", traceback=tb),
+            stop_reason,
+            error,
+            fork=exc.fork if isinstance(exc, StopLoop) else None,
+            interrupted_round=open_round,
+            # Handed back, never answered: only here is the round it cut known, and
+            # `runner/entry.py` re-raises it past the finalize so it still reaches its asker.
+            cancelled=exc if isinstance(exc, asyncio.CancelledError) else None,
         )
 
 

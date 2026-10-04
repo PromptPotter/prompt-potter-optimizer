@@ -411,26 +411,43 @@ def layout_json_schema(
     }
 
 
+def unplaceable_edit(raw_layout: object) -> ValidatorOutcome | None:
+    """``l1_layout_unparseable`` for an edit asking for a slot no layout has, else ``None``. ONE
+    stray move refuses the whole edit: applied without it, the rest would land as a layout nobody
+    asked for, with nothing reporting the move that was dropped.
+
+    The evidence names the panels whose slot was the stray beside the legal slots — the panel
+    names were the half of the edit that was right, and reporting them alone had L2 repeat the
+    same slot on its next fire. The slot asked for is LLM-authored, so it is not echoed."""
+    if not raw_layout:
+        return None
+    asked = raw_layout if isinstance(raw_layout, dict) else {}
+    stray = sorted(
+        str(name)
+        for name, slot in asked.items()
+        if not (isinstance(name, str) and isinstance(slot, str) and slot in L1_LAYOUT_SLOTS)
+    )
+    if asked and not stray:
+        return None
+    return ValidatorOutcome(
+        validator_id="l1_layout_unparseable",
+        evidence={"no_such_slot_for": stray, "slots": list(L1_LAYOUT_SLOTS)},
+    )
+
+
 def coerce_l1_layout(raw_layout: Any, *, base: L1Layout) -> L1Layout | None:
-    """Apply a ``{panel: slot}`` EDIT onto ``base``, or ``None`` for BOTH "no edit asked" (``{}``, the
-    sanctioned omit-sentinel) and "edit asked in a shape no slot can hold". The CALLER separates the
-    two off the raw input; this returns no outcome of its own, because a coercer that judged would be
-    a second validator.
+    """Apply a ``{panel: slot}`` EDIT onto ``base``, or ``None`` for "no edit asked" (``{}``, the
+    sanctioned omit-sentinel). An edit :func:`unplaceable_edit` convicts never reaches here; this
+    returns no outcome of its own, because a coercer that judged would be a second validator.
 
     A panel is MOVED, so it reaches at most one slot and a duplicate has no shape to arrive in. One
     the edit does not name keeps its slot AND its position — the floor's order is authored and
     load-bearing, so only a moved panel is repositioned, to the end of the slot it moves to. An
     unknown PANEL is placed rather than dropped, so ``l1_layout_unknown_placeholder`` rolls the edit
     back instead of the floor surviving in silence."""
-    if not isinstance(raw_layout, dict) or not raw_layout:
+    if not raw_layout:
         return None
-    moves = {
-        name: slot
-        for name, slot in raw_layout.items()
-        if isinstance(name, str) and isinstance(slot, str) and slot in L1_LAYOUT_SLOTS
-    }
-    if not moves:
-        return None
+    moves: dict[str, str] = dict(raw_layout)
     update: dict[str, list[str]] = {}
     for slot in L1_LAYOUT_SLOTS:
         kept = [n for n in base.slot(slot) if moves.get(n, slot) == slot]
@@ -545,20 +562,11 @@ def resolve_layout_override(
             "not L4. Only `editor='l4'` nodes resolve a layout through the per-node override "
             "channel; l1_generate's rides PotterState.memory.l1_layout instead."
         )
+    if breach := unplaceable_edit(raw_layout):
+        return spec.floor, [breach]
     merged = coerce_l1_layout(raw_layout, base=spec.floor)
     if merged is None:
-        # Absent is "no layout edit"; a non-empty declaration that coerces to nothing asked for one
-        # in a shape no slot can hold. Both land here, and treating them alike is the defect
-        # `escalation/firing.py::_parse_l2` already carries the L2 twin of — `l1_layout_unparseable`
-        # is that arm's id, shared so one shape cannot be a breach on one path and silence on the other.
-        if not raw_layout:
-            return spec.floor, []
-        return spec.floor, [
-            ValidatorOutcome(
-                validator_id="l1_layout_unparseable",
-                evidence={"keys": sorted(raw_layout) if isinstance(raw_layout, dict) else []},
-            )
-        ]
+        return spec.floor, []
     result = validate_l1_layout(merged, spec=spec)
     if not result.is_valid:
         return spec.floor, list(result.outcomes)
@@ -602,5 +610,6 @@ __all__ = [
     "layout_levers",
     "resolve_layout_override",
     "resolve_node_layout",
+    "unplaceable_edit",
     "validate_l1_layout",
 ]

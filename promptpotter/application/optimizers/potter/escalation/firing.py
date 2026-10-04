@@ -43,6 +43,7 @@ from promptpotter.application.optimizers.potter.dispatch.injections.catalogues i
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
     coerce_l1_layout,
+    unplaceable_edit,
     validate_l1_layout,
 )
 from promptpotter.application.optimizers.potter.dispatch.prompts import (
@@ -189,11 +190,13 @@ def _parse_l2(raw: L2ContextOutput, memory: L2L3Memory) -> TransitionResult:
     rationale = truncate(raw.rationale, 80) if raw.rationale else "(no rationale given)"
     overrides = {**memory.l1_overrides, **raw.l1_overrides} if raw.l1_overrides else None
 
-    proposed_layout = coerce_l1_layout(raw.l1_layout, base=memory.l1_layout)
     layout_outcomes: list[ValidatorOutcome] = []
     accepted_layout: L1Layout | None = None
     layout_refused = False
-    if proposed_layout is not None:
+    if breach := unplaceable_edit(raw.l1_layout):
+        layout_outcomes = [breach]
+        layout_refused = True
+    elif proposed_layout := coerce_l1_layout(raw.l1_layout, base=memory.l1_layout):
         layout_result = validate_l1_layout(
             proposed_layout,
             spec=NODE_LAYOUTS["l1_generate"],
@@ -204,18 +207,6 @@ def _parse_l2(raw: L2ContextOutput, memory: L2L3Memory) -> TransitionResult:
             accepted_layout = proposed_layout
         else:
             layout_refused = True
-    elif raw.l1_layout:
-        # `{}` is "no layout edit"; a non-empty dict that coerces to nothing is L2 asking for one
-        # in a shape no slot can hold. Both reach here as None, and treating them alike is what let
-        # a signals-as-keys layout cost a whole fire in silence — no breach, so nothing reached the
-        # `guard_breaches` panel and L2's next fire read no evidence that its shape was the problem.
-        layout_outcomes = [
-            ValidatorOutcome(
-                validator_id="l1_layout_unparseable",
-                evidence={"keys": sorted(raw.l1_layout)},
-            )
-        ]
-        layout_refused = True
 
     if layout_outcomes:
         logger.warning(

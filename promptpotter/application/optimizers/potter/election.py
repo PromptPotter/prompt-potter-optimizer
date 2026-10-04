@@ -127,8 +127,8 @@ def elect_on_theta(
         if theta_c is None:
             continue
         cs_idx = cs_by_id[cid]
-        # θ and its SE only: the band and `theta_caveat` are stamped at `candidate_scored`, which
-        # reaches every arm and round 0 — this loop reaches the electable arms alone.
+        # θ and its SE only: the band and `theta_caveat` are stamped where the arm is measured,
+        # which reaches every arm and round 0 — this loop reaches the electable arms alone.
         scores[cs_idx] = scores[cs_idx].model_copy(
             update={"theta": theta_c, "theta_se": abilities.theta_se[cid]}
         )

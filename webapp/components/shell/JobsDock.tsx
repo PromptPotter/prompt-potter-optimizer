@@ -44,8 +44,8 @@ export function JobsDock({ onPicked }: Props) {
         <button
           type="button"
           className={cx("jobs-dock-btn", `phase-${c.run_phase}`)}
-          aria-label={`1 active job — ${label} (${runPhaseLabel(c.run_phase, c.status)}). Go to it.`}
-          title={`${runPhaseLabel(c.run_phase, c.status)}: ${label}`}
+          aria-label={`1 active job — ${label} (${runPhaseLabel(c.run_phase, c.stop_reason)}). Go to it.`}
+          title={`${runPhaseLabel(c.run_phase, c.stop_reason)}: ${label}`}
           onClick={() => pick(c)}
         >
           {POTTER_GLYPH}
@@ -91,7 +91,7 @@ export function JobsDock({ onPicked }: Props) {
                 <span className="jobs-dock-row">
                   <span className={cx("phase-chip", `phase-${r.run_phase}`)}>
                     <span className="phase-dot" aria-hidden="true" />
-                    {runPhaseLabel(r.run_phase, r.status)}
+                    {runPhaseLabel(r.run_phase, r.stop_reason)}
                   </span>
                   <span className="jobs-dock-item-label">{labelFor(r)}</span>
                 </span>

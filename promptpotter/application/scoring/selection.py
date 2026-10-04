@@ -296,21 +296,16 @@ def elimination_p_best(
     # scored on the identical cell list they see the identical δ vector, so a constant
     # misspecification cannot favour one of them.
     entries = ruler.entries_covering(sids) if ruler is not None else None
-    anchor = ruler.anchor_id if ruler is not None else ""
     cand_obs = [
         Observation("__cand__", sid, float(g))
         for sid, g in zip(sids, candidate_grades, strict=True)
     ]
-    theta_c, se_c = fit_theta_given_delta(cand_obs, entries, anchor_id=anchor).get(
-        "__cand__", (0.0, 0.0)
-    )
+    theta_c, se_c = fit_theta_given_delta(cand_obs, entries).get("__cand__", (0.0, 0.0))
 
     per_prior: dict[str, float] = {}
     for pid, grades in paired_prior_grades.items():
         prior_obs = [Observation(pid, sid, float(g)) for sid, g in zip(sids, grades, strict=True)]
-        theta_p, se_p = fit_theta_given_delta(prior_obs, entries, anchor_id=anchor).get(
-            pid, (0.0, 0.0)
-        )
+        theta_p, se_p = fit_theta_given_delta(prior_obs, entries).get(pid, (0.0, 0.0))
         # The SAME comparison `elect_round_winner` ranks on — one reading of "better". What follows
         # is not a second one: the bound never changes the SIDE of 0.5, so an arm this function cuts
         # is still an arm that function would refuse to crown. It caps only how far the reading may
@@ -354,17 +349,16 @@ def elimination_p_best_bounds(
     floor, and the discordant counts are extreme at their corners."""
     sids = [int(s) for s in cells]
     entries = ruler.entries_covering(sids) if ruler is not None else None
-    anchor = ruler.anchor_id if ruler is not None else ""
     known = {s: candidate[s] for s in sids if s in candidate}
     c_low, c_high, c_floor = theta_bounds_given_delta(
-        known, [s for s in sids if s not in known], entries, anchor_id=anchor
+        known, [s for s in sids if s not in known], entries
     )
     low: dict[str, float] = {}
     high: dict[str, float] = {}
     for pid, grades in priors.items():
         both = {s: grades[s] for s in known if s in grades}
         rest = [s for s in sids if s not in both]
-        p_low, p_high, p_floor = theta_bounds_given_delta(both, rest, entries, anchor_id=anchor)
+        p_low, p_high, p_floor = theta_bounds_given_delta(both, rest, entries)
         wins, losses = discordant_counts([known[s] for s in both], list(both.values()))
         # An absent grade can go either way, so it is read as the worst case for each bound.
         can_lose = sum(1 for s in rest if candidate.get(s, 0.0) < grades.get(s, 1.0))

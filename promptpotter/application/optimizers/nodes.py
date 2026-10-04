@@ -400,10 +400,11 @@ class Population:
 
 @dataclass(frozen=True)
 class Measured:
-    """The measurement's output. ``parent`` is the round's best-so-far re-scored on the panel
-    (:attr:`Selector.reads_parent` says how much of it); ``scores`` carry each arm's lift against its ``reference_id``, whose rows ``references``
-    holds; ``electable`` is the arms the round can read, coverage floor applied, in walk order —
-    the only arms a selector may keep."""
+    """The measurement's output. ``parent`` is the round's best-so-far re-scored on
+    :meth:`Selector.parent_cells`; ``scores`` carry each arm's lift against its ``reference_id``,
+    whose rows ``references`` holds; ``electable`` is the arms the round can read, coverage floor applied, in walk order —
+    the only arms a selector may keep. ``cut`` is the budget stop that ended the walks short, on
+    whose panels the round still elects."""
 
     rows: dict[str, list[QueryMeasurement]]
     scores: list[ScoredCandidate]
@@ -413,6 +414,7 @@ class Measured:
     references: dict[str, list[QueryMeasurement]]
     electable: list[OptSearchPoint]
     coverage_floor: int
+    cut: StopReason | None
 
 
 @dataclass(frozen=True)
@@ -554,9 +556,16 @@ class Selector(NodeMember, Protocol):
         ...
 
     @property
-    def reads_parent(self) -> bool:
-        """Whether ``select`` reads ``Measured.parent``. The bench re-scores the parent on the whole
-        panel only for one that does; otherwise on the cells an arm reached, which its lifts pair on."""
+    def elects_partial(self) -> bool:
+        """Whether ``select`` can elect on the panels a budget stop cut short — where it cannot,
+        the cut round is unwound."""
+        ...
+
+    def parent_cells(
+        self, ctx: RoundContext, panel: Panel, rows: Mapping[str, Sequence[QueryMeasurement]]
+    ) -> list[Sample]:
+        """The panel cells the bench re-scores the round's parent on, given each arm's walk: what
+        ``select`` reads of ``Measured.parent``, and all an arm's lift against it can pair on."""
         ...
 
     def select(

@@ -44,9 +44,10 @@ def reflection_prompt(
 
 
 def fenced(text: str) -> str | None:
-    """The text between the reply's first and last fence; ``None`` where it fences nothing."""
+    """The text between the reply's first and last fence, the whole reply where it fences
+    nothing; ``None`` where that is empty."""
     start, end = text.find(_FENCE), text.rfind(_FENCE)
     if start < 0 or end <= start:
-        return None
+        return text.strip() or None
     body = _LANGUAGE_TAG.sub("", text[start + len(_FENCE) : end], count=1).strip()
     return body or None

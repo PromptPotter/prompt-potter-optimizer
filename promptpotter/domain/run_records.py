@@ -7,6 +7,7 @@ from typing import Annotated, Any, Literal
 from pydantic import ConfigDict, Field, model_validator
 
 from promptpotter.domain.launch_limits import RoundsCap
+from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeSearchNarrowing
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler, ThetaCaveat
 from promptpotter.domain.spend import BudgetChange, TokenUsageKind
@@ -16,7 +17,6 @@ from promptpotter.shared.clock import utcnow_iso
 __all__ = [
     "BenchCheckpointKind",
     "CandidateMintedRecord",
-    "CellPricedRecord",
     "CheckpointKind",
     "CommandAckRecord",
     "CommandRecord",
@@ -34,6 +34,7 @@ __all__ = [
     "LedgerCandidate",
     "LedgerRoundClose",
     "PhaseRecord",
+    "PricedKeyRecord",
     "ResumeCheckpointRecord",
     "RoundWarningKind",
     "RoundWarningRecord",
@@ -212,17 +213,15 @@ class SpendHoldRecord(StrictModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class CellPricedRecord(StrictModel):
-    """A cell (``ReplayFeed.cell_key``) this campaign's search has PRICED — its measurement billed,
-    or its replay metered. Written the first time a walk takes the cell, and where a stop keeps one
-    it paid for and has not taken, so a later read of it in this launch or a resumed one prices
-    nothing again. A fact of the spend meter, never of a display: a walk no surface watches writes
-    it too."""
+class PricedKeyRecord(StrictModel):
+    """A key this campaign's search has PRICED — a cell (``ReplayFeed.cell_key``) or an optimizer
+    or judge call (``call:{reuse key}``) — so a later read of it, this launch or a resumed one,
+    prices nothing again. A fact of the spend meter, never of a display."""
 
     model_config = ConfigDict(frozen=True)
 
-    record_type: Literal["cell_priced"] = "cell_priced"
-    cell_key: str
+    record_type: Literal["priced_key"] = "priced_key"
+    priced_key: str
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -348,7 +347,7 @@ class CommandAckRecord(StrictModel):
 
 
 class ErrorRecord(StrictModel):
-    """Emitted from the runner's three ``except`` sites via :func:`emit_error_record` over the
+    """Emitted by ``runner/termination.py::end_run_on`` via :func:`emit_error_record` over the
     ``_CYCLE_LEDGER`` ContextVar. Sole source of ``dashboard.json::error``."""
 
     model_config = ConfigDict(frozen=True)
@@ -359,11 +358,10 @@ class ErrorRecord(StrictModel):
     # Operator-readable message picked at the throw site so no downstream
     # layer maps raw ``httpx``/Pydantic exception strings.
     message: str
-    # Full Python traceback; set on ``CRASHED`` / ``RENDER_ERROR``, elided
-    # on ``DIVERGED`` (resume-divergence is operator-recoverable, the message
-    # alone carries the full diagnostic).
+    # Full Python traceback, set where the reason's ``STOP_REASON_INFO`` row says
+    # ``has_traceback``; elsewhere the message alone is the full diagnostic.
     traceback: str | None = None
-    stop_reason: Literal["CRASHED", "RENDER_ERROR", "DIVERGED"]
+    stop_reason: StopReason
     round: int | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
@@ -763,7 +761,7 @@ class CycleSeedRecord(StrictModel):
 CycleRecord = Annotated[
     ResumeCheckpointRecord
     | CandidateMintedRecord
-    | CellPricedRecord
+    | PricedKeyRecord
     | CommandAckRecord
     | CommandRecord
     | CycleSeedRecord

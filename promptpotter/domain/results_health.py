@@ -186,6 +186,18 @@ def classify_result(result: Mapping[str, Any]) -> ResultClassification:
     )
 
 
+def _failure_kind(step_statuses: Mapping[str, str], warning: WarningDict) -> str | None:
+    """The kind a warning counts as against its node, or None. A node that finished ``success``
+    produced its evidence, whatever it warned on the way: a retry that recovered is a cost, and
+    counting it grades a round whose every cell answered as degraded."""
+    kind = warning.get("kind")
+    if kind not in ("structural", "transient"):
+        return None
+    if step_statuses.get(str(warning.get("step") or "")) == "success":
+        return None
+    return str(kind)
+
+
 def classify_sample_failure(
     step_statuses: Mapping[str, str],
     warnings: Sequence[WarningDict],
@@ -199,7 +211,7 @@ def classify_sample_failure(
         node = str(w.get("step") or "") or None
         if node is not None:
             warned_nodes.add(node)  # explained (has a warning), even if kind is unclassifiable
-        kind = w.get("kind")
+        kind = _failure_kind(step_statuses, w)
         if kind == "structural" and structural_node is None:
             structural_node = node
         elif kind == "transient" and transient_node is None:
@@ -490,12 +502,7 @@ def compute_node_failure_rates(results: list[dict[str, Any]]) -> dict[str, float
         failed_nodes: set[str] = {n for n, st in statuses.items() if st == "failed"}
         for w in warnings:
             wn = str(w.get("step") or "")
-            # A retry that recovered is a cost, never a failed node: its node finished `success`.
-            if (
-                wn
-                and w.get("kind") in ("structural", "transient")
-                and statuses.get(wn) != "success"
-            ):
+            if wn and _failure_kind(statuses, w) is not None:
                 failed_nodes.add(wn)
         for n in failed_nodes:
             counts[n] = counts.get(n, 0) + 1

@@ -109,7 +109,10 @@ the partition, over DISTINCT samples, so no copy of a held-out row stays behind)
 optimizer node sees the search pool alone** — the demo pool only as shot material — and no node
 ever sees the bench set, the check-in model that authors the origin included. The bench scores each optimizer's result on the
 bench set with ONE evaluator, and that is the headline every surface serves and `export.json`
-reports. An optimizer's own selection decides what it KEEPS; it never grades what it kept. **What
+reports. **Every reading carries two columns, `accuracy` and `composite`, each with its own band
+and paired lift, and names which one is the headline** (`domain/bench.py::BENCH_HEADLINE`,
+accuracy): a surface selects the named column and never picks one of its own. An optimizer's own
+selection decides what it KEEPS; it never grades what it kept. **What
 the bench grades is the pick the optimizer DECLARED** — its selector's last selection, which the
 envelope carries as `selected_labels` and the `opt_sp` the round ended on — never one the bench
 makes by comparing rounds read on different rows. A line that closed no round declared none, so
@@ -159,7 +162,9 @@ nothing else. The head-to-head is `head_to_heads/{id}.json` in the workspace
 each may spend (incurred USD, `max_rounds`, the determinism clamp). Its first arm declares it off
 its own; `application/jobs/mint.py` refuses a later arm on any other, or on a key another holds.
 
-What controlled switches, one site each: MEMORY is the arm's own line
+What controlled switches, one site each: the SEARCH is the prompt's own fields
+(`mint.py::_prompt_axes_only` — every other axis the dataset opens is held at its origin value, so
+no arm is graded on a sampling or reasoning setting a rival could not move); MEMORY is the arm's own line
 (`store/archive_queries.py`'s fence — the δ ruler at `RulerScope` `campaign`, the sample and axis
 indexes, the fold), while the CACHE still replays any cell, priced; the check-in never re-runs;
 fork, skip and limit commands are refused 409 (`commands/dispatcher.py`); the ceiling meters the
@@ -626,7 +631,7 @@ tenant, `campaigns/{campaign_id}/` is the Campaign directory:
 `campaign.json` (manifest — `dataset_name, label, created_at,
 root_cycle_id, root_content_hash, treatment, arm, backend_id, config`; identity + config
 + lifecycle intent only — run state is owned per-cycle by
-`index.json::status` and derived on read for campaign surfaces), `result.json` (the campaign's
+`index.json` (`finished_at` + `stop_reason`) and derived on read for campaign surfaces), `result.json` (the campaign's
 result as facts, rewritten by the cycle holding its line — § The bench score is not an
 optimizer's selection), `log.md`
 (campaign digest — covers every session, its forks, and its rounds),

@@ -22,6 +22,7 @@ from promptpotter.application.views.render.primitives import (
 )
 from promptpotter.application.views.view_models import (
     AnyView,
+    BenchEnterView,
     BenchGradedView,
     CandidatesGeneratedView,
     InitEnterView,
@@ -31,9 +32,11 @@ from promptpotter.application.views.view_models import (
     OptimizerStepExitView,
     RoundCompleteView,
     RoundStartView,
+    RunSpendView,
     SpDiffView,
 )
 from promptpotter.domain.candidate_diff import group_diff_keys
+from promptpotter.domain.spend import CeilingMeter
 from promptpotter.shared.composite import render_composite_fitness_block
 
 if TYPE_CHECKING:
@@ -224,20 +227,46 @@ def to_text(view: AnyView) -> str:
             return _render_step_enter(view)
         case OptimizerStepExitView():
             return _render_step_exit(view)
+        case BenchEnterView():
+            return _render_bench_enter(view)
         case BenchGradedView():
             return _render_bench_graded(view)
+        case RunSpendView():
+            return _render_run_spend(view)
         case _:
             return ""
+
+
+_METER_WORDS: dict[CeilingMeter, str] = {"bill": "billed", "search_incurred": "search incurred"}
+
+
+def _render_run_spend(v: RunSpendView) -> str:
+    bits = [
+        f"billed ${v.billed_usd:.4f} (what the provider charged)",
+        f"incurred ${v.incurred_usd:.4f} (every cell priced, replays included)",
+    ]
+    counted = _METER_WORDS[v.meter]
+    if v.usd_cap is not None:
+        bits.append(f"cap ${v.metered_usd:.4f} of ${v.usd_cap:.2f} {counted}")
+    if v.token_cap is not None:
+        bits.append(f"cap {v.metered_tokens:,} of {v.token_cap:,} tokens {counted}")
+    return f"  {DIM}spend: {' · '.join(bits)}{RESET}"
+
+
+def _render_bench_enter(v: BenchEnterView) -> str:
+    subject = "the origin" if v.subject == "origin" else f"the R{v.round} selection"
+    return f"  {DIM}bench pass: {subject} on {v.rows} held-out rows{RESET}"
 
 
 def _render_bench_graded(v: BenchGradedView) -> str:
     reading = v.reading
     if reading is None:
         return f"  {YELLOW}bench: no reading — {v.missing}{RESET}"
-    composite = reading["composite_fitness"]
-    value = "—" if composite is None else f"{composite:.3f}"
+    column = reading["headline"]
+    level = reading[column]
+    value = "—" if level is None else f"{level['value']:.3f}"
     return (
-        f"  {DIM}bench R{reading['round']}: composite {value} on "
+        f"  {DIM}bench R{reading['round']}: {column} {value} on "
         f"{reading['n_scored']} held-out rows{RESET}"
     )
 

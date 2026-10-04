@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { criticalAlert } from "../critical-alert";
+import { STOP_REASON_LABELS, STOP_REASON_NEXT_STEPS } from "@/lib/api/types.generated";
 import type { DashboardSnapshot } from "@/lib/poll";
 
 const base = {
@@ -21,8 +22,8 @@ describe("criticalAlert", () => {
     } as DashboardSnapshot;
     expect(criticalAlert({ ...base, dash })).toEqual({
       severity: "critical",
-      title: "Crashed — CRASHED",
-      detail: "stop: crashed",
+      title: `${STOP_REASON_LABELS.crashed} — CRASHED`,
+      detail: STOP_REASON_NEXT_STEPS.crashed,
     });
   });
 
@@ -39,19 +40,23 @@ describe("criticalAlert", () => {
     } as DashboardSnapshot;
     expect(criticalAlert({ ...base, dash })).toEqual({
       severity: "critical",
-      title: "Diverged — ResumeDivergenceError",
-      detail: "stop: diverged",
+      title: `${STOP_REASON_LABELS.diverged} — ResumeDivergenceError`,
+      detail: STOP_REASON_NEXT_STEPS.diverged,
     });
   });
 
-  // An unknown reason must still not read as a crash — the fallback names nothing it cannot
-  // verify. A reason the generated table does not carry is newer than this build, not a crash.
-  it("falls back to a neutral title for a stop reason the label table does not carry", () => {
+  // `dashboard.json` is served verbatim, so a file an older build wrote can carry a spelling
+  // the table lacks. The bar names the error kind and invents no label for it.
+  it("names only the error kind for a stop reason the label table does not carry", () => {
     const dash = {
       run_phase: "terminal",
-      error: { kind: "SomethingNew", message: "x", stop_reason: "not_in_table" },
-    } as DashboardSnapshot;
-    expect(criticalAlert({ ...base, dash })?.title).toBe("Run stopped — SomethingNew");
+      error: { kind: "SomethingNew", message: "x", stop_reason: "CRASHED" },
+    } as unknown as DashboardSnapshot;
+    expect(criticalAlert({ ...base, dash })).toEqual({
+      severity: "critical",
+      title: "SomethingNew",
+      detail: undefined,
+    });
   });
 
   it("flags server-unreachable (offline) as critical with the hint as detail", () => {
@@ -111,7 +116,7 @@ describe("criticalAlert", () => {
   });
 
   it("does not flag a clean terminal (no error record)", () => {
-    const dash = { run_phase: "terminal", stop_reason: "target_reached" } as DashboardSnapshot;
+    const dash = { run_phase: "terminal", stop_reason: "target_hit" } as DashboardSnapshot;
     expect(criticalAlert({ ...base, dash })).toBeNull();
   });
 
@@ -130,7 +135,7 @@ describe("criticalAlert", () => {
       error: { kind: "DIVERGED", message: "x", stop_reason: "diverged" },
     } as DashboardSnapshot;
     const out = criticalAlert({ ...base, bannerStatus: "offline", dash });
-    expect(out?.title).toBe("Diverged — DIVERGED");
+    expect(out?.title).toBe(`${STOP_REASON_LABELS.diverged} — DIVERGED`);
   });
 
   it("flags an unreachable backend as critical (the LED's twin)", () => {

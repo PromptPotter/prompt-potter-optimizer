@@ -16,6 +16,7 @@ from promptpotter.application.optimizers import other_optimizer_packages
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED, PARSE_FAILURE_TOOLING
 from promptpotter.domain.wounds import ValidationFailure
+from promptpotter.shared.errors import SendRefusedError
 from promptpotter.shared.hashing import module_source_digest, optimizer_prompt_shapers
 
 if TYPE_CHECKING:
@@ -96,14 +97,20 @@ async def ask(ctx: RoundContext, node: str, idx: int | None, prompt: str) -> str
 
 async def ask_each(ctx: RoundContext, node: str, prompts: Mapping[int, str]) -> list[str]:
     """One reply per prompt, keyed by its candidate index. Every send lands before one's refusal is
-    raised: a sibling cut mid-flight is never billed, so its hold binds the ceiling at full bound."""
-    replies = await asyncio.gather(
+    raised: a sibling cut mid-flight is never billed, so its hold binds the ceiling at full bound.
+    A refused send is then asked again, alone: its siblings were held at their bounds when it was
+    refused, and what they billed is the room that is really left."""
+    landed = await asyncio.gather(
         *(ask(ctx, node, idx, prompt) for idx, prompt in prompts.items()), return_exceptions=True
     )
-    for reply in replies:
+    replies: list[str] = []
+    for (idx, prompt), reply in zip(prompts.items(), landed, strict=True):
+        if isinstance(reply, SendRefusedError):
+            reply = await ask(ctx, node, idx, prompt)
         if isinstance(reply, BaseException):
             raise reply
-    return [reply for reply in replies if isinstance(reply, str)]
+        replies.append(reply)
+    return replies
 
 
 def marked(text: str) -> str | None:

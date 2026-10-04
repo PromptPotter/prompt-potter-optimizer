@@ -14,14 +14,14 @@ import { readSpend } from "./spend";
 export interface RunSummary {
   // The frozen item outlives the address in view.
   cycleId: string;
-  stopReason: string | null;
+  stopReason: DashboardSnapshot["stop_reason"];
   // Rounds closed WITH candidates: a round closed before its measurement measured nothing.
   rounds: number;
   championLabel: string | null;
   // `null` where the candidate never covered the parent's panel — an absent floor is not a zero.
   accuracy: number | null;
   parentAccuracy: number | null;
-  // The bench's served held-out lift of the pick over the origin, in composite fitness.
+  // The bench's served held-out lift of the pick over the origin, in the served headline column.
   benchLift: number | null;
   metered: MeteredSpend | null;
   changes: string;

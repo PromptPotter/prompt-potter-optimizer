@@ -1,0 +1,67 @@
+name: JustLogic-d234
+version: v0.1
+description: >-
+  JustLogic deductive-reasoning benchmark (Chen 2025), depths 2-4 (iid mix). 3-class TRUE/FALSE/Uncertain
+  claim evaluation against premises. Routes through TermNorm /matches with the llm_only pipeline.
+backend_name: TermNorm
+backend_type: termnorm
+available_models:
+  - openai/gpt-oss-20b:nitro
+  - openai/gpt-oss-20b
+nodes:
+  llm_only:
+    type: llm
+    runtime: backend
+    node_role: ranker
+    description: >-
+      Direct LLM generation on the TermNorm backend at JustLogic depths 2-4 (iid mix) — a wider inner
+      instrument than d23. ':nitro' for throughput. Adds depth 4 below the d2-3
+      cut to lower the origin and widen the optimizable band. The 2026-07-13 recon read d3+ as collapsed-to-Uncertain
+      and called it a capability wall; this cut RE-TESTS that as an addressable hedging behaviour the
+      loop can correct in the first 2-3 rounds — 'Uncertain' is reserved for genuine indeterminacy, never
+      a hedge against difficulty.
+    config:
+      provider: openrouter
+      model: openai/gpt-oss-20b:nitro
+      temperature: 0.0
+      output_schema:
+        type: object
+        properties:
+          reasoning:
+            type: string
+            description: At most five short steps, one line each.
+          answer:
+            type: string
+            enum:
+              - 'TRUE'
+              - 'FALSE'
+              - Uncertain
+            description: The label.
+        required:
+          - reasoning
+          - answer
+        additionalProperties: false
+      answer_field: answer
+    optimizer:
+      param_keys:
+        # `model` is deliberately NOT here. This is the L4 inner instrument, and its menu is
+        # one model under two ROUTES (`:nitro` and plain) — opening the axis would let L1
+        # flip the host while reporting a prompt, which is the confound `route_order` is
+        # forbidden for, wearing a model name.
+        - temperature
+        - max_tokens
+        - reasoning_effort
+        - persona
+        - task_intent
+        - problem_description
+        - instruction
+        - thinking_style
+        - answer_format
+      observation_name: llm_only
+      observation_mappings:
+        - pipeline_key: final_ranking
+          output_field: generated_text
+          is_llm: true
+pipelines:
+  default:
+    - llm_only

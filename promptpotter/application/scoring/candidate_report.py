@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from promptpotter.application.scoring.evaluators import materialize_row_derivable
+from promptpotter.application.scoring.query_loop import WalkEnd
 from promptpotter.application.scoring.search_point_scorer import SCORING_ERROR_ABORT, ScoredWalk
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import (
@@ -42,7 +43,7 @@ def walk_outcome(scored: ScoredWalk) -> ArmOutcome:
     unsignalled stop is the operator's skip."""
     if scored.signal is not None:
         return scored.signal.outcome
-    return ArmOutcome.SKIPPED if scored.stopped == "skip" else ArmOutcome.MEASURED
+    return ArmOutcome.SKIPPED if scored.stopped is WalkEnd.SKIP else ArmOutcome.MEASURED
 
 
 def is_transient_scoring_abort(signal: StopSignal | None) -> bool:

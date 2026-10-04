@@ -1236,6 +1236,7 @@ def _r_confounds(b: InjectionBundle) -> list[Item]:
             calibration_model=b.ruler.calibration_model,
             round_span=round_span,
             ruler_span=ruler_span,
+            unlinked=(unlinked := b.ruler.unlinked(cells)),
             pinned_share=pinned,
         )
         if caveat in (ThetaCaveat.FLAT_RULER, ThetaCaveat.COLLAPSED_BAND):
@@ -1249,6 +1250,13 @@ def _r_confounds(b: InjectionBundle) -> list[Item]:
                 f"{round_span:.2f} logits on a ruler spanning {ruler_span:.2f}; {cause}. Inside a "
                 f"band that narrow every {b.measured_unit} is equally hard, "
                 "so θ is logit-accuracy plus a constant and ranking on it ranks on accuracy."
+            )
+        elif caveat is ThetaCaveat.UNMEASURED_DELTA and unlinked:
+            rows.append(
+                f"UNMEASURED DIFFICULTY — {unlinked} of this round's "
+                f"{unit_plural(b.measured_unit)} carry no δ: no arm already on the ruler answered "
+                "them, so θ leaves them out and each arm's θ is read on the rest. Read the lift, "
+                "never the level."
             )
         elif caveat is ThetaCaveat.UNMEASURED_DELTA and pinned is not None:
             rows.append(

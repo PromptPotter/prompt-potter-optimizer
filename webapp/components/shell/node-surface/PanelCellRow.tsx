@@ -80,7 +80,7 @@ export function PanelCellRow({
       </span>
       <span className="pcr-meta">
         {run.run_phase === "terminal" && (
-          <span className="pcr-status">{runPhaseLabel(run.run_phase, run.status)}</span>
+          <span className="pcr-status">{runPhaseLabel(run.run_phase, run.stop_reason)}</span>
         )}
         <span className="pcr-score">
           {fmtPct0(run.origin_accuracy ?? run.best_accuracy ?? null)}

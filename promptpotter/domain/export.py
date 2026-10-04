@@ -9,6 +9,7 @@ from pydantic import ConfigDict, Field
 from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import Treatment
 from promptpotter.domain.opt_search_point import FEW_SHOT_BLOCK, PromptTemplate
+from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import AbilityReading
@@ -89,7 +90,7 @@ class PromptExport(StrictModel):
     dataset_hash: str
     # The optimizer that produced this prompt — a different one is a different search.
     treatment: Treatment | None
-    stop_reason: str
+    stop_reason: StopReason
     finished_at: str
     # Named fields, restored by ``template()`` — the round document's dict, NOT
     # ``CycleResult.result_prompt_fields``, which is the wire-side projection.
@@ -143,7 +144,7 @@ def build_prompt_export(
     dataset_name: str,
     dataset_hash: str,
     treatment: Treatment | None,
-    stop_reason: str,
+    stop_reason: StopReason,
     finished_at: str,
     formula: str | None,
     origin_accuracy: float | None,

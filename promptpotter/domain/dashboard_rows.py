@@ -187,12 +187,12 @@ class DashboardCandidate(StrictModel):
     # was elected on, so the chart can explain a lower-accuracy winner. `None` outside the fit,
     # which is round-scoped and needs two arms: every row is null until the ELECTION stamps it,
     # and none is after (`ElectionRecord.fit`). Not fittable sooner — `calibrate_ruler` extends
-    # the δ scale onto the round's cells first, and `fit_theta_given_delta` raises on one it does
-    # not carry rather than defaulting it to a position on the scale.
+    # the δ scale onto the round's cells first, and `fit_theta_given_delta` skips one it does not
+    # carry rather than defaulting it to a position on the scale.
     theta: float | None = None
     theta_se: float | None = None
-    # Why the θ above is NOT this arm's ability (`ScoredCandidate.theta_caveat`) — only ever
-    # `FLOOR_PINNED`, since the other three are facts about the round's scale and ride
+    # Why the θ above is NOT this arm's ability (`ScoredCandidate.theta_caveat`) — `FLOOR_PINNED`
+    # or `UNMEASURED_DELTA`, since the rest are facts about the round's scale and ride
     # `RoundResult.ability` once instead of being copied onto every row. Served rather than
     # derived in the browser: the rows a client would test are the fat per-sample arrays the
     # candidate row exists to avoid shipping.

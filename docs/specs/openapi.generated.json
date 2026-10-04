@@ -561,21 +561,9 @@
         "title": "BackendResponse",
         "type": "object"
       },
-      "BenchReading": {
+      "BandedValue": {
         "additionalProperties": false,
-        "description": "One individual's bench pass, read under a named scorer.",
         "properties": {
-          "accuracy": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Accuracy"
-          },
           "ci_hi": {
             "anyOf": [
               {
@@ -596,20 +584,90 @@
                 "type": "null"
               }
             ],
-            "description": "The 95% band on `composite_fitness`, drawn from the same per-row values.",
+            "description": "The 95% band on `value`, drawn from the same per-row values; `None` where one pass was read twice, which has no spread.",
             "title": "Ci Lo"
           },
-          "composite_fitness": {
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "value",
+          "ci_lo",
+          "ci_hi"
+        ],
+        "title": "BandedValue",
+        "type": "object"
+      },
+      "BenchColumns": {
+        "additionalProperties": false,
+        "description": "One bench quantity in both columns, read off the same rows.",
+        "properties": {
+          "accuracy": {
             "anyOf": [
               {
-                "type": "number"
+                "$ref": "#/components/schemas/BandedValue"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Under the reading scorer's formula — the number the headline reads.",
-            "title": "Composite Fitness"
+            "description": "The hit rate."
+          },
+          "composite": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BandedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Under the reading scorer's formula, which charges cost and length — so it is never the change in the hit rate."
+          }
+        },
+        "required": [
+          "accuracy",
+          "composite"
+        ],
+        "title": "BenchColumns",
+        "type": "object"
+      },
+      "BenchReading": {
+        "additionalProperties": false,
+        "description": "One individual's bench pass, read under a named scorer.",
+        "properties": {
+          "accuracy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BandedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The hit rate."
+          },
+          "composite": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BandedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Under the reading scorer's formula, which charges cost and length — so it is never the change in the hit rate."
+          },
+          "headline": {
+            "description": "Which column the headline reads.",
+            "enum": [
+              "accuracy",
+              "composite"
+            ],
+            "title": "Headline",
+            "type": "string"
           },
           "n_scored": {
             "description": "Bench rows carrying a verdict — a miss the prompt caused included — never fewer than the bench set less its split's `tolerance`.",
@@ -628,12 +686,11 @@
           }
         },
         "required": [
+          "accuracy",
+          "composite",
           "round",
           "sp_hash",
-          "accuracy",
-          "composite_fitness",
-          "ci_lo",
-          "ci_hi",
+          "headline",
           "n_scored"
         ],
         "title": "BenchReading",
@@ -647,40 +704,18 @@
             "title": "Bench Size",
             "type": "integer"
           },
+          "headline": {
+            "description": "Which column the headline reads, on the readings and on `lift` alike.",
+            "enum": [
+              "accuracy",
+              "composite"
+            ],
+            "title": "Headline",
+            "type": "string"
+          },
           "lift": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "`selected` over `origin` in `composite_fitness`, paired per bench row both scored; `None` below two shared rows, and 0.0 where the origin is the selection.",
-            "title": "Lift"
-          },
-          "lift_ci_hi": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lift Ci Hi"
-          },
-          "lift_ci_lo": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The 95% band on `lift`; `None` where `lift` is, and where the origin is the selection — one pass read twice has no spread.",
-            "title": "Lift Ci Lo"
+            "$ref": "#/components/schemas/BenchColumns",
+            "description": "`selected` over `origin`, paired per bench row both scored. A column is `None` below two shared rows, and 0.0 with no band where the origin is the selection."
           },
           "missing_reason": {
             "anyOf": [
@@ -725,12 +760,11 @@
         "required": [
           "bench_size",
           "scorer_id",
+          "headline",
           "origin",
           "selected",
           "missing_reason",
-          "lift",
-          "lift_ci_lo",
-          "lift_ci_hi"
+          "lift"
         ],
         "title": "BenchScore",
         "type": "object"
@@ -2247,7 +2281,7 @@
           "run_phase": {
             "$ref": "#/components/schemas/RunPhase",
             "default": "detached",
-            "description": "The single run-state value (RunPhase). Computed once by derive_run_phase from lifecycle + control flags + freshness; every picker dot and badge reads this, none re-derive it. 'checkin' wins first (the campaign hasn't run); 'terminal' pairs with `status` for the reason label."
+            "description": "The single run-state value (RunPhase). Computed once by derive_run_phase from lifecycle + control flags + freshness; every picker dot and badge reads this, none re-derive it. 'checkin' wins first (the campaign hasn't run); 'terminal' pairs with `stop_reason` for the reason label."
           },
           "spawned_by": {
             "anyOf": [
@@ -2260,9 +2294,16 @@
             ],
             "description": "Which outer work-item asked for this cycle, when it is an L4 inner measurement; null for an ordinary campaign, which is the only reason it is null. Lets the sidebar name an inner run by the candidate that produced it instead of by launch order."
           },
-          "status": {
-            "title": "Status",
-            "type": "string"
+          "stop_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StopReason"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the cycle ended; null while it has not. Label, outcome and next step derive from the one STOP_REASON_INFO table — never re-mapped per surface."
           },
           "superseded_by": {
             "anyOf": [
@@ -2273,7 +2314,7 @@
                 "type": "null"
               }
             ],
-            "description": "The cycle_id that took this cycle's line, set on the LEFT-BEHIND side of a supersede cut. This is the successor pointer — follow it to find which cycle answers for the campaign; it is a fact of its own precisely so it survives on a parent that had already stopped for its own reason, which `status` cannot express. Null on a root, an offshoot, and any cycle still holding the line.",
+            "description": "The cycle_id that took this cycle's line, set on the LEFT-BEHIND side of a supersede cut. This is the successor pointer — follow it to find which cycle answers for the campaign; it is a fact of its own precisely so it survives on a parent that had already stopped for its own reason, which `stop_reason` cannot express. Null on a root, an offshoot, and any cycle still holding the line.",
             "title": "Superseded By"
           },
           "updated_at": {
@@ -2286,8 +2327,7 @@
           "campaign_id",
           "cycle_id",
           "mint_kind",
-          "is_root",
-          "status"
+          "is_root"
         ],
         "title": "CycleListEntry",
         "type": "object"
@@ -3655,6 +3695,14 @@
             ],
             "title": "Head To Head Id"
           },
+          "headline": {
+            "enum": [
+              "accuracy",
+              "composite"
+            ],
+            "title": "Headline",
+            "type": "string"
+          },
           "notes": {
             "items": {
               "type": "string"
@@ -3722,6 +3770,7 @@
           "rows",
           "head_to_head_id",
           "scorer_id",
+          "headline",
           "verdict",
           "differs_on",
           "pairs",
@@ -3859,16 +3908,22 @@
             "title": "Optimizer",
             "type": "string"
           },
-          "replay_share": {
+          "optimizer_models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Optimizer Models",
+            "type": "array"
+          },
+          "outcome": {
             "anyOf": [
               {
-                "type": "number"
+                "$ref": "#/components/schemas/StopOutcome"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Replay Share"
+            ]
           },
           "rounds": {
             "title": "Rounds",
@@ -3888,6 +3943,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/MeteredSpend"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stop_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StopReason"
               },
               {
                 "type": "null"
@@ -3936,12 +4001,15 @@
           "subject",
           "campaign_id",
           "optimizer",
+          "optimizer_models",
           "arm",
           "controlled",
           "treatment_digest",
           "budget",
           "spend_metered",
           "human_intervened",
+          "stop_reason",
+          "outcome",
           "bench",
           "bench_set",
           "comparable",
@@ -3952,7 +4020,6 @@
           "incurred_usd_ratio",
           "loop_incurred_usd_ratio",
           "worked_ratio",
-          "replay_share",
           "lift_per_incurred_usd",
           "concurrent_with",
           "bench_reads"
@@ -4511,7 +4578,7 @@
           },
           "status": {
             "default": "",
-            "description": "Candidate: minted | measured | invalid — never 'winner' (that rides `is_selected`). `invalid` was rejected before it cost a sample, so it carries no accuracy: its stored 0.0 is synthetic and reads as getting every answer wrong. Course: `index.json::status`, the same StopReason value `/cycles` serves under this same name. Not `dashboard.json::state`, which names the fine-grained ACTIVITY phase — a different axis, and one word may not serve both.",
+            "description": "Candidate: minted | measured | invalid — never 'winner' (that rides `is_selected`). `invalid` was rejected before it cost a sample, so it carries no accuracy: its stored 0.0 is synthetic and reads as getting every answer wrong. Empty on a course, whose ending is `stop_reason`.",
             "title": "Status",
             "type": "string"
           },
@@ -4526,6 +4593,17 @@
             ],
             "description": "Operator who cut this fork.",
             "title": "Steered By"
+          },
+          "stop_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StopReason"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Courses only — why the cycle ended (`index.json::stop_reason`), the same value `/cycles` serves. Null while it has not ended, and on a candidate."
           },
           "superseded_by": {
             "anyOf": [
@@ -4855,6 +4933,13 @@
             "title": "Beside",
             "type": "object"
           },
+          "billed_by_bucket": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Billed By Bucket",
+            "type": "object"
+          },
           "billed_usd": {
             "title": "Billed Usd",
             "type": "number"
@@ -4866,6 +4951,17 @@
             "title": "Buckets",
             "type": "object"
           },
+          "incurred_by_bucket": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Incurred By Bucket",
+            "type": "object"
+          },
+          "incurred_usd": {
+            "title": "Incurred Usd",
+            "type": "number"
+          },
           "meter": {
             "enum": [
               "bill",
@@ -4873,6 +4969,17 @@
             ],
             "title": "Meter",
             "type": "string"
+          },
+          "replay_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replay Share"
           },
           "tokens": {
             "title": "Tokens",
@@ -4889,7 +4996,11 @@
           "tokens",
           "buckets",
           "beside",
-          "billed_usd"
+          "billed_usd",
+          "incurred_usd",
+          "billed_by_bucket",
+          "incurred_by_bucket",
+          "replay_share"
         ],
         "title": "MeteredSpend",
         "type": "object"
@@ -6019,7 +6130,6 @@
             "description": "The ledger record_type — ProjectionEnvelope.kind.",
             "enum": [
               "candidate_minted",
-              "cell_priced",
               "decision",
               "command",
               "command_ack",
@@ -6030,6 +6140,7 @@
               "llm_call",
               "llm_call_start",
               "phase",
+              "priced_key",
               "round_warning",
               "ruler",
               "snapshot",
@@ -6270,7 +6381,7 @@
       },
       "SelectionPair": {
         "additionalProperties": false,
-        "description": "Two campaigns' selections paired on the bench rows both scored, in the headline composite.\n``shift = b - a``: ``BenchScore.lift``'s arithmetic with ``a`` where the origin stands.",
+        "description": "Two campaigns' selections paired on the bench rows both scored, in the headline column.\n``shift = b - a``: ``BenchScore.lift``'s arithmetic with ``a`` where the origin stands.",
         "properties": {
           "campaign_a": {
             "title": "Campaign A",
@@ -6522,6 +6633,48 @@
         },
         "title": "SpendRollup",
         "type": "object"
+      },
+      "StopOutcome": {
+        "description": "``PAUSED`` is the **only non-terminal** outcome — the worker exited but the cycle keeps no\n``finished_at``. Every terminal surface derives its label from this one table.",
+        "enum": [
+          "success",
+          "halted",
+          "failed",
+          "paused"
+        ],
+        "title": "StopOutcome",
+        "type": "string"
+      },
+      "StopReason": {
+        "description": "``BACKEND_UNREACHABLE`` halts at the first cell the backend could not reach once its own\nretries were spent (``query_loop.py::Walk.take``).",
+        "enum": [
+          "perfect_score",
+          "max_rounds",
+          "lives_exhausted",
+          "paused",
+          "panel_cut",
+          "crashed",
+          "diverged",
+          "optimizer_abort",
+          "converged",
+          "hard_cap_reached",
+          "diag_complete",
+          "target_hit",
+          "spend_budget",
+          "token_budget",
+          "origin_gate",
+          "backend_unreachable",
+          "provider_credit_exhausted",
+          "provider_throttled",
+          "render_error",
+          "optimizer_timeout",
+          "rebased_to_fork",
+          "producer_vanished",
+          "input_refused",
+          "not_admitted"
+        ],
+        "title": "StopReason",
+        "type": "string"
       },
       "SubjectMask": {
         "additionalProperties": false,
@@ -6871,7 +7024,7 @@
         "type": "object"
       },
       "ThetaCaveat": {
-        "description": "A state in which θ is NOT ability — decided beside the ruler, never in a view.\n\nAll five render every number and raise nothing, so the reading looks identical to a sound one.\nWHICH one fired is the whole value, because the fix differs: one is an instrument, one is an\nacquisition, one is the absence of a scale, one is the ruler's prior standing in for a\nmeasurement, one is the arm itself. The ABSENCE of a caveat is the sixth state, and the only\none where θ is ability.\n\n**Two SCOPES, one vocabulary.** The first four are facts about the ROUND's scale, decided by\n:func:`theta_caveat` and stamped on its ``AbilityReading``; ``FLOOR_PINNED`` is a fact about\nONE ARM, decided by ``results.py::is_floor_pinned`` where that arm is scored. One enum because\nthe question a reader asks is identical — *may I read this θ as ability?* — and a second\nvocabulary for it would be a synonym, not a channel.\n\n`docs/methods/verdict-resolution.md` § Reading a round.",
+        "description": "A state in which θ is NOT ability — decided beside the ruler, never in a view.\n\nAll five render every number and raise nothing, so the reading looks identical to a sound one.\nWHICH one fired is the whole value, because the fix differs: one is an instrument, one is an\nacquisition, one is the absence of a scale, one is the ruler's prior standing in for a\nmeasurement, one is the arm itself. The ABSENCE of a caveat is the sixth state, and the only\none where θ is ability.\n\n**Two SCOPES, one vocabulary.** The first four are facts about the ROUND's scale, decided by\n:func:`theta_caveat` and stamped on its ``AbilityReading``; ``FLOOR_PINNED`` is a fact about\nONE ARM, decided by ``results.py::is_floor_pinned`` where that arm is scored, and an arm whose\nown cells the ruler does not carry takes ``UNMEASURED_DELTA`` on its row too. One enum because\nthe question a reader asks is identical — *may I read this θ as ability?* — and a second\nvocabulary for it would be a synonym, not a channel.\n\n`docs/methods/verdict-resolution.md` § Reading a round.",
         "enum": [
           "cold_ruler",
           "flat_ruler",

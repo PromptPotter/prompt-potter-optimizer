@@ -6,7 +6,7 @@ from typing import Any
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_TOOLING
-from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
+from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.results import ArmOutcome, CycleResult, RoundResult
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import CellUnscoreableError
@@ -65,7 +65,7 @@ class InnerCellFacts(StrictModel):
     inner_peak_lift: float
     inner_rounds_ran: int
     inner_round_budget: int
-    inner_stop_reason: str
+    inner_stop_reason: StopReason
     # REPORTING figures, and they enter no ledger. Billing is each call's own, carried onto the
     # outer ledger as it settles; these are the cell's cumulative total across attempts, so a
     # reader that treated them as a charge would bill a continued cell's history twice.
@@ -96,7 +96,7 @@ def inner_cell_facts(result: CycleResult, campaign_id: str) -> InnerCellFacts | 
         inner_peak_lift=max(levels) - origin,
         inner_rounds_ran=result.n_rounds_after_origin,
         inner_round_budget=len(parent_level_series(result)),
-        inner_stop_reason=str(result.stop_reason),
+        inner_stop_reason=result.stop_reason,
         inner_spend_usd=result.spend.total_used_usd if result.spend else None,
         inner_tokens=result.spend.total_tokens_used if result.spend else None,
         inner_campaign_id=campaign_id,

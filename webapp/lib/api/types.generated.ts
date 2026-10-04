@@ -501,6 +501,10 @@ export interface MeteredSpend {
   buckets: Record<string, number>;
   beside: Record<string, number>;
   billed_usd: number;
+  incurred_usd: number;
+  billed_by_bucket: Record<string, number>;
+  incurred_by_bucket: Record<string, number>;
+  replay_share: number | null;
 }
 
 /** A provider holding a sender's sends (`infrastructure/llm/rate_limit.py::Backpressure`). */
@@ -541,11 +545,11 @@ export interface LoopWarning {
   detail: Record<string, unknown>;
 }
 
-/** ``dashboard.json::error`` — structured crash summary written by */
+/** ``dashboard.json::error`` — structured failure summary written by ``_handle_error`` off the */
 export interface DashboardError {
   kind: string;
   message: string;
-  stop_reason: string;
+  stop_reason: 'perfect_score' | 'max_rounds' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
 }
 
 /** One knob an optimizer declares as bounding its run, which a fork may reconcile. */
@@ -639,6 +643,17 @@ export interface CurrentRound {
   overlap: OverlapReading | null;
 }
 
+/** ``dashboard.json::bench_pass`` — the held-out pass in flight. Its rows are no round's cells. */
+export interface BenchPassProgress {
+  subject: 'origin' | 'selected';
+  /** The round whose selection is graded; 0 is the origin. */
+  round: number;
+  /** Bench rows the pass sends. */
+  rows: number;
+  /** Rows of it scored so far. */
+  scored: number;
+}
+
 /** ``dashboard.json`` — operator-facing snapshot, polled by the webapp. */
 export interface LiveDashboardState {
   campaign_id: string;
@@ -651,7 +666,7 @@ export interface LiveDashboardState {
   state_since: string;
   declared_phase: 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
   run_phase: 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
-  stop_reason: string | null;
+  stop_reason: 'perfect_score' | 'max_rounds' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   round: number;
   candidate: string;
   run_standing: RunStanding | null;
@@ -659,6 +674,7 @@ export interface LiveDashboardState {
   best: number | null;
   current_acc: number | null;
   bench_score: BenchScore | null;
+  bench_pass: BenchPassProgress | null;
   bench_lift_per_incurred_usd: number | null;
   composite_fitness_formula: string | null;
   composite_fitness_weights: Record<string, number> | null;
@@ -989,18 +1005,36 @@ export interface SpawnedBy {
   task: string;
 }
 
+export interface BandedValue {
+  value: number;
+  /** The 95% band on `value`, drawn from the same per-row values; `None` where one
+   * pass was read twice, which has no spread. */
+  ci_lo: number | null;
+  ci_hi: number | null;
+}
+
+/** One bench quantity in both columns, read off the same rows. */
+export interface BenchColumns {
+  /** The hit rate. */
+  accuracy: BandedValue | null;
+  /** Under the reading scorer's formula, which charges cost and length — so it is
+   * never the change in the hit rate. */
+  composite: BandedValue | null;
+}
+
 /** One individual's bench pass, read under a named scorer. */
 export interface BenchReading {
+  /** The hit rate. */
+  accuracy: BandedValue | null;
+  /** Under the reading scorer's formula, which charges cost and length — so it is
+   * never the change in the hit rate. */
+  composite: BandedValue | null;
   /** The round whose selection this is; 0 is the origin. */
   round: number;
   /** The searchpoint scored — the archive's `prompt_fields_id`. */
   sp_hash: string;
-  accuracy: number | null;
-  /** Under the reading scorer's formula — the number the headline reads. */
-  composite_fitness: number | null;
-  /** The 95% band on `composite_fitness`, drawn from the same per-row values. */
-  ci_lo: number | null;
-  ci_hi: number | null;
+  /** Which column the headline reads. */
+  headline: 'accuracy' | 'composite';
   /** Bench rows carrying a verdict — a miss the prompt caused included — never
    * fewer than the bench set less its split's `tolerance`. */
   n_scored: number;
@@ -1013,6 +1047,8 @@ export interface BenchScore {
    * reading: a reader under another grader reads the passes again, never
    * this. */
   scorer_id: string;
+  /** Which column the headline reads, on the readings and on `lift` alike. */
+  headline: 'accuracy' | 'composite';
   /** `None` where its pass read nothing; `missing_reason` says why. */
   origin: BenchReading | null;
   /** The headline. `None` where its pass read nothing; `missing_reason` says why. */
@@ -1022,14 +1058,10 @@ export interface BenchScore {
    * `selected`, a line that closed no round and so selected nothing. `None`
    * when both read. */
   missing_reason: string | null;
-  /** `selected` over `origin` in `composite_fitness`, paired per bench row both
-   * scored; `None` below two shared rows, and 0.0 where the origin is the
+  /** `selected` over `origin`, paired per bench row both scored. A column is `None`
+   * below two shared rows, and 0.0 with no band where the origin is the
    * selection. */
-  lift: number | null;
-  /** The 95% band on `lift`; `None` where `lift` is, and where the origin is the
-   * selection — one pass read twice has no spread. */
-  lift_ci_lo: number | null;
-  lift_ci_hi: number | null;
+  lift: BenchColumns;
 }
 
 export interface CycleListEntry {
@@ -1044,18 +1076,20 @@ export interface CycleListEntry {
   backend_id: string;
   mint_kind: 'session' | 'divergent_resume' | 'user_fork' | 'auto_rebase';
   is_root: boolean;
-  status: string;
+  /** Why the cycle ended; null while it has not. Label, outcome and next step
+   * derive from the one STOP_REASON_INFO table — never re-mapped per surface. */
+  stop_reason: 'perfect_score' | 'max_rounds' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   /** The cycle_id that took this cycle's line, set on the LEFT-BEHIND side of a
    * supersede cut. This is the successor pointer — follow it to find which
    * cycle answers for the campaign; it is a fact of its own precisely so it
    * survives on a parent that had already stopped for its own reason, which
-   * `status` cannot express. Null on a root, an offshoot, and any cycle still
-   * holding the line. */
+   * `stop_reason` cannot express. Null on a root, an offshoot, and any cycle
+   * still holding the line. */
   superseded_by: string | null;
   /** The single run-state value (RunPhase). Computed once by derive_run_phase from
    * lifecycle + control flags + freshness; every picker dot and badge reads
    * this, none re-derive it. 'checkin' wins first (the campaign hasn't run);
-   * 'terminal' pairs with `status` for the reason label. */
+   * 'terminal' pairs with `stop_reason` for the reason label. */
   run_phase: 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
   /** The optimizer's own selection score — what it KEPT, read on the rows that
    * chose it. Never the headline; the campaign's `CampaignSummary.bench` is. */
@@ -1507,12 +1541,15 @@ export interface HeadToHeadRow {
   subject: string;
   campaign_id: string;
   optimizer: string;
+  optimizer_models: string[];
   arm: Arm | null;
   controlled: boolean;
   treatment_digest: string | null;
   budget: ArmBudget;
   spend_metered: MeteredSpend | null;
   human_intervened: boolean;
+  stop_reason: 'perfect_score' | 'max_rounds' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
+  outcome: 'success' | 'halted' | 'failed' | 'paused' | null;
   bench: BenchScore | null;
   bench_set: Instrument | null;
   comparable: boolean | null;
@@ -1523,13 +1560,12 @@ export interface HeadToHeadRow {
   incurred_usd_ratio: number | null;
   loop_incurred_usd_ratio: number | null;
   worked_ratio: number | null;
-  replay_share: number | null;
   lift_per_incurred_usd: number | null;
   concurrent_with: string[];
   bench_reads: number | null;
 }
 
-/** Two campaigns' selections paired on the bench rows both scored, in the headline composite. */
+/** Two campaigns' selections paired on the bench rows both scored, in the headline column. */
 export interface SelectionPair {
   campaign_a: string;
   campaign_b: string;
@@ -1546,6 +1582,7 @@ export interface HeadToHead {
   rows: HeadToHeadRow[];
   head_to_head_id: string | null;
   scorer_id: string;
+  headline: 'accuracy' | 'composite';
   verdict: boolean | null;
   differs_on: string[];
   pairs: SelectionPair[];
@@ -1668,10 +1705,7 @@ export interface LineageNode {
   /** Candidate: minted | measured | invalid — never 'winner' (that rides
    * `is_selected`). `invalid` was rejected before it cost a sample, so it
    * carries no accuracy: its stored 0.0 is synthetic and reads as getting
-   * every answer wrong. Course: `index.json::status`, the same StopReason
-   * value `/cycles` serves under this same name. Not `dashboard.json::state`,
-   * which names the fine-grained ACTIVITY phase — a different axis, and one
-   * word may not serve both. */
+   * every answer wrong. Empty on a course, whose ending is `stop_reason`. */
   status: string;
   /** This candidate's ROUND has held its election. The complement `is_selected`
    * cannot supply: a round that HELD crowned nobody, so every bar in it reads
@@ -1765,6 +1799,9 @@ export interface LineageNode {
   /** Courses only — the ONE server-owned run-state (`derive_run_phase`), the same
    * value `/cycles` serves. Null on a candidate, which has no run of its own. */
   run_phase: 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal' | null;
+  /** Courses only — why the cycle ended (`index.json::stop_reason`), the same value
+   * `/cycles` serves. Null while it has not ended, and on a candidate. */
+  stop_reason: 'perfect_score' | 'max_rounds' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   dataset_name: string;
   /** Fork trigger; empty for roots and inner runs. */
   trigger: string;
@@ -1803,7 +1840,7 @@ export interface RayItem {
    * the two invert (records are stamped at construction but appended later). */
   ts: string;
   /** The ledger record_type — ProjectionEnvelope.kind. */
-  kind: 'candidate_minted' | 'cell_priced' | 'decision' | 'command' | 'command_ack' | 'cycle_seed' | 'election' | 'error' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'round_warning' | 'ruler' | 'snapshot' | 'run_limits' | 'spend_hold' | 'spend_tombstone' | 'token_usage' | 'stream_snapshot';
+  kind: 'candidate_minted' | 'decision' | 'command' | 'command_ack' | 'cycle_seed' | 'election' | 'error' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'priced_key' | 'round_warning' | 'ruler' | 'snapshot' | 'run_limits' | 'spend_hold' | 'spend_tombstone' | 'token_usage' | 'stream_snapshot';
   /** The chronology projection of the record's model_dump — identity, address and
    * the one-line reading, per
    * domain/projection_envelope.py::RAY_PAYLOAD_FIELDS. A SUBSET of
@@ -1828,7 +1865,7 @@ export interface RayResponse {
 /** One outbound SSE frame. Frozen wire shape — a receiver MUST treat an unknown field as a DRIFT SIGNAL, not as */
 export interface ProjectionEnvelope {
   /** Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot. */
-  kind: 'candidate_minted' | 'cell_priced' | 'decision' | 'command' | 'command_ack' | 'cycle_seed' | 'election' | 'error' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'round_warning' | 'ruler' | 'snapshot' | 'run_limits' | 'spend_hold' | 'spend_tombstone' | 'token_usage' | 'stream_snapshot';
+  kind: 'candidate_minted' | 'decision' | 'command' | 'command_ack' | 'cycle_seed' | 'election' | 'error' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'priced_key' | 'round_warning' | 'ruler' | 'snapshot' | 'run_limits' | 'spend_hold' | 'spend_tombstone' | 'token_usage' | 'stream_snapshot';
   /** Envelope shape version. Bump only on a breaking restructure of this class;
    * payload churn is per-kind. */
   version: number;
@@ -2376,11 +2413,14 @@ export type CommandKind = 'archive-campaign' | 'cancel-queued-run' | 'change-run
 
 // Kinds no activity item is ever made of — the ray drops them and the translator
 // returns null. Complement of domain/projection_envelope.py::RENDERS_AS_ACTIVITY.
-export type NonActivityKind = 'cell_priced' | 'decision' | 'election' | 'ruler' | 'run_limits' | 'spend_hold' | 'spend_tombstone' | 'token_usage';
+export type NonActivityKind = 'decision' | 'election' | 'priced_key' | 'ruler' | 'run_limits' | 'spend_hold' | 'spend_tombstone' | 'token_usage';
 
-// Operator-facing label per terminal reason (StopReason). Mirror of
+// Why a cycle ended (domain/phases.py::StopReason).
+export type StopReason = 'perfect_score' | 'max_rounds' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
+
+// Operator-facing label per terminal reason. Mirror of
 // domain/phases.py::STOP_REASON_INFO — the single label source.
-export const STOP_REASON_LABELS: Record<string, string> = {
+export const STOP_REASON_LABELS: Record<StopReason, string> = {
   'perfect_score': 'Perfect score',
   'max_rounds': 'Max rounds',
   'target_hit': 'Target reached',
@@ -2399,6 +2439,8 @@ export const STOP_REASON_LABELS: Record<string, string> = {
   'provider_credit_exhausted': 'Provider out of credit',
   'provider_throttled': 'Provider rate-limited',
   'crashed': 'Crashed',
+  'input_refused': 'Input refused',
+  'not_admitted': 'Not admitted',
   'producer_vanished': 'Producer vanished',
   'render_error': 'Render error',
   'diverged': 'Diverged',
@@ -2406,27 +2448,40 @@ export const STOP_REASON_LABELS: Record<string, string> = {
 };
 
 // What the operator does now, per terminal reason — the same table's `next_step`, so the
-// browser advises exactly what the terminal, log.md and review.md advise. A reason absent
-// here states that nothing is owed; it is not a gap.
-export const STOP_REASON_NEXT_STEPS: Record<string, string> = {
+// browser advises exactly what the terminal, log.md and review.md advise. `""` states
+// that nothing is owed; it is not a gap.
+export const STOP_REASON_NEXT_STEPS: Record<StopReason, string> = {
   'perfect_score': "`verify` the winner on more cells — this is one round's panel, not the dataset.",
   'max_rounds': '`set-limits --max-rounds <more>` then `resume` if the curve was still moving; else read `review.md`.',
+  'target_hit': '',
+  'lives_exhausted': '',
+  'hard_cap_reached': '',
+  'diag_complete': '',
+  'converged': '',
+  'rebased_to_fork': '',
   'paused': '`resume` picks it up at the next checkpoint.',
   'panel_cut': 'Give the cut cells room (`Connector.cell_envelope_s`, or the backend deadline their rows name) before `resume`, or `optimization.panel_gate: off` to elect on the holed panel.',
+  'optimizer_abort': '',
   'spend_budget': '`set-limits --max-usd <above what is already spent>` then `resume`.',
   'token_budget': '`set-limits --max-tokens <above what is already spent>` then `resume`.',
+  'origin_gate': '',
   'backend_unreachable': 'The unreached cell is a hole, not a score: restore the backend or the network it needs, then `resume` re-measures it.',
   'provider_credit_exhausted': "Raise the provider key's limit or top up its credit, then `resume`; a refused cell is a hole it re-measures.",
   'provider_throttled': 'Use your own key for that provider (OpenRouter BYOK) or route to another host (`route_order`), or wait out its quota, then `resume`; the refused cell is a hole it re-measures.',
+  'crashed': 'Read `index.json::crash_traceback` for the cause; `python -m promptpotter resume` re-runs from the last closed round.',
+  'input_refused': "`dashboard.json::error` names the input the run declined; refused at run init, nothing was searched. A spend cap under one round is raised with `set-limits --max-usd` (on a head-to-head arm that moves every arm's budget) or met by narrowing the round in `optimization.nodes`; then `resume`.",
+  'not_admitted': '',
+  'producer_vanished': '',
+  'render_error': '',
   'diverged': '`resume --fork-on-divergence` to branch here, or revert the config edit to continue.',
+  'optimizer_timeout': '',
 };
 
 // Whether a stop SUCCEEDED, and the only half of the table that decides anything —
-// `StopOutcome`, where `paused` is the one non-terminal member. TOTAL over the reasons,
-// so ask it rather than matching names: a hand-listed set of crash names rots in both
-// directions, missing the reason added yesterday and keeping one that was renamed.
+// `StopOutcome`, where `paused` is the one non-terminal member. Ask it rather than
+// matching names: a hand-listed set of crash names rots in both directions.
 export type StopOutcome = 'success' | 'halted' | 'failed' | 'paused';
-export const STOP_REASON_OUTCOMES: Record<string, StopOutcome> = {
+export const STOP_REASON_OUTCOMES: Record<StopReason, StopOutcome> = {
   'perfect_score': 'success',
   'max_rounds': 'success',
   'target_hit': 'success',
@@ -2445,6 +2500,8 @@ export const STOP_REASON_OUTCOMES: Record<string, StopOutcome> = {
   'provider_credit_exhausted': 'halted',
   'provider_throttled': 'halted',
   'crashed': 'failed',
+  'input_refused': 'failed',
+  'not_admitted': 'halted',
   'producer_vanished': 'failed',
   'render_error': 'failed',
   'diverged': 'failed',

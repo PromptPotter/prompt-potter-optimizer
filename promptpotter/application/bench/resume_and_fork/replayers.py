@@ -73,8 +73,8 @@ def _iter_mismatches(ctx: ReplayContext) -> Iterator[ReplayMismatch]:
             current = fn(ctx, rec["inputs_ref"], rec["data"])
         except Exception as exc:
             # A replayer that cannot ANSWER is a third state, never a match: they raise on a record
-            # that does not re-derive (`RulerCoverageError` on an uncarried cell, a `ROUND_WINNER`
-            # missing its `parent_cells` anchor), so counting that as agreement reports a clean pass
+            # that does not re-derive (a `ROUND_WINNER` missing its `parent_cells` anchor, a field
+            # the decision never banked), so counting that as agreement reports a clean pass
             # for exactly the rounds nothing verified and `--fork-on-divergence` never fires. Its own
             # kind, so the operator reads WHICH check went blind.
             # `.get` here only: the raise may BE the missing key, and an error path may not raise.

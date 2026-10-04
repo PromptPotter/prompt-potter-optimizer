@@ -54,6 +54,19 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   `spend_hold` records in the cycle's `.runtime/ledger.jsonl` — one until that cell lands means
   this is still open.
 
+- **A phase VIEW is on-disk shape, and nothing treats it as one.** Resume folds the seed cycle's
+  ledger through `projections/live_dashboard/projection.py::resolve_resume_state`, so every key
+  `_apply_phase` reads off `payload.view` is a persisted contract — while a view is declared in
+  `application/views/view_models.py` as a display dataclass and changed as freely as one. Adding
+  `BenchEnterView` made every cycle paused before it unresumable (`KeyError: 'subject'` at init),
+  and `maintenance/restamp.py::compact_cycle_ledgers` cannot repair it: the old record never held
+  the fact. `scripts/offline_run.py` has no pause-and-resume leg, so the gate stayed green. Owed is
+  a design answer, not a tolerant read: either the fold reads only declared record fields and views
+  stay display-only, or a view change is priced as a persistence change at the writer. **Rides
+  with:** any new or changed phase view. **Re-test:**
+  `grep -n -i resume scripts/offline_run.py` — empty means no check resumes a cycle, so the next
+  view change strands paused cycles the same way.
+
 - **The responsive walk records no Lighthouse score, and sizes the candidates card at no width.**
   The six-width sweep (`e2e/walk/responsive.spec.ts`) catches content DELETED by an
   `overflow:hidden` wrapper or a `viewBox`'d SVG that scaled instead of overflowing — the
@@ -94,6 +107,83 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
 - **No gate stops a router importing `promptpotter.infrastructure.store`**, so a route that picks WHICH rows or in WHAT ORDER stays unreachable from every other entry point (`presentation/CLAUDE.md` § Out-of-bounds). Action: move each router's composition into `application/` (template: `routers/datasets/leaderboard.py` → `application/scoring/cells.py::measurement_log`), then add the import ban to the gate. **Rides with:** any change to one of those routers — each takes its own module off the list. **Re-test:** `grep -rl --include=*.py promptpotter.infrastructure.store promptpotter/presentation/api/routers` — a non-empty list means the gate cannot land yet.
 
 - **`webapp/lib/derivations/round-samples.ts` re-walks the sample mark with three arms** (ERR / HIT / MISS) over raw round-file rows, where `domain/dashboard_rows.py::sample_status` has four — so a historical UNSC row reads as a wrong answer. Action: serve the mark on the row the client reads (the round file's `all_candidate_results`, or route the reader through `/cells`, which already serves `CellRow.status`), then delete the client ladder. **Rides with:** any change to `round-samples.ts` or the round-file result row. **Re-test:** `grep -n '"UNSC"' webapp/lib/derivations/round-samples.ts` — empty while the client ladder still has three arms.
+
+## Open — surfaced by the head-to-head arc
+
+Filed at the operator's ask rather than under the multi-arc bar above. A leading **INVESTIGATE**
+means nobody has established that the item is real, solvable or worth its cost: answer that first,
+and delete the entry if the answer is no.
+
+**The ruler and the peers**
+
+- **INVESTIGATE — GEPA's round ceiling doubled.** `optimizers/gepa/members.py::GepaRuntime.
+  round_cells_ceiling` now prices the parent's cells beside the child's, so
+  `preflight.py::check_search_pool_holds_round` may warn on, or refuse, an arm whose cap held a
+  round before. **Rides with:** the next head-to-head mint. **Re-test:** mint a GEPA arm at the
+  budget the last head-to-head used and read the preflight line.
+- **INVESTIGATE — ruler linking is one pass per round.** `domain/ruler.py::extend_ruler` links a
+  cell only through an arm already on the ruler, so a cell reachable through an arm linked in the
+  same pass stays off it until the next round. Unknown whether any cell is ever left that way.
+  **Rides with:** any change to `extend_ruler`. **Re-test:** count `unmeasured_delta` caveats per
+  round in a potter cycle's `rounds/*.json`; a caveat that clears one round later is this.
+- **`candidate_scored` fires before the per-arm caveat is stamped.** `runner/measurement.py::
+  measure_population` stamps `ThetaCaveat.UNMEASURED_DELTA` after `_walk_population` has already
+  emitted each report, so the live event and the closed round disagree. Action: stamp where the
+  report is built, or re-emit. **Rides with:** any change to `measure_population`. **Re-test:**
+  compare one arm's `theta_caveat` in the ledger's `candidate_scored` record and in its round file.
+- **INVESTIGATE — the webapp's per-arm text for `unmeasured_delta` is unverified**, and so are the
+  docs and tests the ruler-linking change touched: neither was read after it landed. **Rides
+  with:** any webapp caveat surface. **Re-test:** grep `unmeasured_delta` under `webapp/lib`, and
+  `git log -p` that change's `docs/` and `tests/` hunks.
+
+**Spend**
+
+- **Spend by measurement role is not built.** Overlap and catch-up spend are attributed by matching
+  token triples. Action: one optional role on `domain/run_records.py::TokenUsageRecord`, stamped
+  in `infrastructure/llm/telemetry.py::emit_token_usage` from `shared/instrument.py::
+  measured_candidate()` as `round` is. **Rides with:** any change to `TokenUsageRecord` or the
+  spend book. **Re-test:** grep `TokenUsageRecord` for a role field.
+- **Hold bounds leave three gaps.** `_billed_most` is not seeded on resume; `reserved()` does not
+  hold `held_at(...)`, so a walk can plan a cell its reservation refuses; and `scoring/
+  query_loop.py::Walk.end` drops a paid look-ahead cell that crossed a block decision. **Rides
+  with:** any change to `spend_book.py`, `quota.py` or `run_walks`. **Re-test:** resume an arm and
+  read its first `spend_hold` against the ledger's billed maximum for that label.
+- **A paused run prints no spend line.** The run-end line carries billed and incurred; a pause
+  writes neither to the readout. **Rides with:** any change to the readout's stop lines.
+  **Re-test:** `pause` a running cycle and grep its `readout.log` for the spend line.
+- **INVESTIGATE — `runner/campaign_result.py` and a dataset with `split.bench == 0`.** Whether the
+  bench pass, the `bench_origin` reserve and the headline all degrade to a stated reason rather
+  than a zero is unread. **Rides with:** any change to `campaign_result.py`. **Re-test:** run
+  `scripts/offline_run.py` on a split with no bench rows.
+- **INVESTIGATE — the bench pass runs serial at look-ahead depth 1**, which is clock, not dollars.
+  Whether the held-out pass should ride the depth the search uses is undecided. **Rides with:**
+  any change to `runner/bench.py`. **Re-test:** time one bench pass against its cell count.
+
+**Run state and the tree**
+
+- **`scripts/offline_run.py` has no pause-and-resume leg** — the re-test of the phase-view entry
+  above, and what would have caught it. **Rides with:** that entry.
+- **INVESTIGATE — `presentation/cli/commands/reset.py` does not recognise `.cache`**, so `reset`
+  reports it as unknown rather than preserving or clearing it by rule. Changing the preserve list
+  was refused by the permission layer once; it needs the operator's explicit say. **Rides with:**
+  any change to `reset.py`. **Re-test:** run `reset` dry and read what it says about `.cache`.
+- **INVESTIGATE — `dashboard.json` carries each candidate's rows twice**, as `samples` and as
+  `sample_lines`, and they are most of the file: on a wide panel one cycle's dashboard passes half
+  a megabyte. The file is indented and reads fine; the question is whether both shapes have a
+  reader. **Rides with:** any change to `projections/live_dashboard/blocks.py`. **Re-test:** grep
+  `sample_lines` under `webapp/lib` and `webapp/components`.
+- **INVESTIGATE — three items filed with their re-tests in `.scratch/debug-arc-seed.md`**: errored
+  cells (`finish_reason=error` then a schema repair) and whether their rate differs by arm; the
+  potter `plan` panel one char over its runaway backstop; and potter's round-5 L2 layout refusal.
+
+**Webapp — the control-plane session's files**
+
+- **Four stale reads of a run's ending.** `components/compare/ChannelCards.tsx` keeps a
+  `?? row.stop_reason` default the typed field made dead; `e2e/spend/l4.spec.ts` matches a stop
+  by a regex over its name where `STOP_REASON_OUTCOMES` answers; the `RunMasthead.tsx` headline
+  does not read the stop table; and `docs/specs/roadmap.md` still describes LEVI's proxy as drawn
+  on the pool. **Rides with:** that session's next webapp pass. **Re-test:** grep `stop_reason`
+  under `webapp/components/compare` and `webapp/e2e/spend`.
 
 ## Bypasses — one defect class, held for ONE holistic pass
 
@@ -186,6 +276,14 @@ an untyped dict.
   the ceiling is the campaign's or the cycle's. The campaign's answer is one book per campaign,
   shared by its live cycles through the job registry the account wallet already reads.
   **Re-test:** ask the operator which the ceiling is; while unanswered, this stands.
+
+- **A head-to-head's arms do not share one optimizer model**, so "the only difference is the
+  optimizer" is false at the proposer: each preset under `promptpotter/assets/optimizers/` pins its
+  own, and an arm's lift and its dollars both carry the model as well as the method. **Blocker:** a
+  decision only the operator can make — each peer on its paper's model class (faithful, confounded)
+  or every arm on one model (controlled, a declared deviation per peer). **Re-test:**
+  `grep -n "model:" promptpotter/assets/optimizers/*/pipeline.yaml` — more than one distinct model
+  across presets means the arms still differ, and ask the operator which reading the bench reports.
 
 
 **Archive hygiene — the reclaim, its attribution, and the map over both:**

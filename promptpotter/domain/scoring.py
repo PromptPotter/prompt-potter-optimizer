@@ -9,6 +9,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Annotated, Any, Literal, NamedTuple, NotRequired, TypedDict, cast
 
 from promptpotter.config.settings import ANSWER_SPACE_CAP, NO_RESULT
+from promptpotter.domain.phases import StopReason
 from promptpotter.shared.errors import ErrorCategory, is_charged_error, is_error_result
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
@@ -153,7 +154,7 @@ class PipelineData(LedgerPipelineData, total=False):
     inner_peak_lift: float
     inner_rounds_ran: int
     inner_round_budget: int
-    inner_stop_reason: str
+    inner_stop_reason: StopReason
     inner_spend_usd: float | None
     inner_tokens: int | None
     inner_campaign_id: str

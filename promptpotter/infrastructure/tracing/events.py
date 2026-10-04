@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Union
 
+from promptpotter.domain.phases import StopReason
+
 
 def generate_observation_id() -> str:
     prefix = datetime.now(UTC).strftime("%y%m%d%H%M%S")
@@ -130,7 +132,7 @@ class CampaignEnd:
     result_accuracy: float | None
     # Completed L1 rounds, origin-EXCLUSIVE (mirrors CycleResult.n_rounds_after_origin).
     n_rounds_after_origin: int
-    stop_reason: str
+    stop_reason: StopReason
     result_round: int
 
 

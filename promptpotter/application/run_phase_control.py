@@ -3,13 +3,14 @@ paused run declares once and every surface reads the truth even after ``dashboar
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from promptpotter.domain.phases import CONTROL_PHASE, RunPhase
+from promptpotter.domain.phases import CONTROL_PHASE, RunPhase, StopReason
 from promptpotter.domain.run_records import PhaseRecord
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
+    from promptpotter.application.views.view_models import RunSpendView
 
 __all__ = ["declare_run_phase", "pause_requested"]
 
@@ -18,7 +19,8 @@ def declare_run_phase(
     session: Session,
     phase: Literal[RunPhase.RUNNING, RunPhase.PAUSED, RunPhase.GATE, RunPhase.TERMINAL],
     *,
-    stop_reason: str = "",
+    stop_reason: StopReason | None = None,
+    spend: RunSpendView | None = None,
 ) -> None:
     """Append a control ``PhaseRecord`` so the projection flips ``run_phase``; no-op before the ledger is bound.
     ``PAUSED`` is declared where a paused exit ENDS (``runner/entry.py``), never at the checkpoint
@@ -31,7 +33,10 @@ def declare_run_phase(
     ledger = session.state.ledger
     if ledger is None:
         return
-    payload = {"stop_reason": stop_reason} if stop_reason else {}
+    payload: dict[str, Any] = {} if stop_reason is None else {"stop_reason": stop_reason.value}
+    # Where a run ends, what it spent rides as the record's view, which the readout prints.
+    if spend is not None:
+        payload["view"] = spend
     ledger.append(PhaseRecord(phase=CONTROL_PHASE, event=str(phase), payload=payload))
 
 

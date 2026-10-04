@@ -24,13 +24,14 @@ available_models:
   - openai/gpt-oss-20b:nitro
   - openai/gpt-oss-120b:nitro
 nodes:
-  # b = 3 (App. E.4). The paper's D_train splits into D_feedback and D_pareto (Alg. 1 line 1);
-  # AIME-2025, LiveBench-Math and PUPA split them equally (App. E.1).
+  # b = 3 (App. E.4). The paper's D_train splits into D_feedback and D_pareto (Alg. 1 line 1) and
+  # states each as a row count per benchmark (App. E.1). NOT the paper's: 50, the count itself —
+  # every accepted child walks the whole set, so it is sized to the search pools the bench runs.
   minibatch:
     type: sampler
     config:
       size: 3
-      pareto_share: 0.5
+      pareto_size: 50
   # The reflection runs on the model under optimization (App. E.2, "GEPA-Qwen-Opt", Table 2):
   # Qwen3 8B at its recommended temperature 0.6 and top-p 0.95, in a 16,384-token context window
   # (App. E.2). NOT the paper's: its top-k 20, which an llm node's call config does not carry.

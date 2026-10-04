@@ -59,7 +59,8 @@ class ThetaCaveat(StrEnum):
 
     **Two SCOPES, one vocabulary.** The first four are facts about the ROUND's scale, decided by
     :func:`theta_caveat` and stamped on its ``AbilityReading``; ``FLOOR_PINNED`` is a fact about
-    ONE ARM, decided by ``results.py::is_floor_pinned`` where that arm is scored. One enum because
+    ONE ARM, decided by ``results.py::is_floor_pinned`` where that arm is scored, and an arm whose
+    own cells the ruler does not carry takes ``UNMEASURED_DELTA`` on its row too. One enum because
     the question a reader asks is identical — *may I read this θ as ability?* — and a second
     vocabulary for it would be a synonym, not a channel.
 
@@ -79,6 +80,10 @@ class ThetaCaveat(StrEnum):
     # difficulty nobody measured, and the pin MOVES as the ruler grows — so an unchanged prompt
     # drifts upward round on round. Silent like COLLAPSED_BAND: the ruler id matches, the cell
     # count is healthy, every number renders.
+    # ...or NO δ at all: a cell the ruler does not carry, because no arm holding an anchored
+    # ability answered it (`intelligence/exploration.py::extend_ruler`). θ skips that cell, so it
+    # is read on fewer cells than the accuracy beside it. The one member with BOTH scopes: the
+    # round's reading carries it for the frontier's cells, an arm's row for that arm's own.
     UNMEASURED_DELTA = "unmeasured_delta"
     # The ARM: it scored 0.0 on every cell it answered, so the fit has no response to separate
     # ability from the prior and θ settles on the floor the δ vector and n imply. Per-CANDIDATE,
@@ -93,6 +98,7 @@ def theta_caveat(
     calibration_model: CalibrationModel | None,
     round_span: float | None,
     ruler_span: float | None,
+    unlinked: int,
     pinned_share: float | None = None,
 ) -> ThetaCaveat | None:
     """Which of the four SCALE states this reading is in, or ``None`` where θ is genuinely
@@ -103,6 +109,10 @@ def theta_caveat(
     Spans below two cells arrive as ``None`` and are not a verdict — an unmeasurable band is not a
     narrow one, and an absent *pinned_share* is likewise no verdict rather than a clean one.
 
+    ``unlinked`` is ``DeltaRuler.unlinked`` over the cells this reading was taken on. It needs no
+    span to be a verdict: one measured cell the θ skipped is already a θ that is not the reading
+    of what was measured.
+
     **Order is severity, and the band wins.** Inside a collapsed band θ is logit-accuracy plus a
     constant whatever the δ were fit from, so naming the pin there would name the smaller fault.
 
@@ -111,15 +121,14 @@ def theta_caveat(
     """
     if calibration_model is None:
         return ThetaCaveat.COLD_RULER
-    if round_span is None or ruler_span is None:
-        return None
-    if ruler_span <= BAND_COLLAPSE_LOGITS:
-        return ThetaCaveat.FLAT_RULER
-    if round_span <= max(BAND_COLLAPSE_LOGITS, BAND_COLLAPSE_RATIO * ruler_span):
-        return ThetaCaveat.COLLAPSED_BAND
-    if pinned_share is not None and pinned_share >= PRIOR_PINNED_RATIO:
-        return ThetaCaveat.UNMEASURED_DELTA
-    return None
+    if round_span is not None and ruler_span is not None:
+        if ruler_span <= BAND_COLLAPSE_LOGITS:
+            return ThetaCaveat.FLAT_RULER
+        if round_span <= max(BAND_COLLAPSE_LOGITS, BAND_COLLAPSE_RATIO * ruler_span):
+            return ThetaCaveat.COLLAPSED_BAND
+        if pinned_share is not None and pinned_share >= PRIOR_PINNED_RATIO:
+            return ThetaCaveat.UNMEASURED_DELTA
+    return ThetaCaveat.UNMEASURED_DELTA if unlinked else None
 
 
 __all__ = [
@@ -244,6 +253,13 @@ class DeltaRuler(StrictModel):
         if not on:
             return None
         return sum(1 for d in on if d in shared) / len(on)
+
+    def unlinked(self, sample_ids: Iterable[int]) -> int:
+        """How many of these cells this ruler does not carry — measured, and counted by no θ.
+
+        The ONE derivation of the off-ruler state: the round's reading and each arm's row both
+        ask here, so neither surface can report a θ as whole that skipped a cell."""
+        return sum(1 for sid in set(sample_ids) if sid not in self.delta)
 
     def entries_covering(self, sample_ids: Iterable[int]) -> dict[int, RulerEntry]:
         """This ruler completed with a PROVISIONAL entry at its own centre (``mu_delta``, a=1) for

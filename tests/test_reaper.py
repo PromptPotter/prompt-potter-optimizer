@@ -581,7 +581,6 @@ def test_reopening_a_finished_cycle_opens_a_reap_window_until_its_producer_is_fr
     assert reopened is not None
     assert "finished_at" not in reopened, "the terminal latch survived the reopen"
     assert "final" not in reopened, "a stale winner block outlived the round that justified it"
-    assert reopened["status"] == "active"
 
     # The latch is gone and the producer is still stale — this is the window.
     _age(cycle_dir, seconds_ago=10_000.0)

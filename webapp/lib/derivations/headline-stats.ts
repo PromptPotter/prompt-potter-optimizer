@@ -62,8 +62,8 @@ export function fmtDisplayValue(
 export interface HeadlineStats {
   best: number | null;
   origin: number | null;
-  // The bench's held-out lift of the selection over the origin, in composite fitness: the
-  // headline for every optimizer, potter included. θ never stands in for it.
+  // The bench's held-out lift of the selection over the origin, in the served headline column:
+  // the headline for every optimizer, potter included. θ never stands in for it.
   benchLift: number | null;
   // Served: its two inputs land on different events, so dividing here would divide two polls.
   benchLiftPerUsd: number | null;
@@ -78,10 +78,12 @@ export function headlineStats(dash: DashboardSnapshot | null): HeadlineStats {
   const best = finite(dash?.best);
   const round0 = (dash?.rounds ?? []).find((r) => r.round === 0);
   const origin = round0 ? finite(round0.accuracy) : null;
+  const bench = dash?.bench_score;
   return {
     best,
     origin,
-    benchLift: finite(dash?.bench_score?.lift),
+    // Guarded: `dashboard.json` is served verbatim, and a file an older build wrote names no column.
+    benchLift: bench?.headline ? finite(bench.lift[bench.headline]?.value) : null,
     benchLiftPerUsd: finite(dash?.bench_lift_per_incurred_usd),
   };
 }
@@ -117,7 +119,7 @@ export function fitnessTrend(rounds: readonly RoundSummary[] | undefined): Fitne
       r.ability != null && r.ability.ruler_id != null && r.ability.ruler_id === seriesRuler
         ? r.ability.theta
         : null,
-    bench: r.bench?.composite_fitness ?? null,
+    bench: r.bench?.headline ? (r.bench[r.bench.headline]?.value ?? null) : null,
     // The rows the plotted value is a mean over, a held round's included.
     n: r.total,
   }));

@@ -74,6 +74,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.sample import Sample
+    from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 __all__ = [
@@ -99,15 +100,20 @@ _LLOYD_ITERATIONS = 100
 
 
 class ProxyCssKnobs(StrictModel):
+    discovery: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
+        ge=1,
+        description="The discovery set: the search-pool cells, first in bank order, the "
+        "calibration round scores every calibration prompt on and the proxy is chosen among.",
+    )
     size: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
         ge=1,
-        description="K_proxy: the search-pool cells every round after calibration scores its arms "
-        "on, chosen once from the calibration prompts' rows.",
+        description="K_proxy: the discovery-set cells every round after calibration scores its "
+        "arms on, chosen once from the calibration prompts' rows.",
     )
     rank_weight: Annotated[float, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
         ge=0.0,
         description="r: the weight on rank faithfulness — the share of calibration-prompt pairs "
-        "the proxy orders as the whole pool does.",
+        "the proxy orders as the discovery set does.",
     )
     separation_weight: Annotated[float, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
         ge=0.0,
@@ -119,6 +125,12 @@ class ProxyCssKnobs(StrictModel):
         description="c: the penalty on redundancy — a cell's mean |Pearson r| with the cells "
         "already chosen.",
     )
+
+    @model_validator(mode="after")
+    def _proxy_fits_discovery(self) -> ProxyCssKnobs:
+        if self.size > self.discovery:
+            raise ValueError("proxy_css: size must be at most discovery, the set it is chosen from")
+        return self
 
 
 def choose_proxy(
@@ -141,14 +153,14 @@ def choose_proxy(
 
 
 class ProxyCss:
-    """LEVI's panel: the whole search pool in the calibration round, the proxy it chose ever after —
+    """LEVI's panel: the discovery set in the calibration round, the proxy it chose ever after —
     the same cells in the same order every round, resume and fork."""
 
     name: ClassVar[str] = "proxy_css"
     kind: ClassVar[NodeKind] = NodeKind.SAMPLER
     knobs: ClassVar[type[StrictModel]] = ProxyCssKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
-    # K_proxy is the paper's; the calibration round draws the whole pool.
+    # K_proxy and the discovery set are the paper's.
     size_knob: ClassVar[str | None] = None
 
     def draws(self, selected: SelectedOptimizer, pool: int) -> int:
@@ -157,7 +169,14 @@ class ProxyCss:
     def draw(self, ctx: RoundContext, pool: list[Sample]) -> Panel:
         calibration = levi_state(ctx.state).calibration
         if calibration is None:
-            return nodes.Panel(cells=list(pool), order=list(pool), block_size=len(pool))
+            knobs = cast("ProxyCssKnobs", ctx.cycle.optimizer.knobs(self.name))
+            if knobs.discovery > len(pool):
+                raise ValueError(
+                    f"proxy_css: a discovery set of {knobs.discovery} cells needs a search pool "
+                    f"that large, and this one holds {len(pool)}"
+                )
+            discovery = pool[: knobs.discovery]
+            return nodes.Panel(cells=discovery, order=list(discovery), block_size=len(discovery))
         by_key = {s.key: s for s in pool}
         if missing := [key for key in calibration.proxy if key not in by_key]:
             raise ValueError(f"proxy_css: {len(missing)} proxy cells left the search pool")
@@ -291,7 +310,12 @@ class MapElites:
     knobs: ClassVar[type[StrictModel]] = MapElitesKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
     stamps_theta: ClassVar[bool] = False
-    reads_parent: ClassVar[bool] = True
+    elects_partial: ClassVar[bool] = False
+
+    def parent_cells(
+        self, ctx: RoundContext, panel: Panel, rows: Mapping[str, Sequence[QueryMeasurement]]
+    ) -> list[Sample]:
+        return panel.cells
 
     def select(self, ctx: RoundContext, measured: Measured, population: Population) -> Selection:
         cycle = ctx.cycle
@@ -302,7 +326,7 @@ class MapElites:
         ]
         calibration = state.calibration
         if calibration is None:
-            # The incumbent is the origin, scored on the whole pool beside the seeds: the fifth
+            # The incumbent is the origin, scored on the discovery set beside the seeds: the fifth
             # calibration prompt (App. A).
             offered.insert(0, (measured.parent.opt_sp, measured.parent_rows))
             order = [str(r["sample_key"]) for r in measured.parent_rows]
@@ -675,10 +699,14 @@ class LeviRuntime:
         )
 
     def round_cells_ceiling(self, selected: SelectedOptimizer, pool: int) -> int:
-        # Calibration walks the whole pool, every later round the proxy; the parent walks each too.
+        # Calibration walks the discovery set, every later round the proxy; the parent walks each.
         shift = cast("LeviParadigmShiftKnobs", selected.knobs(LeviParadigmShift.name))
+        discovery = cast("ProxyCssKnobs", selected.knobs(ProxyCss.name)).discovery
+        if discovery > pool:
+            return 0
         return max(
-            (shift.n_diverse_seeds + 1) * pool, (shift.interval + 1) * selected.round_cells(pool)
+            (shift.n_diverse_seeds + 1) * discovery,
+            (shift.interval + 1) * selected.round_cells(pool),
         )
 
     def opening(self, ctx: RoundContext) -> nodes.RoundOpening:

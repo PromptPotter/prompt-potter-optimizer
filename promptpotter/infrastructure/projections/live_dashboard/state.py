@@ -8,7 +8,7 @@ from typing import Any, ClassVar
 from pydantic import ConfigDict, Field, ValidationError
 
 from promptpotter.domain.backend import BackpressureReading
-from promptpotter.domain.bench import BenchScore
+from promptpotter.domain.bench import BenchScore, BenchSubject
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import (
@@ -17,7 +17,7 @@ from promptpotter.domain.dashboard_rows import (
     RoundSummary,
     RunStanding,
 )
-from promptpotter.domain.phases import DashboardState, RunPhase
+from promptpotter.domain.phases import DashboardState, RunPhase, StopReason
 from promptpotter.domain.results import DisplayMetric, OverlapReading
 from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import StrictModel
@@ -25,6 +25,7 @@ from promptpotter.shared.clock import utcnow_iso
 
 __all__ = [
     "BackendWarning",
+    "BenchPassProgress",
     "CatchUpLogEntry",
     "CurrentRound",
     "DashboardError",
@@ -109,12 +110,12 @@ class LoopWarning(StrictModel):
 
 
 class DashboardError(StrictModel):
-    """``dashboard.json::error`` — structured crash summary written by
-    ``_handle_error`` on a CRASHED / RENDER_ERROR / DIVERGED exit; absent on a normal stop."""
+    """``dashboard.json::error`` — structured failure summary written by ``_handle_error`` off the
+    run's ``ErrorRecord``, on a stop whose ``STOP_REASON_INFO`` row is FAILED; absent otherwise."""
 
     kind: str
     message: str
-    stop_reason: str
+    stop_reason: StopReason
 
 
 class RunLimits(StrictModel):
@@ -146,6 +147,15 @@ class RacingBlock(StrictModel):
     leader_prob: float
     posterior_width: float
     top: list[dict[str, Any]]
+
+
+class BenchPassProgress(StrictModel):
+    """``dashboard.json::bench_pass`` — the held-out pass in flight. Its rows are no round's cells."""
+
+    subject: BenchSubject
+    round: int = Field(description="The round whose selection is graded; 0 is the origin.")
+    rows: int = Field(description="Bench rows the pass sends.")
+    scored: int = Field(description="Rows of it scored so far.")
 
 
 class CurrentRound(StrictModel):
@@ -215,7 +225,7 @@ class LiveDashboardState(StrictModel):
     # in Python reads or writes it, and the writer must never start.
     run_phase: RunPhase = Field(default=RunPhase.RUNNING, exclude=True)
 
-    stop_reason: str | None = None
+    stop_reason: StopReason | None = None
 
     round: int = 0
     candidate: str = ""
@@ -232,6 +242,9 @@ class LiveDashboardState(StrictModel):
     # The headline for every optimizer: the selection and the origin graded on the held-out bench
     # set. Null until the bench pass lands; a split holding nothing out says so in `missing_reason`.
     bench_score: BenchScore | None = None
+    # The bench pass in flight, null outside one: while it is set, the cells being scored are
+    # held-out rows of `subject`'s pass and no round's.
+    bench_pass: BenchPassProgress | None = None
     # That lift per dollar the SEARCH incurred (`BenchScore.lift_per_usd`, `evidence`'s rule too),
     # settled in ``compose``: spend moves on every call, and a browser dividing the two divides
     # two polls.
@@ -393,6 +406,7 @@ class LiveDashboardState(StrictModel):
             "error": None,
             # A resumed run grades its selection again; the prior pass graded a stale one.
             "bench_score": None,
+            "bench_pass": None,
             "current_round": CurrentRound(),
             "current_query_payload": None,
             "current_sample_id": None,

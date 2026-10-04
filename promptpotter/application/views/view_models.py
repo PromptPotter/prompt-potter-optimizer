@@ -6,7 +6,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from promptpotter.domain.bench import BenchSubject
 from promptpotter.domain.dashboard_rows import RunStanding
+from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import (
     ArmOutcome,
     DisplayMetric,
@@ -15,10 +17,11 @@ from promptpotter.domain.results import (
     OverlapReading,
 )
 from promptpotter.domain.ruler import AbilityReading
-from promptpotter.domain.spend import SpendRollup
+from promptpotter.domain.spend import CeilingMeter, SpendRollup
 
 __all__ = [
     "AnyView",
+    "BenchEnterView",
     "BenchGradedView",
     "BenchScoredView",
     "CandidatesGeneratedView",
@@ -35,6 +38,7 @@ __all__ = [
     "RoundCompleteView",
     "RoundDigestView",
     "RoundStartView",
+    "RunSpendView",
     "ScoreEntry",
     "SpDiffView",
     "ViewContext",
@@ -170,6 +174,14 @@ class MeasureEnterView:
 
 
 @dataclass(frozen=True)
+class BenchEnterView:
+    # The dashboard folds `bench_pass` from it; `round` is the graded round, 0 for the origin.
+    subject: BenchSubject
+    round: int
+    rows: int
+
+
+@dataclass(frozen=True)
 class BenchScoredView:
     # `BenchScore.model_dump(mode="json")` — the dashboard folds `bench_score` from it.
     bench: dict[str, Any]
@@ -181,6 +193,18 @@ class BenchGradedView:
     # the dashboard folds it onto the round it names.
     reading: dict[str, Any] | None
     missing: str | None
+
+
+@dataclass(frozen=True)
+class RunSpendView:
+    # The run's `MeteredSpend` as it ends, beside the armed ceilings its meter counts against.
+    billed_usd: float
+    incurred_usd: float
+    meter: CeilingMeter
+    metered_usd: float
+    metered_tokens: int
+    usd_cap: float | None
+    token_cap: int | None
 
 
 @dataclass(frozen=True)
@@ -293,8 +317,8 @@ class DigestStatusView:
     parent_session_id: str | None
     # The manifest the rounds were run under, off their own documents; ``None`` before round 0.
     optimizer: str | None
-    status: str
-    stop_reason: str
+    # ``None`` while the cycle has not ended.
+    stop_reason: StopReason | None
     # ``None`` where the cycle banked no round 0 — `origin_accuracy_of` reads it off the round
     # documents and there is no stored copy, so absent means never scored, not scored zero.
     origin_accuracy: float | None
@@ -372,11 +396,10 @@ class ForkSummaryView:
 
     cycle_id: str
     mode: str
-    status: str
     best_accuracy: float
     origin_accuracy: float | None
     n_rounds: int
-    stop_reason: str
+    stop_reason: StopReason | None
     finished_at: str | None
 
 
@@ -397,8 +420,10 @@ AnyView = (
     | RoundStartView
     | CandidatesGeneratedView
     | MeasureEnterView
+    | BenchEnterView
     | BenchScoredView
     | BenchGradedView
+    | RunSpendView
     | RoundCompleteView
     | OptimizerStepEnterView
     | OptimizerStepExitView

@@ -14,7 +14,11 @@ from promptpotter.application.bench.resume_and_fork.resume import (
 from promptpotter.application.initialization.session import Session, open_cycle_ledger
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
-from promptpotter.application.preflight import refuse_below_reasoning_floor, run_preflight_checks
+from promptpotter.application.preflight import (
+    refuse_arm_below_round,
+    refuse_below_reasoning_floor,
+    run_preflight_checks,
+)
 from promptpotter.application.runner.campaign_ids import cycle_config_identity
 from promptpotter.application.runner.inner.spawn_context import retarget_inner_spawn
 from promptpotter.application.scoring.classification import build_degradation_checks
@@ -298,16 +302,18 @@ async def _emit_preflight_and_init_session(
     refuse_below_reasoning_floor(config, session.pipeline_params)
 
     bound = await cell_bound(session, session.pipeline_params or {})
+    measured_cell_usd = _measured_cell_usd(session, target_node_configs)
     preflight_warnings = run_preflight_checks(
         config,
         dataset,
         target_models,
         task_context=origin.framing.to_dict(),
         cell_usd=None if bound is None else bound.usd,
-        measured_cell_usd=_measured_cell_usd(session, target_node_configs),
+        measured_cell_usd=measured_cell_usd,
     )
     for w in preflight_warnings:
         logger.warning("preflight[%s]: %s — %s", w.code, w.title, w.detail)
+    refuse_arm_below_round(session.arm, preflight_warnings, measured_cell_usd=measured_cell_usd)
     emit_phase(
         cb.on_phase,
         CampaignPhase.INIT,

@@ -2950,11 +2950,15 @@ components:
         status:
           type: string
           description: |
-            Candidate → `minted` | `measured`. Never `winner` (that rides `is_selected`):
-            election is stamped at round close, so an unclosed round HAS no winner and this
-            tree declines to invent one. Course → `index.json::status`, the same StopReason
-            value `/cycles` serves under this same name. Was `state`, which is what
-            `dashboard.json::state` calls the fine-grained ACTIVITY phase — a different axis.
+            Candidate → `minted` | `measured` | `invalid`. Never `winner` (that rides
+            `is_selected`): election is stamped at round close, so an unclosed round HAS no
+            winner and this tree declines to invent one. Empty on a course, whose ending is
+            `stop_reason`.
+        stop_reason:
+          type: [string, "null"]
+          description: |
+            Course → why the cycle ended, a `StopReason` value off `index.json`; null while it
+            has not. The same field `/cycles` serves. A fork's attempts carry their fork's.
         is_selected:
           type: boolean
           description: |
@@ -3246,7 +3250,7 @@ components:
 
     CycleListEntry:
       type: object
-      required: [campaign_id, cycle_id, mint_kind, is_root, status]
+      required: [campaign_id, cycle_id, mint_kind, is_root]
       properties:
         campaign_id: { type: string }
         cycle_id: { type: string }
@@ -3260,9 +3264,9 @@ components:
           type: string
           enum: [session, divergent_resume, user_fork, auto_rebase]
         is_root: { type: boolean }
-        status:
-          type: string
-          description: StopReason value once finished, else 'active' ('unreadable' when malformed).
+        stop_reason:
+          type: [string, 'null']
+          description: Why the cycle ended, a `StopReason` value; null while it has not.
         run_phase:
           type: string
           enum: [checkin, running, paused, detached, terminal]
@@ -3277,18 +3281,58 @@ components:
         updated_at: { type: string, default: '' }
         human_intervened: { type: boolean, default: false }
 
+    BandedValue:
+      type: object
+      additionalProperties: false
+      required: [value, ci_lo, ci_hi]
+      properties:
+        value: { type: number }
+        ci_lo:
+          type: [number, 'null']
+          description: |
+            The 95% band on `value`, drawn from the same per-row values; null where one pass was
+            read twice, which has no spread.
+        ci_hi: { type: [number, 'null'] }
+
+    BenchColumns:
+      type: object
+      additionalProperties: false
+      required: [accuracy, composite]
+      description: One bench quantity in both columns, read off the same rows.
+      properties:
+        accuracy:
+          description: The hit rate.
+          oneOf:
+            - $ref: '#/components/schemas/BandedValue'
+            - type: 'null'
+        composite:
+          description: |
+            Under the reading scorer's formula, which charges cost and length — so it is never
+            the change in the hit rate.
+          oneOf:
+            - $ref: '#/components/schemas/BandedValue'
+            - type: 'null'
+
     BenchReading:
       type: object
       additionalProperties: false
-      required: [round, sp_hash, accuracy, composite_fitness, ci_lo, ci_hi, n_scored]
+      required: [round, sp_hash, headline, accuracy, composite, n_scored]
       description: One individual's bench pass, read under a named scorer.
       properties:
         round: { type: integer, description: The round whose selection this is; 0 is the origin. }
         sp_hash: { type: string, description: "The searchpoint scored — the archive's `prompt_fields_id`." }
-        accuracy: { type: [number, 'null'] }
-        composite_fitness: { type: [number, 'null'] }
-        ci_lo: { type: [number, 'null'] }
-        ci_hi: { type: [number, 'null'] }
+        headline:
+          type: string
+          enum: [accuracy, composite]
+          description: Which column the headline reads.
+        accuracy:
+          oneOf:
+            - $ref: '#/components/schemas/BandedValue'
+            - type: 'null'
+        composite:
+          oneOf:
+            - $ref: '#/components/schemas/BandedValue'
+            - type: 'null'
         n_scored:
           type: integer
           description: |
@@ -3298,8 +3342,7 @@ components:
     BenchScore:
       type: object
       additionalProperties: false
-      required:
-        [bench_size, scorer_id, origin, selected, missing_reason, lift, lift_ci_lo, lift_ci_hi]
+      required: [bench_size, scorer_id, headline, origin, selected, missing_reason, lift]
       description: |
         A reading of the passes' archived facts (`campaigns/{id}/result.json::bench`) under
         `scorer_id`. Every served copy is a cache of that reading: a reader under another
@@ -3309,6 +3352,10 @@ components:
         scorer_id:
           type: string
           description: The grader every number here was read under.
+        headline:
+          type: string
+          enum: [accuracy, composite]
+          description: Which column the headline reads, on the readings and on `lift` alike.
         origin:
           oneOf:
             - $ref: '#/components/schemas/BenchReading'
@@ -3323,12 +3370,10 @@ components:
             Why a reading is null: each pass that stopped before its last row, or ended past its
             split's `tolerance` of rows with no verdict. Null when both read.
         lift:
-          type: [number, 'null']
+          $ref: '#/components/schemas/BenchColumns'
           description: |
-            `selected` over `origin` on the bench rows both scored, paired per row; null below
-            two shared rows, 0.0 where the origin is the selection.
-        lift_ci_lo: { type: [number, 'null'] }
-        lift_ci_hi: { type: [number, 'null'] }
+            `selected` over `origin`, paired per bench row both scored. A column is null below
+            two shared rows, and 0.0 with no band where the origin is the selection.
 
     CyclesResponse:
       type: object

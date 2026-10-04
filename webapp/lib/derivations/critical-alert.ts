@@ -1,7 +1,7 @@
 // The one verdict for the loud cross-tab alert bar, over signals AppShell already reconciled.
 // Branch order IS the precedence.
 
-import { STOP_REASON_LABELS } from "@/lib/api/types.generated";
+import { STOP_REASON_LABELS, STOP_REASON_NEXT_STEPS } from "@/lib/api/types.generated";
 import type { RoundSummary } from "@/lib/api/types";
 import type { DashboardSnapshot, StatusKind } from "@/lib/poll";
 
@@ -56,12 +56,13 @@ export function criticalAlert({
   if (emptyWorkspace) return null;
   const err = dash?.error;
   if (err) {
-    // Never a hardcoded "crashed": `STOP_REASON_INFO` separates a crash from a designed refusal.
-    const label = (err.stop_reason && STOP_REASON_LABELS[err.stop_reason]) || "Run stopped";
+    // Label and next step are the served `STOP_REASON_INFO` row's; a reason an older build
+    // wrote under a retired spelling carries neither, so the bar names the error kind alone.
+    const label = STOP_REASON_LABELS[err.stop_reason];
     return {
       severity: "critical",
-      title: `${label} — ${err.kind}`,
-      detail: `stop: ${err.stop_reason}`,
+      title: label === undefined ? err.kind : `${label} — ${err.kind}`,
+      detail: STOP_REASON_NEXT_STEPS[err.stop_reason],
     };
   }
   // The poll and AppShell already collapse every offline-class condition into this one.

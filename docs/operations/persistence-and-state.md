@@ -102,7 +102,7 @@ Reads happen by opening the on-disk artifact tree. `evidence` is the one read VE
 
 | File | Lives at | Content |
 |------|----------|---------|
-| `campaign.json` | campaign dir | Manifest: dataset, label, `root_cycle_id`, declaration hashes, backend, lifecycle intent, and the frozen `CampaignConfig` snapshot (single owner — no per-cycle copies). Run state is per-cycle (`index.json::status`), derived on read for campaign surfaces. |
+| `campaign.json` | campaign dir | Manifest: dataset, label, `root_cycle_id`, declaration hashes, backend, lifecycle intent, and the frozen `CampaignConfig` snapshot (single owner — no per-cycle copies). Run state is per-cycle (`index.json`: `finished_at` + `stop_reason`), derived on read for campaign surfaces. |
 | `dashboard.json` | the cycle's dir | Live per-cycle scalars: round, origin, best, candidates, counters. One stream per cycle. Post-mortem `stop_reason` is in `index.json`, not here. |
 | `log.md` / `hard_samples.json` (campaign) | campaign dir | Campaign digest + campaign-scope hard-sample artifact (across all its cycles). |
 | `head_to_heads/{id}.json` | workspace | One declared head-to-head (`domain/campaign.py::HeadToHeadRecord`): the instrument every arm is graded under and the budget each may spend. Written once, by its first arm's mint (`new … --arm {id}:{key}`, or `mint-campaign`'s `arm`), which declares it off its own; a later arm adopts its split and budget and, on any other instrument, is refused before anything is minted. Its arms are the campaigns whose `campaign.json::arm` names it — the record lists none, so a mint never rewrites it. |

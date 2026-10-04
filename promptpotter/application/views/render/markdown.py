@@ -15,19 +15,21 @@ from promptpotter.application.views.view_models import (
     LogMdView,
     RoundDigestView,
 )
-from promptpotter.domain.phases import STOP_REASON_INFO, StopReason, StopReasonInfo
+from promptpotter.domain.phases import STOP_REASON_INFO, StopReason
 from promptpotter.domain.results import overlap_series
 from promptpotter.domain.spend import TOKEN_KIND_BUCKET, TokenAccount
 from promptpotter.shared.composite import render_composite_fitness_block
 
 
-def _stop_info(stop_reason: str) -> StopReasonInfo | None:
-    """The reason's row, or ``None`` where the string names no reason — a running cycle writes
-    ``"(running)"`` here, and a digest is rendered for those too."""
-    try:
-        return STOP_REASON_INFO[StopReason(stop_reason)]
-    except ValueError:
-        return None
+def _ending_lines(stop_reason: StopReason | None) -> list[str]:
+    """A digest is rendered for a cycle still running too, and that one has no ending to name."""
+    if stop_reason is None:
+        return ["- ended: not yet"]
+    info = STOP_REASON_INFO[stop_reason]
+    return [
+        f"- ended: **{info.label}** (`{stop_reason.value}`)",
+        *([f"- next: {info.next_step}"] if info.next_step else []),
+    ]
 
 
 def _json_block(label: str, value: Any) -> list[str]:
@@ -96,13 +98,17 @@ def _render_round_cost(rd: RoundDigestView) -> str:
 
     The prefix reading is `prefix_reading`'s, so this line says the same thing the terminal tape
     and the browser's sample badge do. A bucket holds billed calls only — the fold excludes a
-    replay — so `replayed=False` here is a statement about the bucket, not a shortcut."""
-    if rd.spend is None or rd.spend.total_used_usd <= 0:
+    replay — so `replayed=False` here is a statement about the bucket, not a shortcut.
+
+    A round answered wholly from the archive still renders: billed $0 beside what it incurred."""
+    if rd.spend is None:
         return ""
     bits: list[str] = []
     for kind, attr in TOKEN_KIND_BUCKET.items():
         bucket = getattr(rd.spend, attr)
         if bucket.used_usd <= 0 and bucket.input_tokens <= 0:
+            if bucket.incurred_usd > 0:
+                bits.append(f"{kind} $0.0000 (${bucket.incurred_usd:.4f} replayed)")
             continue
         share = TokenAccount(
             input=bucket.input_tokens, output=0, cache_read=bucket.cache_read_tokens or None
@@ -112,9 +118,8 @@ def _render_round_cost(rd: RoundDigestView) -> str:
         # to fill a prefix nothing ever collects (`run_records.py::cache_write_tokens`).
         wrote = f" ·w{bucket.cache_write_tokens}" if bucket.cache_write_tokens else ""
         bits.append(f"{kind} ${bucket.used_usd:.4f} {badge}{wrote}")
-    if not bits:
-        return ""
-    return f"- cost: **${rd.spend.total_used_usd:.4f}** ({' · '.join(bits)})"
+    by_bucket = f" ({' · '.join(bits)})" if bits else ""
+    return f"- spend: {rd.spend.billed_beside_incurred()}{by_bucket}"
 
 
 def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
@@ -183,8 +188,8 @@ def _render_forks(forks: tuple[ForkSummaryView, ...]) -> list[str]:
             f"best {_fmt_pct(f.best_accuracy)} "
             f"(origin {_fmt_pct(f.origin_accuracy)}, {f.n_rounds} {rounds_word})"
         )
-        if f.stop_reason:
-            line += f" · {f.stop_reason}"
+        if f.stop_reason is not None:
+            line += f" · {f.stop_reason.value}"
         parts.append(line)
     parts.append("")
     return parts
@@ -203,13 +208,7 @@ def to_markdown(view: LogMdView) -> str:
         "## Status",
         "",
         *([f"- optimizer: `{status.optimizer}`"] if status.optimizer else []),
-        f"- status: **{status.status}**",
-        f"- stop reason: `{status.stop_reason}`",
-        *(
-            [f"- next: {info.next_step}"]
-            if (info := _stop_info(status.stop_reason)) and info.next_step
-            else []
-        ),
+        *_ending_lines(status.stop_reason),
         f"- origin: {_fmt_pct(status.origin_accuracy)}",
         (
             f"- best: {_fmt_pct(status.best_accuracy)}"

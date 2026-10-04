@@ -37,6 +37,7 @@ from promptpotter.domain.phases import (
     STOP_REASON_INFO,
     CampaignPhase,
     StopLoop,
+    StopReason,
     emit_phase,
 )
 from promptpotter.domain.pipeline_schema import NodeKind
@@ -416,9 +417,10 @@ async def execute_round(
     callbacks: RunCallbacks,
     *,
     is_final_round: bool = False,
-) -> RoundResult:
-    """The runner folds the result in via ``absorb_round`` — this never mutates ``Cycle``. On the
-    final round the adapters are skipped: they write for a NEXT round."""
+) -> tuple[RoundResult, StopReason | None]:
+    """The round, and the budget stop that cut its measurement short — a cut round is the run's
+    last. The runner folds the result in via ``absorb_round``; this never mutates ``Cycle``. On
+    the final round the adapters are skipped: they write for a NEXT round."""
     session = cycle.session
     obs = session.state.obs
     plan = round_plan(cycle.optimizer)
@@ -456,9 +458,7 @@ async def execute_round(
         campaign_id=session.state.tracing_campaign_id,
         round_num=round_num,
     ):
-        measured = await measure_population(
-            ctx, population, panel, plan.eliminator, reads_parent=plan.selector.reads_parent
-        )
+        measured = await measure_population(ctx, population, panel, plan.eliminator, plan.selector)
     emit_phase(
         callbacks.on_phase,
         CampaignPhase.MEASURE,
@@ -514,8 +514,10 @@ async def execute_round(
         # A zero-candidate round leaves `results` holding the parent's rows: there is nothing to
         # adapt to. And an adapter writes for the NEXT round, so none runs when no round follows —
         # the calendar cap knows that before the round, the controller only now.
-        will_stop = is_final_round or (
-            plan.controller is not None and plan.controller.stops_after(ctx, round_result)
+        will_stop = (
+            is_final_round
+            or measured.cut is not None
+            or (plan.controller is not None and plan.controller.stops_after(ctx, round_result))
         )
         if population.proposals and round_result.results and not will_stop:
             await _adapt(ctx, plan, round_result)
@@ -553,7 +555,7 @@ async def execute_round(
                     parent_ids=tuple(winner_opt_sp.lineage.parent_ids),
                 )
             )
-    return round_result
+    return round_result, measured.cut
 
 
 async def emit_origin_round(cycle: Cycle, session: Session, cb: RunCallbacks) -> None:

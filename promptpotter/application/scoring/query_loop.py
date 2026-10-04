@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import enum
 import logging
 import sys
 import time
@@ -42,7 +43,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     bound_spend_book,
     filed,
 )
-from promptpotter.infrastructure.llm.telemetry import emit_cell_priced
+from promptpotter.infrastructure.llm.telemetry import emit_priced_key
 from promptpotter.infrastructure.runtime_flags import effective_lookahead
 from promptpotter.shared.errors import (
     ErrorCategory,
@@ -61,12 +62,26 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["BlockRace", "CatchUps", "Flight", "FlightGauge", "QueryLoopResult", "Walk", "run_walks"]
+__all__ = [
+    "BlockRace",
+    "CatchUps",
+    "Flight",
+    "FlightGauge",
+    "QueryLoopResult",
+    "Walk",
+    "WalkEnd",
+    "run_walks",
+]
 
 
 # The stops that still wait out the calls already sent — see :func:`run_walks`.
 _BUDGET_STOPS = frozenset({StopReason.SPEND_BUDGET, StopReason.TOKEN_BUDGET})
-_CEILINGS = frozenset(category for category, stop in REFUSAL_STOPS.items() if stop in _BUDGET_STOPS)
+
+
+def _budget_refusal(category: ErrorCategory | None) -> StopReason | None:
+    """The budget stop a refusal of this category is, ``None`` for any other."""
+    stop = REFUSAL_STOPS.get(category) if category is not None else None
+    return stop if stop in _BUDGET_STOPS else None
 
 
 def _dearest(bounds: Sequence[SendBound | None]) -> SendBound | None:
@@ -183,13 +198,31 @@ class FlightGauge:
             self._emit(reading)
 
 
+class WalkEnd(enum.StrEnum):
+    """Why ONE walk ended before its last cell, the round going on. A run's ending is a
+    ``StopReason`` and is raised: a pause always, a budget stop unless the caller keeps the cut."""
+
+    # The operator's early-abort: the partial is accepted.
+    SKIP = "skip"
+    STOP_RULE = "stop_rule"
+    BUDGET = "budget"
+    CLIENT_ERROR = "client_error"
+    PIPELINE_ERROR = "pipeline_error"
+    CONSECUTIVE_ERRORS = "consecutive_errors"
+
+
+_ABORTS_AT_ONCE: dict[ErrorCategory, WalkEnd] = {
+    ErrorCategory.CLIENT: WalkEnd.CLIENT_ERROR,
+    ErrorCategory.PIPELINE: WalkEnd.PIPELINE_ERROR,
+}
+
+
 @dataclass
 class QueryLoopResult:
+    """A decided walk: ``ended_on`` is ``None`` once it took every cell."""
+
     results: list[QueryMeasurement]
-    completed: bool = True
-    # "skip" (operator early-abort: accept partial, cycle continues) | "stop_rule" | abort reason.
-    # A pause or a budget stop is raised, never returned.
-    stop_reason: str | None = None
+    ended_on: WalkEnd | None = None
     stop_signal: StopSignal | None = None
 
 
@@ -272,7 +305,7 @@ class QueryLoopState:
     )
     # Each sample's cell (`ReplayFeed.cell_key`); empty where nothing is archived to replay.
     cell_keys: Mapping[int, str]
-    # The campaign's priced cells (`SessionState.counted_cells`), shared by every walk and grown
+    # The campaign's priced set (`SessionState.priced_keys`), shared by every walk and grown
     # as each takes one, so a replay is metered the first time the campaign reads that cell only.
     counted: set[str]
     # The replays already priced when the walk opened: none waits on the ceiling and no spend stop
@@ -285,7 +318,7 @@ class QueryLoopState:
         cell = self.cell_keys.get(sample.id)
         if cell is not None and cell not in self.counted:
             self.counted.add(cell)
-            emit_cell_priced(cell)
+            emit_priced_key(cell)
 
 
 def _armed_cells(session: Session) -> int:
@@ -535,7 +568,7 @@ class Walk:
                         n,
                         n - len(self.results),
                     )
-                    return QueryLoopResult(self.results, completed=False, stop_reason=reason)
+                    return QueryLoopResult(self.results, ended_on=reason)
             else:
                 self.consecutive_errors = 0
 
@@ -543,14 +576,14 @@ class Walk:
             ctx.on_sample_scored(_with_running(acq.result, running, ctx.run_id), acq.idx, n)
         return None
 
-    def _abort_reason(self, result: QueryMeasurement) -> str:
+    def _abort_reason(self, result: QueryMeasurement) -> WalkEnd | None:
         cat = error_category(result)
-        if cat in {ErrorCategory.CLIENT, ErrorCategory.PIPELINE}:
-            return f"skipped_after_{cat}_error"
+        if cat is not None and (at_once := _ABORTS_AT_ONCE.get(cat)) is not None:
+            return at_once
         self.consecutive_errors += 1
         if self.consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-            return "skipped_after_consecutive_errors"
-        return ""
+            return WalkEnd.CONSECUTIVE_ERRORS
+        return None
 
     def judge(self) -> QueryLoopResult | None:
         """The stop rules over the rows taken — cached rows too, or a candidate whose priors already
@@ -558,12 +591,7 @@ class Walk:
         block race's last close still decides it."""
         for check in self.checks:
             if (signal := check.check(self.results)) is not None:
-                return QueryLoopResult(
-                    self.results,
-                    completed=False,
-                    stop_reason="stop_rule",
-                    stop_signal=signal,
-                )
+                return QueryLoopResult(self.results, ended_on=WalkEnd.STOP_RULE, stop_signal=signal)
         if len(self.results) == self.n and self.boundary is None:
             return QueryLoopResult(self.results)
         return None
@@ -642,7 +670,7 @@ class Walk:
         which saves anything only where it stops their work — see :func:`run_walks`."""
         self.outcome = outcome
         if self.running or self.finished:
-            cause = "the phase ended" if outcome is None else (outcome.stop_reason or "complete")
+            cause = "the phase ended" if outcome is None else (outcome.ended_on or "complete")
             if outcome is not None and outcome.stop_signal is not None:
                 cause = f"{cause}: {outcome.stop_signal.check_name}"
             logger.info(
@@ -675,11 +703,12 @@ async def run_walks(
     walks: Sequence[Walk | None],
     session: Session,
     *,
+    keep_cut: bool,
     backfills: CatchUps | None = None,
     blocks: BlockRace | None = None,
     on_turn: Callable[[int, int | None], None] | None = None,
     on_decided: Callable[[int], None] | None = None,
-) -> None:
+) -> StopReason | None:
     """Drive a scoring phase: every walk measures at once, and they are taken and decided one at a
     time, in order, so every row, cut, prior and event lands where a serial phase lands it.
 
@@ -696,8 +725,12 @@ async def run_walks(
     them, and discarded calls still winding down — which a whole inner campaign per call makes a
     memory bound. Slots go in one order: the catch-ups the walk on turn waits on, then its own
     cells, then the other live walks in index order, which leave one slot free; and no call starts
-    that the spend book cannot hold beside every call out (:func:`_dearest`). A pause or a budget
-    stop is raised; a pause that already cancelled a call is the same pause.
+    that the spend book cannot hold beside every call out (:func:`_dearest`). A pause is raised; a
+    pause that already cancelled a call is the same pause.
+
+    **A budget stop is raised too, unless ``keep_cut``.** Then every walk still undecided is decided
+    on the rows it took, less the cell the ceiling refused, and the stop is returned — ``None``
+    where the phase ran to its end.
 
     **A sent call is cancelled only where that stops what it bills**
     (``Connector.cancel_stops_billing``). Elsewhere the backend finishes it and the provider bills
@@ -705,6 +738,8 @@ async def run_walks(
     phase ends — or stops, where what it returns is banked."""
     gauge = session.flight
     draining: set[asyncio.Future[Any]] = set()
+    announced: set[int] = set()
+    decided: set[int] = set()
     turn = -1
     block = 0
     cancels = session.backend_client.cancel_stops_billing
@@ -740,6 +775,16 @@ async def run_walks(
         if blocks is not None:
             walk.boundary = min(walk.n, (block + 1) * blocks.block_size)
 
+    def announce(i: int) -> None:
+        announced.add(i)
+        if on_turn is not None:
+            on_turn(i, None if blocks is None else block)
+
+    def conclude(i: int) -> None:
+        decided.add(i)
+        if on_decided is not None:
+            on_decided(i)
+
     def close() -> bool:
         """Every live walk took the block: the race decides them together, and a walk through its
         whole panel completes. False once no walk is left."""
@@ -752,15 +797,14 @@ async def run_walks(
         for i, walk in racing.items():
             if (signal := stops.get(i)) is not None:
                 verdict = QueryLoopResult(
-                    walk.results, completed=False, stop_reason="stop_rule", stop_signal=signal
+                    walk.results, ended_on=WalkEnd.STOP_RULE, stop_signal=signal
                 )
             elif len(walk.results) == walk.n:
                 verdict = QueryLoopResult(walk.results)
             else:
                 continue
             draining.update(walk.end(verdict, cancel=cancels))
-            if on_decided is not None:
-                on_decided(i)
+            conclude(i)
         block += 1
         for walk in live():
             reach(walk)
@@ -778,20 +822,17 @@ async def run_walks(
             # A block race turns every live walk once per block; a decided one had its last turn.
             if (walk is None and block > 0) or (walk is not None and walk.outcome is not None):
                 continue
-            if on_turn is not None:
-                on_turn(turn, None if blocks is None else block)
+            announce(turn)
             if walk is not None:
                 walk.release()
                 if walk.dataset:
                     return True
                 walk.end(QueryLoopResult([]), cancel=cancels)
-            if on_decided is not None:
-                on_decided(turn)
+            conclude(turn)
 
     def decide(walk: Walk, verdict: QueryLoopResult) -> bool:
         draining.update(walk.end(verdict, cancel=cancels))
-        if on_decided is not None:
-            on_decided(turn)
+        conclude(turn)
         return advance()
 
     def judged(walk: Walk) -> bool:
@@ -890,7 +931,7 @@ async def run_walks(
             armed = _armed_cells(session)
             if walk.skip_at is not None and len(walk.results) >= walk.skip_at:
                 logger.info("Replaying an operator skip after query %d/%d.", walk.skip_at, walk.n)
-                skipped = QueryLoopResult(walk.results, completed=False, stop_reason="skip")
+                skipped = QueryLoopResult(walk.results, ended_on=WalkEnd.SKIP)
                 if not decide(walk, skipped):
                     break
                 continue
@@ -927,7 +968,7 @@ async def run_walks(
                         len(walk.results),
                         walk.n,
                     )
-                    skipped = QueryLoopResult(walk.results, completed=False, stop_reason="skip")
+                    skipped = QueryLoopResult(walk.results, ended_on=WalkEnd.SKIP)
                     if not decide(walk, skipped):
                         break
                     continue
@@ -1004,15 +1045,17 @@ async def run_walks(
             draining.difference_update([call for call in draining if call.done()])
         if not cancels:
             await land()
+        return None
     except BaseException as stop:
+        budget: StopReason | None = None
+        if isinstance(stop, StopLoop) and stop.reason in _BUDGET_STOPS:
+            budget = stop.reason
+        elif isinstance(stop, SendRefusedError):
+            budget = _budget_refusal(stop.category)
         # A pause or a spent ceiling first waits out the calls already sent, which bill anyway; an
         # unreachable backend or a provider's refusal lands nothing more, and a cancellation aimed
         # at this phase is answered at once.
-        if not cancels and (
-            isinstance(stop, KeyboardInterrupt)
-            or (isinstance(stop, StopLoop) and stop.reason in _BUDGET_STOPS)
-            or (isinstance(stop, SendRefusedError) and stop.category in _CEILINGS)
-        ):
+        if not cancels and (isinstance(stop, KeyboardInterrupt) or budget is not None):
             await land()
         # The phase stops rather than decides, so its walks resume later: keep what came back that
         # each was sure to take, and the catch-ups paired with those cells or with one it took.
@@ -1023,7 +1066,19 @@ async def run_walks(
                     backfills.bank_backfills(
                         [*sure, walk.settling] if walk.settling is not None else sure
                     )
-        raise
+        if budget is None or not keep_cut:
+            raise
+        for i, walk in enumerate(walks):
+            if i in decided:
+                continue
+            if i not in announced:
+                announce(i)
+            if walk is not None:
+                # The cell the ceiling refused was taken as a row before it stopped the phase.
+                kept = [row for row in walk.results if _budget_refusal(error_category(row)) is None]
+                walk.end(QueryLoopResult(kept, ended_on=WalkEnd.BUDGET), cancel=True)
+            conclude(i)
+        return budget
     finally:
         # Not awaited — an `await` here can swallow a CancelledError aimed at this coroutine, and
         # answering a cancellation with a normal return tells the canceller it succeeded while the

@@ -21,6 +21,7 @@ from promptpotter.config.first_run import ensure_api_key
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import settings
 from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
+from promptpotter.domain.phases import StopOutcome
 from promptpotter.infrastructure.store.layout import tenant_workspace
 from promptpotter.infrastructure.store.session_pointer import active_pointer_exists
 from promptpotter.presentation.cli.commands._shared import (
@@ -248,6 +249,10 @@ def main() -> None:
         print(json.dumps(result.data, indent=2, default=str))
     else:
         print(result.human)
+    if result.outcome is StopOutcome.FAILED:
+        # The cycle finalized itself and the read-out names the cause; a shell or CI wrapper
+        # reads only this code.
+        sys.exit(1)
 
 
 if __name__ == "__main__":

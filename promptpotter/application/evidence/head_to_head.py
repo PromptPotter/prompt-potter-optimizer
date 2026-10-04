@@ -8,11 +8,19 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.datasets.authored import config_cell_scorer
 from promptpotter.application.evidence.subjects import SubjectReading
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
-from promptpotter.application.runner.bench import read_bench, read_pass
+from promptpotter.application.runner.bench import bench_rows, read_bench
 from promptpotter.application.runner.campaign_result import read_line_spend
 from promptpotter.application.scoring.selection import paired_fitness
-from promptpotter.domain.bench import BenchPass, BenchReading, BenchScore, DatasetSplit
+from promptpotter.domain.bench import (
+    BENCH_HEADLINE,
+    COLUMN_GRADE,
+    BenchColumn,
+    BenchReading,
+    BenchScore,
+    DatasetSplit,
+)
 from promptpotter.domain.campaign import (
     Arm,
     ArmBudget,
@@ -23,9 +31,11 @@ from promptpotter.domain.campaign import (
     ceiling_meter,
 )
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.spend import MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.archive_queries import bench_reads
+from promptpotter.infrastructure.store.campaign_store.store import cycle_ending
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.clock import epoch_seconds
@@ -43,6 +53,8 @@ class HeadToHeadRow(StrictModel):
     subject: str
     campaign_id: str
     optimizer: str
+    # Every model its optimizer's llm nodes call, sorted: a stronger one is a lift no manifest made.
+    optimizer_models: list[str]
     # The head-to-head the campaign was minted an arm of; `None` for an undeclared campaign.
     arm: Arm | None
     # An arm of THIS table's declared head-to-head, read against that declaration.
@@ -54,6 +66,10 @@ class HeadToHeadRow(StrictModel):
     spend_metered: MeteredSpend | None
     # A cycle on its line was steered, skipped or model-overridden by an operator.
     human_intervened: bool
+    # The line holder's `index.json::stop_reason`; `None` while that cycle has not ended.
+    stop_reason: StopReason | None
+    # Its class off `STOP_REASON_INFO`; a `failed` arm ended on no result, whatever `bench` holds.
+    outcome: StopOutcome | None
     # `None` where the line banked no origin's pass: nothing held out, or none sent yet. Its
     # `selected` is `None` until the line grades its selection.
     bench: BenchScore | None
@@ -74,9 +90,6 @@ class HeadToHeadRow(StrictModel):
     # The `loop` bucket alone — the optimizer's own calls, the spend arms differ on by manifest.
     loop_incurred_usd_ratio: float | None
     worked_ratio: float | None
-    # The share of the search's incurred USD a replay answered, so billed nothing — what this
-    # campaign took from a cache another paid into. `None` where the search incurred nothing.
-    replay_share: float | None
     # Bench lift per USD the SEARCH incurred (`BenchScore.lift_per_usd`); `None` without a lift,
     # or where the search carries tokens no rate priced.
     lift_per_incurred_usd: float | None
@@ -90,7 +103,7 @@ class HeadToHeadRow(StrictModel):
 
 
 class SelectionPair(StrictModel):
-    """Two campaigns' selections paired on the bench rows both scored, in the headline composite.
+    """Two campaigns' selections paired on the bench rows both scored, in the headline column.
     ``shift = b - a``: ``BenchScore.lift``'s arithmetic with ``a`` where the origin stands."""
 
     campaign_a: str
@@ -113,12 +126,16 @@ class HeadToHead(StrictModel):
     # The one grader every row's bench is read under — the declared one, else the oldest
     # campaign's formula — so no two headlines differ by the function that graded them.
     scorer_id: str
-    # `None` below two graded rows: one headline is compared with nothing.
+    # The column every row's headline, its lift per USD and every pair is read in.
+    headline: BenchColumn
+    # `None` below two graded rows, and while an arm of the declared head-to-head is ungraded: the
+    # table is not yet the comparison that was declared.
     verdict: bool | None
-    # `Instrument` fields, plus `budget` and `human_intervened` where rows differ on them, and
-    # `origin_reading` where campaigns on one set read one origin apart.
+    # `Instrument` fields, plus `budget`, `optimizer_models` and `human_intervened` where rows
+    # differ on them, and `origin_reading` where campaigns on one set read one origin apart.
     differs_on: list[str]
-    # Only campaigns on ONE instrument and budget, unsteered, with distinct treatments pair
+    # Only campaigns on ONE instrument, budget and optimizer model set, unsteered, with distinct
+    # treatments pair
     # (`_one_instrument`); any other pair is refused.
     pairs: list[SelectionPair]
     # The oldest row carrying a spend and a worked clock, which every row's `*_ratio` divides by.
@@ -148,6 +165,7 @@ class _Graded(NamedTuple):
 
 
 _ORIGIN_READING = "origin_reading"
+_OPTIMIZER_MODELS = "optimizer_models"
 
 
 def _declared(
@@ -202,6 +220,8 @@ def head_to_head(entries: list[HeadToHeadEntry]) -> HeadToHead | None:
     )
     if len({repr(g.row.budget) for g in graded}) > 1:
         differs_on.append("budget")
+    if len({tuple(g.row.optimizer_models) for g in graded}) > 1:
+        differs_on.append(_OPTIMIZER_MODELS)
     if any(g.row.human_intervened for g in graded):
         differs_on.append("human_intervened")
     if any(
@@ -210,7 +230,10 @@ def head_to_head(entries: list[HeadToHeadEntry]) -> HeadToHead | None:
         for b in graded[i + 1 :]
     ):
         differs_on.append(_ORIGIN_READING)
-    verdict = None if len(graded) < 2 else not differs_on
+    ungraded_arms = [
+        g.row.campaign_id for g in read if g.row.controlled and g.row.bench_set is None
+    ]
+    verdict = None if len(graded) < 2 else False if differs_on else None if ungraded_arms else True
     concurrent = {
         g.row.campaign_id: [o.row.campaign_id for o in read if o is not g and _overlapped(g, o)]
         for g in read
@@ -232,11 +255,12 @@ def head_to_head(entries: list[HeadToHeadEntry]) -> HeadToHead | None:
         ],
         head_to_head_id=None if record is None else record.head_to_head_id,
         scorer_id=scorer_id,
+        headline=BENCH_HEADLINE,
         verdict=verdict,
         differs_on=differs_on,
         pairs=_pairs(graded),
         ratio_reference=None if base is None else base.campaign_id,
-        verdict_line=_verdict_line(verdict, len(graded)),
+        verdict_line=_verdict_line(verdict, len(graded), ungraded_arms),
         uncontrolled_note=None
         if record is None or all(g.row.controlled for g in read)
         else f"Ran as no arm of head-to-head {record.head_to_head_id}, so its search could read "
@@ -244,8 +268,7 @@ def head_to_head(entries: list[HeadToHeadEntry]) -> HeadToHead | None:
         notes=_notes(
             verdict,
             differs_on,
-            len(graded),
-            len(read),
+            len(read) - len(graded) - len(ungraded_arms),
             [cid for cid, others in concurrent.items() if others],
             declared=record,
         ),
@@ -285,12 +308,14 @@ def _on_declared(g: _Graded, record: HeadToHeadRecord) -> bool:
 
 
 def _one_instrument(a: _Graded, b: _Graded) -> bool:
-    """One bench set and budget, neither run steered, and their shared origin read alike."""
+    """One bench set, budget and optimizer model set, neither run steered, and their shared origin
+    read alike."""
     return (
         a.row.bench_set == b.row.bench_set
         and a.row.bench is not None
         and b.row.bench is not None
         and a.row.budget == b.row.budget
+        and a.row.optimizer_models == b.row.optimizer_models
         and not (a.row.human_intervened or b.row.human_intervened)
         and _read_alike(a, b)
     )
@@ -311,7 +336,7 @@ def _read_alike(a: _Graded, b: _Graded) -> bool:
 def _paired(
     a_rows: list[QueryMeasurement], b_rows: list[QueryMeasurement]
 ) -> tuple[float, float | None, float | None, float | None, int]:
-    b_grades, a_grades = paired_fitness(b_rows, a_rows, grade="objective")
+    b_grades, a_grades = paired_fitness(b_rows, a_rows, grade=COLUMN_GRADE[BENCH_HEADLINE])
     return paired_reading(b_grades, a_grades)
 
 
@@ -322,6 +347,13 @@ def _campaign(entry: HeadToHeadEntry) -> Campaign:
             f"campaign {entry.reading.campaign_id} has no manifest to read its bench from"
         )
     return campaign
+
+
+def _ending(stores: Stores, campaign: Campaign) -> tuple[StopReason | None, StopOutcome | None]:
+    """How the cycle holding the campaign's line ended, off its own index."""
+    index = stores.campaigns.load(stores.campaigns.line_holder(campaign.root_hop))
+    reason = None if index is None else cycle_ending(index)
+    return reason, None if reason is None else stop_reason_outcome(reason)
 
 
 def _read(
@@ -342,12 +374,12 @@ def _read(
         else CycleHop(campaign_id=campaign.campaign_id, cycle_id=result.cycle_id)
     )
     layout = CycleLayout(stores.campaigns.cycle_dir(hop))
+    selected = select_optimizer(config.optimization)
     passes = None if result is None else result.bench
     bench = None if passes is None else read_bench(stores, passes, scorer, scorer_id=scorer_id)
-
-    def rows_of(bench_pass: BenchPass, tolerance: int) -> list[QueryMeasurement] | None:
-        read = read_pass(stores, bench_pass, scorer, tolerance=tolerance)
-        return None if read.reading is None else read.rows
+    origin_rows, selected_rows = (
+        (None, None) if passes is None else bench_rows(stores, passes, scorer, scorer_id=scorer_id)
+    )
 
     partition = read_json_tolerant(layout.bank_partition, {})
     bench_ids = frozenset(int(i) for i in partition.get("bench_ids") or [])
@@ -366,6 +398,7 @@ def _read(
         else None
     )
     cost = None if result is None else result.cost
+    stop_reason, outcome = _ending(stores, campaign)
     # Live off the line's ledgers, the fold the campaign card's bill reads: the banked cost is the
     # last ended launch's, so a running arm's would lag its own bill.
     spend = None if cost is None else read_line_spend(stores, campaign)
@@ -380,6 +413,7 @@ def _read(
             subject=reading.key,
             campaign_id=reading.campaign_id,
             optimizer=config.optimization.optimizer,
+            optimizer_models=sorted({selected.model(node) for node in selected.llm_nodes}),
             arm=campaign.arm,
             # A row's own fact: an arm of the read's record, on its budget and — once graded — its
             # instrument.
@@ -394,6 +428,8 @@ def _read(
             if spend is None
             else MeteredSpend.of(spend, ceiling_meter(campaign.arm)),
             human_intervened=reading.human_intervened,
+            stop_reason=stop_reason,
+            outcome=outcome,
             bench=bench,
             bench_set=bench_set,
             comparable=None,
@@ -404,7 +440,6 @@ def _read(
             incurred_usd_ratio=None,
             loop_incurred_usd_ratio=None,
             worked_ratio=None,
-            replay_share=None if spend is None else spend.search_replay_share,
             lift_per_incurred_usd=None
             if bench is None or spend is None
             else bench.lift_per_usd(spend),
@@ -413,10 +448,8 @@ def _read(
             if bench_set is None
             else bench_reads(stores, dataset_name=campaign.dataset_name, sample_ids=bench_ids),
         ),
-        origin_rows=None if passes is None else rows_of(passes.origin, passes.tolerance),
-        selected_rows=None
-        if passes is None or passes.selected is None
-        else rows_of(passes.selected, passes.tolerance),
+        origin_rows=origin_rows,
+        selected_rows=selected_rows,
         windows=windows,
     )
 
@@ -452,13 +485,18 @@ def _pairs(graded: list[_Graded]) -> list[SelectionPair]:
     return out
 
 
-def _verdict_line(verdict: bool | None, n_graded: int) -> str:
+def _verdict_line(verdict: bool | None, n_graded: int, ungraded_arms: list[str]) -> str:
+    if verdict is None and n_graded >= 2:
+        return (
+            f"No verdict yet: no bench headline for {', '.join(ungraded_arms)}, declared arm(s) "
+            "of this head-to-head, so the graded rows are not the comparison that was declared."
+        )
     if verdict is None:
         return f"No verdict: a head-to-head needs two campaigns with a graded bench set; {n_graded} here."
     if verdict:
         return (
-            "Comparable: one bank, split, held-out row set, scorer, target model, origin and "
-            "budget, so the selected column is one quantity."
+            "Comparable: one bank, split, held-out row set, scorer, target model, origin, budget "
+            "and optimizer model set, so the selected column is one quantity."
         )
     return "Not comparable: these headlines are NOT one quantity, and no pair is read across two."
 
@@ -466,8 +504,7 @@ def _verdict_line(verdict: bool | None, n_graded: int) -> str:
 def _notes(
     verdict: bool | None,
     differs_on: list[str],
-    n_graded: int,
-    n_rows: int,
+    n_outside: int,
     concurrent: list[str],
     *,
     declared: HeadToHeadRecord | None,
@@ -488,9 +525,14 @@ def _notes(
             "own noise under one formula, so the backend or a judge moved between them — a change "
             "no stamp names."
         )
-    if n_rows > n_graded:
+    if _OPTIMIZER_MODELS in differs_on:
         notes.append(
-            f"{n_rows - n_graded} campaign(s) carry no bench headline — nothing held out, or the "
+            "`optimizer_models`: the optimizers called different models, so a gap between two "
+            "headlines is the model's as much as the method's."
+        )
+    if n_outside > 0:
+        notes.append(
+            f"{n_outside} campaign(s) carry no bench headline — nothing held out, or the "
             "line has not graded its selection — and sit outside the verdict."
         )
     if concurrent:

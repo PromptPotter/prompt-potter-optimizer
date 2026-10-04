@@ -6,19 +6,27 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import CellGrade
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 
 __all__ = [
+    "BENCH_HEADLINE",
+    "COLUMN_GRADE",
+    "BandedValue",
     "BankPartition",
+    "BenchColumn",
+    "BenchColumns",
     "BenchPass",
     "BenchPasses",
     "BenchReading",
     "BenchScore",
+    "BenchSubject",
     "DatasetSplit",
     "partition_bank",
 ]
@@ -67,20 +75,33 @@ class BankPartition:
 def partition_bank(bank: Sequence[Sample], split: DatasetSplit | None) -> BankPartition:
     """Each part keeps the bank's own order, so a prefix of the search pool is still the draw
     ``sample_dataset`` promises. No split declared ⇒ the whole bank is the search pool. The split
-    ranks DISTINCT samples, so every copy of one lands on the side the sample does."""
+    ranks DISTINCT samples, so every copy of one lands on the side the sample does. A ``bench_only``
+    row is bench beside the ranked ``split.bench`` and is never ranked, so it moves no other row."""
+    declared = {s.key for s in bank if s.bench_only}
     if split is None:
+        if declared:
+            raise ValueError(
+                f"{len(declared)} samples of this bank are bench-only and no dataset_split is "
+                "declared, so the search would draw rows the dataset holds out."
+            )
         return BankPartition(split=None, search=tuple(bank), bench=(), demo=())
+    if repeats := sorted(s.id for s in bank if not s.bench_only and s.key in declared):
+        raise ValueError(
+            f"rows {repeats} repeat the content of a bench-only row, so one sample would sit on "
+            "both sides of the split."
+        )
     keys = sorted(
-        {s.key for s in bank}, key=lambda k: hashlib.sha256(f"{split.seed}:{k}".encode()).digest()
+        {s.key for s in bank} - declared,
+        key=lambda k: hashlib.sha256(f"{split.seed}:{k}".encode()).digest(),
     )
     held = split.bench + split.demo
     if held >= len(keys):
         raise ValueError(
-            f"dataset_split holds out {held} of the {len(keys)} distinct samples in a "
+            f"dataset_split holds out {held} of the {len(keys)} distinct samples it ranks in a "
             f"{len(bank)}-row bank (bench {split.bench}, demo {split.demo}), which leaves the "
             "search none to draw."
         )
-    bench_keys = set(keys[: split.bench])
+    bench_keys = set(keys[: split.bench]) | declared
     demo_keys = set(keys[split.bench : held])
     if unlabelled := sorted(s.id for s in bank if s.key in demo_keys and s.ground_truth is None):
         raise ValueError(
@@ -93,6 +114,10 @@ def partition_bank(bank: Sequence[Sample], split: DatasetSplit | None) -> BankPa
         bench=tuple(s for s in bank if s.key in bench_keys),
         demo=tuple(s for s in bank if s.key in demo_keys),
     )
+
+
+# Whose pass over the bench set it is: the campaign's origin, or the selection it is graded against.
+BenchSubject = Literal["origin", "selected"]
 
 
 class BenchPass(StrictModel):
@@ -127,25 +152,56 @@ class BenchPasses(StrictModel):
     selected: BenchPass | None
 
 
-class BenchReading(StrictModel):
-    """One individual's bench pass, read under a named scorer."""
+BenchColumn = Literal["accuracy", "composite"]
+
+# The column every bench headline is read in, for every optimizer. The other one rides beside it.
+BENCH_HEADLINE: BenchColumn = "accuracy"
+
+# Which per-row grade each column is a mean of.
+COLUMN_GRADE: dict[BenchColumn, CellGrade] = {"accuracy": "fitness", "composite": "objective"}
+
+
+class BandedValue(StrictModel):
+    model_config = ConfigDict(frozen=True)
+
+    value: float
+    ci_lo: float | None = Field(
+        description="The 95% band on `value`, drawn from the same per-row values; `None` where "
+        "one pass was read twice, which has no spread."
+    )
+    ci_hi: float | None
+
+
+class BenchColumns(StrictModel):
+    """One bench quantity in both columns, read off the same rows."""
 
     model_config = ConfigDict(frozen=True)
 
+    accuracy: BandedValue | None = Field(description="The hit rate.")
+    composite: BandedValue | None = Field(
+        description="Under the reading scorer's formula, which charges cost and length — so it is "
+        "never the change in the hit rate."
+    )
+
+    def of(self, column: BenchColumn) -> BandedValue | None:
+        value: BandedValue | None = getattr(self, column)
+        return value
+
+
+class BenchReading(BenchColumns):
+    """One individual's bench pass, read under a named scorer."""
+
     round: int = Field(description="The round whose selection this is; 0 is the origin.")
     sp_hash: str = Field(description="The searchpoint scored — the archive's `prompt_fields_id`.")
-    accuracy: float | None
-    composite_fitness: float | None = Field(
-        description="Under the reading scorer's formula — the number the headline reads."
-    )
-    ci_lo: float | None = Field(
-        description="The 95% band on `composite_fitness`, drawn from the same per-row values."
-    )
-    ci_hi: float | None
+    headline: BenchColumn = Field(description="Which column the headline reads.")
     n_scored: int = Field(
         description="Bench rows carrying a verdict — a miss the prompt caused included — never "
         "fewer than the bench set less its split's `tolerance`."
     )
+
+    @property
+    def level(self) -> BandedValue | None:
+        return self.of(self.headline)
 
 
 class BenchScore(StrictModel):
@@ -158,6 +214,9 @@ class BenchScore(StrictModel):
         description="The grader every number here was read under. A stored copy is a cache of that "
         "reading: a reader under another grader reads the passes again, never this."
     )
+    headline: BenchColumn = Field(
+        description="Which column the headline reads, on the readings and on `lift` alike."
+    )
     origin: BenchReading | None = Field(
         description="`None` where its pass read nothing; `missing_reason` says why."
     )
@@ -169,18 +228,17 @@ class BenchScore(StrictModel):
         "or ended past its split's `tolerance` of rows with no verdict — and, for `selected`, a "
         "line that closed no round and so selected nothing. `None` when both read."
     )
-    lift: float | None = Field(
-        description="`selected` over `origin` in `composite_fitness`, paired per bench row both "
-        "scored; `None` below two shared rows, and 0.0 where the origin is the selection."
+    lift: BenchColumns = Field(
+        description="`selected` over `origin`, paired per bench row both scored. A column is "
+        "`None` below two shared rows, and 0.0 with no band where the origin is the selection."
     )
-    lift_ci_lo: float | None = Field(
-        description="The 95% band on `lift`; `None` where `lift` is, and where the origin is the "
-        "selection — one pass read twice has no spread."
-    )
-    lift_ci_hi: float | None
+
+    @property
+    def headline_lift(self) -> BandedValue | None:
+        return self.lift.of(self.headline)
 
     def lift_per_usd(self, spend: SpendRollup) -> float | None:
         """The headline priced in what its SEARCH incurred, never billed — a replayed cell is billed
         nothing, which would price arriving second — and never the bench's own pass."""
-        usd = spend.search_incurred_usd
-        return None if self.lift is None or usd is None or usd <= 0.0 else self.lift / usd
+        lift, usd = self.headline_lift, spend.search_incurred_usd
+        return None if lift is None or usd is None or usd <= 0.0 else lift.value / usd

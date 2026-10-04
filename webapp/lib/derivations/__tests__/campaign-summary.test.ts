@@ -167,40 +167,35 @@ describe("benchReading", () => {
     const unheld: BenchScore = {
       bench_size: 0,
       scorer_id: "default_hit",
+      headline: "accuracy",
       origin: null,
       selected: null,
       missing_reason: "nothing held out: the campaign's dataset_split declares no bench rows",
-      lift: null,
-      lift_ci_lo: null,
-      lift_ci_hi: null,
+      lift: { accuracy: null, composite: null },
     };
     expect(benchReading(unheld, "terminal").sub).toBe(unheld.missing_reason);
     expect(benchReading(null, "running").sub).toBe("graded when the run ends");
     expect(benchReading(null, "terminal").sub).toBe("not graded — the run ended first");
   });
 
-  // The headline is the composite, a 0–1 score: printed as a percent it reads as accuracy, and a
-  // pick that solved nothing still shows its misses' cost share as "20%".
-  it("reads the composite as a score, with the served accuracy beside it", () => {
-    const reading = {
-      sp_hash: "s",
-      ci_lo: null,
-      ci_hi: null,
-      n_scored: 10,
-    };
+  // The served `headline` picks the column; the composite, a 0–1 score, never prints as a percent.
+  it("reads the served headline column, with the other column beside it", () => {
+    const banded = (value: number) => ({ value, ci_lo: null, ci_hi: null });
+    const reading = { sp_hash: "s", headline: "accuracy" as const, n_scored: 10 };
     const graded: BenchScore = {
       bench_size: 10,
       scorer_id: "default_hit",
-      origin: { ...reading, round: 0, accuracy: 0.0, composite_fitness: 0.2 },
-      selected: { ...reading, round: 3, accuracy: 0.5, composite_fitness: 0.62 },
+      headline: "accuracy",
+      origin: { ...reading, round: 0, accuracy: banded(0.0), composite: banded(0.2) },
+      selected: { ...reading, round: 3, accuracy: banded(0.5), composite: banded(0.62) },
       missing_reason: null,
-      lift: 0.42,
-      lift_ci_lo: null,
-      lift_ci_hi: null,
+      lift: { accuracy: banded(0.5), composite: banded(0.42) },
     };
     const stat = benchReading(graded, "terminal");
-    expect(stat.value).toBe("0.62");
-    expect(stat.sub?.startsWith("accuracy 50% · origin 0.20")).toBe(true);
+    expect(stat.value).toBe("50%");
+    expect(stat.sub?.startsWith("accuracy · origin 0% · lift +0.500 · composite 0.62")).toBe(true);
+    const composite = benchReading({ ...graded, headline: "composite" }, "terminal");
+    expect(composite.value).toBe("0.62");
   });
 });
 

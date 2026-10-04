@@ -849,7 +849,16 @@ async def test_moving_one_ceiling_leaves_the_other_at_its_launch_cap(
     job = registry.request_slot(user_id="default", dataset_name="ds1", hop=hop)
     registry.set_caps(job.job_id, cap_usd=0.30, cap_tokens=5_000_000)
     spent = MeteredSpend(
-        meter="bill", usd=0.10, tokens=210_000, buckets={}, beside={}, billed_usd=0.10
+        meter="bill",
+        usd=0.10,
+        tokens=210_000,
+        buckets={},
+        beside={},
+        billed_usd=0.10,
+        incurred_usd=0.10,
+        billed_by_bucket={},
+        incurred_by_bucket={},
+        replay_share=None,
     )
     observers = types.SimpleNamespace(
         dashboard=types.SimpleNamespace(spend_metered=lambda _meters: spent),
@@ -989,7 +998,18 @@ def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path)
     )
 
     cycle_dir = tmp_path / "cyc"
-    spent = MeteredSpend(meter="bill", usd=1.0, tokens=9_000, buckets={}, beside={}, billed_usd=1.0)
+    spent = MeteredSpend(
+        meter="bill",
+        usd=1.0,
+        tokens=9_000,
+        buckets={},
+        beside={},
+        billed_usd=1.0,
+        incurred_usd=1.0,
+        billed_by_bucket={},
+        incurred_by_bucket={},
+        replay_share=None,
+    )
     observers = types.SimpleNamespace(
         dashboard=types.SimpleNamespace(spend_metered=lambda _meters: spent),
         arm_spend_book=lambda _book: None,

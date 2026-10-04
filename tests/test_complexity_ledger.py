@@ -261,14 +261,17 @@ LEDGER_BASELINE = {
     # `n_diverse_seeds`, `levi_refine`'s parent temperatures, inspiration count and drop rate and
     # feedback count, `map_elites.centroids` / `cvt_samples` / `descriptors`. No CAPO or potter
     # knob holds any: a proxy, an archive and a routing period are mechanisms neither runs.
-    # +2: GEPA's split on the sampler that draws it — `minibatch.size` (b) and `pareto_share`, the
-    # share of the pool held as the Pareto set. No sampler knob draws a fresh subset beside a fixed
+    # +2: GEPA's split on the sampler that draws it — `minibatch.size` (b) and `pareto_size`, the
+    # pool's rows held as the Pareto set. No sampler knob draws a fresh subset beside a fixed
     # one: CAPO's blocks and LEVI's proxy are both one fixed panel.
     # +1: `bench_each_round` — a bench pass per selecting round costs about a round's own panel,
     # so the per-round bench series is the operator's spend to opt into; no knob priced it before.
     # -1: `paired_t.survivors` folds into `population.size` — μ is one number, which the race reads
     # off the selector; a no-race ablation drops the eliminator and still keeps the population.
-    "config_leaf_fields": 71,
+    # +1: `proxy_css.discovery` — LEVI's discovery set, the cells its calibration scores. Without
+    # it calibration took the whole search pool, three times the paper's, and K_proxy sizes only
+    # the rounds after it.
+    "config_leaf_fields": 72,
     # +1: `QUEUE_MAX_WAIT_S` — how long a launch may wait in line before it is withdrawn. It is a
     # setting and not a constant because it is the one queue number a HOST has to be able to
     # answer for: on a shared box it decides when someone else's waiting launch is given up on.
@@ -376,7 +379,12 @@ LEDGER_BASELINE = {
     # `BenchScore.scorer_id` (+1) stamps the reading with the grader it was read under.
     # -5: `SpendBucket.model`, one per bucket — the first model a bucket banked, which named one
     # of a two-model optimizer's and which nothing read.
-    "cycle_result_fields": 227,
+    # +3: `BenchScore.accuracy_lift` and its interval — the bench lift is paired on the composite,
+    # which keeps a miss's cost share and charges length, so it is not the change in the hit rate.
+    # +7: the bench carries BOTH columns whole and names its headline. `BandedValue` (3) and
+    # `BenchColumns` (2) replace the six flat lift fields and a reading's lone band, so accuracy
+    # gets the interval it lacked, and `headline` rides the score and each reading.
+    "cycle_result_fields": 237,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
@@ -393,7 +401,9 @@ LEDGER_BASELINE = {
     # the signature `shared/plugin_registry.py::load_registry` asks of every group.
     # -1: `decompose_prompt_fields(context_input: Any)` is `commit_task_framing(description: str)`:
     # its dict arm had no caller, so the one decomposition input is a description's text.
-    "any_params": 45,
+    # -1: `head_to_head.py::_ran_to_completion(raw_stop_reason: Any)` is gone: a cycle's ending is
+    # read through `campaign_store::cycle_ending`, which hands back a `StopReason`.
+    "any_params": 44,
     # +1: `results.py::is_floor_pinned(rows: Sequence[Mapping[str, Any]])`, the same signature as
     # `measured_cells` and `is_answer_collapsed` beside it — a round row read off disk is a plain
     # mapping, so a narrower annotation here would be a claim the callers cannot honour.
@@ -732,7 +742,13 @@ LEDGER_BASELINE = {
     # account's run unmetered (test_security).
     # +1: a watcher ending read as the run's death reaps a live run that adopted its job
     # (test_reaper).
-    "test_functions": 236,
+    # +1: a round the budget cuts mid-race electing an arm on the one cell it took, or dropping an
+    # offspring it paid for in full, still closes with a population (test_numerics § 4).
+    # +1: a child read on cells its parent skipped this round graded at a default δ, or the ruler
+    # linked through this round's rows alone, so a selector's parent cells decide θ (§ 3).
+    # +1: an input refused with a round open ending CRASHED, so the advice is a traceback and a
+    # re-run for a config only the operator can change (test_resume).
+    "test_functions": 239,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -874,10 +890,10 @@ LEDGER_BASELINE = {
     # `wall_clock_*` became `worked_*`: the line's launches less gate and unworked time.
     # -1: `LineageNode.evaluators` — the round map a `score:` lens re-scored; a lens now re-grades
     # the arm's rows per cell (`mask/load.py`), so no browser or fold reads the map off the tree.
-    # +16: the controlled comparison. `CampaignSummary.arm` and its detail twin (2) over `Arm`'s
+    # +15: the controlled comparison. `CampaignSummary.arm` and its detail twin (2) over `Arm`'s
     # three fields; `Instrument.origin`, so two origins can no longer share an instrument; on
-    # `HeadToHeadRow`, `arm`, `controlled`, `treatment_digest`, `human_intervened`, `replay_share`
-    # and `budget` over `ArmBudget`'s three; `HeadToHead.head_to_head_id`. Each is a fact the
+    # `HeadToHeadRow`, `arm`, `controlled`, `treatment_digest`, `human_intervened` and `budget`
+    # over `ArmBudget`'s three; `HeadToHead.head_to_head_id`. Each is a fact the
     # guard decides on, served so no surface re-derives whether a pair is one quantity.
     # +2: `HeadToHead.note` split into `verdict_line`, `uncontrolled_note` and `notes`, so a surface
     # places each part (the reason a row is uncontrolled on that row) without parsing one paragraph.
@@ -888,7 +904,17 @@ LEDGER_BASELINE = {
     # incurred USD, so every surface read the bill beside it; picking the meter or the buckets in the
     # browser is the arithmetic `webapp/CLAUDE.md` forbids, and `SpendRollup` names no meter.
     # -1: `SpendBucket.model` leaves the wire with the field.
-    "served_fields": 769,
+    # +3: `BenchScore.accuracy_lift` and its interval reach the wire with the field.
+    # +1: `HeadToHead.headline` — the column every row and pair of the comparison is read in.
+    # +1: `HeadToHeadRow.optimizer_models` — the models an arm's optimizer called, which the
+    # comparability guard reads: nothing else on the wire tells a method's lift from a model's.
+    # +4: `MeteredSpend.incurred_usd`, `billed_by_bucket`, `incurred_by_bucket`, `replay_share` —
+    # billed beside incurred on every surface holding a cap, so a replayed arm's $0 bill is not its cost.
+    # +2: `HeadToHeadRow.stop_reason` and `outcome` — how each arm's line holder ended, so an arm
+    # that crashed or was refused at run init is not read as an arm still waiting on its grade.
+    # +1: `LineageNode.stop_reason` — a course's ending as a `StopReason`, split out of `status`,
+    # which carried it as a free string beside the candidate's own state.
+    "served_fields": 780,
 }
 
 

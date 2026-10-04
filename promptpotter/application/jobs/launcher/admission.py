@@ -25,6 +25,7 @@ from promptpotter.application.jobs.registry import (
     JobRegistry,
     JobStatus,
 )
+from promptpotter.application.runner.termination import run_stop_reason
 from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.launch_limits import HeldLimits, LaunchLimits
@@ -57,7 +58,7 @@ _JOB_STATUS_BY_OUTCOME: dict[StopOutcome, JobStatus] = {
 }
 
 
-def job_status_for(stop_reason: StopReason | str) -> JobStatus:
+def job_status_for(stop_reason: StopReason) -> JobStatus:
     """What a finished run's job is stamped, given why the run stopped."""
     return _JOB_STATUS_BY_OUTCOME[stop_reason_outcome(stop_reason)]
 
@@ -76,12 +77,11 @@ def release_slot(
 
     A launch that never got past ADMISSION is ``stopped``, not ``failed`` — the account's ceiling, a
     dark backend and a busy machine each REFUSE it before anything runs or spends."""
-    if launch_interrupted(exc):
-        job_registry.mark_finished(job_id, status="stopped", stop_reason="launch_interrupted")
-    elif not admitted:
-        job_registry.mark_finished(job_id, status="stopped", stop_reason="launch_not_admitted")
+    if admitted or launch_interrupted(exc):
+        stop_reason = run_stop_reason(exc)
     else:
-        job_registry.mark_finished(job_id, status="failed", stop_reason="launch_aborted")
+        stop_reason = StopReason.NOT_ADMITTED
+    job_registry.mark_finished(job_id, status=job_status_for(stop_reason), stop_reason=stop_reason)
 
 
 async def probe_backend(backend_type: str, backend_url: str) -> None:
@@ -167,7 +167,9 @@ async def await_slot(job_registry: JobRegistry, job: Job) -> None:
     deadline = time.monotonic() + settings.QUEUE_MAX_WAIT_S
     while not await asyncio.to_thread(job_registry.claim_next, job.job_id):
         if time.monotonic() >= deadline:
-            job_registry.mark_finished(job.job_id, status="stopped", stop_reason="queue_expired")
+            job_registry.mark_finished(
+                job.job_id, status="stopped", stop_reason=StopReason.NOT_ADMITTED
+            )
             raise ConflictError(
                 f"This launch waited {settings.QUEUE_MAX_WAIT_S / 3600:.0f}h for a free slot and "
                 f"was withdrawn. Nothing ran and nothing was spent; start it again when the "

@@ -6,8 +6,8 @@
 # Every value below cites the section it comes from. Where the bench runs LEVI differently from
 # the paper, `docs/methods/candidate-elimination.md` § LEVI mapping and deviations lists it.
 #
-# Round 1 is the calibration round (Alg. 1): the seeds and the origin are scored on the whole
-# search pool, the proxy is chosen from those rows and the archive is seeded. Every later round is
+# Round 1 is the calibration round (Alg. 1): the seeds and the origin are scored on the discovery
+# set, the proxy is chosen from those rows and the archive is seeded. Every later round is
 # one paradigm-shift period (Alg. 2, App. F): `interval - 1` refinements and one paradigm shift.
 #
 # Editing a `resolved_prompts` field below changes what every LEVI call reads; the text is the
@@ -61,10 +61,12 @@ nodes:
       n_clusters: 3
       # n_diverse_seeds = 4 (App. B, Table 5): with the origin, the 5 calibration prompts (App. A).
       n_diverse_seeds: 4
-  # K_proxy = 30 of {30, 40}, weights (r, s, c) = (0.5, 0.5, 0.15) (§3.3, App. A).
+  # A 150-problem discovery set (App. I); K_proxy = 30 of {30, 40}, weights (r, s, c) =
+  # (0.5, 0.5, 0.15) (§3.3, App. A).
   proxy_css:
     type: sampler
     config:
+      discovery: 150
       size: 30
       rank_weight: 0.5
       separation_weight: 0.5

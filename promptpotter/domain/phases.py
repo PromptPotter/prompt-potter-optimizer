@@ -72,6 +72,8 @@ class StopReason(enum.StrEnum):
     OPTIMIZER_TIMEOUT = "optimizer_timeout"
     REBASED = "rebased_to_fork"
     PRODUCER_VANISHED = "producer_vanished"
+    INPUT_REFUSED = "input_refused"
+    NOT_ADMITTED = "not_admitted"
 
 
 class RunPhase(enum.StrEnum):
@@ -150,9 +152,10 @@ class StopOutcome(enum.StrEnum):
 
 
 class StopReasonInfo(NamedTuple):
-    """``halts_mid_round`` means the round left on disk is PARTIAL — read as complete, its fitness
-    is a handful of samples passing for the whole bank. ``next_step`` is the imperative the operator
-    acts on, SERVED rather than composed per surface — an ended cycle is read on four of them, and
+    """``halts_mid_round`` means a round this reason CUTS is left on disk PARTIAL — read as complete,
+    its fitness is a handful of samples passing for the whole bank. Whether a round was open when
+    it struck is the loop's fact (``LoopEnd.interrupted_round``). ``next_step`` is the imperative
+    the operator acts on, SERVED rather than composed per surface — an ended cycle is read on four of them, and
     four authors is four chances to advise differently. ``""`` states that nothing is owed; it is
     never a surface's licence to write its own. ``grades_selection`` means the line ENDED here
     holding a selection the bench may grade: a crash vouches for no state, and a pause or a rebase
@@ -172,14 +175,17 @@ class StopReasonInfo(NamedTuple):
 #
 # Mid-round is decided by WHERE the stop is raised, not by how bad it sounds:
 #   - `scoring/query_loop.py::run_walks` raises inside the scoring phase -> SPEND_BUDGET,
-#     TOKEN_BUDGET, BACKEND_UNREACHABLE, PROVIDER_CREDIT, PROVIDER_THROTTLED.
+#     TOKEN_BUDGET, BACKEND_UNREACHABLE, PROVIDER_CREDIT, PROVIDER_THROTTLED. The two budget
+#     stops are RETURNED instead where the selector `elects_partial`: the round closes on the
+#     panels it paid for and the stop lands at the boundary after it.
 #   - a pause is raised from that same loop between samples -> PAUSED.
-#   - CRASHED / RENDER_ERROR / OPTIMIZER_TIMEOUT are exceptions from anywhere, round included, and
-#     so are PROVIDER_CREDIT and PROVIDER_THROTTLED when an optimizer call is the one refused.
+#   - CRASHED / RENDER_ERROR / OPTIMIZER_TIMEOUT / INPUT_REFUSED are exceptions from anywhere,
+#     round included (`runner/termination.py::run_stop_reason` classifies by TYPE, not by site),
+#     and so are PROVIDER_CREDIT and PROVIDER_THROTTLED when an optimizer call is the one refused.
 #   - everything else fires at a round BOUNDARY: `runner/round.py` raises only after
 #     `close_round`, the optimizer's OPTIMIZER_ABORT/REBASED ride the post-round transition seam,
-#     ORIGIN_GATE runs once round 0 is scored, and DIVERGED is decided at resume before any
-#     round starts.
+#     ORIGIN_GATE runs once round 0 is scored, and DIVERGED is raised by the resume replay alone,
+#     before any round starts.
 #
 # `next_step` is filled ONLY where the verb cannot be read off the label. "Fix the backend, then
 # resume" is the reason restated, not advice; the ones below each name a flag, a threshold or a
@@ -243,9 +249,10 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
     StopReason.OPTIMIZER_ABORT: StopReasonInfo(
         "Optimizer abort", StopOutcome.HALTED, False, False, "", True
     ),
-    # The two the private or-chain missed: the budget gate stops INSIDE the sample loop. The
-    # counter is CUMULATIVE across resume, so a new ceiling must clear what is already spent —
-    # the one fact neither label carries and every operator gets wrong once.
+    # The budget gate stops INSIDE the sample loop as well as at the boundary, so the round it
+    # cut is partial unless the selector elected on it. The counter is CUMULATIVE across resume,
+    # so a new ceiling must clear what is already spent — the one fact neither label carries and
+    # every operator gets wrong once.
     StopReason.SPEND_BUDGET: StopReasonInfo(
         "Spend budget reached",
         StopOutcome.HALTED,
@@ -296,7 +303,34 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
         "re-measures.",
         True,
     ),
-    StopReason.CRASHED: StopReasonInfo("Crashed", StopOutcome.FAILED, True, True, "", False),
+    StopReason.CRASHED: StopReasonInfo(
+        "Crashed",
+        StopOutcome.FAILED,
+        True,
+        True,
+        "Read `index.json::crash_traceback` for the cause; `python -m promptpotter resume` "
+        "re-runs from the last closed round.",
+        False,
+    ),
+    # Not CRASHED: the run declined the operator's own input (`PayloadInvalidError`), so nothing
+    # broke and the cure is the input, never the traceback. Run init raises most of them, with no
+    # round open; one raised inside a round leaves that round partial.
+    StopReason.INPUT_REFUSED: StopReasonInfo(
+        "Input refused",
+        StopOutcome.FAILED,
+        True,
+        False,
+        "`dashboard.json::error` names the input the run declined; refused at run init, nothing "
+        "was searched. A spend cap under one round is raised with `set-limits --max-usd` (on a "
+        "head-to-head arm that moves every arm's budget) or met by narrowing the round in "
+        "`optimization.nodes`; then `resume`.",
+        False,
+    ),
+    # A JOB's ending, never a cycle's: the launch left before it held a run — refused at admission,
+    # or withdrawn from the queue by its owner or the wait bound. Nothing ran, nothing was spent.
+    StopReason.NOT_ADMITTED: StopReasonInfo(
+        "Not admitted", StopOutcome.HALTED, False, False, "", False
+    ),
     # Written by the REAPER straight onto index.json — the producer is already gone, so
     # `_finalize_run` never runs and never reads this row. True is the honest value: a
     # vanished process died at an arbitrary point, so whatever round was open is partial.
@@ -329,8 +363,8 @@ if _missing_stop_info:
     )
 
 
-def stop_reason_outcome(reason: StopReason | str) -> StopOutcome:
-    return STOP_REASON_INFO[StopReason(reason)].outcome
+def stop_reason_outcome(reason: StopReason) -> StopOutcome:
+    return STOP_REASON_INFO[reason].outcome
 
 
 # Which stop each refusal ends a run on — raised at a send (`SendRefusedError`) or banked on the

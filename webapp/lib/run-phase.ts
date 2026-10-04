@@ -1,4 +1,9 @@
-import type { DashboardState, RunPhase, StopOutcome } from "@/lib/api/types.generated";
+import type {
+  DashboardState,
+  RunPhase,
+  StopOutcome,
+  StopReason,
+} from "@/lib/api/types.generated";
 import {
   STOP_REASON_LABELS,
   STOP_REASON_NEXT_STEPS,
@@ -69,16 +74,23 @@ export function dockPriority(runPhase: string | null | undefined): number {
   return isRunPhase(runPhase) ? DOCK_PRIORITY[runPhase] : 3;
 }
 
-// `reason` is `dash.stop_reason` on the live view, the entry's `status` on the cycle list.
+// An untyped payload (a ray item, a hand-built fixture) enters the typed vocabulary here and
+// nowhere else; a served field is already a `StopReason`.
+export function isStopReason(v: unknown): v is StopReason {
+  return typeof v === "string" && v in STOP_REASON_OUTCOMES;
+}
+
+const NOT_SERVED = "—";
+
+// `reason` is the served `stop_reason` of the cycle being named — `dashboard.json`'s, a `/cycles`
+// entry's or a tree course's. A terminal phase with none is a read that has not landed yet.
 export function runPhaseLabel(
   runPhase: string | null | undefined,
-  reason: string | null | undefined,
+  reason: StopReason | null | undefined,
 ): string {
-  if (runPhase === "terminal") {
-    return (reason && STOP_REASON_LABELS[reason]) || reason || "Finished";
-  }
-  if (isRunPhase(runPhase) && runPhase !== "terminal") return RUN_PHASE_LABEL[runPhase];
-  return runPhase || "—";
+  if (!isRunPhase(runPhase)) return NOT_SERVED;
+  if (runPhase !== "terminal") return RUN_PHASE_LABEL[runPhase];
+  return reason ? STOP_REASON_LABELS[reason] : NOT_SERVED;
 }
 
 // The glyph form of `runPhaseLabel`; the word still rides the mark's `aria-label`.
@@ -107,18 +119,16 @@ const UNKNOWN_MARK: RunPhaseMark = { glyph: "?", tone: "quiet" };
 
 export function runPhaseMark(
   runPhase: string | null | undefined,
-  reason: string | null | undefined,
+  reason: StopReason | null | undefined,
 ): RunPhaseMark {
-  if (runPhase === "terminal") {
-    const outcome = reason ? STOP_REASON_OUTCOMES[reason] : undefined;
-    return outcome ? OUTCOME_MARK[outcome] : UNKNOWN_MARK;
-  }
-  return isRunPhase(runPhase) && runPhase !== "terminal" ? PHASE_MARK[runPhase] : UNKNOWN_MARK;
+  if (!isRunPhase(runPhase)) return UNKNOWN_MARK;
+  if (runPhase !== "terminal") return PHASE_MARK[runPhase];
+  return reason ? OUTCOME_MARK[STOP_REASON_OUTCOMES[reason]] : UNKNOWN_MARK;
 }
 
 // Served, never composed here: the browser advises what the terminal and `review.md` advise.
-export function stopReasonNextStep(reason: string | null | undefined): string {
-  return (reason && STOP_REASON_NEXT_STEPS[reason]) || "";
+export function stopReasonNextStep(reason: StopReason | null | undefined): string {
+  return reason ? STOP_REASON_NEXT_STEPS[reason] : "";
 }
 
 // The pause affordance's word for `dashboard.json::state`; `null` = nothing worth naming, so the

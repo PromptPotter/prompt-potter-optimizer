@@ -360,6 +360,14 @@ class SpendRollup(StrictModel):
         incurred = sum(b.incurred_usd for b in search)
         return None if incurred <= 0.0 else 1.0 - sum(b.used_usd for b in search) / incurred
 
+    def billed_beside_incurred(self) -> str:
+        """The one text reading of the two totals, so no surface prints a bare "cost"."""
+        share = self.search_replay_share
+        replayed = "" if share is None else f" · {share:.0%} of the search replayed"
+        return (
+            f"billed ${self.total_used_usd:.4f} · incurred ${self.total_incurred_usd:.4f}{replayed}"
+        )
+
     @property
     def search_incurred_usd(self) -> float | None:
         """What the SEARCH incurred (``SEARCH_KINDS``), replays priced — ``None`` where a search
@@ -383,12 +391,20 @@ class MeteredSpend(StrictModel):
     buckets: dict[str, float]
     beside: dict[str, float]
     billed_usd: float
+    # Meter-independent, every bucket: what the provider charged beside what the same calls would
+    # have cost with every replay priced. `replay_share` is the search's, `None` where it incurred
+    # nothing.
+    incurred_usd: float
+    billed_by_bucket: dict[str, float]
+    incurred_by_bucket: dict[str, float]
+    replay_share: float | None
 
     @classmethod
     def of(cls, spend: SpendRollup, meter: CeilingMeter) -> MeteredSpend:
         usd, tokens = spend.metered(meter)
         counted = {TOKEN_KIND_BUCKET[k] for k in METER_KINDS[meter]}
-        at = {name: getattr(spend, name).metered_usd(meter) for name in TOKEN_KIND_BUCKET.values()}
+        names = list(TOKEN_KIND_BUCKET.values())
+        at = {name: getattr(spend, name).metered_usd(meter) for name in names}
         return cls(
             meter=meter,
             usd=usd,
@@ -396,6 +412,10 @@ class MeteredSpend(StrictModel):
             buckets={name: v for name, v in at.items() if name in counted},
             beside={name: v for name, v in at.items() if name not in counted},
             billed_usd=spend.total_used_usd,
+            incurred_usd=spend.total_incurred_usd,
+            billed_by_bucket={name: getattr(spend, name).used_usd for name in names},
+            incurred_by_bucket={name: getattr(spend, name).incurred_usd for name in names},
+            replay_share=spend.search_replay_share,
         )
 
 

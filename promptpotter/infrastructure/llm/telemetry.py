@@ -9,13 +9,14 @@ from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from typing import TYPE_CHECKING, Any, Literal
 
+from promptpotter.domain.phases import StopReason
 from promptpotter.domain.run_records import (
-    CellPricedRecord,
     CommandAckRecord,
     CommandRecord,
     CycleRecord,
     ErrorRecord,
     PhaseRecord,
+    PricedKeyRecord,
     RoundWarningKind,
     RoundWarningRecord,
     SpendHoldRecord,
@@ -194,8 +195,31 @@ def emit_backend_warning(
     )
 
 
-def emit_cell_priced(cell_key: str) -> None:
-    _append_record(CellPricedRecord(cell_key=cell_key))
+def emit_priced_key(priced_key: str) -> None:
+    """Say on the active ledger that this campaign's search priced ``priced_key``."""
+    _append_record(PricedKeyRecord(priced_key=priced_key))
+
+
+_PRICED: ContextVar[set[str] | None] = ContextVar("priced", default=None)
+
+
+def bind_priced(priced: set[str]) -> None:
+    """Bind the campaign's priced set — its cells and its calls — for :func:`call_priced`."""
+    _PRICED.set(priced)
+
+
+def call_priced(key: str) -> bool:
+    """Whether this campaign already priced the reuse call ``key``. The first asking says so on the
+    active ledger, as a walk does for a cell, so no replay of it is metered again."""
+    priced = _PRICED.get()
+    if priced is None:
+        return False
+    name = f"call:{key}"
+    if name in priced:
+        return True
+    priced.add(name)
+    emit_priced_key(name)
+    return False
 
 
 def emit_spend_hold(
@@ -268,10 +292,10 @@ def emit_error_record(
     *,
     kind: str,
     message: str,
-    stop_reason: Literal["CRASHED", "RENDER_ERROR", "DIVERGED"],
+    stop_reason: StopReason,
     traceback: str | None = None,
 ) -> ErrorRecord:
-    """Append an ``ErrorRecord`` and RETURN it — the runner's ``except`` sites carry the same object onto
+    """Append an ``ErrorRecord`` and RETURN it — ``end_run_on`` carries the same object onto
     ``CycleResult.error``, so there is one build and no twin. Pre-loop errors carry ``round=None``."""
     record = ErrorRecord(
         kind=kind,
@@ -307,10 +331,12 @@ def emit_round_warning(
 __all__ = [
     "active_cycle_ledger",
     "bill_usd",
-    "emit_cell_priced",
+    "bind_priced",
+    "call_priced",
     "emit_command",
     "emit_command_ack",
     "emit_error_record",
+    "emit_priced_key",
     "emit_round_warning",
     "emit_token_usage",
     "filed_as",

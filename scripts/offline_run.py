@@ -53,7 +53,7 @@ from promptpotter.application.optimizer_manifest import (
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.runner.entry import RunMode
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
-from promptpotter.config.settings import Settings
+from promptpotter.config.settings import PROMPT_STRING_FIELDS, Settings
 from promptpotter.connectors.promptpotter import measurement_modules
 from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import ArmRequest
@@ -96,8 +96,9 @@ SCALED: dict[str, dict[str, dict[str, Any]]] = {
         "capo_crossover": {"config": {"crossovers": 2}},
         "few_shot": {"config": {"k_max": 2}},
     },
+    "gepa": {"minibatch": {"config": {"pareto_size": 20}}},
     "levi": {
-        "proxy_css": {"config": {"size": 10}},
+        "proxy_css": {"config": {"discovery": 40, "size": 10}},
         "levi_paradigm_shift": {"config": {"interval": 4, "n_diverse_seeds": 2}},
         "map_elites": {"config": {"centroids": 8, "cvt_samples": 400}},
     },
@@ -607,6 +608,9 @@ async def run_one(
         arm=arm,
     )
     await session.backend_client.aclose()
+    searched = {key for node in session.pipeline_schema.config_nodes for key in node.param_keys}
+    if arm is not None and (beside := sorted(searched - set(PROMPT_STRING_FIELDS))):
+        raise SystemExit(f"offline run: arm {arm.arm_key} searched {beside} beside its prompt")
     stores.campaigns.update_campaign(session.campaign_id, {"label": LABEL})
     cycle = Path(stores.campaigns.cycle_dir(session.hop))
     dashboard = json.loads((cycle / "dashboard.json").read_text(encoding="utf-8"))
@@ -896,7 +900,7 @@ def extract(cycle: Path, bench: BenchScore | None) -> dict[str, Any]:
     canon = Canon(ids)
     final = index.get("final") or {}
     run = {
-        **{k: index.get(k) for k in ("status", "stop_reason", "n_rounds", "best_round")},
+        **{k: index.get(k) for k in ("stop_reason", "n_rounds", "best_round")},
         **{
             k: final.get(k)
             for k in (
@@ -1029,7 +1033,9 @@ def main() -> int:
         run = json.loads((workspace / "decisions.json").read_text(encoding="utf-8"))["run"]
         (cycle,) = (workspace / "projects").glob("*/campaigns/*/cycles/*")
         failed += run["bench"] is None
-        headline = "NO BENCH HEADLINE" if run["bench"] is None else f"{run['bench']['lift']:+.3f}"
+        bench = run["bench"]
+        lift = None if bench is None else bench["lift"][bench["headline"]]
+        headline = "NO BENCH HEADLINE" if lift is None else f"{lift['value']:+.3f}"
         print(f"{name}: {run['stop_reason']}, bench lift {headline} -- {cycle}")
     if args.controlled and not failed:
         beside, bare = (home / name for name in CONTROLLED)

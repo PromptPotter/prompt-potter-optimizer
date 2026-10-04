@@ -36,6 +36,11 @@ from promptpotter.config.settings import (
 )
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.launch_limits import HeldLimits, LaunchLimits
+from promptpotter.domain.phases import (
+    STOP_REASON_INFO,
+    StopOutcome,
+    stop_reason_outcome,
+)
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.io import write_text
@@ -61,10 +66,12 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 
 @dataclass
 class CommandResult:
-    """``data`` is machine-readable; ``human`` is pre-rendered text. ``main()`` picks one."""
+    """``data`` is machine-readable; ``human`` is pre-rendered text. ``main()`` picks one, and
+    exits non-zero on a ``FAILED`` ``outcome`` — set only by a verb that ran a cycle."""
 
     data: dict[str, Any] | None = None
     human: str | None = None
+    outcome: StopOutcome | None = None
 
 
 _VERBOSE = False
@@ -103,10 +110,18 @@ def log_startup_summary(
     )
 
 
-def campaign_result_human(campaign_dir: Path, *, dataset_name: str, cycle_id: str | None) -> str:
-    """Operator-facing summary block for a finished ``new`` / ``resume`` run — dataset, campaign,
-    cycle, and where on disk each artifact landed."""
+def campaign_result_human(campaign_dir: Path, *, dataset_name: str, result: CycleResult) -> str:
+    """Operator-facing summary block for an ended ``new`` / ``resume`` run — how it ended, dataset,
+    campaign, cycle, and where on disk each artifact landed."""
+    cycle_id = result.cycle_id
+    info = STOP_REASON_INFO[result.stop_reason]
+    ended = [f"Ended:     {info.label}"]
+    if result.error is not None:
+        ended.append(f"Error:     {result.error.kind}: {result.error.message}")
+    if info.next_step:
+        ended.append(f"Next:      {info.next_step}")
     return (
+        "\n".join(ended) + "\n"
         f"Dataset:   {dataset_name}\n"
         f"Campaign:  {campaign_dir.name}\n"
         f"Cycle:     {cycle_id or '?'}\n"
@@ -324,8 +339,9 @@ def cycle_result_command(
         human=campaign_result_human(
             campaign_dir,
             dataset_name=ctx.init_params.get("dataset_name") or "?",
-            cycle_id=cycle_result.cycle_id,
+            result=cycle_result,
         ),
+        outcome=stop_reason_outcome(cycle_result.stop_reason),
     )
 
 

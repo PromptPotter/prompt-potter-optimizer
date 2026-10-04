@@ -22,7 +22,6 @@ import {
   fmtSigned,
   fmtTokens,
   fmtUsd,
-  fmtUsdCents,
   fmtValue,
   shortId,
   vendorOf,
@@ -72,37 +71,48 @@ function spendFloor(c: CampaignSummary): string {
   return c.spend_unpriced_tokens > 0 ? "≥" : "";
 }
 
-// What the campaign's cap counts, so an arm stopped at its cap reads at its cap.
+// The bill, the figure the row's own card leads with: no cap sits beside a row to read a meter by.
 export function spendLabel(c: CampaignSummary): string {
-  return `${spendFloor(c)}${fmtUsdCents(c.spend_metered.usd)}`;
+  return `${spendFloor(c)}${fmtUsd(c.spend_metered.billed_usd)}`;
 }
 
-export const SPEND_STAT_LABEL = "Spend";
+export const SPEND_STAT_LABEL = "Billed";
 
+// The bill leads; what the same calls would have cost with every replay priced, and what the cap
+// counts of either, sit beside it — an arm replaying a sibling's cells bills $0 for them.
 export function spendStat(metered: MeteredSpend, floor: string): RowStat {
   return {
     label: SPEND_STAT_LABEL,
-    value: `${floor}${fmtUsd(metered.usd)} ${METER_WORD[metered.meter]}`,
-    sub: meteredBucketsLine(metered),
+    value: `${floor}${fmtUsd(metered.billed_usd)}`,
+    sub:
+      `Incurred ${fmtUsd(metered.incurred_usd)} · Counted against cap ` +
+      `${fmtUsd(metered.usd)} ${METER_WORD[metered.meter]}: ${meteredBucketsLine(metered)}`,
   };
 }
 
-// The headline: the selection graded on held-out rows no optimizer node read. It is the campaign's
-// COMPOSITE, a 0–1 score and never a rate, so accuracy rides beside it; every value served, and a
-// pass that read nothing shows the served reason in place of a number.
-export const BENCH_STAT_LABEL = "Bench composite";
+// The headline: the selection graded on held-out rows no optimizer node read, in the column the
+// score names (`headline`), with the other column beside it; every value served, and a pass that
+// read nothing shows the served reason in place of a number.
+export const BENCH_STAT_LABEL = "Bench";
+
+// Accuracy is a rate and the composite a 0–1 score: a score printed as a percent reads as a rate.
+function fmtBenchColumn(column: BenchScore["headline"], v: number | null | undefined): string {
+  return column === "accuracy" ? fmtPct0(v) : fmtFitness(v ?? null);
+}
 
 export function benchStat(bench: BenchScore): RowStat {
-  const { selected, origin, missing_reason } = bench;
+  const { selected, origin, missing_reason, headline } = bench;
+  const beside = headline === "accuracy" ? "composite" : "accuracy";
   return {
     label: BENCH_STAT_LABEL,
-    value: selected === null ? "—" : fmtFitness(selected.composite_fitness),
+    value: fmtBenchColumn(headline, selected?.[headline]?.value),
     sub:
       missing_reason !== null
         ? missing_reason
-        : `accuracy ${fmtPct0(selected?.accuracy)} · origin ` +
-          `${origin === null ? "—" : fmtFitness(origin.composite_fitness)} · ` +
-          `lift ${fmtSigned(bench.lift)} · ${bench.bench_size} held-out rows`,
+        : `${headline} · origin ${fmtBenchColumn(headline, origin?.[headline]?.value)} · ` +
+          `lift ${fmtSigned(bench.lift[headline]?.value)} · ` +
+          `${beside} ${fmtBenchColumn(beside, selected?.[beside]?.value)} · ` +
+          `${bench.bench_size} held-out rows`,
   };
 }
 
@@ -112,7 +122,8 @@ export function benchReading(
   bench: BenchScore | null | undefined,
   runPhase: LiveDashboardState["run_phase"] | undefined,
 ): RowStat {
-  if (bench) return benchStat(bench);
+  // Guarded: `dashboard.json` is served verbatim, and a file an older build wrote names no column.
+  if (bench?.headline) return benchStat(bench);
   const sub =
     runPhase === "terminal" ? "not graded — the run ended first" : "graded when the run ends";
   return { label: BENCH_STAT_LABEL, value: "—", sub };
@@ -158,7 +169,7 @@ const ARCHIVED: RowStatus = { mark: { glyph: "▫", tone: "quiet" }, word: "Arch
 // One cycle's served phase as a row mark — a campaign row, a fork row and an inner run alike.
 export function phaseStatus(
   runPhase: string | null | undefined,
-  reason: string | null | undefined,
+  reason: LineageNode["stop_reason"] | undefined,
 ): RowStatus {
   return { mark: runPhaseMark(runPhase, reason), word: runPhaseLabel(runPhase, reason) };
 }
@@ -166,7 +177,7 @@ export function phaseStatus(
 // Off the ANSWERING cycle, so the sidebar row and the masthead switcher cannot disagree.
 export function campaignStatus(run: RunGroup): RowStatus {
   if (run.campaign.lifecycle_status === "archived") return ARCHIVED;
-  return phaseStatus(run.answering.run_phase, run.answering.status);
+  return phaseStatus(run.answering.run_phase, run.answering.stop_reason);
 }
 
 // After a supersede cut the line continues on a fork, which carries its own cap and rounds.
@@ -253,7 +264,7 @@ export function campaignCard(
     ...(campaign.bench ? [benchStat(campaign.bench)] : []),
     spendStat(campaign.spend_metered, spendFloor(campaign)),
     {
-      label: "Billed",
+      label: "Lifetime bill",
       value: `${spendFloor(campaign)}${fmtUsd(campaign.spend_used_usd)}`,
       sub:
         campaign.spend_unpriced_tokens > 0

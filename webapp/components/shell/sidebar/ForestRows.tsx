@@ -167,7 +167,7 @@ function RunRow({ run, ctx }: { run: RunGroup; ctx: TreeCtx }) {
       }
       // Always `/cycles`, never the tree node the row only has while expanded.
       phase={run.answering.run_phase}
-      phaseReason={run.answering.status}
+      phaseReason={run.answering.stop_reason}
     />
   );
 }
@@ -194,7 +194,7 @@ function CourseRow({
   chrome?: React.ReactNode;
   // Handed in, never picked here: `/cycles` for a root row, the tree node for a nested course.
   phase: string | null | undefined;
-  phaseReason: string | null | undefined;
+  phaseReason: LineageNode["stop_reason"] | undefined;
 }) {
   const addr = encodeCyclePath(path);
   const open = courseOpen(ctx, path);
@@ -525,7 +525,7 @@ function CandidateRow({
               <span className="unit-library-meta">
                 {/* A cut that broke before measuring must not borrow the origin's number. */}
                 {cand.accuracy == null && cand.course_kind ? (
-                  <PhaseMark status={phaseStatus("terminal", cand.status)} />
+                  <PhaseMark status={phaseStatus("terminal", cand.stop_reason)} />
                 ) : (
                   fmtPct0(cand.accuracy)
                 )}
@@ -546,7 +546,7 @@ function CandidateRow({
                 label={course.task ? panelCellLabel(course.task) : course.dataset_name}
                 // `/cycles` lists top-level cycles only, so an inner run answers off its node.
                 phase={course.run_phase}
-                phaseReason={course.status}
+                phaseReason={course.stop_reason}
               />
             </li>
           ))}

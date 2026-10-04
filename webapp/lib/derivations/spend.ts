@@ -3,7 +3,7 @@
 
 import type { MeteredSpend, SpendBucket, SpendRollup } from "@/lib/api/types";
 import type { DashboardSnapshot } from "@/lib/poll";
-import { fmtUsd } from "@/lib/format";
+import { fmtPct0, fmtUsd } from "@/lib/format";
 import { cacheShare, prefixReading, type PrefixReading } from "./token-account";
 
 // Display order, biggest first, in the operator's words — `evidence.py::_BUCKET_WORD` says the same.
@@ -28,6 +28,27 @@ export function labelledBuckets(served: Record<string, number>): { label: string
     const usd = served[key];
     return usd === undefined ? [] : [{ label, usd }];
   });
+}
+
+// Each served bucket's bill beside what it incurred, in display order; a bucket the wire lacks on
+// either side is dropped, never zeroed.
+export function billedIncurredBuckets(
+  m: MeteredSpend,
+): { label: string; billedUsd: number; incurredUsd: number }[] {
+  return SPEND_BUCKETS.flatMap(({ key, label }) => {
+    const billedUsd = m.billed_by_bucket[key];
+    const incurredUsd = m.incurred_by_bucket[key];
+    return billedUsd === undefined || incurredUsd === undefined
+      ? []
+      : [{ label, billedUsd, incurredUsd }];
+  });
+}
+
+// The served replay share as a sentence, its `null` said rather than hidden.
+export function replayShareLine(m: MeteredSpend): string {
+  return m.replay_share == null
+    ? "The search incurred nothing, so no share of it replayed"
+    : `${fmtPct0(m.replay_share)} of the search replayed`;
 }
 
 // The compact secondary line: the buckets inside the cap, then what is metered beside it.

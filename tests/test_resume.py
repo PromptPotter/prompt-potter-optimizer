@@ -96,7 +96,7 @@ def test_a_replayer_that_cannot_re_derive_is_not_reported_as_a_match() -> None:
     """A record the replay cannot reproduce is a THIRD state, never agreement.
 
     The replayers raise on purpose where a decision does not re-derive — a `ROUND_WINNER` with no
-    `parent_bias`/`parent_cells` anchor, `RulerCoverageError` on a cell the ruler never carried.
+    `parent_bias`/`parent_cells` anchor.
     The walker caught every exception and counted it as a match, so the rounds nothing could verify
     were exactly the rounds that reported clean: `--fork-on-divergence` never fired, and the resume
     continued on a winner no rule had reproduced. Silent in the worst direction — a ledger missing
@@ -1197,6 +1197,7 @@ def test_a_deepened_inner_cell_continues_the_cycle_that_holds_its_line(
     import types
 
     from promptpotter.application.runner.inner import spawn
+    from promptpotter.domain.phases import StopReason
 
     store = built_stores.campaigns
     root = CycleHop(campaign_id=_CAMPAIGN, cycle_id="cycle_innerroot")
@@ -1206,7 +1207,7 @@ def test_a_deepened_inner_cell_continues_the_cycle_that_holds_its_line(
     store.create(successor, {"parent_session_id": "sess-inner", "rounds": banked})
     store.mark_superseded(root, successor.cycle_id)
     store.mark_finished(
-        successor, status="max_rounds", stop_reason="max_rounds", finished_at="2026-09-01T00:00:00Z"
+        successor, stop_reason=StopReason.MAX_ROUNDS, finished_at="2026-09-01T00:00:00Z"
     )
 
     plan = types.SimpleNamespace(cycle_id=root.cycle_id)
@@ -1405,6 +1406,41 @@ def test_a_resume_before_round_one_regates_the_origin_it_measured(
     ).stop_reason
     assert stop is StopReason.ORIGIN_GATE, "a resume reached round 1 past an ungated origin"
     assert gated_on == [37], "the gate read a verdict other than this launch's re-measure"
+
+
+def test_an_input_refused_inside_a_round_ends_input_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The round loop's ladder had no arm for a refused input, so one raised with a round open
+    ended CRASHED: a traceback and "re-run from the last closed round" for a config the operator
+    has to change, and `resume` re-raises the same refusal."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from promptpotter.application.campaign_config import load_campaign_config
+    from promptpotter.application.runner import loop
+    from promptpotter.domain.phases import StopReason
+    from promptpotter.shared.errors import PayloadInvalidError
+
+    async def refuse(*_: Any) -> None:
+        raise PayloadInvalidError("optimization.nodes names no measurement", code="no_measure")
+
+    monkeypatch.setattr(loop, "emit_origin_round", refuse)
+    state = SimpleNamespace(resumed_from_round=1, cycle_id="cycle_r0", crash_traceback=None)
+    end = asyncio.run(
+        loop.run_round_loop(
+            SimpleNamespace(),
+            [],
+            load_campaign_config({"optimization": _OPT}),
+            SimpleNamespace(state=state),
+            None,
+            budget_gate=None,
+        )
+    )
+    assert end.stop_reason is StopReason.INPUT_REFUSED, "a refused input ended as a crash"
+    assert end.interrupted_round == 0, "the round the refusal cut was not handed back"
+    assert end.error is not None and end.error.traceback is None
+    assert state.crash_traceback is None, "a refusal stashed the traceback its row disowns"
 
 
 def test_a_halted_cell_is_not_a_hole_a_resume_can_plug() -> None:

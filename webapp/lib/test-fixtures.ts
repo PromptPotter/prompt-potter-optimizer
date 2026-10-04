@@ -213,6 +213,7 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
     best: 0,
     current_acc: 0,
     bench_score: null,
+    bench_pass: null,
     bench_lift_per_incurred_usd: null,
     composite_fitness_formula: null,
     composite_fitness_weights: null,

@@ -95,7 +95,7 @@ from promptpotter.domain.export import build_prompt_export
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED, PARSE_FAILURE_TOOLING
-from promptpotter.domain.phases import StopReason
+from promptpotter.domain.phases import StopOutcome, StopReason
 from promptpotter.domain.pipeline_schema import (
     NodePromptInfo,
     NodeType,
@@ -113,6 +113,7 @@ from promptpotter.domain.results import (
 from promptpotter.domain.ruler import (
     AbilityReading,
     DeltaRuler,
+    ThetaCaveat,
     anchor_id_of,
     flat_ruler_id,
     is_flat_ruler_id,
@@ -129,7 +130,6 @@ from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded
 from promptpotter.infrastructure.store.archive_queries import record_measurement_run
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared import extract_gsm8k_number
-from promptpotter.shared.errors import RulerCoverageError
 from promptpotter.shared.statistics import (
     paired_reading,
 )
@@ -928,13 +928,13 @@ def test_fit_theta_given_delta_is_subset_invariant_unlike_accuracy() -> None:
     same_hard = fit_theta_given_delta(measure("x", 0.8, hard), ruler)["x"][0]
     assert abs(same_easy - same_hard) < 0.5
 
-    # A sample absent from a WARM ruler RAISES. It used to be graded at δ=0, which is not a
+    # A sample absent from a WARM ruler enters no θ. It used to be graded at δ=0, which is not a
     # neutral value but a position: on a ruler centred near +2.8 it scored an unmeasured cell as
     # easier than anything ever measured, and silently pulled θ down ~2 logits for every round
-    # whose subset had walked off the scale. Loud beats plausible.
-    with pytest.raises(RulerCoverageError) as caught:
-        fit_theta_given_delta([Observation("ghost", 99, True)], ruler)
-    assert "99" in str(caught.value)
+    # whose subset had walked off the scale.
+    assert fit_theta_given_delta([Observation("ghost", 99, True)], ruler) == {}
+    off_scale = fit_theta_given_delta([*able, Observation("able", 99, False)], ruler)
+    assert off_scale["able"] == fit_theta_given_delta(able, ruler)["able"]
     # The COLD ruler is the one legitimate flat read: θ is plain logit-accuracy, which depends on
     # no fit and so stays comparable across cycles. A single hit ⇒ θ > 0 under the N(0,σ²) prior.
     cold = fit_theta_given_delta([Observation("ghost", 99, True)], None)
@@ -1067,10 +1067,46 @@ def test_ruler_id_names_the_scale_a_theta_was_read_on() -> None:
     # the membership would churn it every round, read a cycle as incomparable with ITSELF, and —
     # since `evidence/` reads round 0's id into `Comparability` — poison cross-campaign comparison
     # too.
-    grown = extend_ruler(fitted, [Observation("arm", 1, 1.0), Observation("arm", 9, 0.0)])
+    grown = extend_ruler(
+        fitted, [Observation("arm", 1, 1.0), Observation("arm", 9, 0.0)], history=[]
+    )
     assert set(grown.delta) == {1, 2, 3, 9}
     assert grown.anchor_id == fitted.anchor_id
     assert all(grown.delta[sid] == fitted.delta[sid] for sid in fitted.delta)
+
+
+def test_a_child_read_on_cells_its_parent_skipped_this_round_stays_off_the_ruler() -> None:
+    """A selector buys the parent only the cells it compares on, so a rejected child can hold cells
+    no arm on the scale answered THIS round. Linking through this round's rows alone made the
+    selector's parent cells a hidden duty of the ruler, and the cell it missed killed the round.
+
+    Grade the cell at a default instead and nothing raises — the child's θ is read against a
+    position nobody measured, and the round elects on it."""
+    fitted = _ruler({1: 1.5, 2: -1.25, 3: 0.0})
+    child = [Observation("child", sid, float(sid == 7)) for sid in (7, 8, 9)]
+    parent_now = [Observation("parent", sid, 1.0) for sid in (1, 2, 3)]
+
+    # No arm on the scale answered 7-9 anywhere in the cycle: they stay off, declared.
+    held = extend_ruler(fitted, child + parent_now, history=[])
+    assert held.delta == fitted.delta
+    assert held.unlinked([7, 8, 9]) == 3 and held.unlinked([1, 2]) == 0
+    assert fit_theta_given_delta(child, held) == {}
+    span = held.delta_span
+    served = {
+        n: theta_caveat(calibration_model="1PL", round_span=span, ruler_span=span, unlinked=n)
+        for n in (0, 3)
+    }
+    assert served == {0: None, 3: ThetaCaveat.UNMEASURED_DELTA}
+
+    # The parent answered them in an EARLIER round of this cycle: its ability, anchored on every
+    # cell it has, carries them onto the scale without moving a δ already there.
+    earlier = [Observation("parent", sid, float(sid != 8)) for sid in (7, 8, 9)]
+    linked = extend_ruler(fitted, child + parent_now, history=earlier + parent_now)
+    assert set(linked.delta) == {1, 2, 3, 7, 8, 9}
+    assert all(linked.delta[sid] == fitted.delta[sid] for sid in fitted.delta)
+    assert linked.anchor_id == fitted.anchor_id
+    assert linked.delta[8] > linked.delta[7]
+    assert linked.unlinked([7, 8, 9]) == 0
 
 
 def test_an_instrument_reads_on_the_scale_its_spawner_fixed(tmp_path: Path) -> None:
@@ -1544,7 +1580,8 @@ def test_a_round_that_measured_nothing_usable_names_which_way_it_broke():
     )
     assert recovered is not None
     assert recovered.node_failure_rates == {} and recovered.cause != "evidence_starved"
-    # The same warning on a node that did NOT finish is starvation.
+    assert (recovered.grade, recovered.transient_count) == ("healthy", 0)
+    # …while the same warning on a node that did NOT finish is the starvation it always was.
     starved = compute_round_health(
         results=[_health_row({"llm_only": "failed"}, retried) for _ in range(11)]
         + answered("TRUE")[:9],
@@ -1701,7 +1738,7 @@ def test_a_capo_round_races_its_population_beside_the_offspring_and_keeps_the_be
     search = list(session.scoring.partition.search)
     callbacks = _QUIET_CALLBACKS
 
-    first = asyncio.run(execute_round(cycle, 1, search, callbacks))  # type: ignore[arg-type]
+    first, _ = asyncio.run(execute_round(cycle, 1, search, callbacks))  # type: ignore[arg-type]
     carried = first.optimizer_state.payload.population
     members = {ind.lineage.id for ind in carried}
     arms = [cs.candidate_id for cs in first.candidate_scores]
@@ -1726,7 +1763,7 @@ def test_a_capo_round_races_its_population_beside_the_offspring_and_keeps_the_be
     assert replay_all_mismatches(first, decisions) == [], "a resume re-derives both decisions"
 
     cycle.absorb_round(first)
-    second = asyncio.run(execute_round(cycle, 2, search, callbacks))  # type: ignore[arg-type]
+    second, _ = asyncio.run(execute_round(cycle, 2, search, callbacks))  # type: ignore[arg-type]
     arms = [cs.candidate_id for cs in second.candidate_scores]
     assert set(arms[:3]) == members, "the kept population races again"
     minted = [
@@ -1750,6 +1787,85 @@ def test_a_capo_round_races_its_population_beside_the_offspring_and_keeps_the_be
     session.campaign_id = "another campaign"
     again = paper_templates.walk_rng(cycle, 2, "capo_crossover").random()
     assert again != drawn, "two campaigns drew as one"
+
+
+@pytest.mark.parametrize(
+    ("cut_round", "budget", "replayed", "parent_cells"), [(1, 17, 0, 2), (2, 5, 12, 4)]
+)
+def test_a_round_the_budget_cuts_elects_on_the_cells_it_paid_for(
+    built_stores,
+    tmp_path,
+    monkeypatch,
+    cut_round: int,
+    budget: int,
+    replayed: int,
+    parent_cells: int,
+) -> None:
+    """A spend ceiling reached mid-race ends the walks and the round still elects: the population
+    is kept among the arms that reached the coverage floor. The arm cut at one cell reads perfect
+    on it, so electing it would carry a prompt nobody measured. Round 1's parent is the origin, no
+    racing arm: it is read on the cells run init banked, and a cell bought for it would unwind the
+    round. Silent if wrong: the round closes with a population either way."""
+    minted: list[str] = []
+
+    async def _llm(messages: list[dict], **_kw: Any) -> Any:
+        if "Create overall 15 prompts" in messages[0]["content"]:
+            text = json.dumps(["Solve the task, A.", "Solve the task, B.", "Solve the task, C."])
+        else:
+            minted.append(f"Go {len(minted)}.")
+            text = f"<prompt>{minted[-1]}</prompt>"
+        return types.SimpleNamespace(content=text)
+
+    nodes = {
+        "blocks": {"config": {"block_size": 4, "max_blocks": 3}},
+        "capo_crossover": {"config": {"crossovers": 2}},
+        "few_shot": {"config": {"k_max": 0}},
+        "population": {"config": {"size": 3}},
+    }
+    paid: list[int] = []
+
+    def even_cells(_prompt: str, sample: Sample) -> bool:
+        paid.append(sample.id)
+        return sample.id % 2 == 0
+
+    cycle = _peer_cycle(built_stores, tmp_path, monkeypatch, "capo", nodes, even_cells)
+    monkeypatch.setattr(paper_templates, "llm_call", _llm)
+    session = cycle.session
+    # A backend to file under, so the kept population's cells replay and only offspring are bought.
+    session.backend_id = "capo-e2e"
+    search = list(session.scoring.require_partition().search)
+    if cut_round == 1:
+        # Run init scores the origin through the gateway — here on half of CAPO's first block.
+        asyncio.run(
+            score_search_point(
+                cycle.tracking.current_sp,
+                search[:2],
+                session,
+                label="origin",
+                measured=None,
+                on_sample_scored=None,
+                on_sample_starting=None,
+            )
+        )
+    else:
+        first, cut = asyncio.run(execute_round(cycle, 1, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
+        assert cut is None
+        cycle.absorb_round(first)
+
+    paid.clear()
+    session.budget_tripped = lambda: StopReason.SPEND_BUDGET if len(paid) >= budget else None
+    closed, cut = asyncio.run(execute_round(cycle, cut_round, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
+    assert cut is StopReason.SPEND_BUDGET
+    rows = closed.all_candidate_results
+    assert sum(len(arm) for arm in rows.values()) == replayed + len(paid), "a cell nobody elects on"
+    [reference] = closed.reference_results.values()
+    assert len(reference) == parent_cells, "the parent is read where the archive holds it"
+    [short] = [cs for cs in closed.candidate_scores if len(rows[cs.candidate_id]) == 1]
+    assert short.accuracy == 1.0, "the cut arm reads perfect on its one cell"
+    carried = [ind.lineage.id for ind in closed.optimizer_state.payload.population]
+    assert len(carried) == 3 and short.candidate_id not in carried, "elected below the floor"
+    full = next(cs for cs in closed.candidate_scores[3:] if cs is not short)
+    assert full.candidate_id in carried, "an offspring the budget paid for in full was dropped"
 
 
 def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composite_round(
@@ -1777,7 +1893,7 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
     monkeypatch.setattr(paper_templates, "llm_call", _llm)
     session = cycle.session
     search = list(session.scoring.require_partition().search)
-    picked = cycle.absorb_round(asyncio.run(execute_round(cycle, 1, search, _QUIET_CALLBACKS)))  # type: ignore[arg-type]
+    picked = cycle.absorb_round(asyncio.run(execute_round(cycle, 1, search, _QUIET_CALLBACKS))[0])  # type: ignore[arg-type]
     assert (
         picked.selected_labels and picked.composite_fitness < cycle.origin_round.composite_fitness
     )
@@ -1796,6 +1912,7 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
         score_on_bench(
             session,
             cycle.searchpoint(origin.lineage.id),
+            subject="origin",
             round_num=0,
             cb=_QUIET_CALLBACKS,  # type: ignore[arg-type]
         )
@@ -1811,13 +1928,15 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
     )
     bench = headline(_QUIET_CALLBACKS, session, passes)  # type: ignore[arg-type]
     assert (bench.selected.round, bench.selected.sp_hash) == (1, picked.selected_scores[0].sp_hash)
-    assert (bench.selected.accuracy, bench.origin.accuracy) == (1.0, 0.0), "GOOD solves them all"
-    # Point, band and lift read ONE per-row series, the composite, whose misses keep a cost share:
-    # the accuracy gap is not the lift, and a band folded off `fitness` misses its own point.
+    assert (bench.selected.accuracy.value, bench.origin.accuracy.value) == (1.0, 0.0)
+    assert bench.headline_lift.value == 1.0, "GOOD solves them all, and the headline is accuracy"
+    # Each column's point, band and lift read ONE per-row series. The composite's misses keep a
+    # cost share, so its lift is not the accuracy gap, and a band folded off the other column's
+    # series misses its own point.
     for reading in (bench.origin, bench.selected):
-        assert reading.ci_lo <= reading.composite_fitness <= reading.ci_hi
-    composite_gap = bench.selected.composite_fitness - bench.origin.composite_fitness
-    assert bench.lift == pytest.approx(composite_gap) and composite_gap < 1.0
+        assert reading.composite.ci_lo <= reading.composite.value <= reading.composite.ci_hi
+    composite_gap = bench.selected.composite.value - bench.origin.composite.value
+    assert bench.lift.composite.value == pytest.approx(composite_gap) and composite_gap < 1.0
     result = _build_cycle_result(
         cycle,
         None,
@@ -1845,7 +1964,8 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
     m = build_prompt_export(
         round_result(1).model_copy(update={"candidate_scores": [won], "selected_labels": ["C1.1"]}),
         **dict.fromkeys(("tool_version", "campaign_id", "cycle_id", "dataset_name"), ""),
-        **dict.fromkeys(("dataset_hash", "stop_reason", "finished_at"), ""),
+        **dict.fromkeys(("dataset_hash", "finished_at"), ""),
+        stop_reason=StopReason.MAX_ROUNDS,
         treatment=None,
         formula=None,
         origin_accuracy=None,
@@ -1882,6 +2002,7 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
         score_on_bench(
             session,
             cycle.searchpoint(unread.candidate_id),
+            subject="selected",
             round_num=1,
             cb=_QUIET_CALLBACKS,  # type: ignore[arg-type]
         )
@@ -1895,7 +2016,8 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
             bench_selection(cycle, session, banked=banked(refused), cb=_QUIET_CALLBACKS)  # type: ignore[arg-type]
         ),
     )
-    assert (cut.origin, cut.lift, cut.selected) == (None, None, bench.selected)
+    assert (cut.origin, cut.selected) == (None, bench.selected)
+    assert (cut.lift.accuracy, cut.lift.composite) == (None, None)
     assert cut.missing_reason is not None and "model is not allowed" in cut.missing_reason
 
 
@@ -1925,7 +2047,9 @@ def test_bench_passes_read_under_a_second_formula_read_as_a_fresh_pass_under_it(
         reserve_usd=0.0,
         reserve_tokens=0,
         **{
-            role: asyncio.run(score_on_bench(session, sp, round_num=r, cb=_QUIET_CALLBACKS))  # type: ignore[arg-type]
+            role: asyncio.run(
+                score_on_bench(session, sp, subject=role, round_num=r, cb=_QUIET_CALLBACKS)  # type: ignore[arg-type]
+            )
             for r, (role, sp) in enumerate(zip(("origin", "selected"), points, strict=True))
         },
     )
@@ -1955,7 +2079,8 @@ def test_bench_passes_read_under_a_second_formula_read_as_a_fresh_pass_under_it(
         plain,
         scorer_id="plain",
     )
-    assert (unsearched.selected, unsearched.lift) == (None, None)
+    assert unsearched.selected is None
+    assert (unsearched.lift.accuracy, unsearched.lift.composite) == (None, None)
     assert unsearched.origin == read.origin and "no round closed" in unsearched.missing_reason
 
     # Fresh under the second formula: nothing replayed, nothing filed, graded as measured.
@@ -1976,12 +2101,12 @@ def test_bench_passes_read_under_a_second_formula_read_as_a_fresh_pass_under_it(
     ]
     for reading, scores in zip((read.origin, read.selected), fresh, strict=True):
         assert reading is not None
-        assert (reading.accuracy, reading.n_scored) == (scores["accuracy"], scores["total"])
-        assert reading.composite_fitness == pytest.approx(scores["composite_fitness"])
+        assert (reading.accuracy.value, reading.n_scored) == (scores["accuracy"], scores["total"])
+        assert reading.composite.value == pytest.approx(scores["composite_fitness"])
     gap = fresh[1]["composite_fitness"] - fresh[0]["composite_fitness"]
-    assert read.lift == pytest.approx(gap) and gap > 0.0
+    assert read.lift.composite.value == pytest.approx(gap) and gap > 0.0
     assert banked.selected is not None and read.selected is not None
-    assert banked.selected.composite_fitness != pytest.approx(read.selected.composite_fitness)
+    assert banked.selected.composite.value != pytest.approx(read.selected.composite.value)
 
 
 def test_every_installed_optimizer_closes_its_campaign_on_a_bench_headline(tmp_path) -> None:
@@ -2008,15 +2133,16 @@ def test_every_installed_optimizer_closes_its_campaign_on_a_bench_headline(tmp_p
         run = json.loads((home / name / "decisions.json").read_text(encoding="utf-8"))["run"]
         bench = run["bench"]
         assert bench["selected"]["n_scored"] == bench["origin"]["n_scored"] == bench["bench_size"]
-        gap = bench["selected"]["composite_fitness"] - bench["origin"]["composite_fitness"]
-        assert bench["lift"] == pytest.approx(gap, abs=1e-5), name
+        for column in ("accuracy", "composite"):
+            gap = bench["selected"][column]["value"] - bench["origin"][column]["value"]
+            assert bench["lift"][column]["value"] == pytest.approx(gap, abs=1e-5), (name, column)
 
 
 def test_a_levi_run_calibrates_a_proxy_then_spends_one_large_call_per_period(
     built_stores, tmp_path, monkeypatch
 ) -> None:
     """LEVI through the real round spine (arXiv 2605.09764 Alg. 1-2): the calibration round scores
-    the seeds and the origin on the whole pool and keeps a proxy that ranks them as the pool does;
+    the seeds and the origin on the discovery set and keeps a proxy that ranks them as it does;
     every later round walks exactly that proxy with `interval - 1` small-model refinements and one
     large-model paradigm shift, and the archive keeps each cell's best by the campaign's objective.
     Under `lift_reference: parents` a child is read against an elite no round selected, resolved
@@ -2038,7 +2164,7 @@ def test_a_levi_run_calibrates_a_proxy_then_spends_one_large_call_per_period(
         return types.SimpleNamespace(content=text)
 
     nodes = {
-        "proxy_css": {"config": {"size": 4}},
+        "proxy_css": {"config": {"discovery": 12, "size": 4}},
         "levi_paradigm_shift": {"config": {"interval": 3, "n_clusters": 2, "n_diverse_seeds": 3}},
         "levi_refine": {"config": {"feedback_failures": 1}},
         "map_elites": {"config": {"centroids": 4, "cvt_samples": 64}},
@@ -2071,18 +2197,24 @@ def test_a_levi_run_calibrates_a_proxy_then_spends_one_large_call_per_period(
         by_key = {r["sample_key"]: r["objective"] for r in rows}
         return sum(by_key[k] for k in keys) / len(keys)
 
-    first = asyncio.run(execute_round(cycle, 1, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
+    first, _ = asyncio.run(execute_round(cycle, 1, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
     assert [node for node, _ in calls] == ["levi_paradigm_shift"] * 3, "the seed pass alone"
     measured = [cs for cs in first.candidate_scores if cs.outcome is not ArmOutcome.INVALID]
-    assert len(measured) == 2 and all(cs.scored_samples == len(search) for cs in measured)
+    discovery = [s.key for s in search[:12]]
+    assert len(search) > 12, "a pool the discovery set does not exhaust"
+    assert len(measured) == 2 and all(
+        sorted(r["sample_key"] for r in first.all_candidate_results[cs.candidate_id])
+        == sorted(discovery)
+        for cs in measured
+    ), "calibration walks the discovery set alone"
     payload = first.optimizer_state.payload
     proxy = payload.calibration.proxy
-    assert len(proxy) == 4 and set(proxy) <= {s.key for s in search}
+    assert len(proxy) == 4 and set(proxy) <= set(discovery)
     calibration = {
         origin_id: first.reference_results[origin_id],
         **{cs.candidate_id: first.all_candidate_results[cs.candidate_id] for cs in measured},
     }
-    full = {cid: objective_mean(rows, [s.key for s in search]) for cid, rows in calibration.items()}
+    full = {cid: objective_mean(rows, discovery) for cid, rows in calibration.items()}
     on_proxy = {cid: objective_mean(rows, proxy) for cid, rows in calibration.items()}
     for a in calibration:
         for b in calibration:
@@ -2105,7 +2237,7 @@ def test_a_levi_run_calibrates_a_proxy_then_spends_one_large_call_per_period(
 
     cycle.absorb_round(first)
     calls.clear()
-    second = asyncio.run(execute_round(cycle, 2, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
+    second, _ = asyncio.run(execute_round(cycle, 2, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
     assert [node for node, _ in calls] == ["levi_refine"] * 2 + ["levi_paradigm_shift"], (
         "interval 3: two small-model refinements, then one large-model shift"
     )
@@ -2190,7 +2322,7 @@ def test_a_gepa_run_admits_a_child_only_past_the_minibatch_and_draws_parents_off
             return s.key not in pareto or s.key in pareto[:4]
         return "BETA" in prompt and (s.key not in pareto or s.key in pareto[4:])
 
-    nodes = {"minibatch": {"config": {"size": 3, "pareto_share": 0.5}}}
+    nodes = {"minibatch": {"config": {"size": 3, "pareto_size": 7}}}
     cycle = _peer_cycle(built_stores, tmp_path, monkeypatch, "gepa", nodes, solves)
     monkeypatch.setattr(paper_templates, "llm_call", _llm)
     search = list(cycle.session.scoring.partition.search)
@@ -2201,7 +2333,7 @@ def test_a_gepa_run_admits_a_child_only_past_the_minibatch_and_draws_parents_off
         (cs,) = rr.candidate_scores
         return cs
 
-    first = asyncio.run(execute_round(cycle, 1, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
+    first, _ = asyncio.run(execute_round(cycle, 1, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
     payload = first.optimizer_state.payload
     assert payload.pareto_set == pareto
     child = arm(first)
@@ -2221,7 +2353,7 @@ def test_a_gepa_run_admits_a_child_only_past_the_minibatch_and_draws_parents_off
 
     cycle.absorb_round(first)
     cycle.pending_decisions.clear()
-    second = asyncio.run(execute_round(cycle, 2, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
+    second, _ = asyncio.run(execute_round(cycle, 2, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
     assert alpha in prompts[1].split("```")[1], "the drawn parent is what the reflection reads"
     beta_arm = arm(second)
     assert beta_arm.scored_samples == 3 + len(pareto)
@@ -2246,7 +2378,7 @@ def test_a_gepa_run_admits_a_child_only_past_the_minibatch_and_draws_parents_off
 
     cycle.absorb_round(second)
     cycle.pending_decisions.clear()
-    third = asyncio.run(execute_round(cycle, 3, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
+    third, _ = asyncio.run(execute_round(cycle, 3, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
     drawn = next(c for c in kept.pool if c.individual.lineage.id == kept.parent_id)
     assert drawn.individual.instruction in prompts[2].split("```")[1]
     tied = arm(third)
@@ -2287,7 +2419,7 @@ def test_a_gepa_run_admits_a_child_only_past_the_minibatch_and_draws_parents_off
     unread = _peer_cycle(built_stores, tmp_path / "unread", monkeypatch, "gepa", nodes, solves)
     monkeypatch.setattr(paper_templates, "llm_call", _llm)
     pool = list(unread.session.scoring.require_partition().search)
-    lone = asyncio.run(execute_round(unread, 1, pool, _QUIET_CALLBACKS))  # type: ignore[arg-type]
+    lone, _ = asyncio.run(execute_round(unread, 1, pool, _QUIET_CALLBACKS))  # type: ignore[arg-type]
     assert arm(lone).scored_samples == 3 + len(pareto), "it passed the minibatch"
     assert not lone.selected_labels
     assert [c.individual.lineage.id for c in lone.optimizer_state.payload.pool] == [
@@ -2312,7 +2444,7 @@ def test_a_gepa_pool_member_carries_a_verdict_on_every_pareto_cell(
             return True
         return None if s.key in errored else False
 
-    nodes = {"minibatch": {"config": {"size": 3, "pareto_share": 0.5}}}
+    nodes = {"minibatch": {"config": {"size": 3, "pareto_size": 7}}}
     cycle = _peer_cycle(built_stores, tmp_path, monkeypatch, "gepa", nodes, solves)
     monkeypatch.setattr(paper_templates, "llm_call", _llm)
     search = list(cycle.session.scoring.partition.search)
@@ -2321,7 +2453,7 @@ def test_a_gepa_pool_member_carries_a_verdict_on_every_pareto_cell(
     errored.add(pareto[0])
     origin_id = cycle.opt_sp.lineage.id
 
-    first = asyncio.run(execute_round(cycle, 1, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
+    first, _ = asyncio.run(execute_round(cycle, 1, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
     (child,) = first.candidate_scores
     pool = first.optimizer_state.payload.pool
     assert [c.individual.lineage.id for c in pool] == [child.candidate_id], "the seat got in"
@@ -2873,13 +3005,11 @@ def test_the_paired_t_race_cuts_live_arms_together_at_each_block_on_the_rows_the
         optimizer_state=CapoState().snapshot({}, population=[], rounds_without_advance=0),
     )
     measured = asyncio.run(
-        measure_population(
-            ctx, population, panel, plan.eliminator, reads_parent=plan.selector.reads_parent
-        )
+        measure_population(ctx, population, panel, plan.eliminator, plan.selector)
     )
-    # CAPO's selector reads no parent, so the parent pays only for the cells an arm reached —
-    # never block 3, which the race settled before buying.
-    assert sorted(r["sample_id"] for r in measured.parent_rows) == sorted(order[:8])
+    # Round 1's parent is the origin, no population member, so it pays for one block — never
+    # the blocks the race bought its arms.
+    assert sorted(r["sample_id"] for r in measured.parent_rows) == sorted(order[:4])
 
     # Block 1 cuts BAD, beaten by the four arms BEHIND it, and the wordy GOOD-c, which γ prices
     # below three arms solving as much; block 2 cuts LATE, beaten by exactly μ=2; the two left
@@ -3628,6 +3758,8 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench_under_one_grader(
         wall: int = 100,
         rebased: bool = False,
         arm: Arm | None = None,
+        proposer_model: str | None = None,
+        graded: bool = True,
     ) -> Any:
         split = DatasetSplit(bench=6, seed=seed)
         partition = partition_bank(bank, split)
@@ -3643,6 +3775,9 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench_under_one_grader(
                     "optimization": {
                         "optimizer": cid.split("_")[0],
                         "degradation_threshold": 0.0,
+                        "nodes": {}
+                        if proposer_model is None
+                        else {"l1_generate": {"config": {"model": proposer_model}}},
                     },
                     "dataset_split": split.model_dump(),
                     "scoring": scoring,
@@ -3660,8 +3795,8 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench_under_one_grader(
             stores.campaigns.write_bank_partition(cycle, partition)
         if rebased:
             stores.campaigns.mark_superseded(root, hop.cycle_id)
-        passes = {}
-        for role, level in (("origin", origin), ("selected", selected)):
+        passes: dict[str, BenchPass | None] = {"selected": None}
+        for role, level in (("origin", origin), ("selected", selected))[: 1 + graded]:
             # The origin is ONE individual every campaign sends, filed under one content-addressed
             # run while the backend reads it alike; each pick is its own.
             graded = role if role == "origin" else f"{cid}:{role}"
@@ -3781,6 +3916,14 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench_under_one_grader(
     # Their runs overlapped potter's: a shared cache split the bill by arrival.
     assert [r.concurrent_with for r in h2h.rows] == [["capo_f"], [], ["potter_a"]]
 
+    # One optimizer on another model: a gap to it is the model's as much as the method's, so it
+    # is listed and never paired.
+    swapped = campaign("potter_g", 7, seed=0, selected=0.7, proposer_model="other/model")
+    h2h = subject_evidence(stores, [potter, capo, swapped]).head_to_head
+    assert h2h is not None and h2h.verdict is False
+    assert h2h.differs_on == ["optimizer_models"]
+    assert [(p.campaign_a, p.campaign_b) for p in h2h.pairs] == [("potter_a", "capo_b")]
+
     # Three arms of one declared record beside an arm of another: only the foreign row is not
     # controlled. Naming two records must not demote the arms, which read their own record.
     shared = subject_evidence(stores, [potter, capo]).head_to_head
@@ -3811,6 +3954,32 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench_under_one_grader(
     assert h2h is not None and h2h.head_to_head_id == "real4"
     assert [r.controlled for r in h2h.rows] == [True, True, True, False]
 
+    # Two graded arms read as one quantity; a third arm of that record still ungraded withholds
+    # the verdict, since the graded rows are not yet the comparison that was declared.
+    assert subject_evidence(stores, arms[:2]).head_to_head.verdict is True  # type: ignore[union-attr]
+    waiting = campaign(
+        "capo_waiting",
+        14,
+        seed=0,
+        selected=0.6,
+        arm=Arm(head_to_head_id="real4", arm_key="waiting", treatment_digest="waiting"),
+        graded=False,
+    )
+    h2h = subject_evidence(stores, [*arms[:2], waiting]).head_to_head
+    assert h2h is not None and h2h.verdict is None and h2h.differs_on == []
+
+    # An ungraded arm is waiting only while its cycle has not ended: refused at run init it holds
+    # no bench and never will, and without the ending it reads exactly like one still running.
+    assert [r.outcome for r in h2h.rows] == [None, None, None]
+    stores.campaigns.mark_finished(
+        CycleHop(campaign_id="capo_waiting", cycle_id="cycle_capo_waiting"),
+        stop_reason=StopReason.INPUT_REFUSED,
+        finished_at="2026-09-26T15:00:00Z",
+    )
+    h2h = subject_evidence(stores, [*arms[:2], waiting]).head_to_head
+    assert h2h is not None
+    assert [r.outcome for r in h2h.rows] == [None, None, StopOutcome.FAILED]
+
 
 # 8. The L4 outer proxy — what one finished inner cycle says
 
@@ -3838,7 +4007,9 @@ def test_parent_level_trajectory_is_honest_single_scale() -> None:
             ruler_span=span,
             round_span=span,
             calibration_model=cal,
-            caveat=theta_caveat(calibration_model=cal, round_span=span, ruler_span=span),
+            caveat=theta_caveat(
+                calibration_model=cal, round_span=span, ruler_span=span, unlinked=0
+            ),
         )
 
     origin_theta = on(0.0, 0.30)

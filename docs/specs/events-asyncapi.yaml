@@ -227,9 +227,10 @@ components:
             # so it reaches no cycle subscriber — listed because the enum's rule
             # is the union, not the subset a given channel happens to carry.
             - spend_tombstone
-            # A cell the campaign's search priced — billed fresh or metered as a
-            # replay (``CellPricedRecord``), so a resumed launch prices it once.
-            - cell_priced
+            # A cell or an optimizer / judge call the campaign's search priced —
+            # billed fresh or metered as a replay (``PricedKeyRecord``), so a
+            # resumed launch prices it once.
+            - priced_key
         version:
           type: integer
           minimum: 1
@@ -364,6 +365,21 @@ components:
           type: string
           format: date-time
 
+    BenchEnterPayload:
+      type: object
+      description: |
+        `PhaseRecord.payload.view` of `phase: bench`, `event: enter` — one
+        individual's pass over the bench set begins, and every `sample_scored`
+        up to the matching `exit` is one of its rows. `subject` says whose pass
+        it is, `round` the round whose selection that is (0 is the origin) and
+        `rows` the size of the bench set; the dashboard serves it as
+        `bench_pass`, with the rows scored so far beside it.
+      required: [subject, round, rows]
+      properties:
+        subject: { type: string, enum: [origin, selected] }
+        round: { type: integer, minimum: 0 }
+        rows: { type: integer, minimum: 0 }
+
     BenchScoredPayload:
       type: object
       description: |
@@ -447,12 +463,13 @@ components:
     ErrorPayload:
       type: object
       description: |
-        ErrorRecord — structured runner failure on `StopReason.CRASHED`,
-        `RENDER_ERROR`, or `DIVERGED`. Emitted from the runner's three
-        `except` sites in `promptpotter/application/runner/{entry,loop}.py`
-        via the kwargs-only `emit_error_record(...)` helper over the
-        `_CYCLE_LEDGER` ContextVar (mirrors the `emit_token_usage` pattern
-        from ADR-0003).
+        ErrorRecord — a run that ended FAILED. One writer:
+        `promptpotter/application/runner/termination.py::end_run_on`, the
+        place every run ends through, emits it for each stop whose
+        `STOP_REASON_INFO` row (`promptpotter/domain/phases.py`) has outcome
+        `failed`, via the kwargs-only `emit_error_record(...)` helper over
+        the `_CYCLE_LEDGER` ContextVar (mirrors the `emit_token_usage`
+        pattern from ADR-0003).
 
         Subscribers:
           * `LiveDashboardProjection._handle_error` — sole writer of
@@ -483,13 +500,16 @@ components:
         traceback:
           type: [string, 'null']
           description: |
-            Full Python traceback. Optional — set on `CRASHED` (forensic
-            value) and elided on `DIVERGED` where the message alone is
-            the full diagnostic.
+            Full Python traceback. Set where the reason's
+            `STOP_REASON_INFO` row declares `has_traceback`, `null` where
+            the message alone is the full diagnostic.
         stop_reason:
           type: string
-          enum: [CRASHED, RENDER_ERROR, DIVERGED]
-          description: Which terminal stop_reason this record corresponds to.
+          description: |
+            The `StopReason` VALUE the run ended on (lowercase, e.g.
+            `crashed`) — the same spelling the control `PhaseRecord`,
+            `index.json` and `dashboard.json` carry. Its label, outcome
+            and next step are that member's `STOP_REASON_INFO` row.
         round:
           type: [integer, 'null']
           minimum: 0

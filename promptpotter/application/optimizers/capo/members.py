@@ -743,7 +743,15 @@ class PopulationSelector:
     knobs: ClassVar[type[StrictModel]] = PopulationKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
     stamps_theta: ClassVar[bool] = False
-    reads_parent: ClassVar[bool] = False
+    elects_partial: ClassVar[bool] = True
+
+    def parent_cells(
+        self, ctx: RoundContext, panel: Panel, rows: Mapping[str, Sequence[QueryMeasurement]]
+    ) -> list[Sample]:
+        # The incumbent races as a population member, so the cells it walked are its reading;
+        # round 1's is the origin, no member, read on the first block.
+        walked = {r["sample_id"] for r in rows.get(ctx.cycle.opt_sp.lineage.id, ())}
+        return [s for s in panel.cells if s.id in walked] or panel.cells[: panel.block_size]
 
     def select(self, ctx: RoundContext, measured: Measured, population: Population) -> Selection:
         cycle = ctx.cycle
@@ -909,7 +917,10 @@ class CapoRuntime:
         )
 
     def round_cells_ceiling(self, selected: SelectedOptimizer, pool: int) -> int:
-        return (self._arms(selected) + 1) * selected.round_cells(pool)
+        # Round 1's origin is no member: its reading is one block beside the arms'.
+        block = cast("BlocksKnobs", selected.knobs(Blocks.name)).block_size
+        panel = selected.round_cells(pool)
+        return self._arms(selected) * panel + block if panel else 0
 
     def opening(self, ctx: RoundContext) -> nodes.RoundOpening:
         return nodes.standing_opening(ctx)

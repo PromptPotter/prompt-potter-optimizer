@@ -10,6 +10,7 @@ from promptpotter.application.optimizers.nodes import RoundOpening
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.views.view_models import (
     AnyView,
+    BenchEnterView,
     BenchGradedView,
     BenchScoredView,
     CandidatesGeneratedView,
@@ -20,6 +21,7 @@ from promptpotter.application.views.view_models import (
     OptimizerStepExitView,
     RoundCompleteView,
     RoundStartView,
+    RunSpendView,
     ScoreEntry,
     SpDiffView,
     ViewContext,
@@ -30,10 +32,12 @@ from promptpotter.domain.dashboard_rows import RunStanding
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.results import ArmOutcome, ScoredCandidate
 from promptpotter.domain.ruler import is_flat_ruler_id
+from promptpotter.domain.spend import MeteredSpend
 from promptpotter.shared import truncate
 
 __all__ = [
     "from_phase_event",
+    "run_spend_view",
 ]
 
 
@@ -183,6 +187,10 @@ def _measure_enter(d: dict[str, Any], ctx: ViewContext) -> MeasureEnterView:
     )
 
 
+def _bench_enter(d: dict[str, Any], ctx: ViewContext) -> BenchEnterView:
+    return BenchEnterView(subject=d["subject"], round=int(d["graded_round"]), rows=int(d["rows"]))
+
+
 def _bench_scored(d: dict[str, Any], ctx: ViewContext) -> BenchScoredView:
     return BenchScoredView(bench=d["bench"].model_dump(mode="json"))
 
@@ -191,6 +199,22 @@ def _bench_graded(d: dict[str, Any], ctx: ViewContext) -> BenchGradedView:
     reading = d["reading"]
     return BenchGradedView(
         reading=None if reading is None else reading.model_dump(mode="json"), missing=d["missing"]
+    )
+
+
+def run_spend_view(
+    spent: MeteredSpend, *, usd_cap: float | None, token_cap: int | None
+) -> RunSpendView:
+    """The run-end view. A control record is declared outside ``from_phase_event``, so its
+    declarer builds this and hands it to ``declare_run_phase``."""
+    return RunSpendView(
+        billed_usd=spent.billed_usd,
+        incurred_usd=spent.incurred_usd,
+        meter=spent.meter,
+        metered_usd=spent.usd,
+        metered_tokens=spent.tokens,
+        usd_cap=usd_cap,
+        token_cap=token_cap,
     )
 
 
@@ -270,6 +294,7 @@ _BUILDERS: dict[str, Any] = {
     f"{CampaignPhase.PROPOSE}:exit": _propose_exit,
     f"{CampaignPhase.MEASURE}:enter": _measure_enter,
     f"{CampaignPhase.SELECT}:exit": _select_exit,
+    f"{CampaignPhase.BENCH}:enter": _bench_enter,
     f"{CampaignPhase.BENCH}:scored": _bench_scored,
     f"{CampaignPhase.BENCH}:graded": _bench_graded,
 }

@@ -159,6 +159,11 @@ responses. A sound round can carry a pinned arm, and a pinned arm can sit on a s
   shared by every arm, so it cancels out of a lift; between rounds it does not cancel at all.
   Checked after the band, because inside a collapsed band θ is logit-accuracy plus a constant
   whatever the δ were fit from, and naming the pin there would name the smaller fault.
+  The same state covers a cell with NO δ: one the ruler does not carry, because no arm already on
+  the scale answered it in this cycle (`DeltaRuler.unlinked`). θ leaves that cell out, so it is
+  read on fewer cells than the accuracy beside it. It is the one caveat with both scopes — the
+  round's reading carries it for the frontier's cells, an arm's row for that arm's own — and a
+  later round links the cell once an arm that answered it is on the scale.
 
   **The question this state makes unanswerable — "is the round-N winner better than C0?" — has its
   own answer, and it is not θ.** `RoundResult.overlap` (`domain/results.py::OverlapReading`) reads
@@ -173,11 +178,13 @@ responses. A sound round can carry a pinned arm, and a pinned arm can sit on a s
   identify the parent better than the arms it judges. Round documents, `log.md`, `review.md`,
   the round-close terminal line and the candidates chart's `overlap` series all render the same
   reading, under that one name. It does not repair the acquisition — it measures around it.
-- **A ruler HOLE — impossible now, and named because it was silent for so long.** A cell missing
-  from a warm ruler was graded δ=0, which is a *position* on the scale rather than a neutral value:
-  against a centre near +2.1 it scored an unmeasured cell as easier than anything ever measured and
-  pulled θ down ~2 logits. `fit_theta_given_delta` raises on it now, and `Cycle.calibrate_ruler`
-  makes coverage a postcondition by EXTENDING the ruler onto each round's cells.
+- **A ruler HOLE is never graded.** δ=0 is a *position* on the scale rather than a neutral value:
+  against a centre near +2.1 it scores an unmeasured cell as easier than anything ever measured and
+  pulls θ down ~2 logits. So `fit_theta_given_delta` reads θ on the cells the ruler carries and no
+  other, and `Cycle.calibrate_ruler` EXTENDS the ruler each round onto every cell an arm already on
+  the scale answered — an arm's ability for that link read on its cells across the cycle's rounds,
+  never this round's alone, so no selector's choice of parent cells decides what links. A cell
+  still off the ruler is the `unmeasured_delta` state above.
 
 ## What an arm's lift is read against — `lift_reference`
 

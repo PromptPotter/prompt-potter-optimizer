@@ -1,0 +1,8 @@
+persona: ''
+task_intent: >-
+  Decide whether the claim follows from the premises alone. Answer TRUE if the premises entail the
+  claim, FALSE if they entail its negation, and Uncertain only if they determine neither.
+problem_description: ''
+instruction: ''
+thinking_style: ''
+answer_format: Reason in at most five short steps, one line each, then give the label.

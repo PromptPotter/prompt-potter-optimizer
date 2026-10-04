@@ -48,12 +48,7 @@ class CampaignSummary(StrictModel):
     campaign_id: str = Field(description="Campaign id ({dataset}__{rand6}) — one RUN of an origin")
     dataset_name: str = Field(description="Dataset this campaign optimizes")
     label: str = Field(default="", description="Operator-supplied campaign label")
-    # There is deliberately NO `status` here. It served `index.json::status` on both the list
-    # and the detail, no webapp surface ever read it (the sidebar derives everything from
-    # `node.run_phase`), and it was the wrong quantity anyway: `index.json::status` is not
-    # maintained across a pause or a gate, both of which `derive_run_phase` derives. Dead and
-    # wrong at once — so a future consumer wiring it up would have inherited the bug rather
-    # than a field. Run-state has ONE server-owned answer and it is `run_phase`.
+    # Deliberately no run-state field: a campaign's is its answering cycle's `run_phase`.
     created_at: str = Field(description="ISO 8601 creation timestamp")
     root_cycle_id: str = Field(
         description=(

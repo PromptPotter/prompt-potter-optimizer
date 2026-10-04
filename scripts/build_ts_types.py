@@ -70,7 +70,13 @@ from promptpotter.application.pipeline_resolve import (
     RunsWithParam,
 )
 from promptpotter.domain.backend import BackpressureReading
-from promptpotter.domain.bench import BenchReading, BenchScore, DatasetSplit
+from promptpotter.domain.bench import (
+    BandedValue,
+    BenchColumns,
+    BenchReading,
+    BenchScore,
+    DatasetSplit,
+)
 from promptpotter.domain.campaign import Arm, ArmBudget, Instrument
 from promptpotter.domain.cells import (
     Cell,
@@ -126,6 +132,7 @@ from promptpotter.domain.spend import MeteredSpend, SpendBucket, SpendRollup
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     BackendWarning,
+    BenchPassProgress,
     CatchUpLogEntry,
     CurrentRound,
     DashboardError,
@@ -232,6 +239,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     RacingBlock,
     LiveCandidate,
     CurrentRound,
+    BenchPassProgress,
     LiveDashboardState,
     # --- datasets router ---
     DatasetItem,
@@ -252,6 +260,8 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     # --- active router ---
     ActiveSessionResponse,
     SpawnedBy,  # nested in CycleListEntry — the emitter does not recurse, so register it
+    BandedValue,  # nested in BenchColumns and BenchReading
+    BenchColumns,
     BenchReading,  # nested in BenchScore, which nests in CampaignSummary
     BenchScore,
     CycleListEntry,
@@ -532,49 +542,41 @@ def _emit_stop_reason_tables() -> str:
     """Emit ``STOP_REASON_INFO`` (domain/phases.py) as TS consts — the single label, next-step AND
     outcome source, mirrored to the webapp without hand-maintained drift. All three ride the mirror
     rather than ``dashboard.json`` because they are properties of the REASON, not of a cycle;
-    serving them per poll would ship the same twenty strings every two seconds. ``""`` next steps
-    are omitted.
+    serving them per poll would ship the same twenty strings every two seconds.
 
-    **``outcome`` is the load-bearing third and was the one missing.** The two decorative halves
-    reached the browser while the half that says whether a stop SUCCEEDED did not, so every
-    consumer that had to tell a crash from a clean finish hand-authored a name set instead — the
-    exact shape `promptpotter/CLAUDE.md` § Ask the typed predicate calls a bug, and the browser
-    walk's spend tier was carrying one. Emitted TOTAL over the table, so a new `StopReason`
-    arrives classified rather than silently absent.
+    **All three are keyed on the named ``StopReason`` union and TOTAL over it**, so a reason the
+    table gains is a compile error at every map the browser keeps beside these, and an index needs
+    no ``||`` default — a ``Record<string, …>`` answers ``undefined`` for a renamed member and the
+    surface papers over it with the raw value. ``""`` is a stated next step: nothing is owed.
     """
-    from promptpotter.domain.phases import STOP_REASON_INFO, StopOutcome
+    from promptpotter.domain.phases import STOP_REASON_INFO, StopOutcome, StopReason
+
+    def table(column: str) -> str:
+        return "\n".join(
+            f"  {reason.value!r}: {str(getattr(info, column))!r},"
+            for reason, info in STOP_REASON_INFO.items()
+        )
 
     outcome_union = " | ".join(repr(o.value) for o in StopOutcome)
-    rows = "\n".join(
-        f"  {reason.value!r}: {info.label!r}," for reason, info in STOP_REASON_INFO.items()
-    )
-    steps = "\n".join(
-        f"  {reason.value!r}: {info.next_step!r},"
-        for reason, info in STOP_REASON_INFO.items()
-        if info.next_step
-    )
-    outcomes = "\n".join(
-        f"  {reason.value!r}: {info.outcome.value!r}," for reason, info in STOP_REASON_INFO.items()
-    )
     return (
-        "// Operator-facing label per terminal reason (StopReason). Mirror of\n"
+        _emit_enum_union(StopReason, "Why a cycle ended (domain/phases.py::StopReason).") + "\n\n"
+        "// Operator-facing label per terminal reason. Mirror of\n"
         "// domain/phases.py::STOP_REASON_INFO — the single label source.\n"
-        "export const STOP_REASON_LABELS: Record<string, string> = {\n"
-        f"{rows}\n"
+        "export const STOP_REASON_LABELS: Record<StopReason, string> = {\n"
+        f"{table('label')}\n"
         "};\n\n"
         "// What the operator does now, per terminal reason — the same table's `next_step`, so the\n"
-        "// browser advises exactly what the terminal, log.md and review.md advise. A reason absent\n"
-        "// here states that nothing is owed; it is not a gap.\n"
-        "export const STOP_REASON_NEXT_STEPS: Record<string, string> = {\n"
-        f"{steps}\n"
+        '// browser advises exactly what the terminal, log.md and review.md advise. `""` states\n'
+        "// that nothing is owed; it is not a gap.\n"
+        "export const STOP_REASON_NEXT_STEPS: Record<StopReason, string> = {\n"
+        f"{table('next_step')}\n"
         "};\n\n"
         "// Whether a stop SUCCEEDED, and the only half of the table that decides anything —\n"
-        "// `StopOutcome`, where `paused` is the one non-terminal member. TOTAL over the reasons,\n"
-        "// so ask it rather than matching names: a hand-listed set of crash names rots in both\n"
-        "// directions, missing the reason added yesterday and keeping one that was renamed.\n"
+        "// `StopOutcome`, where `paused` is the one non-terminal member. Ask it rather than\n"
+        "// matching names: a hand-listed set of crash names rots in both directions.\n"
         f"export type StopOutcome = {outcome_union};\n"
-        "export const STOP_REASON_OUTCOMES: Record<string, StopOutcome> = {\n"
-        f"{outcomes}\n"
+        "export const STOP_REASON_OUTCOMES: Record<StopReason, StopOutcome> = {\n"
+        f"{table('outcome')}\n"
         "};"
     )
 

@@ -4,7 +4,9 @@
 import { candidateLabel } from "@/lib/candidate-label";
 import { cacheShare, prefixReading } from "@/lib/derivations";
 import { fmtDuration, fmtPct0 } from "@/lib/format";
-import type { NonActivityKind, ProjectionEnvelope } from "@/lib/api/types";
+import type { BenchPassProgress, NonActivityKind, ProjectionEnvelope } from "@/lib/api/types";
+import { STOP_REASON_LABELS } from "@/lib/api/types.generated";
+import { isStopReason } from "@/lib/run-phase";
 
 // The faster copy of `dashboard.json::declared_sample_order`. A DECLARED order: an eliminator can stop a
 // candidate early, so a surface says "next", never "will".
@@ -48,6 +50,10 @@ function asRec(v: unknown): Record<string, unknown> {
 }
 function str(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
+}
+// The served label for a wire `stop_reason`; a value the table does not carry names nothing.
+function stopLabel(v: unknown): string | undefined {
+  return isStopReason(v) ? STOP_REASON_LABELS[v] : undefined;
 }
 function num(v: unknown): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
@@ -116,7 +122,7 @@ export function snapshotToActivity(payload: Record<string, unknown>): ActivityIt
   const err = asRec(payload.error);
   const errMsg = str(err.message);
   if (errMsg) {
-    out.push({ id: "error", kind: "error", icon: "✗", label: errMsg, detail: str(err.stop_reason), tone: "bad" });
+    out.push({ id: "error", kind: "error", icon: "✗", label: errMsg, detail: stopLabel(err.stop_reason), tone: "bad" });
   }
   return out;
 }
@@ -128,6 +134,20 @@ export function sampleScoredCandidate(env: ProjectionEnvelope): ActivityItem | n
   const running = asRec(asRec(asRec(p.payload).result)._running);
   if (Object.keys(running).length === 0) return null;
   return candidateItem(candidateLabel(num(p.round) ?? 0, num(p.candidate_idx) ?? 0), fitPct(running));
+}
+
+// The chip for a held-out bench pass in flight: its rows belong to no round, so the plain
+// "scoring i/n" beside it reads as a round that stalled. Null where the file carries no pass.
+export function benchPassActivity(pass: BenchPassProgress | null | undefined): ActivityItem | null {
+  if (!pass) return null;
+  const subject = pass.subject === "origin" ? "origin" : `R${pass.round} selection`;
+  return {
+    id: "bench-pass",
+    kind: "progress",
+    icon: "·",
+    label: `bench pass · ${subject} · ${pass.scored}/${pass.rows} held-out rows`,
+    tone: "muted",
+  };
 }
 
 // Narrower than `ProjectionEnvelope`: a `RayItem` carries no `version` and no `cycle_id`.
@@ -188,7 +208,7 @@ export function projectionToActivity(env: ActivitySource): ActivityItem | null {
       return { id, kind: "warning", icon: error ? "✗" : "⚠", label: str(p.message) ?? "round degraded", tone: error ? "bad" : "warn" };
     }
     case "error": {
-      return { id, kind: "error", icon: "✗", label: str(p.message) ?? "run error", detail: str(p.stop_reason), tone: "bad" };
+      return { id, kind: "error", icon: "✗", label: str(p.message) ?? "run error", detail: stopLabel(p.stop_reason), tone: "bad" };
     }
     case "command": {
       return { id, kind: "merge", icon: "⚡", label: str(p.kind) ?? "control", tone: "muted" };

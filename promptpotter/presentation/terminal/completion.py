@@ -5,27 +5,28 @@ from __future__ import annotations
 
 import html
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never, get_args
 
 from promptpotter.application.views.render.primitives import (
     BOLD,
     GREEN,
+    RED,
     RESET,
     YELLOW,
     _dbox_block,
     render_pipeline_overlay,
 )
+from promptpotter.domain.bench import BenchColumn
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
     StopOutcome,
-    StopReason,
     stop_reason_outcome,
 )
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
-    from promptpotter.domain.bench import BenchScore
+    from promptpotter.domain.bench import BenchReading, BenchScore
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import CycleResult
 
@@ -41,12 +42,18 @@ def render_completion(
 ) -> str:
     # The OUTCOME, never the member: `StopOutcome.PAUSED` is the one non-terminal class, and a
     # second reason in it (a panel the bounds cut) read as COMPLETE against a name comparison.
-    paused = stop_reason_outcome(result.stop_reason) is StopOutcome.PAUSED
-    title = (
-        f"{YELLOW}{BOLD}PAUSED{RESET} — resumable"
-        if paused
-        else f"{GREEN}{BOLD}OPTIMIZATION COMPLETE{RESET}"
-    )
+    info = STOP_REASON_INFO[result.stop_reason]
+    match info.outcome:
+        case StopOutcome.PAUSED:
+            title = f"{YELLOW}{BOLD}PAUSED{RESET} — resumable"
+        case StopOutcome.FAILED:
+            title = f"{RED}{BOLD}{info.label.upper()}{RESET} — no result"
+        case StopOutcome.HALTED:
+            title = f"{YELLOW}{BOLD}HALTED{RESET} — {info.label}; best so far kept"
+        case StopOutcome.SUCCESS:
+            title = f"{GREEN}{BOLD}OPTIMIZATION COMPLETE{RESET}"
+        case _:
+            assert_never(info.outcome)
 
     headline = f"Rounds       {result.n_rounds_after_origin:<15d}"
     if result.result_accuracy is not None:
@@ -56,11 +63,14 @@ def render_completion(
     # below is the optimizer's own reading on the rows that chose it.
     if (bench := result.bench) is not None:
         fields.append(f"Bench        {_bench_text(bench)}")
-    fields += [headline, f"Stop reason  {result.stop_reason}"]
+    fields += [headline, f"Stop reason  {info.label}"]
+    if result.error is not None:
+        fields.append(f"Error        {result.error.kind}: {result.error.message}")
+    if result.spend is not None:
+        fields.append(f"Spend        {result.spend.billed_beside_incurred()}")
     # The reason's OWN next step, off the one table, so the terminal advises what `log.md`,
-    # `review.md` and the browser advise. It replaces a hard-coded PAUSED line that was the only
-    # advice any ending carried; `""` is a stated answer and prints nothing.
-    if (info := STOP_REASON_INFO.get(StopReason(result.stop_reason))) and info.next_step:
+    # `review.md` and the browser advise; `""` is a stated answer and prints nothing.
+    if info.next_step:
         fields.append(f"Next         {info.next_step}")
     if dataset_name:
         fields.append(f"Dataset      {dataset_name}")
@@ -81,16 +91,21 @@ def render_completion(
 
 
 def _bench_text(bench: BenchScore) -> str:
-    def _value(x: float | None) -> str:
-        return "—" if x is None else f"{x:.3f}"
+    def _level(reading: BenchReading | None) -> str:
+        level = None if reading is None else reading.level
+        return "—" if level is None else f"{level.value:.3f}"
 
-    lift = "—" if bench.lift is None else f"{bench.lift:+.3f}"
-    selected, origin = bench.selected, bench.origin
+    lift = "—" if bench.headline_lift is None else f"{bench.headline_lift.value:+.3f}"
+    for column in get_args(BenchColumn):
+        beside = bench.lift.of(column)
+        if column != bench.headline and beside is not None:
+            lift += f" ({column} {beside.value:+.3f})"
+    selected = bench.selected
     missing = "" if bench.missing_reason is None else f" · missing: {bench.missing_reason}"
     return (
-        f"{'—' if selected is None else _value(selected.composite_fitness)} selected"
+        f"{bench.headline} {_level(selected)} selected"
         f"{'' if selected is None else f' (round {selected.round})'} · "
-        f"{'—' if origin is None else _value(origin.composite_fitness)} origin · lift {lift} · "
+        f"{_level(bench.origin)} origin · lift {lift} · "
         f"{bench.bench_size} held-out rows{missing}"
     )
 
@@ -132,7 +147,9 @@ def _try_display_html(html_body: str) -> bool:
 
 def report_completion(result: CycleResult, *, session: Session) -> None:
     """Print the box, and render the winner inline when the caller is a notebook."""
-    if not result.rounds:
+    # Only a pause is resumable-with-nothing-to-show; a cycle refused or crashed at run init
+    # also holds no round, and its box names the cause.
+    if not result.rounds and stop_reason_outcome(result.stop_reason) is StopOutcome.PAUSED:
         print(
             f"\n{YELLOW}{BOLD}[PAUSED]{RESET} Cycle ended before any rounds completed — "
             "resume with `python -m promptpotter resume`."

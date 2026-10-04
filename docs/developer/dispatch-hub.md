@@ -332,7 +332,7 @@ That is the whole of `_apply_l2`: it writes `PotterState.memory` in place. Every
 
 ## Wound 4 — L2 self-healing via L3
 
-`l2_guard_breaches` holds every outcome `validate_l1_layout` returned, plus `l1_layout_unparseable`, which `_parse_l2` emits when a non-empty edit coerces to no slot at all and the validator therefore never runs. L2's own thrashing is observable to L3 via the `l2_guard_breaches` injection on its next fire.
+`l2_guard_breaches` holds every outcome `validate_l1_layout` returned, plus `l1_layout_unparseable`, which `layout.py::unplaceable_edit` returns for an edit asking for a slot no layout has — the whole edit is refused, so the validator never runs. L2's own thrashing is observable to L3 via the `l2_guard_breaches` injection on its next fire.
 
 **The force-trigger reads the REFUSAL, not the stream** (`TransitionResult.l1_layout_refused`): L3 heals L2 when L2's layout edit was rejected — a HARD breach or an unparseable one — and the stream is prompt evidence that also carries two inert members, `l1_layout_voids_prefix` (a cache-cost report on an ACCEPTED layout) and `l1_layout_unchanged_from_prior` (a no-op). Reading the stream replanned the cycle on both. There is no `task_context` validator either: the framing is frozen for the run — no L1/L2/L3 wire schema declares a field of it — so a stale-repeat breach is not representable.
 

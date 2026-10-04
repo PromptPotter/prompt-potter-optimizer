@@ -106,6 +106,23 @@ def origin_accuracy_of(index: dict[str, Any]) -> float | None:
     return float(recorded) if recorded is not None else None
 
 
+_ENDING_KEYS = (
+    "finished_at",
+    "stop_reason",
+    "final",
+    "interrupted_round",
+    "crash_traceback",
+    "superseded_by",
+)
+
+
+def cycle_ending(index: Mapping[str, Any]) -> StopReason | None:
+    """Why this cycle ended, or ``None`` while it has not — the ONE reading of a cycle's ending
+    off ``index.json``. ``finished_at`` is the latch and ``stop_reason`` the only key that says
+    why, so a reader asks here instead of defaulting a missing string per surface."""
+    return StopReason(index["stop_reason"]) if index.get("finished_at") else None
+
+
 def _apply_best(data: dict[str, Any]) -> None:
     """Never argmax ``cumulative_accuracy``: no rescore backs that series, so the headline
     would exceed anything the cycle measured. Two deliberate bases — ``architecture.md`` §0.5.
@@ -169,7 +186,6 @@ def _fresh_sibling_index_blob(
         "rounds": [],
         "n_rounds": 0,
         "best_accuracy": 0.0,
-        "status": "active",
         "created_at": forked_at,
         "updated_at": forked_at,
         "forked_at_offset": forked_at_offset,
@@ -556,7 +572,6 @@ class CampaignStore:
         defaults: dict[str, Any] = {
             "created_at": existing.get("created_at", now),
             "updated_at": now,
-            "status": "active",
             "type": "optimization_loop",
             "parent_session_id": existing.get("parent_session_id", ""),
             "parent_cycle_id": None,
@@ -682,8 +697,7 @@ class CampaignStore:
         self,
         hop: CycleHop,
         *,
-        status: str,
-        stop_reason: str,
+        stop_reason: StopReason,
         finished_at: str,
         interrupted_round: int | None = None,
         crash_traceback: str | None = None,
@@ -692,16 +706,13 @@ class CampaignStore:
     ) -> None:
 
         updates: dict[str, Any] = {
-            "status": status,
-            "stop_reason": stop_reason,
+            "stop_reason": stop_reason.value,
             "finished_at": finished_at,
         }
         if final is not None:
             updates["final"] = final
         # Store partial-round / traceback markers based on what the caller computed
-        # (halted_mid_round → interrupted_round; has_traceback → crash_traceback),
-        # not by re-deriving from the status string — status is now the precise
-        # StopReason value, decoupled from this storage decision.
+        # (halted_mid_round → interrupted_round; has_traceback → crash_traceback).
         remove_keys: list[str] = []
         if interrupted_round is not None:
             updates["interrupted_round"] = interrupted_round
@@ -741,18 +752,7 @@ class CampaignStore:
 
         ``superseded_by`` goes with it — consumers navigate it to find who answers NOW, so a stale
         one points off the reopened running cycle onto its idle successor."""
-        self.update(
-            hop,
-            {"status": "active"},
-            remove=[
-                "finished_at",
-                "stop_reason",
-                "final",
-                "interrupted_round",
-                "crash_traceback",
-                "superseded_by",
-            ],
-        )
+        self.update(hop, {}, remove=_ENDING_KEYS)
 
     def mark_superseded(self, hop: CycleHop, successor_cycle_id: str) -> None:
         """The line moved to *successor_cycle_id*. TWO facts, written apart because only one is
@@ -781,12 +781,7 @@ class CampaignStore:
         data = read_json_optional(self._index_path(hop))
         if not isinstance(data, dict) or data.get("finished_at"):
             return False
-        self.mark_finished(
-            hop,
-            status=reason.value,
-            stop_reason=reason.value,
-            finished_at=utcnow_iso(),
-        )
+        self.mark_finished(hop, stop_reason=reason, finished_at=utcnow_iso())
         return True
 
     def mark_producer_vanished(self, hop: CycleHop) -> bool:
@@ -814,9 +809,6 @@ class CampaignStore:
         run_phase = str(derive_run_phase(index_path.parent, is_terminal=is_terminal))
         if not isinstance(data, dict):
             data = {}
-            status = "unreadable"
-        else:
-            status = str(data.get("status", ""))
         header_raw = data.get("header")
         header: dict[str, Any] = header_raw if isinstance(header_raw, dict) else {}
         fork_raw = data.get("fork")
@@ -834,7 +826,7 @@ class CampaignStore:
             "backend_id": header.get("backend_id", ""),
             "mint_kind": _mint_kind(kind, fork_trigger),
             "is_root": kind == "root",
-            "status": status,
+            "stop_reason": cycle_ending(data),
             "superseded_by": data.get("superseded_by"),
             "run_phase": run_phase,
             "best_accuracy": data.get("best_accuracy"),
@@ -936,18 +928,19 @@ class CampaignStore:
         surviving_rounds: list[RoundResult],
     ) -> Path:
         """Single writer for all four rebase triggers; the issuer rides ``ForkSpec.trigger`` on
-        the FORK_CUT record. ``rounds[]`` is the index SUMMARY shape, never whole documents."""
+        the FORK_CUT record. ``rounds[]`` is the index SUMMARY shape, never whole documents.
+
+        The parent's ENDING is its own: a fork cut from a finished cycle is born unfinished."""
         parent = CycleHop(campaign_id=campaign_id, cycle_id=parent_cycle_id)
         parent_index = read_json_optional(self._index_path(parent)) or {}
         index = {
-            **parent_index,
+            **{k: v for k, v in parent_index.items() if k not in _ENDING_KEYS},
             "parent_cycle_id": parent_cycle_id,
             "forked_from_round": forked_from_round,
             "forked_at": forked_at,
             "forked_at_offset": _branch_offset(self.cycle_dir(parent)),
             "rounds": [_index_round(rr) for rr in surviving_rounds],
             "n_rounds": len(surviving_rounds),
-            "status": "resumed",
             "updated_at": forked_at,
         }
         _apply_best(index)
@@ -1273,4 +1266,4 @@ class CampaignStore:
             )
 
 
-__all__ = ["CampaignStore", "origin_accuracy_of"]
+__all__ = ["CampaignStore", "cycle_ending", "origin_accuracy_of"]

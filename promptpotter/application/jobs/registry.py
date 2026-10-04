@@ -25,6 +25,7 @@ from promptpotter.application.jobs.interlock import (
     this_producer,
 )
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.phases import StopReason
 from promptpotter.infrastructure.store.io import read_json, write_json
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import CycleBusyError, ServiceUnavailableError
@@ -69,7 +70,7 @@ class Job:
     created_at: str
     started_at: str | None
     finished_at: str | None
-    stop_reason: str | None
+    stop_reason: StopReason | None
     # The ceilings this run was admitted at — until it finishes they are the account's outstanding
     # reservation, which is what stops two concurrent launches sharing one remainder.
     cap_usd: float | None = None
@@ -266,7 +267,7 @@ class JobRegistry:
             job = self.get(job_id)
             if job is None or job.status != "queued" or job.user_id != user_id:
                 return False
-            self.mark_finished(job_id, status="stopped", stop_reason="queue_cancelled")
+            self.mark_finished(job_id, status="stopped", stop_reason=StopReason.NOT_ADMITTED)
             return True
 
     def holder(self) -> Job | None:
@@ -324,7 +325,7 @@ class JobRegistry:
         self._persist(job)
 
     def mark_finished(
-        self, job_id: str, *, status: JobStatus, stop_reason: str | None = None
+        self, job_id: str, *, status: JobStatus, stop_reason: StopReason | None = None
     ) -> None:
         job = self.get(job_id)
         if job is None:
@@ -390,7 +391,7 @@ class JobRegistry:
         logger.warning(
             "job %s claims %s but its producer is gone — reaping", job.job_id, job.status
         )
-        self.mark_finished(job.job_id, status="stopped", stop_reason="producer_vanished")
+        self.mark_finished(job.job_id, status="stopped", stop_reason=StopReason.PRODUCER_VANISHED)
         self._fire_reap(job)
         return self.get(job.job_id) or job
 
@@ -454,7 +455,9 @@ class JobRegistry:
             created_at=str(raw.get("created_at", "")),
             started_at=_optional_str(raw.get("started_at")),
             finished_at=_optional_str(raw.get("finished_at")),
-            stop_reason=_optional_str(raw.get("stop_reason")),
+            stop_reason=(
+                None if raw.get("stop_reason") is None else StopReason(str(raw["stop_reason"]))
+            ),
             cap_usd=_optional_float(raw.get("cap_usd")),
             cap_tokens=_optional_int(raw.get("cap_tokens")),
             producer_id=str(raw.get("producer_id", "")),

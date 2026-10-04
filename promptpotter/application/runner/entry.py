@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import traceback
 from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
@@ -54,10 +53,17 @@ from promptpotter.application.runner.inner.spawn_context import publish_inner_sp
 from promptpotter.application.runner.loop import run_round_loop, set_round_cap
 from promptpotter.application.runner.output import write_log_md, write_review_md
 from promptpotter.application.runner.round import flush_pending_decisions
-from promptpotter.application.runner.termination import RUN_STOPS, BudgetGate, run_stop_reason
+from promptpotter.application.runner.termination import (
+    RUN_ENDS,
+    RUN_STOPS,
+    BudgetGate,
+    end_run_on,
+    run_stop_reason,
+)
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.application.scoring.query_loop import FlightGauge
+from promptpotter.application.views.ingress import run_spend_view
 from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.bench import BenchPasses, BenchScore, partition_bank
 from promptpotter.domain.campaign import ceiling_meter
@@ -83,7 +89,7 @@ from promptpotter.domain.spend import BudgetChange, CeilingMeter, SpendCeilings,
 from promptpotter.infrastructure.llm.pricing import refresh_rates_in_background
 from promptpotter.infrastructure.llm.rate_limit import get_abort_check, set_abort_check
 from promptpotter.infrastructure.llm.spend_book import SpendBook
-from promptpotter.infrastructure.llm.telemetry import emit_error_record
+from promptpotter.infrastructure.llm.telemetry import bind_priced
 from promptpotter.infrastructure.runtime_flags import (
     clear_run_control_flags,
     read_reserve_mirror,
@@ -94,14 +100,13 @@ from promptpotter.infrastructure.runtime_flags import (
 )
 from promptpotter.infrastructure.store.archive_queries import scope_memory_to_own_runs
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_ledger_cell_keys,
+    scan_ledger_priced_keys,
     scan_ledger_run_ids,
     scan_ledger_wall_clock,
 )
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.judges import judge_instrument
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import ResumeDivergenceError
 from promptpotter.shared.hashing import dataset_hash
 
 logger = logging.getLogger(__name__)
@@ -477,7 +482,7 @@ def _export_artifact(
         dataset_name=campaign.dataset_name if campaign else (session.dataset_name or ""),
         dataset_hash=dataset_hash(session.samples),
         treatment=campaign.treatment if campaign else None,
-        stop_reason=str(cycle_result.stop_reason),
+        stop_reason=cycle_result.stop_reason,
         finished_at=cycle_result.finished_at,
         formula=formula,
         origin_accuracy=cycle_result.origin_accuracy,
@@ -496,6 +501,7 @@ def _close_cycle(
     *,
     stop_reason: StopReason,
     cycle_error: ErrorRecord | None,
+    open_round: int | None,
     started_at: str,
     config: CampaignConfig,
     diag: bool,
@@ -539,6 +545,7 @@ def _close_cycle(
         config=config,
         cycle=cycle,
         diag=diag,
+        open_round=open_round,
     )
     if langfuse_trace_id is not None:
         cycle_result = cycle_result.model_copy(update={"langfuse_trace_id": langfuse_trace_id})
@@ -578,6 +585,7 @@ async def _run_single_cycle(
     banked: BenchPasses | None = None
     unheld: BenchScore | None = None
     fork: RebaseRequest | None = None
+    open_round: int | None = None
     try:
         cycle = await init_optimization_loop(
             origin,
@@ -642,7 +650,7 @@ async def _run_single_cycle(
                 graded(cb, session, banked.origin)
         elif not session.scoring.require_partition().bench:
             unheld = nothing_held_out(cb, scorer_id=session.scoring.scorer_id)
-        stop_reason, cycle_error, fork = await run_round_loop(
+        stop_reason, cycle_error, fork, open_round, cancel_exc = await run_round_loop(
             cycle,
             dataset,
             campaign_config,
@@ -653,43 +661,16 @@ async def _run_single_cycle(
             stop_after_rounds=mode.stop_after_rounds,
             budget_gate=budget_gate,
         )
-    except RUN_STOPS as stop:
-        stop_reason = run_stop_reason(stop)
-        cycle_error = None
-    except KeyboardInterrupt:
-        logger.warning("Optimization paused before round loop entered (user-initiated).")
-        stop_reason = StopReason.PAUSED
-        cycle_error = None
-    except asyncio.CancelledError as exc:
+    except RUN_ENDS as exc:
+        stop_reason, cycle_error = end_run_on(exc, session, where="before the round loop")
         # Where a terminal Ctrl+C lands (`asyncio.Runner` cancels the main task first) and
         # where an inner campaign cancelled by its outer sample deadline lands. It still
         # finalizes — the cycle's state must reach disk exactly as a pause does — but it must
         # ALSO reach the canceller, so it is re-raised past the finalize below: answering a
-        # cancellation with a return is what made the L4 sample deadline unenforceable.
-        cancel_exc = exc
-        logger.warning(
-            "Optimization cancelled (%s); finalizing as paused (resumable).",
-            session.state.cycle_id or "no cycle",
-        )
-        stop_reason = StopReason.PAUSED
-        cycle_error = None
-    except ResumeDivergenceError as exc:
-        # Operator-recoverable; fix is ``--fork-on-divergence``.
-        message = str(exc) or type(exc).__name__
-        kind = type(exc).__name__
-        logger.warning("Resume halted on divergence:\n%s", exc)
-        stop_reason = StopReason.DIVERGED
-        cycle_error = emit_error_record(kind=kind, message=message, stop_reason="DIVERGED")
-    except Exception as exc:
-        tb = traceback.format_exc()
-        session.state.crash_traceback = tb
-        message = str(exc) or type(exc).__name__
-        kind = type(exc).__name__
-        logger.exception("Optimization crashed before round loop entered.")
-        stop_reason = StopReason.CRASHED
-        cycle_error = emit_error_record(
-            kind=kind, message=message, stop_reason="CRASHED", traceback=tb
-        )
+        # cancellation with a return is what made the L4 sample deadline unenforceable. This arm
+        # is the one struck before the round loop; the loop hands back its own with the round.
+        if isinstance(exc, asyncio.CancelledError):
+            cancel_exc = exc
 
     bench: BenchScore | None = unheld
     if (
@@ -702,15 +683,12 @@ async def _run_single_cycle(
         try:
             banked = await bench_selection(cycle, session, banked=banked, cb=cb)
             bench = headline(cb, session, banked)
-        except RUN_STOPS as stop:
+        except (*RUN_STOPS, KeyboardInterrupt, asyncio.CancelledError) as exc:
             # Only a pause escapes the pass; it keeps the cycle resumable, and the resume takes
             # the pass again.
-            stop_reason, cycle_error = run_stop_reason(stop), None
-        except KeyboardInterrupt:
-            stop_reason, cycle_error = StopReason.PAUSED, None
-        except asyncio.CancelledError as exc:
-            cancel_exc = exc
-            stop_reason, cycle_error = StopReason.PAUSED, None
+            stop_reason, cycle_error = run_stop_reason(exc), None
+            if isinstance(exc, asyncio.CancelledError):
+                cancel_exc = exc
 
     cycle_result = _close_cycle(
         cycle,
@@ -719,6 +697,7 @@ async def _run_single_cycle(
         observers,
         stop_reason=stop_reason,
         cycle_error=cycle_error,
+        open_round=open_round,
         started_at=started_at,
         config=campaign_config,
         diag=mode.diag,
@@ -827,9 +806,11 @@ async def run_optimization(
     dataset = list(partition.search)
     # Before this launch takes a cell: every cycle of the campaign priced its cells once, and a
     # re-read of one — a resume, a fork, a parent re-scored each round — prices nothing again.
-    session.state.counted_cells = scan_ledger_cell_keys(
+    # Its optimizer and judge calls ride the same set, so a replayed call is priced once too.
+    session.state.priced_keys = scan_ledger_priced_keys(
         session.store.campaigns.campaign_cycle_ledgers(session.campaign_id)
     )
+    bind_priced(session.state.priced_keys)
     # Every launch path reaches here; bolted onto one entry point instead, it leaves the others
     # pricing off whatever table shipped. No-op on a fresh cache.
     refresh_rates_in_background()
@@ -856,13 +837,15 @@ async def run_optimization(
     except RUN_STOPS as stop:
         # Origin scoring stops on the round loop's channel — the budget gate, an unreachable
         # backend, a spent provider account — so it ends on the round loop's path, never a crash.
+        stop_reason, cycle_error = end_run_on(stop, session, where="in run prep")
         return _close_cycle(
             None,
             None,
             session,
             observers,
-            stop_reason=run_stop_reason(stop),
-            cycle_error=None,
+            stop_reason=stop_reason,
+            cycle_error=cycle_error,
+            open_round=None,
             started_at=started_at,
             config=campaign_config,
             diag=mode.diag,
@@ -925,36 +908,40 @@ def _finalize_run(
     config: CampaignConfig,
     cycle: Cycle | None,
     diag: bool,
+    open_round: int | None,
 ) -> str | None:
     """Returns the Langfuse trace id from the terminal ``end_campaign`` emit (``None`` when
     no tracing bridge is active) so the caller can stamp it onto the returned ``CycleResult``.
+    *open_round* is the round the stop left unabsorbed, ``None`` for a stop at a boundary.
     """
     stop_reason = cycle_result.stop_reason
-    # Read off the canonical table, never re-derived here: a private or-chain has no
-    # exhaustiveness check, and silently missed the two reasons the budget gate raises from
-    # INSIDE the scoring phase, writing a partial round with no `interrupted` marker.
-    info = STOP_REASON_INFO[StopReason(stop_reason)]
+    info = STOP_REASON_INFO[stop_reason]
     is_paused = info.outcome is StopOutcome.PAUSED
-    halted_mid_round = info.halts_mid_round
+    # Two facts, both needed: the table says whether this reason leaves a PARTIAL round on disk,
+    # the loop says whether a round was open when it struck — a budget stop at a clean boundary
+    # interrupts nothing.
+    interrupted_round = open_round if info.halts_mid_round else None
     has_traceback = info.has_traceback
+    limits = observers.dashboard.state.run_limits
+    spend = run_spend_view(
+        observers.dashboard.spend_metered(ceiling_meter(session.arm)),
+        usd_cap=limits.spend_budget_usd if limits else None,
+        token_cap=limits.token_budget if limits else None,
+    )
     if is_paused:
         # DECLARE the pause at the one point every paused exit converges on, rather than
         # trusting each raise site. Skipping the terminal writes below leaves `derive_run_phase`
         # only two ways to read `paused` — the flag or a declaration — and Ctrl+C inside the
         # round loop sets neither, so it falls through to freshness, returns DETACHED, and the
         # reaper stamps `producer_vanished` on a cycle its owner deliberately cancelled.
-        declare_run_phase(session, RunPhase.PAUSED)
+        declare_run_phase(session, RunPhase.PAUSED, spend=spend)
     # A pause leaves the cycle ACTIVE and resumable, so every terminal-marking write is skipped
     # and `index.json` keeps no `finished_at` for `derive_run_phase` to read past the PAUSED
     # just declared. The partial round is still drained below.
     if session.state.cycle_id and not is_paused:
-        interrupted_round = int(observers.callbacks._current_round) if halted_mid_round else None
         # The active exception is gone from `sys.exc_info()` by now; the except clause stashed
         # the formatted traceback before returning.
         crash_traceback = session.state.crash_traceback if has_traceback else None
-        # The precise terminal reason, with no lossy collapse to "completed" — the
-        # operator-facing label and outcome derive from STOP_REASON_INFO, never per surface.
-        cycle_status = str(stop_reason)
 
         rounds = cycle_result.rounds
         round_formula = resolve_cell_formula(
@@ -971,7 +958,6 @@ def _finalize_run(
             ),
         )
         final_block: dict[str, Any] = {
-            "stop_reason": stop_reason,
             "started_at": cycle_result.started_at,
             "finished_at": cycle_result.finished_at,
             # WHERE that span went, folded from the chronology and banked because the records it
@@ -1002,7 +988,6 @@ def _finalize_run(
         }
         session.store.campaigns.mark_finished(
             session.hop,
-            status=cycle_status,
             stop_reason=stop_reason,
             finished_at=cycle_result.finished_at,
             interrupted_round=interrupted_round,
@@ -1020,8 +1005,8 @@ def _finalize_run(
     # append reaches the projection through the same door every other fact does — it is a
     # subscriber — so there is no second path to keep in step with this one.
     if not is_paused:
-        declare_run_phase(session, RunPhase.TERMINAL, stop_reason=str(stop_reason or ""))
-    observers.audit._halted_mid_round = halted_mid_round
+        declare_run_phase(session, RunPhase.TERMINAL, stop_reason=stop_reason, spend=spend)
+    observers.audit._halted_mid_round = interrupted_round is not None
     observers.drain_all()
 
     obs = session.state.obs

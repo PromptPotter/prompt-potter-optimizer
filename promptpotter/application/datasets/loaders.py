@@ -150,7 +150,11 @@ _JUSTLOGIC_TRAIN_PER_DEPTH: int = 200
 # Deterministic and fixed: the per-depth train/test split and the interleave shuffle must
 # reproduce byte-for-byte across processes, or a cut silently becomes a different bank.
 _JUSTLOGIC_SEED: int = 42
-_JUSTLOGIC_CUT_RE = re.compile(r"^justlogic-d(\d+)$")
+# A `-held` cut is its depth cut's bank at the same ids, then this many rows per depth of the
+# rows that cut never drew, each `bench_only` — a wider bench under the same search and demo pools.
+_JUSTLOGIC_HELD_PER_DEPTH: int = 300
+_JUSTLOGIC_HELD_SUFFIX = "-held"
+_JUSTLOGIC_CUT_RE = re.compile(rf"^justlogic-d(\d+)(?:{_JUSTLOGIC_HELD_SUFFIX})?$")
 
 
 def justlogic_depths(dataset_name: str) -> tuple[int, ...] | None:
@@ -164,8 +168,8 @@ def justlogic_depths(dataset_name: str) -> tuple[int, ...] | None:
 
 
 def _load_justlogic(depths: tuple[int, ...], split: str = "train") -> list[Sample]:
-    if split not in ("train", "test"):
-        raise ValueError(f"JustLogic split must be 'train' or 'test', got {split!r}")
+    if split not in ("train", "test", "held"):
+        raise ValueError(f"JustLogic split must be 'train', 'test' or 'held', got {split!r}")
     load_dataset = hf_load_dataset()
     from collections import defaultdict
 
@@ -181,7 +185,8 @@ def _load_justlogic(depths: tuple[int, ...], split: str = "train") -> list[Sampl
         indices = list(range(len(rows)))
         random.Random(_JUSTLOGIC_SEED).shuffle(indices)
         cut = _JUSTLOGIC_TRAIN_PER_DEPTH
-        picked = indices[:cut] if split == "train" else indices[cut:]
+        stop = cut + _JUSTLOGIC_HELD_PER_DEPTH if split == "held" else None
+        picked = indices[:cut] if split == "train" else indices[cut:stop]
         picked_rows.extend(rows[i] for i in picked)
 
     # Interleave the depths before numbering. `sample_dataset` takes a PREFIX of the bank
@@ -216,6 +221,14 @@ def _load_justlogic(depths: tuple[int, ...], split: str = "train") -> list[Sampl
     return samples
 
 
+def _load_justlogic_held(depths: tuple[int, ...]) -> list[Sample]:
+    bank = _load_justlogic(depths)
+    held = _load_justlogic(depths, "held")
+    return bank + [
+        row.model_copy(update={"id": len(bank) + row.id, "bench_only": True}) for row in held
+    ]
+
+
 DATASET_LOADERS: dict[str, Callable[..., list[Sample]]] = {
     "gsm8k": load_gsm8k,
     "aime_2025": load_aime_2025,
@@ -238,6 +251,8 @@ def dataset_loader(dataset_name: str) -> Callable[[], list[Sample]] | None:
     depths = justlogic_depths(dataset_name)
     if depths is None:
         return None
+    if dataset_name.endswith(_JUSTLOGIC_HELD_SUFFIX):
+        return lambda: _load_justlogic_held(depths)
     return lambda: _load_justlogic(depths)
 
 

@@ -29,6 +29,7 @@ from promptpotter.application.preflight import (
     refuse_below_reasoning_floor,
 )
 from promptpotter.application.runner.campaign_ids import build_origin_cycle_id, mint_campaign_id
+from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import (
     Arm,
@@ -42,6 +43,7 @@ from promptpotter.domain.campaign import (
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.l4.inner_origin import instrument_of
 from promptpotter.domain.launch_limits import LaunchLimits, refuse_arm_limits
+from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.io import read_json_tolerant
@@ -279,14 +281,33 @@ def _join_head_to_head(
     )
 
 
+def _prompt_axes_only(
+    session: Session, campaign_config: CampaignConfig
+) -> dict[str, NodeSearchNarrowing]:
+    """Every node's search space closed to the prompt's own fields: an optimizer that also moved
+    a call's sampling or its reasoning rung would be graded on more than the prompt it wrote."""
+    narrowing: dict[str, NodeSearchNarrowing] = {}
+    for node in session.pipeline_schema.config_nodes:
+        held = campaign_config.optimizer_narrowing.get(node.name, NodeSearchNarrowing())
+        still_open = PROMPT_STRING_FIELDS if held.param_keys is None else held.param_keys
+        narrowing[node.name] = held.model_copy(
+            update={"param_keys": [key for key in PROMPT_STRING_FIELDS if key in still_open]}
+        )
+    return narrowing
+
+
 def _under_declaration(
     session: Session, campaign_config: CampaignConfig, arm: ArmRequest | None
 ) -> CampaignConfig:
-    """The config a later arm runs: the declaration owns the split and the budget, so an arm adopts
-    both rather than repeating them — before its origin resolves, whose id the split moves."""
-    declared = (
-        None if arm is None else session.store.campaigns.load_head_to_head(arm.head_to_head_id)
+    """The config an arm runs. It searches the prompt alone; and a later arm adopts the split and
+    the budget the declaration owns rather than repeating them — before its origin resolves,
+    whose id the split moves."""
+    if arm is None:
+        return campaign_config
+    campaign_config = campaign_config.model_copy(
+        update={"optimizer_narrowing": _prompt_axes_only(session, campaign_config)}
     )
+    declared = session.store.campaigns.load_head_to_head(arm.head_to_head_id)
     if declared is None:
         return campaign_config
     optimization = campaign_config.optimization

@@ -95,7 +95,8 @@ class CycleSnapshot:
     ledger: CycleEventLog | None = None
     # Every cell (`ReplayFeed.cell_key`) this campaign's search already priced, grown as a walk
     # takes each: a replay of one is a re-read and costs nothing again (`QueryLoopState.counted`).
-    counted_cells: set[str] = field(default_factory=set)
+    # The optimizer and judge calls it priced ride it too, as `call:{reuse key}`.
+    priced_keys: set[str] = field(default_factory=set)
     # Forensic traceback for ``index.json::crash_traceback`` written by
     # ``mark_finished``. Operator-facing summary (kind + message) is owned by
     # the canonical ``ErrorRecord`` on the ledger; this field is the in-process

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, get_args
 
 from promptpotter.config.settings import DATASET_NAME, settings
+from promptpotter.domain.phases import StopReason
 from promptpotter.infrastructure.tracing.events import (
     CampaignEnd,
     CampaignStart,
@@ -249,7 +250,7 @@ class ObservabilityBridge:
         *,
         result_accuracy: float | None,
         n_rounds_after_origin: int,
-        stop_reason: str,
+        stop_reason: StopReason,
         result_round: int,
     ) -> str | None:
         langfuse_trace_id: str | None = None

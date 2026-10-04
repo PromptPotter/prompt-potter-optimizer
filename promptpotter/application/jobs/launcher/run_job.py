@@ -16,7 +16,6 @@ from promptpotter.application.initialization.wiring import complete_registries, 
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.launcher.admission import (
     job_status_for,
-    launch_interrupted,
     release_slot,
 )
 from promptpotter.application.jobs.registry import JobRegistry
@@ -26,9 +25,10 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import RunMode, run_optimization
+from promptpotter.application.runner.termination import run_stop_reason
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.launch_limits import HeldLimits
-from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
+from promptpotter.domain.phases import STOP_REASON_INFO, StopOutcome, StopReason
 from promptpotter.domain.spend import BudgetChange, SpendCeilings
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.live_dashboard.projection import (
@@ -150,7 +150,8 @@ def record_launch_stop(
 ) -> None:
     """Stamp a launch that ended before its projection pipeline bound. A crash gets ``finished_at``,
     an interrupt gets the paused declaration and none. Best-effort — must never mask *exc*."""
-    interrupted = launch_interrupted(exc)
+    stop_reason = run_stop_reason(exc)
+    info = STOP_REASON_INFO[stop_reason]
     try:
         cycle_dir = CycleDir(stores.campaigns.cycle_dir(hop))
         LiveDashboardProjection.write_launch_stop(
@@ -158,15 +159,14 @@ def record_launch_stop(
             hop=hop,
             session_id=session_id,
             exc=exc,
-            interrupted=interrupted,
+            stop_reason=stop_reason,
         )
-        if not interrupted:
+        if info.outcome is not StopOutcome.PAUSED:
             stores.campaigns.mark_finished(
                 hop,
-                status="failed",
-                stop_reason=f"{type(exc).__name__}: {exc}",
+                stop_reason=stop_reason,
                 finished_at=utcnow_iso(),
-                crash_traceback=traceback.format_exc(),
+                crash_traceback=traceback.format_exc() if info.has_traceback else None,
             )
     except Exception:
         logger.exception("failed to record launch stop for %s/%s", hop.campaign_id, hop.cycle_id)
@@ -268,25 +268,21 @@ async def run_job(spec: JobSpec) -> None:
             limits=spec.limits,
         )
         stop_reason = result.stop_reason
-        # The SAME classification index.json / dashboard.json / the webapp read.
-        outcome = stop_reason_outcome(stop_reason)
-        if outcome is StopOutcome.FAILED and result.error is not None:
-            persisted_reason: str | None = result.error.message
-        else:
-            persisted_reason = stop_reason
         job_registry.mark_finished(
-            job_id, status=job_status_for(stop_reason), stop_reason=persisted_reason
+            job_id, status=job_status_for(stop_reason), stop_reason=stop_reason
         )
-    except (KeyboardInterrupt, asyncio.CancelledError) as exc:
+    except (KeyboardInterrupt, asyncio.CancelledError):
         # The pause flag's SYNTHETIC interrupt, raised by origin scoring to unwind (`scoring/
-        # search_point_scorer.py`) outside the round loop's own arm; the process exits clean.
-        job_registry.mark_finished(job_id, status="stopped", stop_reason=str(exc) or "paused")
+        # search_point_scorer.py`) — round-0 origin runs inside `_prepare_run`, outside the round
+        # loop's own arm. It is fully handled here; the process exits clean.
+        job_registry.mark_finished(job_id, status="stopped", stop_reason=StopReason.PAUSED)
     except Exception as exc:
-        # Fired OUTSIDE the runner's own try/except (e.g. ``build_run_observers``), so no
-        # ``ErrorRecord`` exists and ``ClassName: message`` is the most the audit trail can have.
+        # Anything reaching here fired BEFORE / OUTSIDE the runner's own try/except (e.g.
+        # ``build_run_observers`` blew up), so no ``ErrorRecord`` was emitted.
         logger.exception("job %s failed", job_id)
+        stop_reason = run_stop_reason(exc)
         job_registry.mark_finished(
-            job_id, status="failed", stop_reason=f"{type(exc).__name__}: {exc}"
+            job_id, status=job_status_for(stop_reason), stop_reason=stop_reason
         )
         # Nothing wrote the cycle terminal either — stamp it so the fork does not sit frozen
         # at `init` in the file tree and the webapp.

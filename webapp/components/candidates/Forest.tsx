@@ -13,6 +13,7 @@ import { pressable } from "@/components/ui";
 import { pathLeaf, shortFamilyTail } from "@/lib/ids";
 import { heartsText } from "@/lib/derivations";
 import type { LineageNode } from "@/lib/api";
+import { STOP_REASON_LABELS } from "@/lib/api/types.generated";
 import {
   DIRECTION_GLYPH,
   HEADER_H,
@@ -325,7 +326,7 @@ export function Forest({
                   {course.fork_direction === "equivalent"
                     ? "\n≡ the cut reached nothing — this branch and its parent continue identically"
                     : ""}
-                  {course.status ? ` · ${course.status}` : ""}
+                  {course.stop_reason ? ` · ${STOP_REASON_LABELS[course.stop_reason]}` : ""}
                   {course.best_accuracy != null ? ` · best ${fmtPct0(course.best_accuracy)}` : ""}
                   {isEmpty
                     ? "\nNo post-divergence rounds — use Clean up in the header to prune"

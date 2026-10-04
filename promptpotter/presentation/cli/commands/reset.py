@@ -44,7 +44,8 @@ __all__ = ["cmd_reset"]
 # Top-level names ``reset`` removes; everything else is preserved by default.
 # Each tenant's active-session pointer lives at ``{tenant}/.workspace/active_session.json``
 # and is cleared in lockstep with the campaigns/ + sessions/ trees it points into.
-_DROP_NAMES = ("campaigns", "sessions")
+# A head-to-head manifest names campaigns, so it goes with them.
+_DROP_NAMES = ("campaigns", "sessions", "head_to_heads")
 
 # Preserved names — listed separately so the confirm prompt can name what survives, and named
 # EXHAUSTIVELY so anything left over surfaces as "unrecognized" instead of hiding among the

@@ -21,7 +21,6 @@ from promptpotter.application.runner.inner.spawn_context import (
     set_inner_rulers,
 )
 from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
-from promptpotter.shared.errors import RulerCoverageError
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
@@ -90,21 +89,11 @@ def _fit_or_extend(
             len({o.candidate_id for o in obs}),
         )
     else:
-        try:
-            ruler = extend_ruler(held, obs)
-        except RulerCoverageError:
-            # A permanent provisional δ is worse than the cell staying off the scale; the inner
-            # cycle's own extension reaches it once its round grades exist.
-            logger.info(
-                "inner δ scale for %s kept at %d cells — the archive's new ones have no arm to "
-                "equate through yet",
-                dataset_name,
-                len(held.delta),
-            )
-            return held
+        ruler = extend_ruler(held, obs, history=[])
         if ruler == held:
             # `RulerRecord` is written WHOLE, so an append that carries no new cell is a copy of
-            # the scale already on the ledger.
+            # the scale already on the ledger. A cell no anchored arm answered stays off it; the
+            # inner cycle's own extension reaches it once its round grades exist.
             return held
         logger.info(
             "inner δ scale for %s EXTENDED to %d cells (+%d) at outer round %d",

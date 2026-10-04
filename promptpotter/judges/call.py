@@ -45,6 +45,7 @@ from promptpotter.infrastructure.llm.spend_book import CallLabel
 from promptpotter.infrastructure.llm.telemetry import (
     _CURRENT_ROUND,
     _CYCLE_LEDGER,
+    call_priced,
     emit_token_usage,
 )
 from promptpotter.infrastructure.store.stores import LLMReuseCache, hash_call
@@ -111,7 +112,9 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
     # than making a re-read of an old comparison read as free. A fresh grading was metered at its
     # send. A grading is the one call shape with a naturally cacheable prefix — the rubric is a
     # module constant, so most of the prompt is byte-identical on every cell of every campaign.
-    if cached is not None:
+    # Once per campaign: a grading its ledger already priced is not metered on a later replay.
+    counted = key is not None and call_priced(key)
+    if cached is not None and not counted:
         emit_token_usage(
             node=f"{judge}:{stage.role}",
             kind="judge",

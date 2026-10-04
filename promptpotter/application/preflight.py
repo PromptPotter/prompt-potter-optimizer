@@ -14,12 +14,14 @@ from promptpotter.infrastructure.llm.registry import model_profile
 from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
+    from promptpotter.domain.campaign import Arm
     from promptpotter.domain.sample import Sample
 
 
 __all__ = [
     "PreflightWarning",
     "check_search_pool_holds_round",
+    "refuse_arm_below_round",
     "refuse_below_reasoning_floor",
     "run_preflight_checks",
 ]
@@ -143,8 +145,9 @@ def _check_cap_funds_round(
     cell_usd: float | None,
     measured_cell_usd: float | None,
 ) -> PreflightWarning | None:
-    """A warning, never a block. Priced at what a cell BILLED where the archive says: ``cell_usd``
-    is every retry at its token ceiling on the dearest host, a bound a cell bills far under."""
+    """A warning, a block only for an arm. A round is priced at what a cell of this dataset BILLED
+    where the archive says, and only an unmeasured one at ``cell_usd`` — every retry at its token
+    ceiling on the dearest host, a bound a cell bills far under, so priced there alone it warns on every run."""
     cap = config.optimization.spend_budget_usd
     price = cell_usd if measured_cell_usd is None else measured_cell_usd
     if cap is None or price is None:
@@ -218,6 +221,24 @@ def run_preflight_checks(
         warnings.append(w)
     warnings.extend(_check_config_couplings(config))
     return warnings
+
+
+def refuse_arm_below_round(
+    arm: Arm | None, warnings: Iterable[PreflightWarning], *, measured_cell_usd: float | None
+) -> None:
+    """A HARD block for an arm alone: stopped on `spend_budget` inside round 1 it is still graded
+    beside the arms that searched. Never on the unmeasured bound, which a cell bills far under."""
+    if arm is None or measured_cell_usd is None:
+        return
+    for w in warnings:
+        if w.code == "spend_cap_below_round":
+            raise PayloadInvalidError(
+                f"arm {arm.arm_key} of head-to-head {arm.head_to_head_id} cannot close one round: "
+                f"{w.title}. {w.detail} On an arm `set-limits --max-usd` moves the head-to-head's "
+                "declared budget and every arm with it; the round is sized down with the "
+                "optimizer's own knobs instead.",
+                code="spend_cap_below_round",
+            )
 
 
 def refuse_below_reasoning_floor(

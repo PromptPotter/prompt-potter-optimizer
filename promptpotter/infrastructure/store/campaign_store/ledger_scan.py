@@ -532,13 +532,13 @@ def scan_ledger_run_ids(ledger_paths: Iterable[Path]) -> set[str]:
     return found
 
 
-def scan_ledger_cell_keys(ledger_paths: Iterable[Path]) -> set[str]:
-    """Every cell these ledgers' campaign already priced (``CellPricedRecord``)."""
+def scan_ledger_priced_keys(ledger_paths: Iterable[Path]) -> set[str]:
+    """Every cell and call these ledgers' campaign already priced (``PricedKeyRecord``)."""
     found: set[str] = set()
     for path in ledger_paths:
-        for rec in iter_jsonl(path, record_types=frozenset({"cell_priced"})):
-            value = rec.get("cell_key")
-            if rec.get("record_type") == "cell_priced" and isinstance(value, str):
+        for rec in iter_jsonl(path, record_types=frozenset({"priced_key"})):
+            value = rec.get("priced_key")
+            if isinstance(value, str):
                 found.add(value)
     return found
 

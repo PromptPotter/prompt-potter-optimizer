@@ -102,18 +102,17 @@ class MinibatchKnobs(StrictModel):
         description="b: the feedback-set cells a round runs its parent on for the reflection to "
         "read, and tests the child on before the Pareto set scores it.",
     )
-    pareto_share: Annotated[float, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
-        gt=0.0,
-        lt=1.0,
-        description="The share of the search pool held out as the Pareto set, which every "
-        "accepted child is scored on and the pool is ranked by; minibatches are drawn from the "
-        "rest, the feedback set.",
+    pareto_size: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
+        ge=1,
+        description="The Pareto set: the search-pool cells, first in bank order, every accepted "
+        "child is scored on and the pool is ranked by; minibatches are drawn from the rest, the "
+        "feedback set.",
     )
 
 
 class Minibatch:
     """GEPA's panel: a fresh minibatch of the feedback set as the first block, where the gate
-    reads, then the Pareto set — the pool's first ``pareto_share`` in bank order, fixed per run."""
+    reads, then the Pareto set — the pool's first ``pareto_size`` in bank order, fixed per run."""
 
     name: ClassVar[str] = "minibatch"
     kind: ClassVar[NodeKind] = NodeKind.SAMPLER
@@ -123,7 +122,7 @@ class Minibatch:
 
     def draws(self, selected: SelectedOptimizer, pool: int) -> int:
         knobs = cast("MinibatchKnobs", selected.knobs(self.name))
-        return knobs.size + round(knobs.pareto_share * pool)
+        return knobs.size + knobs.pareto_size
 
     def draw(self, ctx: RoundContext, pool: list[Sample]) -> Panel:
         knobs = cast("MinibatchKnobs", ctx.cycle.optimizer.knobs(self.name))
@@ -131,11 +130,7 @@ class Minibatch:
         by_key = {s.key: s for s in pool}
         if missing := [key for key in banked if key not in by_key]:
             raise ValueError(f"minibatch: {len(missing)} Pareto-set cells left the search pool")
-        pareto = (
-            [by_key[key] for key in banked]
-            if banked
-            else pool[: round(knobs.pareto_share * len(pool))]
-        )
+        pareto = [by_key[key] for key in banked] if banked else pool[: knobs.pareto_size]
         held = {s.key for s in pareto}
         feedback = [s for s in pool if s.key not in held]
         if not pareto or len(feedback) < knobs.size:
@@ -444,7 +439,12 @@ class Pareto:
     knobs: ClassVar[type[StrictModel]] = ParetoKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
     stamps_theta: ClassVar[bool] = False
-    reads_parent: ClassVar[bool] = True
+    elects_partial: ClassVar[bool] = False
+
+    def parent_cells(
+        self, ctx: RoundContext, panel: Panel, rows: Mapping[str, Sequence[QueryMeasurement]]
+    ) -> list[Sample]:
+        return panel.cells[panel.block_size :]
 
     def select(self, ctx: RoundContext, measured: Measured, population: Population) -> Selection:
         cycle = ctx.cycle
@@ -458,7 +458,7 @@ class Pareto:
             if ind.lineage.id not in cut
         ]
         if not pool:
-            # Alg. 1 lines 3-5: the incumbent, re-scored on this round's panel, seats the pool.
+            # Alg. 1 lines 3-5: the incumbent, re-scored on the Pareto set, seats the pool.
             offered.insert(0, (measured.parent.opt_sp, measured.parent_rows))
         admitted: list[str] = []
         for ind, rows in offered:
@@ -608,11 +608,10 @@ class GepaRuntime:
 
     def round_cells_ceiling(self, selected: SelectedOptimizer, pool: int) -> int:
         knobs = cast("MinibatchKnobs", selected.knobs(Minibatch.name))
-        pareto = round(knobs.pareto_share * pool)
-        if not pareto or pool - pareto < knobs.size:
+        if pool - knobs.pareto_size < knobs.size:
             return 0
-        # The child and its parent each walk the minibatch, then the Pareto set.
-        return 2 * (knobs.size + pareto)
+        # Parent and child each read the minibatch, then the Pareto set.
+        return 2 * (knobs.size + knobs.pareto_size)
 
     def opening(self, ctx: RoundContext) -> nodes.RoundOpening:
         return nodes.standing_opening(ctx)

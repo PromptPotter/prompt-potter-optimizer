@@ -12,7 +12,7 @@ from pydantic import ConfigDict, Field
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.dashboard_rows import RunStanding
-from promptpotter.domain.phases import RunPhase
+from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.domain.ruler import ThetaCaveat
 from promptpotter.domain.run_records import (
     FORK_DIRECTION,
@@ -31,7 +31,10 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_round_closes,
     scan_ledger_run_standing,
 )
-from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
+from promptpotter.infrastructure.store.campaign_store.store import (
+    cycle_ending,
+    origin_accuracy_of,
+)
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for, sibling_kind
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store, resolve_cycle_path
@@ -130,9 +133,7 @@ class LineageNode(StrictModel):
         description="Candidate: minted | measured | invalid — never 'winner' (that rides "
         "`is_selected`). `invalid` was rejected before it cost a sample, so it carries no "
         "accuracy: its stored 0.0 is synthetic and reads as getting every answer wrong. "
-        "Course: `index.json::status`, the same StopReason value `/cycles` serves under this "
-        "same name. Not `dashboard.json::state`, which names the fine-grained ACTIVITY "
-        "phase — a different axis, and one word may not serve both.",
+        "Empty on a course, whose ending is `stop_reason`.",
     )
     election_held: bool = Field(
         default=False,
@@ -254,6 +255,11 @@ class LineageNode(StrictModel):
         default=None,
         description="Courses only — the ONE server-owned run-state (`derive_run_phase`), the "
         "same value `/cycles` serves. Null on a candidate, which has no run of its own.",
+    )
+    stop_reason: StopReason | None = Field(
+        default=None,
+        description="Courses only — why the cycle ended (`index.json::stop_reason`), the same "
+        "value `/cycles` serves. Null while it has not ended, and on a candidate.",
     )
     dataset_name: str = ""
     trigger: str = Field(default="", description="Fork trigger; empty for roots and inner runs.")
@@ -443,7 +449,7 @@ def _round_facts(
 
 class _CourseScalars(TypedDict):
     course_kind: CourseKind
-    status: str
+    stop_reason: StopReason | None
     run_phase: RunPhase | None
     trigger: str
     fork_direction: ForkDirection | None
@@ -479,7 +485,7 @@ def _course_scalars(
 
     return {
         "course_kind": kind,
-        "status": str(index.get("status") or ""),
+        "stop_reason": cycle_ending(index),
         # The ONE run-phase derivation, the same call `/cycles` makes.
         "run_phase": derive_run_phase(layout.cycle_dir, is_terminal=bool(index.get("finished_at"))),
         "trigger": str(fork.get("trigger") or ""),
@@ -861,7 +867,7 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Lin
     if branch is not None:
         scalars |= {
             "run_phase": branch.run_phase,
-            "status": branch.status,
+            "stop_reason": branch.stop_reason,
             "best_accuracy": branch.best_accuracy,
         }
 

@@ -19,7 +19,6 @@ from promptpotter.domain.ruler import (
     ruler_entry,
 )
 from promptpotter.domain.scoring import is_graded
-from promptpotter.shared.errors import RulerCoverageError
 
 if TYPE_CHECKING:
     from promptpotter.domain.results import RoundResult
@@ -346,7 +345,6 @@ def fit_theta_given_delta(
     delta: Ruler | None,
     *,
     sigma_theta: float = _INIT_SIGMA_THETA,
-    anchor_id: str = "",
     max_iter: int = 50,
     tol: float = 1e-4,
 ) -> dict[str, tuple[float, float]]:
@@ -356,16 +354,19 @@ def fit_theta_given_delta(
     legitimate (round 0 has one arm, and logit-accuracy depends on no fit, so it is comparable
     across cycles) and it is the ONLY state in which a cell may go ungraded.
 
-    A ruler that is not ``None`` must carry every observed cell, and a hole RAISES rather than
-    grading it δ=0 — zero is a POSITION on this scale, not a neutral value, so a ruler centred
-    well above it would read an unmeasured cell as easier than anything ever measured.
+    A ruler that is not ``None`` reads θ on the cells it CARRIES and no other: an observation off
+    it enters no fit, and an arm holding none on it has no entry in the result. Never δ=0 for the
+    hole — zero is a POSITION on this scale, not a neutral value, so a ruler centred well above it
+    would read an unmeasured cell as easier than anything ever measured. That an arm answered
+    cells its θ does not count is served, as ``ThetaCaveat.UNMEASURED_DELTA``.
     """
-    graded = _cell_parameters({o.sample_id for o in observations}, delta, anchor_id)
+    graded = _cell_parameters({o.sample_id for o in observations}, delta)
 
     by_c: dict[str, list[tuple[float, float, float]]] = {}
     for o in observations:
-        d, a = graded[o.sample_id]
-        by_c.setdefault(o.candidate_id, []).append((d, a, o.response))
+        if (cell := graded.get(o.sample_id)) is None:
+            continue
+        by_c.setdefault(o.candidate_id, []).append((*cell, o.response))
 
     out: dict[str, tuple[float, float]] = {}
     inv_var = 1.0 / (sigma_theta * sigma_theta)
@@ -395,14 +396,11 @@ def fit_theta_given_delta(
 
 
 def _cell_parameters(
-    sample_ids: Collection[int], delta: Ruler | None, anchor_id: str
+    sample_ids: Collection[int], delta: Ruler | None
 ) -> dict[int, tuple[float, float]]:
     if delta is None:
         return dict.fromkeys(sample_ids, (0.0, 1.0))
-    missing = sorted(set(sample_ids) - delta.keys())
-    if missing:
-        raise RulerCoverageError(missing, anchor_id=anchor_id)
-    return {sid: ruler_entry(delta[sid]) for sid in sample_ids}
+    return {sid: ruler_entry(delta[sid]) for sid in sample_ids if sid in delta}
 
 
 # The Newton fit stops within `tol` of its root, so two fits are never compared tighter than this.
@@ -413,8 +411,6 @@ def theta_bounds_given_delta(
     measured: Mapping[int, float],
     open_cells: Collection[int],
     delta: Ruler | None,
-    *,
-    anchor_id: str = "",
 ) -> tuple[float, float, float]:
     """``(θ_low, θ_high, se_floor)`` around what :func:`fit_theta_given_delta` can return for ONE
     arm once ``open_cells`` resolve — each to any grade in [0, 1], or to an error that drops it.
@@ -424,12 +420,12 @@ def theta_bounds_given_delta(
     dispersion grows with misfit — so it is floored instead: φ by the least misfit the measured
     cells can show anywhere in that interval, the information by each cell at its most informative
     θ inside it."""
-    params = _cell_parameters({*measured, *open_cells}, delta, anchor_id)
+    params = _cell_parameters({*measured, *open_cells}, delta)
 
     def fit(fill: float) -> float:
         obs = [Observation("", sid, y) for sid, y in measured.items()]
         obs += [Observation("", sid, fill) for sid in open_cells]
-        return fit_theta_given_delta(obs, delta, anchor_id=anchor_id).get("", (0.0, 0.0))[0]
+        return fit_theta_given_delta(obs, delta).get("", (0.0, 0.0))[0]
 
     low, high = fit(0.0) - _FIT_SLACK, fit(1.0) + _FIT_SLACK
 
@@ -441,8 +437,9 @@ def theta_bounds_given_delta(
     info = 1.0 / (_INIT_SIGMA_THETA * _INIT_SIGMA_THETA) + float(np.sum(a * a * p * (1.0 - p)))
     # Misfit is unimodal in p with its zero at p = y, so each cell's least lies at y clamped into
     # the p range the interval allows.
-    y = np.fromiter(measured.values(), dtype=np.float64, count=len(measured))
-    dm, am = (np.array([params[s][k] for s in measured], dtype=np.float64) for k in (0, 1))
+    on = [s for s in measured if s in params]
+    y = np.fromiter((measured[s] for s in on), dtype=np.float64, count=len(on))
+    dm, am = (np.array([params[s][k] for s in on], dtype=np.float64) for k in (0, 1))
     ends = p_at(np.array([low, high]), dm[:, None], am[:, None])
     pm = np.clip(y, ends.min(axis=1), ends.max(axis=1))
     misfit = float(np.sum((y - pm) ** 2 / np.clip(pm * (1.0 - pm), 1e-6, None)))
@@ -455,6 +452,7 @@ def extend_ruler(
     ruler: DeltaRuler,
     observations: list[Observation],
     *,
+    history: list[Observation],
     max_iter: int = 50,
     tol: float = 1e-4,
 ) -> DeltaRuler:
@@ -466,35 +464,36 @@ def extend_ruler(
     carried verbatim, and ``mean(theta) == 0`` is NEVER re-imposed (that is ``_map_fit``'s job, and
     re-imposing it here is exactly how the scale would drift).
 
+    ``history`` is what the same arms answered EARLIER, under the ids they answer under now, and
+    the link reads both: an arm's θ is fit on every anchored cell it holds across the two, so which
+    cells a selector re-reads its parent on this round decides nothing here. The caller scopes it —
+    a cycle passes its OWN closed rounds, never the workspace archive, so a run links exactly as a
+    fresh run of itself would.
+
     ONE pass, deliberately — not coordinate ascent. Folding the new δ back into the arms' θ reads as
     "more accurate" and lets the anchor drift a little every round, which is this bug in slow motion.
 
-    Raises ``RulerCoverageError`` when a new cell has no arm carrying an anchored ability to link
-    through: the subset walked entirely off the ruler and there is nothing to equate against. A
-    provisional δ would be a fabricated value written permanently into the scale — the transient
-    read that legitimately needs one is ``DeltaRuler.entries_covering``, not this.
+    A cell no anchored arm answered STAYS OFF the ruler, and the ruler comes back unchanged where
+    that is every new cell. A provisional δ would be a fabricated value written permanently into
+    the scale — the transient read that legitimately needs one is ``DeltaRuler.entries_covering``.
+    Such a cell enters no θ, is counted by ``DeltaRuler.unlinked`` into the served caveat, and
+    links in the first later call whose history holds an anchored arm that answered it.
     """
-    new_ids = {o.sample_id for o in observations} - ruler.delta.keys()
-    if not new_ids:
-        return ruler
-
-    anchored = [o for o in observations if o.sample_id in ruler.delta]
+    seen = dedup_observations(history, observations)
     # `_INIT_SIGMA_THETA`, not `ruler.sigma_theta`, so this link is regularized exactly as the
     # election's own θ read is. The ruler CARRIES the fit's converged σ_θ and nothing passes it
     # yet: doing so moves every θ in the repo and belongs in its own commit with its own
     # before/after, not smuggled in here where it would be indistinguishable from the extension.
-    theta = fit_theta_given_delta(anchored, ruler.entries(), anchor_id=ruler.anchor_id)
+    theta = fit_theta_given_delta(seen, ruler.entries())
 
     by_s: dict[int, list[tuple[float, float]]] = {}
-    for o in observations:
+    for o in seen:
         arm = theta.get(o.candidate_id)
         if o.sample_id in ruler.delta or arm is None:
             continue
         by_s.setdefault(o.sample_id, []).append((arm[0], o.response))
-
-    unlinkable = sorted(new_ids - by_s.keys())
-    if unlinkable:
-        raise RulerCoverageError(unlinkable, anchor_id=ruler.anchor_id)
+    if not by_s:
+        return ruler
 
     inv_var = 1.0 / (ruler.sigma_delta * ruler.sigma_delta)
     delta = dict(ruler.delta)
@@ -782,11 +781,7 @@ def candidate_abilities(
     obs = dedup_observations(
         observations_from_results({**results_by_id, PARENT_ABILITY_ID: parent_results})
     )
-    fit = fit_theta_given_delta(
-        obs,
-        ruler.entries() if ruler is not None else None,
-        anchor_id=ruler.anchor_id if ruler is not None else "",
-    )
+    fit = fit_theta_given_delta(obs, ruler.entries() if ruler is not None else None)
     split = {sid: ruler_entry(v) for sid, v in (ruler.entries() if ruler else {}).items()}
     return RaschPosterior(
         theta={cid: t for cid, (t, _) in fit.items()},
@@ -841,8 +836,7 @@ def select_round_subset(
     # A cell the ruler has not absorbed stands at the ruler's own centre with the population SE.
     delta_map = {sid: ruler.delta.get(sid, ruler.mu_delta) for sid in by_id}
     delta_se_map = {sid: ruler.delta_se.get(sid, ruler.sigma_delta) for sid in by_id}
-    anchored = [o for o in observations if o.sample_id in ruler.delta]
-    theta = fit_theta_given_delta(anchored, ruler.entries(), anchor_id=ruler.anchor_id)
+    theta = fit_theta_given_delta(observations, ruler.entries())
     in_race = (
         [ts for cid, ts in theta.items() if cid in leader_ids]
         if leader_ids is not None

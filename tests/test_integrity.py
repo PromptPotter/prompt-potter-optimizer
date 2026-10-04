@@ -2151,6 +2151,19 @@ def test_no_held_out_row_reaches_a_round_panel_or_an_archive_view() -> None:
     doubled = partition_bank(twins, split)
     assert {s.key for s in doubled.bench}.isdisjoint(s.key for s in doubled.search)
     assert len(doubled.bench) == 2 * split.bench
+    # A row a bank DECLARES bench is bench beside the ranked ones and moves no other row: widening
+    # a dataset's bench leaves its search and demo pools, so its paid cells, exactly where they were.
+    extra = [
+        Sample(id=60 + i, query=f"held {i}", ground_truth="TRUE", bench_only=True) for i in range(9)
+    ]
+    assert extra[0].key == extra[0].model_copy(update={"bench_only": False}).key
+    wide = partition_bank([*bank, *extra], split)
+    assert (wide.search, wide.demo) == (part.search, part.demo)
+    assert wide.bench == (*part.bench, *extra)
+    with pytest.raises(ValueError):
+        partition_bank([*bank, *extra], None)
+    with pytest.raises(ValueError):
+        partition_bank([*bank, bank[0].model_copy(update={"id": 60, "bench_only": True})], split)
 
     # Archive evidence naming every held-out cell cannot pull one into the panel.
     contaminating = [Observation("bench_arm", sid, 0.0) for sid in held]
@@ -4186,11 +4199,16 @@ async def _walk(
         )
         walk.skip_at = skip_at
         stopped = await _stopped_by_operator(
-            query_loop.run_walks([walk], session, backfills=priors if parent_lacks_cells else None)
+            query_loop.run_walks(
+                [walk],
+                session,
+                keep_cut=False,
+                backfills=priors if parent_lacks_cells else None,
+            )
         )
     return {
         "rows": walk.results,
-        "stop_reason": stopped or walk.outcome.stop_reason,
+        "stop_reason": stopped or walk.outcome.ended_on,
         "calls": list(backend.calls),
         "entries": list(backend.entries),
         "committed": committed,
@@ -4260,10 +4278,10 @@ async def _round(
         for w, cut in enumerate(cuts)
     ]
     with mock.patch.object(query_loop, "measure_sample", _measure):
-        stopped = await _stopped_by_operator(query_loop.run_walks(walks, session))
+        stopped = await _stopped_by_operator(query_loop.run_walks(walks, session, keep_cut=False))
     return {
         "rows": [walk.results for walk in walks],
-        "stops": [stopped or walk.outcome.stop_reason for walk in walks],
+        "stops": [stopped or walk.outcome.ended_on for walk in walks],
         "absorbed": [(w, sid) for kind, w, sid in events if kind == "absorb"],
         "events": events,
         "calls": list(backend.calls),
@@ -4634,18 +4652,48 @@ async def test_sample_lookahead_changes_the_bill_and_never_the_record(tmp_path: 
     assert sorted(replayed["calls"]) == [s.id for s in dataset[:3]]
 
 
-async def test_a_resumed_arm_re_reads_its_cells_and_still_reaches_its_bench(tmp_path: Path) -> None:
+async def test_a_resumed_arm_re_reads_its_cells_and_still_reaches_its_bench(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A resume re-walks the origin, and the round it stopped in, over cells its own ledger already
     priced. Metered again, a controlled arm pays for each twice; near its ceiling it halts in run
     init, and a spent search ceiling stops its bench pass too, so its selection is never graded.
-    Silent: the halt reads as the arm's budget, and the headline is simply missing."""
+    Silent: the halt reads as the arm's budget, and the headline is simply missing. The stopped
+    round's optimizer and judge calls replay too, and are priced once per campaign the same way."""
+    from promptpotter.application.bench import llm_call as call_mod
     from promptpotter.application.runner.termination import BudgetGate
     from promptpotter.domain.pipeline_schema import WebSpendBound
     from promptpotter.domain.run_records import TokenUsageRecord
     from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.llm import telemetry
+    from promptpotter.infrastructure.llm.response import LLMResponse
     from promptpotter.infrastructure.llm.spend_book import SpendBook, spending_under
-    from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_cell_keys
+    from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_priced_keys
+    from promptpotter.infrastructure.store.stores import LLMReuseCache
+    from promptpotter.judges import call as judge_call
+    from promptpotter.judges.protocol import JudgeStage
+
+    class _Provider:
+        async def chat(self, **_kw: Any) -> LLMResponse:
+            return LLMResponse(content="ok", model="m", cost_usd=0.01)
+
+    monkeypatch.setattr(call_mod, "get_llm_client", lambda _p: _Provider())
+    monkeypatch.setattr(judge_call, "get_llm_client", lambda _p: _Provider())
+    loop_reuse = LLMReuseCache(tmp_path, "optimizer_reuse")
+    judge_reuse = LLMReuseCache(tmp_path, "judge_reuse")
+
+    async def round_calls() -> None:
+        await call_mod.llm_call(
+            [{"role": "user", "content": "q"}],
+            config={"provider": "p", "model": "m"},
+            context=call_mod.LLMCallContext(cache=loop_reuse),
+        )
+        with judge_call.bind_cache(judge_reuse):
+            await judge_call.ask(JudgeStage(model="m", provider="p"), "grade", judge="j")
+
+    # Another campaign's run banks both replies; this arm only ever replays them.
+    telemetry.bind_priced(set())
+    await round_calls()
 
     dataset = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(4)]
     step = {"solve": {"input": 10, "output": 5, "cost_usd": 0.01}}
@@ -4705,9 +4753,17 @@ async def test_a_resumed_arm_re_reads_its_cells_and_still_reaches_its_bench(tmp_
     token = telemetry.set_cycle_ledger(ledger)
     try:
         with spending_under(book):
-            stopped = await _stopped_by_operator(query_loop.run_walks([walk], session))
+            stopped = await _stopped_by_operator(
+                query_loop.run_walks([walk], session, keep_cut=False)
+            )
             with telemetry.filed_as("bench"):
-                await query_loop.run_walks([bench], session)
+                await query_loop.run_walks([bench], session, keep_cut=False)
+            # The launch that stopped made the round's calls; the resumed one learns them off the
+            # ledger and replays the same round.
+            telemetry.bind_priced(set())
+            await round_calls()
+            telemetry.bind_priced(scan_ledger_priced_keys([ledger.path]))
+            await round_calls()
     finally:
         telemetry.reset_cycle_ledger(token)
     assert [r["sample_id"] for r in walk.results] == taken, "the ceiling held back a re-read"
@@ -4715,10 +4771,14 @@ async def test_a_resumed_arm_re_reads_its_cells_and_still_reaches_its_bench(tmp_
     assert stopped == "spend_budget"
     assert len(bench.results) == len(dataset), "the search's ceiling stopped the bench pass"
     kinds = [r.kind for _, r in ledger.iter() if isinstance(r, TokenUsageRecord)]
-    assert kinds == ["bench"] * len(dataset), f"a re-read was metered a second time: {kinds}"
-    assert book.usd_spent == pytest.approx(0.02)
-    # No surface watched the bench walk, and the next launch still learns every cell it priced.
-    assert scan_ledger_cell_keys([ledger.path]) == {f"cell_{s.id}" for s in dataset}
+    assert kinds == ["bench"] * len(dataset) + ["optimizer", "judge"], (
+        f"a re-read was metered a second time: {kinds}"
+    )
+    assert book.usd_spent == pytest.approx(0.04)
+    # No surface watched the bench walk, and the next launch still learns every cell it priced —
+    # and each of the two calls.
+    priced = scan_ledger_priced_keys([ledger.path])
+    assert {f"cell_{s.id}" for s in dataset} <= priced and len(priced) == len(dataset) + 2
 
 
 def _counting_client(reply: str) -> tuple[Any, list[int]]:
@@ -4962,6 +5022,9 @@ def test_a_rounds_cost_reaches_the_markdown_digest_too() -> None:
     assert "·w8000" in line, "writes with no reads is paying to fill a prefix nothing collects"
     # A bucket that neither billed nor consumed is absent, not a row of zeroes.
     assert "judge" not in line
+    # A round the archive answered whole billed nothing and still cost something: it renders.
+    replayed = SpendRollup(backend=SpendBucket(incurred_usd=0.05), total_incurred_usd=0.05)
+    assert "billed $0.0000 · incurred $0.0500 · 100%" in _render_round_cost(digest(replayed))
 
 
 def test_every_prefix_state_says_which_one_it_is() -> None:
@@ -5333,7 +5396,7 @@ def test_the_bench_pass_bills_and_clocks_under_its_own_name(built_stores, tmp_pa
     )
 
     async def _passes() -> None:
-        await score_on_bench(session, sp, round_num=0, cb=cb)
+        await score_on_bench(session, sp, subject="origin", round_num=0, cb=cb)
         with telemetry.filed_as("diagnostic"):
             await score_search_point(
                 sp,
@@ -5697,6 +5760,7 @@ def test_a_cycle_with_an_unfinished_job_refuses_a_second_producer(tmp_path: Path
     targets is refused at admission, a queued one included — it becomes a producer once admitted.
     """
     from promptpotter.application.jobs.registry import JobRegistry
+    from promptpotter.domain.phases import StopReason
     from promptpotter.shared.errors import CycleBusyError
 
     registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
@@ -5711,5 +5775,5 @@ def test_a_cycle_with_an_unfinished_job_refuses_a_second_producer(tmp_path: Path
             registry.request_slot(user_id="u", dataset_name="d", hop=hop)
         assert refused.value.details["job_id"] == holder.job_id
 
-    registry.mark_finished(first.job_id, status="stopped", stop_reason="paused")
+    registry.mark_finished(first.job_id, status="stopped", stop_reason=StopReason.PAUSED)
     assert registry.request_slot(user_id="u", dataset_name="d", hop=running).status == "pending"

@@ -82,9 +82,22 @@ def _reading(
             calibration_model=calibration,
             round_span=round_span,
             ruler_span=ruler_span,
+            unlinked=ruler.unlinked(cells) if ruler is not None else 0,
             pinned_share=pinned,
         ),
     )
+
+
+def _cycle_history(rounds: list[RoundResult]) -> list[Observation]:
+    """What every arm answered in the rounds this cycle closed, under its own individual id: each
+    round's arms, the references they were read against, and the individual the round stood on."""
+    groups: list[list[Observation]] = []
+    for rr in rounds:
+        groups.append(observations_from_results(rr.all_candidate_results))
+        groups.append(observations_from_results(rr.reference_results))
+        if rr.opt_sp is not None:
+            groups.append(observations_from_results({rr.opt_sp.lineage.id: rr.results}))
+    return dedup_observations(*groups)
 
 
 def _calibrate_delta_ruler(
@@ -133,8 +146,7 @@ def _calibrate_delta_ruler(
     # ``obs``, not ``origin_obs``: the deduped set carries the archive's origin rows too.
     origin_obs_all = [o for o in obs if o.candidate_id == ORIGIN_ABILITY_ID]
     entries = ruler.entries() if ruler is not None else None
-    anchor = ruler.anchor_id if ruler is not None else ""
-    theta = fit_theta_given_delta(origin_obs_all, entries, anchor_id=anchor)
+    theta = fit_theta_given_delta(origin_obs_all, entries)
     return ruler, theta.get(ORIGIN_ABILITY_ID)
 
 
@@ -184,18 +196,16 @@ def _origin_theta_on(
     ruler: DeltaRuler,
     archive_obs: list[Observation],
 ) -> tuple[float, float] | None:
-    """C0's ability on an ALREADY-anchored ruler. Restricted to the cells that ruler carries: the
-    archive has grown since the lock, and reading θ over rows the scale never absorbed is the very
-    thing this arc removes."""
+    """C0's ability on an ALREADY-anchored ruler — read on the cells that ruler carries, though
+    the archive has grown since the lock."""
 
     origin_obs = observations_from_results({ORIGIN_ABILITY_ID: list(origin_results or [])})
     obs = [
         o
         for o in dedup_observations(archive_obs, origin_obs)
-        if o.candidate_id == ORIGIN_ABILITY_ID and o.sample_id in ruler.delta
+        if o.candidate_id == ORIGIN_ABILITY_ID
     ]
-    fit = fit_theta_given_delta(obs, ruler.entries(), anchor_id=ruler.anchor_id)
-    return fit.get(ORIGIN_ABILITY_ID)
+    return fit_theta_given_delta(obs, ruler.entries()).get(ORIGIN_ABILITY_ID)
 
 
 _FRONTIER_ABILITY_ID = "_frontier"
@@ -209,15 +219,14 @@ def _cumulative_theta(
 
     obs = observations_from_results({_FRONTIER_ABILITY_ID: results})
     entries = ruler.entries() if ruler is not None else None
-    anchor = ruler.anchor_id if ruler is not None else ""
-    return fit_theta_given_delta(obs, entries, anchor_id=anchor).get(_FRONTIER_ABILITY_ID)
+    return fit_theta_given_delta(obs, entries).get(_FRONTIER_ABILITY_ID)
 
 
 @dataclass
 class DifficultyView:
     """One cycle's δ scale over the archive rows ``scope`` admits. ``ruler`` is ANCHORED on the
-    first warm fit and grown by :meth:`calibrate` after every round, so it always covers the cells
-    its θ are read on while the anchor stays put; ``None`` = still cold, θ == logit-accuracy."""
+    first warm fit and grown by :meth:`calibrate` after every round onto each cell an anchored arm
+    answered, while the anchor stays put; ``None`` = still cold, θ == logit-accuracy."""
 
     session: Session
     n_min: int
@@ -301,13 +310,15 @@ class DifficultyView:
         self, measured: Mapping[str, Sequence[Mapping[str, Any]]], rounds: list[RoundResult]
     ) -> bool:
         """Cold: attempt the anchoring fit, LOCK, and re-read every θ ``rounds`` banked — True
-        then. Warm: EXTEND onto every cell in ``measured``.
+        then. Warm: EXTEND onto every cell an anchored arm answered, in ``measured`` or in
+        ``rounds``.
 
-        POSTCONDITION on return: the ruler is ``None`` (still cold) or it carries every sample_id
-        in ``measured``. That is the whole contract — ``fit_theta_given_delta`` raises on a hole
-        rather than defaulting it to δ=0, so a gap surfaces as a crashed cycle instead of silently
-        depressing every θ downstream. Called once per round, after every cell has a grade and
-        before the election that reads them.
+        ``measured`` is keyed by INDIVIDUAL id, the parent's re-score under the parent's own, so an
+        arm's link reads its cells across this cycle's rounds and not this round's alone. Linking
+        is owned here: no selector's choice of parent cells carries it. A cell left off the ruler
+        enters no θ and is served as ``ThetaCaveat.UNMEASURED_DELTA`` — never a raise, never δ=0.
+        Called once per round, after every cell has a grade and before the election that reads
+        them.
         """
 
         warmed = False
@@ -327,9 +338,9 @@ class DifficultyView:
             self._restamp(rounds, origin_theta)
             warmed = True
 
-        obs = observations_from_results(measured)
-        if obs:
-            self.ruler = extend_ruler(self.ruler, obs)
+        self.ruler = extend_ruler(
+            self.ruler, observations_from_results(measured), history=_cycle_history(rounds)
+        )
         self.persist(round_num=max(len(rounds) - 1, 0))
         return warmed
 

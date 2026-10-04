@@ -16,6 +16,9 @@ from promptpotter.domain.phases import (
     DashboardState,
     PhaseEvent,
     RunPhase,
+    StopOutcome,
+    StopReason,
+    stop_reason_outcome,
 )
 from promptpotter.domain.results import (
     DisplayMetric,
@@ -63,6 +66,7 @@ from promptpotter.infrastructure.projections.live_dashboard.round_summary import
 )
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     BackendWarning,
+    BenchPassProgress,
     CatchUpLogEntry,
     CurrentRound,
     DashboardError,
@@ -281,19 +285,21 @@ class LiveDashboardProjection(Projection):
         hop: CycleHop,
         session_id: str = "",
         exc: BaseException,
-        interrupted: bool,
+        stop_reason: StopReason,
     ) -> None:
         """Stamps a cycle whose run stopped BEFORE the projection bound, so the tree shows what
-        happened. ``mark_finished`` only on a crash — a ``finished_at`` unresumes a pause."""
+        happened. Pair with ``mark_finished`` only on a terminal stop — a ``finished_at`` unresumes
+        a pause.
+
+        The declaration goes on the LEDGER first, like every other one: ``derive_run_phase`` reads
+        it there, so a stop written only into this file is a pause no reader sees."""
         cycle_path = Path(cycle_dir)
-        stop_reason = "" if interrupted else f"{type(exc).__name__}: {exc}"
-        # On the LEDGER first: `derive_run_phase` reads the declaration there, so a stop written
-        # only into this file is one no reader sees.
+        interrupted = stop_reason_outcome(stop_reason) is StopOutcome.PAUSED
         CycleEventLog.open(cycle_dir).append(
             PhaseRecord(
                 phase=CONTROL_PHASE,
                 event=str(RunPhase.PAUSED if interrupted else RunPhase.TERMINAL),
-                payload={"stop_reason": stop_reason} if stop_reason else {},
+                payload={} if interrupted else {"stop_reason": stop_reason.value},
             )
         )
         state = resolve_resume_state(Cut(cycle=CycleDir(cycle_path), hop=hop), cycle_path, None)
@@ -305,7 +311,7 @@ class LiveDashboardProjection(Projection):
             state.error = DashboardError(
                 kind="launch_failed",
                 message=str(exc) or type(exc).__name__,
-                stop_reason="launch_aborted",
+                stop_reason=stop_reason,
             )
             state.stop_reason = stop_reason
             state.declared_phase = RunPhase.TERMINAL
@@ -382,7 +388,7 @@ class LiveDashboardProjection(Projection):
                 return
             self.state.declared_phase = event_phase
             if event_phase == RunPhase.TERMINAL:
-                self.state.stop_reason = str(record.payload.get("stop_reason") or "")
+                self.state.stop_reason = StopReason(record.payload["stop_reason"])
                 self._set_state(DashboardState.STOPPED)
                 # A stopped cycle is running nothing (`_active_node`'s STOPPED arm), so it is
                 # scoring no candidate: drop the marker rather than leave the final round's
@@ -583,6 +589,10 @@ class LiveDashboardProjection(Projection):
             # other; the buffer below is the ROUND's population, which it is not a member of.
             if ci != NO_ROUND_SLOT:
                 self._buffer.append_sample(ci, ct, qi, qt, result)
+            elif (bench_pass := self.state.bench_pass) is not None:
+                self.state.bench_pass = bench_pass.model_copy(
+                    update={"scored": bench_pass.scored + 1}
+                )
         elif ev == "candidate_started":
             # Seed it empty so the lineage draws the round's path the instant a candidate is
             # known, rendering as a pending node until `sample_scored` fills it in.
@@ -686,6 +696,12 @@ class LiveDashboardProjection(Projection):
             short = view.get("composite_fitness_formula_short")
             if short is not None:
                 self.short_formula_template = short
+        elif event.phase == CampaignPhase.BENCH and event.event == "enter":
+            s.bench_pass = BenchPassProgress(
+                subject=view["subject"], round=view["round"], rows=view["rows"], scored=0
+            )
+        elif event.phase == CampaignPhase.BENCH and event.event == "exit":
+            s.bench_pass = None
         elif event.phase == CampaignPhase.PROPOSE and event.event == "enter":
             # Rewind/fork-in-place clamp: drop rounds this run will overwrite. Sole clamp
             # writer; `round:display` is the sole growth site.
@@ -783,8 +799,8 @@ class LiveDashboardProjection(Projection):
         self._schedule_persist()
 
     def _handle_error(self, record: ErrorRecord) -> None:
-        """Sole writer of ``dashboard.json::error``, fed by the ``ErrorRecord`` the runner's three
-        ``except`` sites emit — so the webapp renders a crash without parsing ``index.json``."""
+        """Sole writer of ``dashboard.json::error``, fed by the ``ErrorRecord`` ``end_run_on``
+        emits — so the webapp renders a crash without parsing ``index.json``."""
         self.state.error = DashboardError(
             kind=record.kind,
             message=record.message,

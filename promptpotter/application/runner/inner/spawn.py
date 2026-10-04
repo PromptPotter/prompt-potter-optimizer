@@ -573,10 +573,12 @@ async def _measure_inner_cell(
         max_rounds = (dash.get("run_limits") or {}).get("max_rounds")
         # The SERVED bench lift, the webapp's headline too, once the inner pass has graded its
         # pick; until then only the inner optimizer's own search-pool reading exists.
-        bench = (dash.get("bench_score") or {}).get("lift")
+        score = dash.get("bench_score") or {}
+        column = score.get("headline")
+        bench = (score.get("lift") or {}).get(column)
         lift = f"best measured {best:.0%}" if isinstance(best, int | float) else "best —"
-        if isinstance(bench, int | float):
-            lift += f" · bench lift {bench:+.3f}"
+        if bench is not None:
+            lift += f" · bench {column} lift {bench['value']:+.3f}"
         return f"inner r{rnd if rnd is not None else '?'}/{max_rounds or '?'} · {lift}"
 
     # Awaiting `inner_task` DIRECTLY makes it this coroutine's `_fut_waiter`, so the envelope's

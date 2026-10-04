@@ -9,12 +9,14 @@ describe("runSummary", () => {
     bench_score: {
       bench_size: 10,
       scorer_id: "default_hit",
+      headline: "accuracy",
       origin: null,
       selected: null,
       missing_reason: null,
-      lift: 0.12,
-      lift_ci_lo: 0.02,
-      lift_ci_hi: 0.22,
+      lift: {
+        accuracy: { value: 0.2, ci_lo: 0.05, ci_hi: 0.35 },
+        composite: { value: 0.12, ci_lo: 0.02, ci_hi: 0.22 },
+      },
     },
     rounds: [
       summaryRound({
@@ -62,7 +64,7 @@ describe("runSummary", () => {
 
   it("carries the SERVED bench lift and stop reason verbatim", () => {
     const s = runSummary(finished);
-    expect(s?.benchLift).toBe(0.12);
+    expect(s?.benchLift).toBe(0.2);
     expect(s?.stopReason).toBe("lives_exhausted");
     expect(s?.cycleId).toBe("cycle_9");
   });

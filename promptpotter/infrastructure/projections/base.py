@@ -21,7 +21,6 @@ from typing import get_args
 
 from promptpotter.domain.run_records import (
     CandidateMintedRecord,
-    CellPricedRecord,
     CommandAckRecord,
     CommandRecord,
     CycleRecord,
@@ -32,6 +31,7 @@ from promptpotter.domain.run_records import (
     LLMCallRecord,
     LLMCallStartRecord,
     PhaseRecord,
+    PricedKeyRecord,
     ResumeCheckpointRecord,
     RoundWarningRecord,
     RulerRecord,
@@ -78,8 +78,8 @@ _ROUTES: dict[type, str | None] = {
     # Banked by `store/account_spend.py` before a delete takes the rows it stands for — a fact
     # about a cycle that no longer exists, so no live view of one can hold it.
     SpendTombstoneRecord: None,
-    # Read by a scan at launch (`scan_ledger_cell_keys`), into the set the walks then grow.
-    CellPricedRecord: None,
+    # Read by a scan at launch (`scan_ledger_priced_keys`), into the set the walks then grow.
+    PricedKeyRecord: None,
     # A send's admission, paired with the bill that closes it. Money moves on the bill alone; a
     # hold no bill closed is unreported, read off the ledger where it is asked (`spend_book.py`).
     SpendHoldRecord: None,

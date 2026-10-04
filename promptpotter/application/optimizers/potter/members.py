@@ -3,7 +3,7 @@ runtime, registered under the manifest's."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -97,6 +97,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.results import OptimizerFact, RoundResult
     from promptpotter.domain.run_records import CheckpointKind
     from promptpotter.domain.sample import Sample
+    from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 __all__ = ["MEMBERS", "RUNTIME"]
@@ -244,7 +245,12 @@ class ThetaElection:
     knobs: ClassVar[type[StrictModel]] = ThetaElectionKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
     stamps_theta: ClassVar[bool] = True
-    reads_parent: ClassVar[bool] = True
+    elects_partial: ClassVar[bool] = True
+
+    def parent_cells(
+        self, ctx: RoundContext, panel: Panel, rows: Mapping[str, Sequence[QueryMeasurement]]
+    ) -> list[Sample]:
+        return panel.cells
 
     def select(self, ctx: RoundContext, measured: Measured, population: Population) -> Selection:
         return elect_on_theta(ctx, measured, population, node=self.name)

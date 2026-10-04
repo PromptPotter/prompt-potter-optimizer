@@ -3,8 +3,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
+from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.wounds import RuntimeFailure, rf_dedup_key
+from promptpotter.infrastructure.store.campaign_store.store import cycle_ending
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
 from promptpotter.infrastructure.store.layout import root_cycle_id as _root_of
@@ -13,22 +14,6 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
-
-
-def _ran_to_completion(raw_stop_reason: Any) -> bool:
-    """The sibling reached a natural conclusion, so its terminal searchpoint carries trustworthy failures. Classified
-    through the canonical ``StopReason`` table, never a hand-written name allowlist."""
-    if not isinstance(raw_stop_reason, str):
-        return False
-    try:
-        reason = StopReason(raw_stop_reason)
-    except ValueError:
-        logger.warning(
-            "sibling carries an unknown stop_reason %r — skipped; its wounds are not inherited",
-            raw_stop_reason,
-        )
-        return False
-    return stop_reason_outcome(reason) is StopOutcome.SUCCESS
 
 
 def gather_sibling_runtime_failures(
@@ -56,7 +41,9 @@ def gather_sibling_runtime_failures(
         idx = read_json_tolerant(CycleLayout(sibling).manifest)
         if not isinstance(idx, dict):
             continue
-        if not _ran_to_completion(idx.get("stop_reason")):
+        # Only a sibling that reached a natural conclusion carries trustworthy failures.
+        reason = cycle_ending(idx)
+        if reason is None or stop_reason_outcome(reason) is not StopOutcome.SUCCESS:
             continue
         n_rounds = int(idx.get("n_rounds") or 0)
         if n_rounds <= 0:

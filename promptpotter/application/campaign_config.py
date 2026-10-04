@@ -426,8 +426,9 @@ class CampaignConfig(StrictModel):
         False,
         description="Grade each round's declared selection on the bench set too, so the trend "
         "carries a held-out series beside the round composite. A round that selects a new "
-        "individual costs one more bench pass, `dataset_split.bench` cells, which is on the "
-        "order of the round's own panel; a held round costs nothing. Off: only the origin and "
+        "individual costs one more bench pass, a cell per bench row — the ranked "
+        "`dataset_split.bench` and every bench-only row the bank declares; a held round costs "
+        "nothing. Off: only the origin and "
         "the final selection are graded, which the headline needs either way.",
     )
 

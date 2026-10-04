@@ -14,6 +14,7 @@ import type {
   MeteredSpend,
   SubjectReading,
 } from "@/lib/api";
+import { STOP_REASON_LABELS } from "@/lib/api/types.generated";
 import { useCampaignPipeline } from "@/lib/hooks/useConnector";
 import { candidateSubject, readingPath } from "@/lib/api/reads";
 import { SteerForkAction } from "@/components/shell/searchpoint/SteerForkAction";
@@ -340,21 +341,23 @@ function Metric({
 // in the sidebar's own words (`benchReading`).
 function benchLead(bench: BenchScore | null, runPhase: CycleListEntry["run_phase"] | undefined) {
   const s = bench?.selected ?? null;
+  const level = s?.[s.headline] ?? null;
+  const lift = bench?.lift[bench.headline] ?? null;
   return {
     score:
       bench === null || s === null
         ? { value: "—", band: benchReading(bench, runPhase).sub ?? "" }
         : {
-            value: fmtMetricValue("level", s.composite_fitness),
-            band: `${fmtMetricInterval("level", s.ci_lo, s.ci_hi)} · ${s.n_scored}/${bench.bench_size} rows`,
+            value: fmtMetricValue("level", level?.value ?? null),
+            band: `${s.headline} ${fmtMetricInterval("level", level?.ci_lo ?? null, level?.ci_hi ?? null)} · ${s.n_scored}/${bench.bench_size} rows`,
           },
     lift:
-      bench === null
+      lift === null
         ? { value: "—", band: "" }
         : {
-            value: fmtSigned(bench.lift),
-            band: fmtMetricInterval("delta", bench.lift_ci_lo, bench.lift_ci_hi),
-            tone: effectTone(bench.lift_ci_lo, bench.lift_ci_hi),
+            value: fmtSigned(lift.value),
+            band: fmtMetricInterval("delta", lift.ci_lo, lift.ci_hi),
+            tone: effectTone(lift.ci_lo, lift.ci_hi),
           },
   };
 }
@@ -396,7 +399,7 @@ function CostFacts({ row }: { row: HeadToHeadRow }) {
       </div>
       <div>
         <dt>replayed</dt>
-        <dd>{fmtPct0(row.replay_share)}</dd>
+        <dd>{row.spend_metered === null ? "—" : fmtPct0(row.spend_metered.replay_share)}</dd>
       </div>
     </dl>
   );
@@ -425,6 +428,9 @@ function HeadlineBadges({
         <Badge tone={row.comparable === false ? "danger" : "default"}>
           {row.comparable === null ? "no headline" : "instrument off"}
         </Badge>
+      )}
+      {row.outcome === "failed" && row.stop_reason !== null && (
+        <Badge tone="danger">{STOP_REASON_LABELS[row.stop_reason] ?? row.stop_reason}</Badge>
       )}
     </span>
   );

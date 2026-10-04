@@ -4,7 +4,7 @@ through its entry points alone: a random panel, a rephrasing llm node, a keep-th
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, cast
@@ -51,6 +51,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.sample import Sample
+    from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
@@ -187,7 +188,12 @@ class Keep:
     knobs: ClassVar[type[StrictModel]] = KeepKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
     stamps_theta: ClassVar[bool] = False
-    reads_parent: ClassVar[bool] = True
+    elects_partial: ClassVar[bool] = False
+
+    def parent_cells(
+        self, ctx: RoundContext, panel: Panel, rows: Mapping[str, Sequence[QueryMeasurement]]
+    ) -> list[Sample]:
+        return panel.cells
 
     def select(self, ctx: RoundContext, measured: Measured, population: Population) -> Selection:
         state = _state(ctx.state)

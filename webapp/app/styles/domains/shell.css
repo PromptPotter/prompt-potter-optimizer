@@ -173,7 +173,14 @@
 .summary-block.is-dense .summary-block-stat-value{font-size:var(--text-sm)}
 /* `SpendBuckets`, the breakdown a spend figure opens onto — the masthead's chip, the chat's run card. */
 .spend-buckets{min-width:200px;font-size:var(--text-sm)}
-.spend-buckets-head{margin:0 0 var(--space-4);color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-size:var(--text-xs);font-weight:600}
+.spend-buckets table{width:100%;border-collapse:collapse}
+.spend-buckets th,.spend-buckets td{padding:0 0 var(--space-4);font-weight:inherit;text-align:right;font-variant-numeric:tabular-nums}
+.spend-buckets td{padding-left:var(--space-12)}
+.spend-buckets th:first-child{text-align:left;color:var(--color-text-secondary)}
+.spend-buckets thead th{color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-size:var(--text-xs);font-weight:600}
+.spend-buckets thead th+th{padding-left:var(--space-12)}
+.spend-buckets tfoot th,.spend-buckets tfoot td{padding-top:var(--space-4)}
+.spend-buckets-replay{margin:var(--space-4) 0 var(--space-8);color:var(--color-text-secondary)}
 .spend-buckets dl{margin:0;display:grid;gap:var(--space-4)}
 .spend-buckets dl>div{display:flex;justify-content:space-between;gap:var(--space-12)}
 .spend-buckets dt{color:var(--color-text-secondary)}

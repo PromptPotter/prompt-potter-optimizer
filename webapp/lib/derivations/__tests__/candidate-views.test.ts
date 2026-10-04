@@ -14,6 +14,7 @@ function node(
     accuracy: null,
     composite_fitness: null,
     status: "",
+    stop_reason: null,
     election_held: true,
     is_selected: false,
     theta: null,

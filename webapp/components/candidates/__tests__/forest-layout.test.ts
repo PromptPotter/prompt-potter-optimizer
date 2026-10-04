@@ -26,6 +26,7 @@ function node(
     composite_fitness: null,
     changes_description: "",
     status: "",
+    stop_reason: null,
     election_held: false,
     is_selected: false,
     theta: null,

@@ -102,7 +102,7 @@ export function CampaignSwitcher({ origins }: { origins: OriginGroup[] }) {
                       }}
                     >
                       <span className="run-switch-branch">
-                        <PhaseMark status={phaseStatus(branch.run_phase, branch.status)} />
+                        <PhaseMark status={phaseStatus(branch.run_phase, branch.stop_reason)} />
                         {unitDisplayName(branch)}
                       </span>
                     </MenuItem>

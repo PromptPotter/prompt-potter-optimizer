@@ -4,7 +4,7 @@ import asyncio
 import enum
 import logging
 import re
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -292,28 +292,6 @@ class RequestTooLargeError(RuntimeError):
         )
 
 
-class RulerCoverageError(PotterError):
-    """A θ was asked for on a warm δ ruler that does not carry the cell.
-
-    Coverage is a POSTCONDITION of ``Cycle.calibrate_ruler``, so this is an engine fault and never
-    a data condition: it means a measured cell reached a θ read without passing the extension seam.
-    Deliberately caught nowhere — it must surface as a crashed cycle with a traceback, because the
-    only quiet alternative is a δ=0 default, which reads an off-ruler cell as easier than anything
-    ever measured and depresses every θ downstream of it.
-    """
-
-    code = "ruler_coverage"
-
-    def __init__(self, missing: Sequence[int], *, anchor_id: str = "") -> None:
-        shown = ", ".join(str(sid) for sid in list(missing)[:10])
-        more = f" (+{len(missing) - 10} more)" if len(missing) > 10 else ""
-        super().__init__(
-            f"δ ruler {anchor_id or '<unknown>'} does not carry {len(missing)} measured "
-            f"sample(s): {shown}{more}. The round was scored on cells the ruler never absorbed.",
-            details={"missing_sample_ids": list(missing)[:50], "anchor_id": anchor_id},
-        )
-
-
 class RulerUnpersistedError(PotterError):
     """This cycle's rounds were read on a WARM δ ruler that its ledger cannot reproduce.
 
@@ -369,6 +347,11 @@ class ResumeDivergenceError(RuntimeError):
 class PromptCompositionError(Exception):
     """An optimizer node's prompt could not be composed. The run halts with ``RENDER_ERROR`` — the
     composition is at fault, not the search — rather than sending a degraded prompt."""
+
+
+class OptimizerTimeoutError(TimeoutError):
+    """An optimizer call outran its wall-clock deadline (``application/bench/llm_call.py``). The run
+    halts with ``OPTIMIZER_TIMEOUT``; any other timeout is a crash and keeps its traceback."""
 
 
 class DatasetIdentityError(RuntimeError):
@@ -503,7 +486,6 @@ __all__ = [
     "PromptCompositionError",
     "RequestTooLargeError",
     "ResumeDivergenceError",
-    "RulerCoverageError",
     "RulerUnpersistedError",
     "SendRefusedError",
     "ServiceUnavailableError",

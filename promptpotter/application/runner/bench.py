@@ -16,7 +16,18 @@ from promptpotter.application.scoring.search_point_scorer import (
     score_search_point,
 )
 from promptpotter.application.scoring.selection import matched_parent_lift, mean_fitness_ci
-from promptpotter.domain.bench import BenchPass, BenchPasses, BenchReading, BenchScore
+from promptpotter.domain.bench import (
+    BENCH_HEADLINE,
+    COLUMN_GRADE,
+    BandedValue,
+    BenchColumn,
+    BenchColumns,
+    BenchPass,
+    BenchPasses,
+    BenchReading,
+    BenchScore,
+    BenchSubject,
+)
 from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopOutcome, emit_phase
 from promptpotter.domain.results import resolved_fitness
 from promptpotter.infrastructure.store.archive_queries import load_run
@@ -34,6 +45,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "PassReading",
+    "bench_rows",
     "bench_selection",
     "grade_round_selection",
     "graded",
@@ -78,21 +90,33 @@ def read_pass(
         return PassReading(None, missing, [])
     folded = fold_cells(rows)
     accuracy = folded["accuracy"]
-    # The walk's served band is accuracy's; the headline is the composite, so its band is too.
-    ci_lo, ci_hi = mean_fitness_ci(graded_rows, grade="objective")
+    # The composite floors at 0.0 over no scoreable row; a column over none has no value.
+    levels: dict[BenchColumn, float | None] = {
+        "accuracy": accuracy,
+        "composite": None
+        if accuracy is None
+        else resolved_fitness(folded["composite_fitness"], accuracy),
+    }
+
+    def column(name: BenchColumn) -> BandedValue | None:
+        level = levels[name]
+        if level is None:
+            return None
+        return _banded(level, *mean_fitness_ci(graded_rows, grade=COLUMN_GRADE[name]))
+
     reading = BenchReading(
         round=bench_pass.round,
         sp_hash=bench_pass.sp_hash,
-        accuracy=accuracy,
-        # The composite floors at 0.0 over no scoreable row; a headline over none has no value.
-        composite_fitness=(
-            None if accuracy is None else resolved_fitness(folded["composite_fitness"], accuracy)
-        ),
-        ci_lo=ci_lo,
-        ci_hi=ci_hi,
+        headline=BENCH_HEADLINE,
         n_scored=len(graded_rows),
+        accuracy=column("accuracy"),
+        composite=column("composite"),
     )
     return PassReading(reading, None, graded_rows)
+
+
+def _banded(value: float, ci_lo: float | None, ci_hi: float | None) -> BandedValue:
+    return BandedValue(value=value, ci_lo=ci_lo, ci_hi=ci_hi)
 
 
 def read_bench(
@@ -100,24 +124,53 @@ def read_bench(
 ) -> BenchScore:
     """The headline, derived from the passes' archived facts under *scorer* — for the run that
     graded them and every later reader alike, so a copy of it is only ever a cache."""
+    return _graded_bench(stores, passes, scorer, scorer_id=scorer_id)[0]
+
+
+def bench_rows(
+    stores: Stores, passes: BenchPasses, scorer: CellScorer, *, scorer_id: str
+) -> tuple[list[QueryMeasurement] | None, list[QueryMeasurement] | None]:
+    """The graded rows behind :func:`read_bench`'s two readings, origin then selected; ``None``
+    for a pass that read nothing. Shared with every other reader, so read-only."""
+    _, origin, selected = _graded_bench(stores, passes, scorer, scorer_id=scorer_id)
+    return (
+        None if origin.reading is None else origin.rows,
+        None if selected.reading is None else selected.rows,
+    )
+
+
+def _graded_bench(
+    stores: Stores, passes: BenchPasses, scorer: CellScorer, *, scorer_id: str
+) -> tuple[BenchScore, PassReading, PassReading]:
+    """Regraded only when a pass's archived run moves: the campaign list asks on every poll."""
     archive = stores.archive
-    # Regraded only when a pass's archived run moves: the campaign list asks on every poll.
     runs = tuple(
         None if p is None or p.run_id is None else archive.signature(p.run_id)
         for p in (passes.origin, passes.selected)
     )
-    score = derived(
+    graded = derived(
         ("bench", archive.base_dir, passes.model_dump_json(), scorer_id),
         sig=runs,
         compute=lambda: _grade_bench(stores, passes, scorer, scorer_id=scorer_id),
     )
-    assert score is not None
-    return score
+    assert graded is not None
+    return graded
+
+
+def _lift(origin: PassReading, selected: PassReading, *, same_pass: bool) -> BenchColumns:
+    def column(name: BenchColumn) -> BandedValue | None:
+        if same_pass:
+            # One pass read twice is no comparison: 0.0 by identity, and no interval to draw.
+            return None if origin.reading is None else _banded(0.0, None, None)
+        paired = matched_parent_lift(selected.rows, origin.rows, grade=COLUMN_GRADE[name])
+        return None if paired is None else _banded(*paired)
+
+    return BenchColumns(accuracy=column("accuracy"), composite=column("composite"))
 
 
 def _grade_bench(
     stores: Stores, passes: BenchPasses, scorer: CellScorer, *, scorer_id: str
-) -> BenchScore:
+) -> tuple[BenchScore, PassReading, PassReading]:
     origin = read_pass(stores, passes.origin, scorer, tolerance=passes.tolerance)
     if passes.selected is None:
         selected = PassReading(None, "not graded until the line's run ends", [])
@@ -125,38 +178,40 @@ def _grade_bench(
         selected = origin
     else:
         selected = read_pass(stores, passes.selected, scorer, tolerance=passes.tolerance)
-    paired: tuple[float, float | None, float | None] | None
-    if passes.selected == passes.origin:
-        # One pass read twice is no comparison: 0.0 by identity, and no interval to draw.
-        paired = None if origin.reading is None else (0.0, None, None)
-    else:
-        paired = matched_parent_lift(selected.rows, origin.rows, grade="objective")
     reads = (("origin", origin), ("selected", selected))
     missing = "; ".join(f"{name}: {r.missing}" for name, r in reads if r.missing is not None)
-    return BenchScore(
+    score = BenchScore(
         bench_size=len(passes.origin.sample_ids),
         scorer_id=scorer_id,
+        headline=BENCH_HEADLINE,
         origin=origin.reading,
         selected=selected.reading,
         missing_reason=missing or None,
-        lift=None if paired is None else paired[0],
-        lift_ci_lo=None if paired is None else paired[1],
-        lift_ci_hi=None if paired is None else paired[2],
+        lift=_lift(origin, selected, same_pass=passes.selected == passes.origin),
     )
+    return score, origin, selected
 
 
 async def score_on_bench(
     session: Session,
     search_point: JobSearchPoint,
     *,
+    subject: BenchSubject,
     round_num: int,
     cb: RunCallbacks,
 ) -> BenchPass:
     sp_hash = search_point.sp_hash(session.pipeline_schema)
     bench = list(session.scoring.require_partition().bench)
     # Bracketed without a round: the pass scores after the loop, and a round here would move the
-    # dashboard's round back to the one being graded.
-    emit_phase(cb.on_phase, CampaignPhase.BENCH, "enter")
+    # dashboard's round back to the one being graded. That round rides the view instead.
+    emit_phase(
+        cb.on_phase,
+        CampaignPhase.BENCH,
+        "enter",
+        subject=subject,
+        graded_round=round_num,
+        rows=len(bench),
+    )
     try:
         scored = await score_search_point(
             search_point,
@@ -193,12 +248,11 @@ def unheld_bench(scorer_id: str) -> BenchScore:
     return BenchScore(
         bench_size=0,
         scorer_id=scorer_id,
+        headline=BENCH_HEADLINE,
         origin=None,
         selected=None,
         missing_reason="nothing held out: the campaign's dataset_split declares no bench rows",
-        lift=None,
-        lift_ci_lo=None,
-        lift_ci_hi=None,
+        lift=BenchColumns(accuracy=None, composite=None),
     )
 
 
@@ -240,7 +294,9 @@ async def grade_round_selection(
     graded(
         cb,
         session,
-        await score_on_bench(session, cycle.selected_sp, round_num=round_result.round, cb=cb),
+        await score_on_bench(
+            session, cycle.selected_sp, subject="selected", round_num=round_result.round, cb=cb
+        ),
     )
 
 
@@ -266,7 +322,9 @@ async def bench_selection(
         selected = origin
     else:
         try:
-            selected = await score_on_bench(session, selected_sp, round_num=picked.round, cb=cb)
+            selected = await score_on_bench(
+                session, selected_sp, subject="selected", round_num=picked.round, cb=cb
+            )
         except RUN_STOPS as stop:
             reason = run_stop_reason(stop)
             if STOP_REASON_INFO[reason].outcome is StopOutcome.PAUSED:

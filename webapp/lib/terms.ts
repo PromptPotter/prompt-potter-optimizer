@@ -28,7 +28,7 @@ export const TERMS: Record<string, string> = {
 
   masthead_best: "The best pick so far, read on the ORIGIN's panel — the one set of cells C0 and every new best since have all answered. A round's own accuracy is read on the subset that round bought, so this can sit above or below every round on the chart. The line is that reading as each round closed.",
   remote_eta:    "Estimated time until spend hits the budget at the current burn rate. Renders '—' when the budget is uncapped or spend is unknown.",
-  remote_eff:    "Bench lift per dollar: the selection's composite fitness over the origin's on held-out rows no optimizer node read — the masthead's BENCH lift — divided by what its search incurred, never the bench's own pass; '—' where the search carries tokens no rate priced. The same reading for every optimizer, potter included; θ is potter's election signal and never stands in for it. '—' until the bench grades the pick, when the run ends.",
+  remote_eff:    "Bench lift per dollar: the selection's lift over the origin, in the bench's headline column, on held-out rows no optimizer node read — the masthead's BENCH lift — divided by what its search incurred, never the bench's own pass; '—' where the search carries tokens no rate priced. The same reading for every optimizer, potter included; θ is potter's election signal and never stands in for it. '—' until the bench grades the pick, when the run ends.",
   arm_broken:     "Its measurements kept failing, so the bench stopped it. That is the candidate's own fault, and it is charged to it.",
   arm_eliminated: "The optimizer's eliminator stopped buying it: a budget call, not a verdict on the idea.",
   arm_locked_in:  "The optimizer's eliminator stopped it far enough ahead to call.",

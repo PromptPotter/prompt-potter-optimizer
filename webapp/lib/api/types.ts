@@ -32,6 +32,7 @@ export type {
   CommandAcceptedBody,
   NodeSearchNarrowing,
   CycleHop,
+  BenchPassProgress,
   BenchReading,
   BenchScore,
   CycleListEntry,

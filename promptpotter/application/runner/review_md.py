@@ -7,11 +7,11 @@ that silently shadowed the first, so the file's one externally-called function w
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, get_args
 
 from promptpotter.application.optimizers.nodes import CheckResult, ReviewReading, ReviewStat
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
-from promptpotter.domain.bench import BenchReading, BenchScore
+from promptpotter.domain.bench import BenchColumn, BenchColumns, BenchReading, BenchScore
 from promptpotter.domain.phases import STOP_REASON_INFO, StopReason
 from promptpotter.domain.results import (
     CEILING_FRACTION,
@@ -23,6 +23,8 @@ from promptpotter.domain.results import (
     overlap_series,
     round_clocks,
 )
+from promptpotter.domain.spend import TOKEN_KIND_BUCKET, SpendRollup
+from promptpotter.infrastructure.store.campaign_store.store import cycle_ending
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
@@ -39,8 +41,10 @@ def render_review_md(
     accuracy_ceiling: float | None,
     optimizer: SelectedOptimizer,
     bench: BenchScore | None,
+    spend: SpendRollup | None,
 ) -> str:
-    """*bench* is the campaign's headline where this cycle answers for its result."""
+    """*bench* is the campaign's headline where this cycle answers for its result; *spend* is the
+    cycle's served rollup, ``None`` where no dashboard carries one."""
     audits = list(round_audits or [None] * len(rounds))
     if len(audits) < len(rounds):
         audits.extend([None] * (len(rounds) - len(audits)))
@@ -76,6 +80,7 @@ def render_review_md(
         clocks, round_ended_s, stats, repairs_per_round, calls_per_round, halt, optimizer.name
     )
     parts += _render_wall_clock(clock)
+    parts += _render_spend(spend)
     parts += _render_behavior_summary(review)
     parts += ["## Rounds", ""]
 
@@ -128,8 +133,7 @@ def _stat(stat: ReviewStat) -> str:
 def _halt_info(index: dict[str, Any], rounds: list[RoundResult]) -> dict[str, str] | None:
     """The cycle's terminal health story, or ``None`` when it ended cleanly. Gated on the cycle's
     TERMINAL state, never on a critical round in history that L2 then self-healed away."""
-    stop_reason = (index.get("stop_reason") or "").strip()
-    terminated = "yes" if stop_reason == StopReason.OPTIMIZER_ABORT else ""
+    terminated = "yes" if cycle_ending(index) is StopReason.OPTIMIZER_ABORT else ""
     last_health: DegradationHealth | None = None
     last_critical: DegradationHealth | None = None
     for r in rounds:
@@ -155,11 +159,9 @@ def _halt_info(index: dict[str, Any], rounds: list[RoundResult]) -> dict[str, st
 
 def _stop_next_step(index: dict[str, Any]) -> str:
     """What the cycle's own stop reason says to do now, off the one table. ``""`` where the cycle
-    is still running, the reason is unknown, or the reason states that nothing is owed."""
-    try:
-        return STOP_REASON_INFO[StopReason((index.get("stop_reason") or "").strip())].next_step
-    except ValueError:
-        return ""
+    is still running or the reason states that nothing is owed."""
+    reason = cycle_ending(index)
+    return "" if reason is None else STOP_REASON_INFO[reason].next_step
 
 
 def _render_header(
@@ -206,17 +208,28 @@ def _render_header(
 def _bench_line(name: str, reading: BenchReading | None, bench: BenchScore) -> str:
     if reading is None:
         return f"- {name}: no reading — {bench.missing_reason}"
-    bench_size = bench.bench_size
-    band = (
-        ""
-        if reading.ci_lo is None or reading.ci_hi is None
-        else f" (95% {reading.ci_lo:.3f} to {reading.ci_hi:.3f})"
-    )
-    value = "—" if reading.composite_fitness is None else f"{reading.composite_fitness:.3f}"
     return (
-        f"- {name} (round {reading.round}): **{value}**{band} · accuracy "
-        f"{fmt_pct(reading.accuracy)} · {reading.n_scored}/{bench_size} rows"
+        f"- {name} (round {reading.round}): {_bench_columns(reading, bench.headline, '{:.3f}')} · "
+        f"{reading.n_scored}/{bench.bench_size} rows"
     )
+
+
+def _bench_columns(columns: BenchColumns, headline: BenchColumn, spec: str) -> str:
+    """Both columns by name, the headline first and bold."""
+
+    def cell(column: BenchColumn) -> str:
+        banded = columns.of(column)
+        if banded is None:
+            return f"{column} —"
+        value = spec.format(banded.value)
+        band = (
+            ""
+            if banded.ci_lo is None or banded.ci_hi is None
+            else f" (95% {spec.format(banded.ci_lo)} to {spec.format(banded.ci_hi)})"
+        )
+        return f"{column} {f'**{value}**' if column == headline else value}{band}"
+
+    return " · ".join(cell(c) for c in sorted(get_args(BenchColumn), key=lambda c: c != headline))
 
 
 def _render_bench(final: dict[str, Any], bench: BenchScore | None) -> list[str]:
@@ -232,16 +245,6 @@ def _render_bench(final: dict[str, Any], bench: BenchScore | None) -> list[str]:
             "campaign's line, whose result is the one graded.",
             "",
         ]
-    lift = (
-        "—"
-        if bench.lift is None
-        else f"{bench.lift:+.3f}"
-        + (
-            ""
-            if bench.lift_ci_lo is None or bench.lift_ci_hi is None
-            else f" (95% {bench.lift_ci_lo:+.3f} to {bench.lift_ci_hi:+.3f})"
-        )
-    )
     return [
         "## Bench score — the headline",
         "",
@@ -251,9 +254,28 @@ def _render_bench(final: dict[str, Any], bench: BenchScore | None) -> list[str]:
         "",
         _bench_line("selected", bench.selected, bench),
         _bench_line("origin", bench.origin, bench),
-        f"- lift, paired per row: **{lift}**",
+        f"- lift, paired per row: {_bench_columns(bench.lift, bench.headline, '{:+.3f}')}",
         "",
     ]
+
+
+def _render_spend(spend: SpendRollup | None) -> list[str]:
+    """Billed beside incurred, total then per bucket — a replay is priced in the second column and
+    charged in neither."""
+    if spend is None:
+        return []
+    lines = [
+        "## Spend",
+        "",
+        f"- **{spend.billed_beside_incurred()}**",
+        "",
+        "| bucket | billed $ | incurred $ |",
+        "|---|---:|---:|",
+    ]
+    for kind, attr in TOKEN_KIND_BUCKET.items():
+        bucket = getattr(spend, attr)
+        lines.append(f"| {kind} | {bucket.used_usd:.4f} | {bucket.incurred_usd:.4f} |")
+    return [*lines, ""]
 
 
 def _render_stats_block(

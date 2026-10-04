@@ -1,6 +1,7 @@
 """The round's measurement — the manifest's one ``measurement`` node, and the bench's: every arm
 walked through the scoring gateway on the sampler's panel under the eliminator's race, the parent
-re-scored on the same panel, each arm read against it, and the ruler extended over every cell."""
+re-scored on the same panel, each arm read against it, and the ruler extended over every cell an
+anchored arm answered."""
 
 from __future__ import annotations
 
@@ -8,7 +9,6 @@ import math
 from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.intelligence.exploration import PARENT_ABILITY_ID
 from promptpotter.application.optimizers.nodes import Measured
 from promptpotter.application.origin import rescore_parent
 from promptpotter.application.scoring.candidate_report import (
@@ -25,6 +25,7 @@ from promptpotter.application.scoring.search_point_scorer import (
     SCORING_ERROR_ABORT,
     close_walk,
     open_walk,
+    reread_cells,
     score_search_point,
 )
 from promptpotter.application.scoring.selection import (
@@ -32,6 +33,7 @@ from promptpotter.application.scoring.selection import (
     matched_parent_lift,
     paired_fitness,
 )
+from promptpotter.domain.phases import StopLoop
 from promptpotter.domain.results import (
     ArmOutcome,
     CandidateProposal,
@@ -39,7 +41,9 @@ from promptpotter.domain.results import (
     candidate_label,
     is_electable,
     is_leader_eligible,
+    measured_cells,
 )
+from promptpotter.domain.ruler import ThetaCaveat
 from promptpotter.domain.run_records import SnapshotRecord
 from promptpotter.shared.instrument import NO_ROUND_SLOT, MeasuredCandidate, MeasurementRole
 
@@ -52,8 +56,10 @@ if TYPE_CHECKING:
         Population,
         Race,
         RoundContext,
+        Selector,
     )
     from promptpotter.domain.opt_search_point import OptSearchPoint
+    from promptpotter.domain.phases import StopReason
     from promptpotter.domain.results import ReferenceReading
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
@@ -69,13 +75,21 @@ async def measure_population(
     population: Population,
     panel: Panel,
     eliminator: Eliminator | None,
-    *,
-    reads_parent: bool,
+    selector: Selector,
 ) -> Measured:
     cycle = ctx.cycle
     schema = cycle.session.pipeline_schema
     assert schema is not None, "the measurement requires pipeline_schema"
-    rows, scores = await _walk_population(ctx, population, panel, eliminator)
+    rows, scores, cut = await _walk_population(
+        ctx, population, panel, eliminator, keep_cut=selector.elects_partial
+    )
+    # Clamped so a tiny dataset stays electable.
+    coverage_floor = min(cycle.config.optimization.elimination_n_min, len(panel.cells))
+    if cut is not None and not any(
+        distinct_valid_cells(arm) >= coverage_floor for arm in rows.values()
+    ):
+        # Nothing the cut left can be elected, so the round is unwound as an unkept cut is.
+        raise StopLoop(cut)
 
     # The REPLICATION cohort, deliberately the looser predicate; admission to the election is
     # `is_electable` below, since collapse is a verdict on rows we would be about to add to.
@@ -85,10 +99,17 @@ async def measure_population(
         for ind in population.individuals
         if ind.lineage.id in rows and ind.lineage.id not in aborted_ids
     ]
-    # On the round's WHOLE panel for a selector that reads it: a held round's headline IS this
-    # re-score, and a narrower set hands it the denominator of whatever the eliminator cut.
-    reached = {int(r["sample_id"]) for arm in rows.values() for r in arm}
-    cells = panel.cells if reads_parent else [s for s in panel.cells if int(s.id) in reached]
+    # A held round's headline IS this re-score, so the selector names the cells it is read on.
+    cells = selector.parent_cells(ctx, panel, rows)
+    if cut is not None:
+        # The spent budget buys the parent no cell: it is read where the archive holds it — the
+        # origin's on what run init banked, a racing incumbent's on its own walk.
+        assert cycle.tracking.current_sp is not None
+        cells = reread_cells(
+            cycle.tracking.current_sp, cells, cycle.session, label=MeasurementRole.PARENT
+        )
+        if not cells:
+            raise StopLoop(cut)
     parent = await rescore_parent(cycle, cells, callbacks=ctx.callbacks)
     # Spent where the round's scoring ends, never in a `finally` (an unwound round did not score);
     # round 0 spends it in `round.py::emit_origin_round`, and the two cannot fire for one round.
@@ -98,8 +119,6 @@ async def measure_population(
     # every comparison equally rather than favouring one.
     parent_rows = list(cast("list[QueryMeasurement]", parent.results))
     read_against, references = await _lift_references(ctx, population, panel, rows, scored, parent)
-    # Clamped so a tiny dataset stays electable.
-    coverage_floor = min(cycle.config.optimization.elimination_n_min, len(panel.cells))
     cs_by_id = {cs.candidate_id: i for i, cs in enumerate(scores)}
     electable: list[OptSearchPoint] = []
     for ind in scored:
@@ -132,9 +151,18 @@ async def measure_population(
             continue
         electable.append(ind)
 
-    # Before the selector, which reads it: the ≥2-arm floor is satisfiable now, and on return the
-    # ruler covers every cell above, so a θ fit raises on a hole instead of grading it δ=0.
-    cycle.calibrate_ruler({**rows, PARENT_ABILITY_ID: parent_rows})
+    # Before the selector, which reads it: the ≥2-arm floor is satisfiable now. The parent rides
+    # under its own id, so the ruler links it through every round this cycle read it in.
+    bar_id = parent.opt_sp.lineage.id
+    cycle.calibrate_ruler({**rows, bar_id: [*rows.get(bar_id, ()), *parent_rows]})
+    if (ruler := cycle.difficulty.ruler) is not None:
+        scores = [
+            cs.model_copy(update={"theta_caveat": ThetaCaveat.UNMEASURED_DELTA})
+            if cs.theta_caveat is None
+            and ruler.unlinked(measured_cells(rows.get(cs.candidate_id, ())))
+            else cs
+            for cs in scores
+        ]
     return Measured(
         rows=rows,
         scores=scores,
@@ -144,6 +172,7 @@ async def measure_population(
         references=references,
         electable=electable,
         coverage_floor=coverage_floor,
+        cut=cut,
     )
 
 
@@ -244,7 +273,9 @@ async def _walk_population(
     population: Population,
     panel: Panel,
     eliminator: Eliminator | None,
-) -> tuple[dict[str, list[QueryMeasurement]], list[ScoredCandidate]]:
+    *,
+    keep_cut: bool,
+) -> tuple[dict[str, list[QueryMeasurement]], list[ScoredCandidate], StopReason | None]:
     cycle = ctx.cycle
     callbacks = ctx.callbacks
     round_num = ctx.round_num
@@ -329,16 +360,17 @@ async def _walk_population(
         reports[idx] = report
         callbacks.on_candidate_scored(idx, n, report.model_dump())
 
-    await run_walks(
+    cut = await run_walks(
         walks,
         cycle.session,
+        keep_cut=keep_cut,
         backfills=race,
         blocks=blocks,
         on_turn=on_turn,
         on_decided=on_decided,
     )
     ranked = sorted(reports)
-    return {ids[i]: rows[ids[i]] for i in ranked}, [reports[i] for i in ranked]
+    return {ids[i]: rows[ids[i]] for i in ranked}, [reports[i] for i in ranked], cut
 
 
 def _catch_up(cycle: Cycle, sp: JobSearchPoint, sample: Sample, prior_id: str) -> CatchUp:

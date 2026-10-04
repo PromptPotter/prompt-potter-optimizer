@@ -180,9 +180,9 @@ function ConfigBox({
           {summary.metered ? (
             <>
               <Term content={<SpendBuckets metered={summary.metered} />}>
-                <strong>{fmtUsd(summary.metered.usd)}</strong>
+                <strong>{fmtUsd(summary.metered.billed_usd)}</strong>
               </Term>
-              <span className="run-headline-unit">{METER_WORD[summary.metered.meter]}</span>
+              <span className="run-headline-unit">{METER_WORD.bill}</span>
             </>
           ) : (
             <strong>—</strong>

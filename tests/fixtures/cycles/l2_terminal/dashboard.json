@@ -806,28 +806,40 @@
   "bench_score": {
     "bench_size": 10,
     "scorer_id": "auto_5d0c7a19e2",
+    "headline": "accuracy",
     "origin": {
       "round": 0,
       "sp_hash": "c274cdc71db2012c",
-      "accuracy": 0.3,
-      "composite_fitness": 0.3729087568891611,
-      "ci_lo": 0.16991794712615302,
-      "ci_hi": 0.5758995666521691,
+      "headline": "accuracy",
+      "accuracy": {"value": 0.3, "ci_lo": null, "ci_hi": null},
+      "composite": {
+        "value": 0.3729087568891611,
+        "ci_lo": 0.16991794712615302,
+        "ci_hi": 0.5758995666521691
+      },
       "n_scored": 10
     },
     "selected": {
       "round": 4,
       "sp_hash": "ec9a1dea39928e14",
-      "accuracy": 1.0,
-      "composite_fitness": 0.9301075268817204,
-      "ci_lo": 0.881108427268219,
-      "ci_hi": 0.9791066264952217,
+      "headline": "accuracy",
+      "accuracy": {"value": 1.0, "ci_lo": null, "ci_hi": null},
+      "composite": {
+        "value": 0.9301075268817204,
+        "ci_lo": 0.881108427268219,
+        "ci_hi": 0.9791066264952217
+      },
       "n_scored": 10
     },
     "missing_reason": null,
-    "lift": 0.5571987699925594,
-    "lift_ci_lo": 0.3229102229020594,
-    "lift_ci_hi": 0.7914873170830593
+    "lift": {
+      "accuracy": {"value": 0.7, "ci_lo": null, "ci_hi": null},
+      "composite": {
+        "value": 0.5571987699925594,
+        "ci_lo": 0.3229102229020594,
+        "ci_hi": 0.7914873170830593
+      }
+    }
   },
   "bench_lift_per_incurred_usd": null,
   "composite_fitness_formula": "max(0.0, min(1.0, fitness * 692.0 / (692.0 + 0.5 * max(0.0, tokens - 692.0))))",

@@ -4,18 +4,35 @@ what enforces them is the admission of each call, ahead of any boundary."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import traceback
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from promptpotter.domain.phases import REFUSAL_STOPS, StopLoop, StopReason
-from promptpotter.infrastructure.llm.telemetry import emit_round_warning
-from promptpotter.shared.errors import SendRefusedError, is_repairable_hole
+from promptpotter.domain.phases import (
+    REFUSAL_STOPS,
+    STOP_REASON_INFO,
+    StopLoop,
+    StopOutcome,
+    StopReason,
+)
+from promptpotter.domain.run_records import ErrorRecord
+from promptpotter.infrastructure.llm.telemetry import emit_error_record, emit_round_warning
+from promptpotter.shared.errors import (
+    OptimizerTimeoutError,
+    PayloadInvalidError,
+    PromptCompositionError,
+    ResumeDivergenceError,
+    SendRefusedError,
+    is_repairable_hole,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from promptpotter.application.bench.cycle import Cycle
+    from promptpotter.application.initialization.session import Session
     from promptpotter.domain.results import DegradationHealth
     from promptpotter.infrastructure.llm.spend_book import SpendBook
 
@@ -26,14 +43,66 @@ PanelGateMode = Literal["strict", "off"]
 
 # What ends a run on a named reason wherever it is raised — prep, init or the round loop.
 RUN_STOPS = (StopLoop, SendRefusedError)
+# Everything a run ENDS on instead of propagating; `SystemExit` and `GeneratorExit` still pass.
+RUN_ENDS = (Exception, KeyboardInterrupt, asyncio.CancelledError)
 
 
-def run_stop_reason(stop: StopLoop | SendRefusedError) -> StopReason:
-    if isinstance(stop, SendRefusedError):
-        logger.warning("Run halted: %s", stop)
-        emit_round_warning(kind="send_refused", severity="error", message=str(stop))
-        return REFUSAL_STOPS[stop.category]
-    return stop.reason
+def run_stop_reason(exc: BaseException) -> StopReason:
+    """The stop a run ends on for ANY exception it can end on, wherever it was raised; one no
+    case names is a crash. A classification only — ``end_run_on`` is what a run ENDS through."""
+    match exc:
+        case StopLoop():
+            return exc.reason
+        case SendRefusedError():
+            return REFUSAL_STOPS[exc.category]
+        # A KeyboardInterrupt is the PAUSE FLAG's stop (`scoring/search_point_scorer.py`); a
+        # terminal Ctrl+C and an outer sample deadline both arrive as the cancellation.
+        case KeyboardInterrupt() | asyncio.CancelledError():
+            return StopReason.PAUSED
+        case PromptCompositionError():
+            return StopReason.RENDER_ERROR
+        case ResumeDivergenceError():
+            return StopReason.DIVERGED
+        case PayloadInvalidError():
+            return StopReason.INPUT_REFUSED
+        case OptimizerTimeoutError():
+            return StopReason.OPTIMIZER_TIMEOUT
+        case _:
+            return StopReason.CRASHED
+
+
+def end_run_on(
+    exc: BaseException, session: Session, *, where: str
+) -> tuple[StopReason, ErrorRecord | None]:
+    """The stop ``exc`` ends the run on, and what that reason's ``STOP_REASON_INFO`` row owes: an
+    error record where the outcome is FAILED, a stashed traceback where the row keeps one, and
+    the ``send_refused`` warning for a refused send. Called INSIDE the ``except`` — the traceback
+    is read off the live exception, dead by finalize."""
+    reason = run_stop_reason(exc)
+    info = STOP_REASON_INFO[reason]
+    if isinstance(exc, SendRefusedError):
+        logger.warning("Run halted: %s", exc)
+        emit_round_warning(kind="send_refused", severity="error", message=str(exc))
+    elif isinstance(exc, asyncio.CancelledError):
+        logger.warning(
+            "Optimization cancelled %s (%s); finalizing as paused (resumable).",
+            where,
+            session.state.cycle_id or "no cycle",
+        )
+    elif isinstance(exc, KeyboardInterrupt):
+        logger.warning("Optimization paused %s (%s).", where, str(exc) or "user-initiated")
+    if info.outcome is not StopOutcome.FAILED:
+        return reason, None
+    message = str(exc) or type(exc).__name__
+    tb: str | None = None
+    if info.has_traceback:
+        tb = session.state.crash_traceback = traceback.format_exc()
+        logger.exception("Optimization ended %s: %s.", where, info.label)
+    else:
+        logger.warning("Optimization ended %s: %s — %s", where, info.label, message)
+    return reason, emit_error_record(
+        kind=type(exc).__name__, message=message, stop_reason=reason, traceback=tb
+    )
 
 
 @dataclass(frozen=True)
@@ -91,9 +160,11 @@ def target_tripped(cycle: Cycle, target: float | None) -> StopReason | None:
 
 
 __all__ = [
+    "RUN_ENDS",
     "RUN_STOPS",
     "BudgetGate",
     "OriginGateMode",
+    "end_run_on",
     "origin_gate_tripped",
     "panel_gate_tripped",
     "run_stop_reason",

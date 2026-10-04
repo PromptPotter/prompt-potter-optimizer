@@ -104,7 +104,12 @@ reach the racing stream under `paired_t`.
   smallest `p_better`, the t fiducial P(arm beats that rival).
 - **Where it departs from the paper.** A race that starts with μ arms or fewer still walks its
   first block, so the selector has rows to rank; App. B races none. `paired_reading` floors the SE
-  at `1/(4n)`, which moves a p only where the paired differences are nearly constant.
+  at `1/(4n)`, which moves a p only where the paired differences are nearly constant. And a round
+  the spend or token budget cuts is elected on the k of z_max blocks it paid for
+  (`Selector.elects_partial`): the population is kept among the arms that reached the coverage
+  floor, its parent is read on the cells the archive already holds — round 1's origin on what
+  run init scored — and the round is the run's last. Where no arm reached the floor, or the
+  parent holds none of its cells, the round is unwound.
 - **Each cut is a ledger decision**, `paired_t_cut`, REPLAYED: its record names the arm, the rows
   it was cut at, the arms it raced against and the objective's γ and normaliser, so a resume under
   a changed scorer re-reads the same test off the rescored round.
@@ -151,11 +156,11 @@ incumbent. Where the bench runs CAPO differently from the paper:
 - **The 5M-input-token budget** (§5) is the campaign's `token_budget`, which counts output tokens
   too.
 - **A reply without `<prompt>` markers** makes an invalid arm that costs no cell.
-- **The bench re-scores its incumbent** each round on the cells some arm reached, never the blocks
-  the race settled before buying: `population` reads no parent (`Selector.reads_parent`), and the
-  bench's reference rows are what every arm's lift pairs on. From round 2 the incumbent races as a
-  population member, so the re-score replays whatever of those cells it raced; round 1's is the
-  origin's, measured on them and billed in the same book — cells CAPO's budget leaves out.
+- **The bench re-scores its incumbent** each round on the cells `population` names
+  (`Selector.parent_cells`), which every arm's lift pairs on. From round 2 the incumbent races as
+  a population member, so those are the cells it raced and the re-score replays them. Round 1's is
+  the origin, no member: it is read on the first block alone — cells CAPO's budget leaves out,
+  billed in the same book — so a round-1 lift pairs on one block.
 - **A repeated request samples afresh**, as the paper's T = 1.0 draw does, though the optimizer
   reuse cache keys on the request: each call carries a seed drawn by round, node and call off the
   run's seed — the determinism clamp's where one pins it, else the campaign's id — so only a resume
@@ -172,7 +177,7 @@ value cited there) has no eliminator, and its selector is an archive. Round 1 is
 | Paper | Node · config |
 |---|---|
 | Seed pass `M_l.DIVERSESEED`, 4 seeds (Alg. 1, Table 5) | `levi_paradigm_shift` in round 1, `n_diverse_seeds: 4` |
-| Calibration matrix on the discovery set, N_init = 5 (§3.3, App. A) | round 1 scores the origin (its parent) and the seeds on the whole search pool |
+| Calibration matrix on the discovery set, N_init = 5 (§3.3, App. A) | round 1 scores the origin (its parent) and the seeds on `proxy_css.discovery`, the pool's first 150 in bank order (App. I) |
 | Proxy by greedy column subset, K_proxy = 30, (r, s, c) = (0.5, 0.5, 0.15) | `proxy_css`: `size`, `rank_weight`, `separation_weight`, `redundancy_weight`; `shared/statistics.py::greedy_column_subset`; a `proxy_selected` decision, REPLAYED |
 | f restricted to the proxy (Alg. 1 line 11) | `proxy_css` draws the proxy, in one order, every round after calibration |
 | Welford z-score + sigmoid, CVT with 50 centroids, TRYINSERT (§3, Alg. 1-2) | `map_elites`: `centroids: 50`; the statistics ride `LeviCalibration.stats` |
@@ -189,11 +194,12 @@ Where the bench runs LEVI differently from the paper:
   together and inserted in walk order, so the ratio holds exactly while no refinement sees another's
   insert; LEVI's four workers do (App. B). Its worker, process and timeout counts are the bench's.
 - **The seed pass sends E.7** — E.1 is written for code — over the seeds so far, **starting from
-  the origin** where Alg. 1 starts from none: the origin is measured on the pool anyway, and makes
+  the origin** where Alg. 1 starts from none: the origin is measured on the discovery set anyway, and makes
   App. A's five calibration prompts of Table 5's four seeds. A seed reply without `<prompt>`
   markers is an invalid arm; nothing of it is fed forward.
 - **No variants and no meta-advice.** The variant bursts (Table 5, App. F) have only a code
-  template (E.5), and 80 variants on the pool exceed the paper's own prompt budget (Table 2); the
+  template (E.5), and 80 variants on the discovery set exceed the paper's own prompt budget
+  (Table 2); the
   meta-advice template is unpublished, so its section stays empty.
 - **Unstated values, chosen:** the descriptors (prompt length and each proxy cell's objective);
   `feedback_failures` 3, GEPA's reflection minibatch; centroids by k-means over `cvt_samples`
@@ -222,8 +228,8 @@ Alg. 1 per round, and its eliminator is Alg. 1's acceptance test.
 
 | Paper | Node · config |
 |---|---|
-| Split D_train into D_feedback and D_pareto (Alg. 1 line 1) | `minibatch.pareto_share` 0.5 — AIME, LiveBench-Math and PUPA split equally (App. E.1); the Pareto set rides `GepaRoundState.pareto_set` |
-| P ← [Φ], Φ scored on D_pareto (lines 2-5) | round 1 mutates the incumbent, the origin; `pareto` seats it with its Pareto-set scores off the bench's re-score of the round's panel |
+| Split D_train into D_feedback and D_pareto (Alg. 1 line 1) | `minibatch.pareto_size` 50, a row count as the paper states each benchmark's (App. E.1); the Pareto set rides `GepaRoundState.pareto_set` |
+| P ← [Φ], Φ scored on D_pareto (lines 2-5) | round 1 mutates the incumbent, the origin; `pareto` seats it with its Pareto-set scores off the bench's re-score, which reads the Pareto set alone (`Selector.parent_cells`) |
 | SELECTCANDIDATE (line 7, Alg. 2) | `pareto`, at each round's close: per-cell fronts, the dominated removed, the next parent drawn ∝ cells led — `GepaRoundState.parent_id` |
 | SELECTMODULE, round-robin (line 8, §3) | an individual renders one prompt, so the module is its whole prompt every round |
 | A minibatch of b from D_feedback (line 9), b = 3 (App. E.4) | `minibatch.size` 3, the panel's first block |
@@ -242,7 +248,8 @@ Where the bench runs GEPA differently from the paper:
   child IS the other descendant. The bench runs the paper's GEPA row, not GEPA+Merge.
 - **The prompt** is the individual's whole text, as § CAPO's population and operators states for
   CAPO: round 1's reflection reads the origin's fields as one instruction.
-- **Unstated values, chosen:** the Pareto set is the pool's first half in the bank's order; the
+- **Unstated values, chosen:** the Pareto set is the pool's first `pareto_size` rows in the bank's
+  order, 50 where the paper sizes it per benchmark — every accepted child walks it whole; the
   minibatch is drawn uniformly each round by the run's seed, where the reference implementation
   walks a once-per-epoch shuffle; dominance is read as the reference implementation reads it — a
   candidate is dominated when every cell it leads another survivor also leads, lowest aggregate
@@ -255,9 +262,9 @@ Where the bench runs GEPA differently from the paper:
 - **μ_f** is what the scorer can say about a cell — its objective, its correctness where the
   composite differs, the expected answer and each judge's banked reason — where the paper's
   feedback functions are written per benchmark (App. E.1).
-- **A reply without a fenced block** makes an invalid arm that costs no cell; the reference
-  implementation takes the whole reply. Top-k 20 (App. E.2) is not carried, an llm node's call
-  config having none, and the context window stands in for the output cap.
+- **Top-k 20** (App. E.2) is not carried, an llm node's call config having none, and the context
+  window stands in for the output cap. A reply without a fenced block is taken whole, as the
+  reference implementation takes it.
 - **A repeated reflection samples afresh** at 0.6, as the paper's does — the same parent on the
   same minibatch included — its call seeded as § CAPO's population and operators states for CAPO.
 - **One model for reflection and target** is the campaign's choice, as it is CAPO's: matching
