@@ -1048,11 +1048,14 @@ the PR description.
     admission (a `min` against the knob), no launch could raise a dataset's
     ceiling and the reservation would name a number the run never runs to.
   - **Only the cycle tier halts a run, and it halts one BEFORE a call is sent**:
-    its spend book (`infrastructure/llm/spend_book.py`) admits every paid call
-    at the most it may cost, in both units, beside everything still out, and a
-    call that ends without reporting stays UNREPORTED at that bound — binding
-    the ceiling, never counted as spent, since only a provider's bill is. A
-    ceiling read after the fact is a guess about the calls in flight.
+    its spend book (`infrastructure/llm/spend_book.py`) admits every paid call,
+    in both units, beside everything still out. Against the run's CEILING a
+    call out holds what such calls have billed, so the run stops on reaching
+    it, passing it at most by the calls then out; against the account's
+    RESERVE — the ceiling and as much again, within what the account has left —
+    it holds the most it may cost: bills never pass it. A call that ends without
+    reporting stays UNREPORTED at the most it may have cost — binding the
+    ceiling, never counted as spent, since only a provider's bill is.
     `termination.py::BudgetGate` reads the same book at the round boundary; the
     account tier admits or refuses and never interrupts a campaign in flight.
   - **An L4 inner cycle needs no fourth source** — it spends under its ROOT's

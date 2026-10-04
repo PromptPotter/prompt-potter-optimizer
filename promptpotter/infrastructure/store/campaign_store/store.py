@@ -1126,7 +1126,12 @@ class CampaignStore:
         return scan_ledger_cycle_seed(self._layout(hop).ledger)
 
     def write_run_limits(
-        self, hop: CycleHop, ceiling: BudgetChange, *, rounds: RoundsCap | None
+        self,
+        hop: CycleHop,
+        ceiling: BudgetChange,
+        *,
+        rounds: RoundsCap | None,
+        reserve: BudgetChange,
     ) -> None:
         """Land the cycle's standing operator ceiling — the record, then its polled mirror. The ONE
         writer of both, so the mirror a running gate reads can never name a ceiling the ledger does
@@ -1135,7 +1140,8 @@ class CampaignStore:
         CycleEventLog.open(CycleDir(cycle_dir)).append(
             RunLimitsRecord(usd=ceiling.usd, tokens=ceiling.tokens, rounds=rounds)
         )
-        write_run_limits_mirror(cycle_dir, ceiling, rounds=rounds)
+        # *reserve* rides the mirror alone: every launch admits its own.
+        write_run_limits_mirror(cycle_dir, ceiling, rounds=rounds, reserve=reserve)
 
     def read_run_limits(self, hop: CycleHop) -> RunLimitsRecord:
         return scan_ledger_run_limits(self._layout(hop).ledger)

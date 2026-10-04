@@ -52,8 +52,9 @@ def refuse_arm_limits(budgets: BudgetChange, halt_at_accuracy: float | None) -> 
 
 
 class HeldLimits(NamedTuple):
-    """What a run HOLDS once its declaration is admitted: the ONE ceiling that is reserved on the
-    job, set on the run's config, stamped on the dashboard and armed on the spend book.
+    """What a run HOLDS once its declaration is admitted: the ``ceiling`` it stops on — set on
+    the run's config, stamped on the dashboard, armed on the spend book — and the ``reserve`` its
+    bills may never pass, which is the job's reservation and ``None`` on an arm no account bounds.
 
     ``operator`` is the subset of arms an operator gesture declared (a launch flag, a standing
     ``set-limits``), at their HELD values — the runner persists exactly those as the cycle's
@@ -63,16 +64,23 @@ class HeldLimits(NamedTuple):
     halt_at_accuracy: float | None
     ceiling: SpendCeilings
     operator: BudgetChange
+    reserve: SpendCeilings
 
     @classmethod
     def admitted(
-        cls, requested: LaunchLimits, ceiling: SpendCeilings, operator: BudgetChange
+        cls,
+        requested: LaunchLimits,
+        ceiling: SpendCeilings,
+        operator: BudgetChange,
+        *,
+        reserve: SpendCeilings,
     ) -> HeldLimits:
         """*ceiling* as the run holds it. Only the arms an operator set are theirs to persist, at
         the value held for them — never the value asked for, which admission may have clamped."""
         return cls(
             halt_at_accuracy=requested.halt_at_accuracy,
             ceiling=ceiling,
+            reserve=reserve,
             operator=BudgetChange(
                 None if operator.usd is None else ceiling.usd,
                 None if operator.tokens is None else ceiling.tokens,

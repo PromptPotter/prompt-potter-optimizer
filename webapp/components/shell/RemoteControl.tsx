@@ -156,8 +156,8 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
   const allowed = dash?.lookahead_allowed ?? 0;
   const most = dash?.lookahead_most ?? 0;
   const scoringNow = inFlight > 0 || allowed > 0;
-  // A cell RESERVES its worst case against the spend ceiling, so a tight ceiling holds the walk
-  // at one call while the depth reads armed.
+  // What a call out holds against the limit that binds is served; where that is its worst case
+  // (an account's reserve) a tight one holds the walk at one call while the depth reads armed.
   const affordable = dash?.lookahead_affordable ?? null;
   const cellReserve = dash?.cell_reserve_usd ?? null;
   const moneyPinned = affordable !== null && inFlight + affordable < Math.min(lookahead, allowed);
@@ -278,9 +278,9 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
                 <span className="lbl">Ceiling</span>
                 <Term
                   className="val remote-spend-warn"
-                  content={`A cell is admitted on the MOST it could bill${
+                  content={`Each call out holds part of the ceiling${
                     cellReserve != null ? `, ${fmtUsd(cellReserve)} here` : ""
-                  }, so once the ceiling cannot hold another of those the walk runs one at a time — whatever depth is armed. Raise the budget below to widen it.`}
+                  }, so once the ceiling cannot hold another the walk runs one at a time — whatever depth is armed. Raise the budget below to widen it.`}
                 >
                   {affordable === 0 ? "holds no further cell" : `${affordable} more affordable`}
                 </Term>

@@ -292,10 +292,8 @@ class LiveDashboardState(StrictModel):
     in_flight: int = 0
     lookahead_allowed: int = 0
     lookahead_most: int | None = 0
-    # How many MORE cells the SPEND ceiling admits, and what one reserves — the fourth bound on the
-    # same depth, and the only one nothing else implies. A cell reserves its worst case, so a
-    # ceiling a few of those wide pins the walk at one call while the depth reads armed and the
-    # stop rules read generous. ``None`` where no book bounds the cells.
+    # How many MORE cells the spend limits admit, and what one reserves: a reserve a few worst
+    # cases wide pins the walk at one call while the depth reads armed. ``None``: no book binds.
     lookahead_affordable: int | None = None
     cell_reserve_usd: float | None = None
     # The call the round's next decision waits on — calls are taken in walk order, so one slow cell

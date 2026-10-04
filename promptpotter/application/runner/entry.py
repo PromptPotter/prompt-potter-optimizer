@@ -86,6 +86,7 @@ from promptpotter.infrastructure.llm.spend_book import SpendBook
 from promptpotter.infrastructure.llm.telemetry import emit_error_record
 from promptpotter.infrastructure.runtime_flags import (
     clear_run_control_flags,
+    read_reserve_mirror,
     read_run_limits_mirror,
     read_sample_lookahead,
     spend_sample_lookahead,
@@ -132,6 +133,7 @@ def _build_budget_gate(
     usd_cap: float | None,
     token_cap: int | None,
     meters: CeilingMeter,
+    reserve: SpendCeilings,
 ) -> BudgetGate:
     """**Always armed**, because a run's ceiling is not settled at launch: the probes re-read
     ``.runtime/run_limits.json`` each tick, so ``change-run-limits`` can bind a run that declared
@@ -150,10 +152,20 @@ def _build_budget_gate(
         saved = read_run_limits_mirror(cycle_dir).tokens
         return saved if saved is not None else token_cap
 
+    def _usd_reserve() -> float | None:
+        moved = read_reserve_mirror(cycle_dir).usd
+        return moved if moved is not None else reserve.usd
+
+    def _token_reserve() -> int | None:
+        moved = read_reserve_mirror(cycle_dir).tokens
+        return moved if moved is not None else reserve.tokens
+
     # Seeded from the rollup the resume folded, then fed by the ledger itself.
     book = SpendBook(
         usd_cap=_usd_cap,
         tokens_cap=_token_cap,
+        usd_reserve=_usd_reserve,
+        tokens_reserve=_token_reserve,
         meters=meters,
         usd_spent=spent.usd,
         tokens_spent=spent.tokens,
@@ -185,6 +197,7 @@ def _arm_run_controls(
         usd_cap=campaign_config.optimization.spend_budget_usd,
         token_cap=campaign_config.optimization.token_budget,
         meters=ceiling_meter(session.arm),
+        reserve=session.reserve,
     )
     session.budget_tripped = gate.tripped
     session.spend_used = lambda: gate.book.usd_spent
@@ -312,9 +325,10 @@ async def _prepare_run(
             )
             session.human_intervened = True
 
-    # LAST, after the seed's other knobs: the held ceiling is the one number the reservation, this
-    # config and the dashboard all carry, composed and admitted before launch.
+    # LAST, after the seed's other knobs: the held ceiling is the one number this config and the
+    # dashboard both carry, composed and admitted before launch.
     campaign_config = _set_held_ceiling(campaign_config, limits.ceiling)
+    session.reserve = limits.reserve
     # A standing round cap outranks the seed's, as the standing spend ceiling does; it admits
     # nothing, so it is set here rather than composed with the budget before launch.
     campaigns = session.store.campaigns
@@ -335,10 +349,13 @@ async def _prepare_run(
         # again rather than falling back to the knob. Held values, not the request: the gate
         # prefers the mirror over the config, so landing more than was admitted would let the run
         # escape its own admission. A launch that moved nothing re-lands the swept mirror alone.
+        unmoved = BudgetChange(None, None)
         if standing.ceiling != limits.operator:
-            campaigns.write_run_limits(session.hop, limits.operator, rounds=rounds)
+            campaigns.write_run_limits(session.hop, limits.operator, rounds=rounds, reserve=unmoved)
         else:
-            write_run_limits_mirror(launch_cycle_dir, limits.operator, rounds=rounds)
+            write_run_limits_mirror(
+                launch_cycle_dir, limits.operator, rounds=rounds, reserve=unmoved
+            )
 
     # After the mirror, so the gate's probes read the same ceiling the config carries, and
     # before the origin pass, which spends without one otherwise.

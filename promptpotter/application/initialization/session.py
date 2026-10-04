@@ -19,6 +19,7 @@ from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import DisplayMetric
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellScorer
+from promptpotter.domain.spend import SpendCeilings
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
@@ -201,6 +202,9 @@ class Session:
     # the spend book's own total, bound at the same seam. A FLOOR while unpriced tokens are
     # outstanding.
     spend_used: Callable[[], float] | None = None
+    # What the account reserved for this run (``HeldLimits.reserve``), set at the runner seam
+    # before the book is armed.
+    reserve: SpendCeilings = field(default_factory=lambda: SpendCeilings(None, None))
 
 
 def new_session_state(

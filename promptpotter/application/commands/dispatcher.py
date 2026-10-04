@@ -776,7 +776,7 @@ class CommandDispatcher:
 
     def _clamp_to_account_ceilings(
         self, hop: CycleHop, job_registry: JobRegistry, change: BudgetChange
-    ) -> BudgetChange:
+    ) -> tuple[BudgetChange, BudgetChange]:
         """Only a SUPPLIED arm is clamped — composing an absent one would write a ceiling the
         caller asked to leave alone."""
         user = self._stores.users.get_or_create(
@@ -801,10 +801,18 @@ class CommandDispatcher:
         The next launch declares the standing ceiling again and re-admits it. A round cap is no
         money, so a rounds-only change skips the wallet read, whose contention would refuse it."""
         registry = self._require_job_registry()
+        reserve = BudgetChange(None, None)
         if change != BudgetChange(None, None):
-            change = await asyncio.to_thread(self._clamp_to_account_ceilings, hop, registry, change)
+            change, reserve = await asyncio.to_thread(
+                self._clamp_to_account_ceilings, hop, registry, change
+            )
         hold_run_limits(
-            job_registry=registry, stores=self._stores, hop=hop, change=change, rounds=rounds
+            job_registry=registry,
+            stores=self._stores,
+            hop=hop,
+            change=change,
+            reserve=reserve,
+            rounds=rounds,
         )
 
     async def _apply_mint_campaign(self, payload: MintCampaignPayload) -> None:

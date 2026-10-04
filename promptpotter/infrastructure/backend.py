@@ -50,7 +50,7 @@ _OUTAGE_POLL_S = 5.0
 # The hold a whole cell is admitted on, and the settle that reads what it billed off the reply —
 # ``None`` where the reply reports nothing, which leaves the cell unreported.
 CellBilling = Callable[[dict[str, Any]], "list[Billed] | None"]
-_CELL = CallLabel("backend_cell", "backend")
+CELL = CallLabel("backend_cell", "backend")
 
 if TYPE_CHECKING:
     from promptpotter.connectors.protocol import (
@@ -451,7 +451,7 @@ class BackendClient:
             wait: float | None = None
             unreachable: httpx.TransportError | None = None
             async with self.backpressure.send() as ticket:
-                with admitted(_CELL, bound, model=None, provider=None) as admission:
+                with admitted(CELL, bound, model=None, provider=None) as admission:
                     try:
                         resp = await client.post(
                             f"{self.base_url}/matches",
@@ -562,9 +562,9 @@ class BackendClient:
             return await run(self.workload, query, payload)
         if self.holds_own_sends:
             # Every send it makes is billed where it is made, so the cell is no send of its own.
-            with reserved(_CELL, bound):
+            with reserved(CELL, bound):
                 return await run(self.workload, query, payload)
-        with admitted(_CELL, bound, model=None, provider=None) as admission:
+        with admitted(CELL, bound, model=None, provider=None) as admission:
             try:
                 result = await run(self.workload, query, payload)
             except CellUnscoreableError as exc:

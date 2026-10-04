@@ -249,8 +249,9 @@ async def admit_and_hold(
     *config* is resolved in here rather than handed in, so a campaign config that cannot load
     releases the slot as not admitted instead of stranding it.
 
-    The held ceiling is the reservation, the run's config and the dashboard's number at once, so
-    the caller hands it to the runner and nothing downstream re-composes it.
+    The held ceiling is the run's config and the dashboard's number at once, and its reserve the
+    job's reservation, so the caller hands both to the runner and nothing downstream re-composes
+    either.
 
     Nothing here touches a cycle, so a failure answers for the machine slot alone and leaves the
     campaign re-startable once the account has room again — which is why the whole prologue runs
@@ -268,7 +269,7 @@ async def admit_and_hold(
         )
         # The wallet read globs + reads every cycle ledger — offload so the scan never blocks the
         # single event loop on the launch path.
-        ceiling = await asyncio.to_thread(
+        ceiling, reserve = await asyncio.to_thread(
             admit_launch,
             declared=declared,
             user=user,
@@ -276,10 +277,10 @@ async def admit_and_hold(
             job_registry=job_registry,
             job_id=job.job_id,
         )
-        held = HeldLimits.admitted(requested, ceiling, operator)
+        held = HeldLimits.admitted(requested, ceiling, operator, reserve=reserve)
         # Before the caller's first await, so a concurrent launch on this account reads a stamped
         # reservation rather than an unquotable one.
-        job_registry.set_caps(job.job_id, cap_usd=ceiling.usd, cap_tokens=ceiling.tokens)
+        job_registry.set_caps(job.job_id, cap_usd=reserve.usd, cap_tokens=reserve.tokens)
         t_caps = time.perf_counter()
     except BaseException as exc:
         release_slot(job_registry, job.job_id, exc, admitted=False)

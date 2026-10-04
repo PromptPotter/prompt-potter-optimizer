@@ -36,8 +36,8 @@ from promptpotter.domain.phases import (
 from promptpotter.domain.scoring import CellScorer, QueryMeasurement
 from promptpotter.domain.spend import StepTokenUsage
 from promptpotter.domain.validators import StopRule, StopSignal
+from promptpotter.infrastructure.backend import CELL
 from promptpotter.infrastructure.llm.spend_book import (
-    CallLabel,
     SendBound,
     bound_spend_book,
     filed,
@@ -140,11 +140,8 @@ class Flight:
     most: int = 0
     waiting: tuple[int, float] | None = None
     backpressure: BackpressureReading | None = None
-    # How many MORE cells the spend ceiling admits beside those out, and what one cell reserves.
-    # ``None`` where no book bounds the cells. The depth can be armed, the stop rules can allow a
-    # dozen, and this can still be 0: a cell reserves its WORST case, so a ceiling only a few of
-    # those wide holds the walk at one call with every other reading saying otherwise — which is
-    # what it did, unreported, for a whole campaign.
+    # How many MORE cells the spend book admits beside those out, and what one holds against the
+    # limit that binds; ``None`` where no book bounds them. Against a reserve it is the WORST case.
     affordable: int | None = None
     cell_usd: float | None = None
 
@@ -712,7 +709,7 @@ async def run_walks(
     block = 0
     cancels = session.backend_client.cancel_stops_billing
     book = bound_spend_book()
-    label = filed(CallLabel("the next cell", "backend"))
+    label = filed(CELL)
     # A pass the book's ceilings do not meter — a bench pass on a controlled arm — is neither
     # admitted against them nor stopped by them.
     unbounded = book is not None and not book.binds(label.kind)
@@ -725,11 +722,11 @@ async def run_walks(
     )
 
     def affordable() -> int:
-        # Every call out is counted at the dearest cell, here rather than read back off the book: a
-        # cell launched this step has not placed its own hold yet.
+        # At the book's own price for a cell, and every call out counted at it here rather than
+        # read back off the book: a cell launched this step has not placed its own hold yet.
         if book is None or cell is None or unbounded:
             return sys.maxsize
-        return book.fits(cell, beside=label.kind) - out()
+        return book.fits(book.held_at(label, cell), cell, beside=label.kind) - out()
 
     def live() -> list[Walk]:
         return [walk for walk in walks if walk is not None and walk.outcome is None]
@@ -852,7 +849,11 @@ async def run_walks(
             waiting,
             session.backend_client.backpressure.reading(),
             affordable=None if book is None or cell is None or unbounded else max(0, affordable()),
-            cell_usd=None if cell is None else cell.usd,
+            cell_usd=(
+                None
+                if book is None or cell is None
+                else book.binding(book.held_at(label, cell), cell, beside=label.kind).usd
+            ),
         )
 
     def outstanding() -> set[asyncio.Future[Any]]:
@@ -992,7 +993,7 @@ async def run_walks(
                         walk.n,
                     )
                     # Refused with the ceiling that binds, and the sums that say why.
-                    book.hold(cell, label.kind, what=label.node)
+                    book.hold(book.held_at(label, cell), cell, label.kind, what="the next cell")
                 raise RuntimeError(
                     f"scoring phase stalled: nothing out and nothing to take at query "
                     f"{len(walk.results)}/{walk.n}"

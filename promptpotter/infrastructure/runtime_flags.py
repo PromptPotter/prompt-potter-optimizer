@@ -135,7 +135,7 @@ def clear_run_control_flags(cycle_dir: Path) -> None:
 
 
 def write_run_limits_mirror(
-    cycle_dir: Path, change: BudgetChange, *, rounds: RoundsCap | None
+    cycle_dir: Path, change: BudgetChange, *, rounds: RoundsCap | None, reserve: BudgetChange
 ) -> None:
     """Land the POLLED MIRROR of the cycle's standing operator ceiling, an unset arm omitted — so
     ``max_rounds: null`` (a lifted round cap) and no ``max_rounds`` key are two answers.
@@ -155,8 +155,20 @@ def write_run_limits_mirror(
         caps["max_tokens"] = change.tokens
     if rounds is not None:
         caps["max_rounds"] = rounds.max_rounds
+    if reserve.usd is not None:
+        caps["reserve_usd"] = reserve.usd
+    if reserve.tokens is not None:
+        caps["reserve_tokens"] = reserve.tokens
     _POLLS.pop(path, None)
     write_json(path, caps)
+
+
+def _usd(value: object) -> float | None:
+    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
+
+
+def _count(value: object) -> int | None:
+    return int(value) if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def read_run_limits_mirror(cycle_dir: Path) -> RunLimitsRecord:
@@ -166,8 +178,6 @@ def read_run_limits_mirror(cycle_dir: Path) -> RunLimitsRecord:
     data = _polled(CycleLayout(cycle_dir).run_limits)
     if not isinstance(data, dict):
         return RunLimitsRecord()
-    usd = data.get("max_usd")
-    tokens = data.get("max_tokens")
     rounds = None
     if "max_rounds" in data:
         try:
@@ -175,10 +185,17 @@ def read_run_limits_mirror(cycle_dir: Path) -> RunLimitsRecord:
         except ValidationError:
             rounds = None
     return RunLimitsRecord(
-        usd=float(usd) if isinstance(usd, int | float) and not isinstance(usd, bool) else None,
-        tokens=int(tokens) if isinstance(tokens, int) and not isinstance(tokens, bool) else None,
-        rounds=rounds,
+        usd=_usd(data.get("max_usd")), tokens=_count(data.get("max_tokens")), rounds=rounds
     )
+
+
+def read_reserve_mirror(cycle_dir: Path) -> BudgetChange:
+    """The job's reservation as a ceiling moved since the launch left it; ``None`` on an arm none
+    moved, where the run holds the reserve it launched with."""
+    data = _polled(CycleLayout(cycle_dir).run_limits)
+    if not isinstance(data, dict):
+        return BudgetChange(None, None)
+    return BudgetChange(_usd(data.get("reserve_usd")), _count(data.get("reserve_tokens")))
 
 
 def armed_run_limits(cycle_dir: Path) -> dict[str, float | int | None]:
@@ -341,6 +358,7 @@ __all__ = [
     "derive_run_phase",
     "is_checkin",
     "is_paused",
+    "read_reserve_mirror",
     "read_run_limits_mirror",
     "read_sample_lookahead",
     "run_phase_validator_epoch",

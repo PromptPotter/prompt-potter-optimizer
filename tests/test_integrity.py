@@ -4113,7 +4113,13 @@ async def _walk(
     depths: list[int] = []
     committed: list[int] = []
     returned: list[int] = []
-    book = SpendBook(usd_cap=lambda: cap_usd, tokens_cap=lambda: None, meters="bill")
+    book = SpendBook(
+        usd_cap=lambda: cap_usd,
+        tokens_cap=lambda: None,
+        usd_reserve=lambda: cap_usd,
+        tokens_reserve=lambda: None,
+        meters="bill",
+    )
     dollar = SendBound(input_tokens=0, output_tokens=0, usd=1.0)
 
     async def _measure(sample: Sample, session: Any, *, pipeline_params: Any = None) -> Any:
@@ -4658,7 +4664,12 @@ async def test_a_resumed_arm_re_reads_its_cells_and_still_reaches_its_bench(tmp_
     }
     # The ceiling already spent: no cell fits, and the gate reads it as reached.
     book = SpendBook(
-        usd_cap=lambda: 0.02, tokens_cap=lambda: None, meters="search_incurred", usd_spent=0.02
+        usd_cap=lambda: 0.02,
+        tokens_cap=lambda: None,
+        usd_reserve=lambda: 0.02,
+        tokens_reserve=lambda: None,
+        meters="search_incurred",
+        usd_spent=0.02,
     )
     ledger = CycleEventLog.open(CycleDir(tmp_path / "cycle"))
     ledger.bind(book)

@@ -516,7 +516,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
             stores=_oidc_stores({"spend_ceiling_usd": 2.0}),
             job_registry=idle_registry,
             job_id="job-a",
-        ).usd
+        )[0].usd
         == 2.0
     )
     assert (
@@ -526,7 +526,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
             stores=_oidc_stores({}),
             job_registry=idle_registry,
             job_id="job-a",
-        ).usd
+        )[0].usd
         == 10.0
     )
 
@@ -548,7 +548,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
             stores=_oidc_stores({"spend_ceiling_usd": 2.0}),
             job_registry=idle_registry,
             job_id="job-a",
-        ).usd
+        )[0].usd
         == 1.0
     )
 
@@ -763,13 +763,29 @@ async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.launch_limits import RoundsCap
     from promptpotter.domain.spend import BudgetChange
-    from promptpotter.infrastructure.runtime_flags import read_run_limits_mirror
+    from promptpotter.infrastructure.runtime_flags import (
+        read_reserve_mirror,
+        read_run_limits_mirror,
+    )
+    from promptpotter.infrastructure.store.stores import build_stores
     from promptpotter.infrastructure.store.user_store import User
+    from promptpotter.shared.identity import IdentityContext, Issuer, TenantId, UserId
 
-    stores = built_stores
+    # A metered account: only one reserves anything, so only its job has an arm to release.
+    stores = build_stores(
+        IdentityContext(
+            user_id=UserId("sub-9"),
+            tenant_id=TenantId("sub-9"),
+            issuer=Issuer("https://accounts.google.com"),
+            claims={},
+            capabilities=frozenset(),
+        ),
+        projects_root=built_stores.projects_root,
+        benchmarks_root=built_stores.benchmarks_root,
+    )
     hop = CycleHop(campaign_id="camp-3", cycle_id="cycle_budget0000")
     registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
-    job = registry.request_slot(user_id="default", dataset_name="ds1", hop=hop)
+    job = registry.request_slot(user_id="sub-9", dataset_name="ds1", hop=hop)
     assert job.status == "pending", "an empty box must hand out a slot, not a place in line"
     registry.set_caps(job.job_id, cap_usd=0.30, cap_tokens=5_000_000)
 
@@ -780,8 +796,11 @@ async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
     await dispatcher._apply_change_run_limits(hop, BudgetChange(None, 1_000), None)
     held = registry.get(job.job_id)
     assert held is not None
-    assert held.cap_tokens == 1_000
+    # The reservation moves with the ceiling under the launch's own rule — as much again for the
+    # calls out — and reaches the running gate through the mirror the ceiling rides.
+    assert held.cap_tokens == 2_000
     assert held.cap_usd == pytest.approx(0.30), "the untouched USD reservation was released"
+    assert read_reserve_mirror(stores.campaigns.cycle_dir(hop)) == (pytest.approx(0.30), 2_000)
     # The standing record is written WHOLE, so a spend move must carry the round cap it did not
     # touch — dropped, the run falls back to the config's cap and spends past the operator's.
     assert stores.campaigns.read_run_limits(hop).rounds == RoundsCap(max_rounds=3)
@@ -797,7 +816,7 @@ async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
         ),
         campaigns=types.SimpleNamespace(iter_cycle_ledgers=lambda: [], workspace=tmp_path / "ws-d"),
     )
-    caps = clamp_budget_change(
+    caps, _ = clamp_budget_change(
         requested=BudgetChange(None, 1_000),
         user=User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01"),
         stores=delegated,
@@ -823,7 +842,7 @@ async def test_moving_one_ceiling_leaves_the_other_at_its_launch_cap(
     from promptpotter.application.runner.entry import _build_budget_gate
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.phases import StopReason
-    from promptpotter.domain.spend import BudgetChange, MeteredSpend
+    from promptpotter.domain.spend import BudgetChange, MeteredSpend, SpendCeilings
 
     hop = CycleHop(campaign_id="camp-4", cycle_id="cycle_budget0001")
     registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
@@ -842,6 +861,7 @@ async def test_moving_one_ceiling_leaves_the_other_at_its_launch_cap(
         usd_cap=0.30,
         token_cap=210_000,
         meters="bill",
+        reserve=SpendCeilings(None, None),
     )
     assert gate.tripped() == StopReason.TOKEN_BUDGET
 
@@ -962,7 +982,7 @@ def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path)
     from promptpotter.application.runner.loop import _armed_round_cap
     from promptpotter.domain.launch_limits import RoundsCap
     from promptpotter.domain.phases import StopReason
-    from promptpotter.domain.spend import BudgetChange, MeteredSpend
+    from promptpotter.domain.spend import BudgetChange, MeteredSpend, SpendCeilings
     from promptpotter.infrastructure.runtime_flags import (
         clear_run_control_flags,
         write_run_limits_mirror,
@@ -976,13 +996,24 @@ def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path)
     )
 
     # A run that declared NOTHING is still gated, and the gate stays silent until a ceiling exists.
-    gate = _build_budget_gate(observers, cycle_dir, usd_cap=None, token_cap=None, meters="bill")
+    gate = _build_budget_gate(
+        observers,
+        cycle_dir,
+        usd_cap=None,
+        token_cap=None,
+        meters="bill",
+        reserve=SpendCeilings(None, None),
+    )
     assert gate.tripped() is None
-    write_run_limits_mirror(cycle_dir, BudgetChange(0.50, None), rounds=None)
+    write_run_limits_mirror(
+        cycle_dir, BudgetChange(0.50, None), rounds=None, reserve=BudgetChange(None, None)
+    )
     assert gate.tripped() == StopReason.SPEND_BUDGET, "a mid-run ceiling reached no gate"
 
     # The token arm binds on its own, in the unit that survives an unpriced model.
-    write_run_limits_mirror(cycle_dir, BudgetChange(None, 5_000), rounds=None)
+    write_run_limits_mirror(
+        cycle_dir, BudgetChange(None, 5_000), rounds=None, reserve=BudgetChange(None, None)
+    )
     assert gate.tripped() == StopReason.TOKEN_BUDGET
 
     # The round cap rides the same mirror into the loop's boundary: lowered mid-run it binds over
@@ -997,9 +1028,19 @@ def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path)
     config = load_campaign_config(
         {"optimization": {"degradation_threshold": 0.05, "max_rounds": 50}}
     )
-    write_run_limits_mirror(cycle_dir, BudgetChange(None, None), rounds=RoundsCap(max_rounds=3))
+    write_run_limits_mirror(
+        cycle_dir,
+        BudgetChange(None, None),
+        rounds=RoundsCap(max_rounds=3),
+        reserve=BudgetChange(None, None),
+    )
     assert _armed_round_cap(session, config) == 3, "a mid-run round cap reached no loop"
-    write_run_limits_mirror(cycle_dir, BudgetChange(None, None), rounds=RoundsCap(max_rounds=None))
+    write_run_limits_mirror(
+        cycle_dir,
+        BudgetChange(None, None),
+        rounds=RoundsCap(max_rounds=None),
+        reserve=BudgetChange(None, None),
+    )
     assert _armed_round_cap(session, config) is None
 
     # The launch sweep drops the mirror; the standing ceiling itself is the ledger's to carry.
@@ -1091,7 +1132,13 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
         )
     )
     ledger = CycleEventLog(tmp_path / "ledger.jsonl")
-    book = SpendBook(usd_cap=lambda: 0.05, tokens_cap=lambda: None, meters="bill")
+    book = SpendBook(
+        usd_cap=lambda: 0.05,
+        tokens_cap=lambda: None,
+        usd_reserve=lambda: 0.05,
+        tokens_reserve=lambda: None,
+        meters="bill",
+    )
     ledger.bind(book)
 
     async def burst() -> list[Any]:
@@ -1131,6 +1178,36 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     assert book.usd_unreported == pytest.approx(left.usd)
     # …and the ceiling binds bills and unknowns together.
     assert book.usd_spent + book.usd_unreported <= 0.05 + 1e-12
+
+    # Apart from the ceiling, the reserve holds each send's bound while the ceiling holds what such
+    # sends bill: the run stops on its ceiling, and no burst then out bills past the reserve.
+    cell = CallLabel("cell", "backend")
+    worst = SendBound(input_tokens=0, output_tokens=1000, usd=0.125)
+    for reserve, depth in ((0.5, 4), (None, 16), (1.0, 8)):
+        own = SpendBook(
+            usd_cap=lambda: 0.5,
+            tokens_cap=lambda: None,
+            usd_reserve=lambda reserve=reserve: reserve,
+            tokens_reserve=lambda: None,
+            meters="bill",
+        )
+        assert own.fits(worst, worst) == 4, "nothing billed yet: the bound holds"
+        own.learn(cell, 0.03125, 100)
+        own.learn(cell, 0.0, 0)
+        held = own.held_at(cell, worst)
+        assert own.fits(held, worst) == depth
+        for _ in range(depth):
+            own.hold(held, worst, "backend", what="cell")
+        with pytest.raises(SendRefusedError):
+            own.hold(held, worst, "backend", what="cell")
+        billed = 0
+        while own.exhausted() is None:
+            own.release(held, worst, "backend")
+            own.usd_spent += worst.usd or 0.0
+            billed += 1
+        assert billed == 4, "the run stops on reaching its ceiling, whatever it reserved"
+        out = (depth - billed) * 0.125
+        assert reserve is None or own.usd_spent + out <= reserve, "a burst billed past the reserve"
 
     # A hard exit runs no `finally`: the hold written ahead of the call is all that says it left.
     # The account reads it as unreported, never as spent, and a resumed book holds it.
@@ -1181,7 +1258,7 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     try:
         cut = SendBound(input_tokens=600, output_tokens=1500, usd=0.0036)
         Admission(
-            book, CallLabel("cut", "optimizer"), cut, model="gpt-x", provider="openai"
+            book, CallLabel("cut", "optimizer"), cut, cut, model="gpt-x", provider="openai"
         ).unreported()
     finally:
         reset_cycle_ledger(token)
@@ -1266,7 +1343,13 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     )
     cells._http = httpx.AsyncClient(transport=httpx.MockTransport(backend))
     cell = SendBound(input_tokens=100, output_tokens=50, usd=0.01)
-    wallet = SpendBook(usd_cap=lambda: None, tokens_cap=lambda: None, meters="bill")
+    wallet = SpendBook(
+        usd_cap=lambda: None,
+        tokens_cap=lambda: None,
+        usd_reserve=lambda: None,
+        tokens_reserve=lambda: None,
+        meters="bill",
+    )
     before = sum(isinstance(r, TokenUsageRecord) for _, r in ledger.iter())
     token = set_cycle_ledger(ledger)
     try:
@@ -1315,7 +1398,13 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
         prompt_delivery=types.SimpleNamespace(),  # type: ignore[arg-type]
     )
     cell_ledger = CycleEventLog(tmp_path / "cell.jsonl")
-    purse = SpendBook(usd_cap=lambda: 1.0, tokens_cap=lambda: None, meters="bill")
+    purse = SpendBook(
+        usd_cap=lambda: 1.0,
+        tokens_cap=lambda: None,
+        usd_reserve=lambda: 1.0,
+        tokens_reserve=lambda: None,
+        meters="bill",
+    )
     cell_ledger.bind(purse)
     whole = SendBound(input_tokens=100_000, output_tokens=50_000, usd=0.5)
 
@@ -1341,7 +1430,7 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     assert out.sends == 1 and out.usd < whole.usd / 100, f"a cancel left ${out.usd} unreported"
     assert purse.usd_unreported == pytest.approx(out.usd)
     # The reservation is gone with the cell: the whole bound fits again beside what was paid.
-    assert purse.fits(whole) == 1
+    assert purse.fits(whole, whole) == 1
 
 
 def test_a_controlled_arms_ceiling_is_its_searchs_incurred_cost() -> None:
@@ -1365,19 +1454,37 @@ def test_a_controlled_arms_ceiling_is_its_searchs_incurred_cost() -> None:
             kind="backend", node="n", input_tokens=10, output_tokens=5, cost_usd=usd, cached=True
         )
 
-    arm = SpendBook(usd_cap=lambda: 0.10, tokens_cap=lambda: None, meters="search_incurred")
-    ordinary = SpendBook(usd_cap=lambda: 0.10, tokens_cap=lambda: None, meters="bill")
+    arm = SpendBook(
+        usd_cap=lambda: 0.10,
+        tokens_cap=lambda: None,
+        usd_reserve=lambda: 0.10,
+        tokens_reserve=lambda: None,
+        meters="search_incurred",
+    )
+    ordinary = SpendBook(
+        usd_cap=lambda: 0.10,
+        tokens_cap=lambda: None,
+        usd_reserve=lambda: 0.10,
+        tokens_reserve=lambda: None,
+        meters="bill",
+    )
     for book in (arm, ordinary):
         book.count(replay(0.06))
         book.count(replay(0.05))
     assert ordinary.exhausted() is None, "a replay billed nothing, so it spends no bill"
     assert arm.exhausted() == ErrorCategory.SPEND_CEILING, "a sibling's cache stretched the arm"
 
-    fresh = SpendBook(usd_cap=lambda: 0.10, tokens_cap=lambda: None, meters="search_incurred")
+    fresh = SpendBook(
+        usd_cap=lambda: 0.10,
+        tokens_cap=lambda: None,
+        usd_reserve=lambda: 0.10,
+        tokens_reserve=lambda: None,
+        meters="search_incurred",
+    )
     fresh.count(replay(0.09))
     pass_bound = SendBound(input_tokens=100, output_tokens=100, usd=5.0)
-    fresh.hold(pass_bound, "bench", what="bench pass")
-    fresh.release(pass_bound, "bench")
+    fresh.hold(pass_bound, pass_bound, "bench", what="bench pass")
+    fresh.release(pass_bound, pass_bound, "bench")
     fresh.count(
         TokenUsageRecord(kind="bench", node="b", input_tokens=1, output_tokens=1, cost_usd=5.0)
     )
@@ -1390,7 +1497,8 @@ def test_a_controlled_arms_ceiling_is_its_searchs_incurred_cost() -> None:
     ):
         pass
     with pytest.raises(SendRefusedError):
-        fresh.hold(SendBound(input_tokens=1, output_tokens=1, usd=0.02), "optimizer", what="o")
+        small = SendBound(input_tokens=1, output_tokens=1, usd=0.02)
+        fresh.hold(small, small, "optimizer", what="o")
 
 
 def test_a_run_holds_the_budget_it_declared_and_admission_is_the_only_bound(
@@ -1483,7 +1591,7 @@ def test_a_run_holds_the_budget_it_declared_and_admission_is_the_only_bound(
     # The operator of the box spends their own money: held exactly as declared.
     assert admit_launch(
         declared=declared, user=free_tier, stores=host, job_registry=idle, job_id="job-a"
-    ) == SpendCeilings(pytest.approx(5.0), 210_000)
+    )[0] == SpendCeilings(pytest.approx(5.0), 210_000)
 
 
 def test_a_run_in_its_own_process_spends_as_the_account_that_launched_it(
@@ -1518,6 +1626,7 @@ def test_a_run_in_its_own_process_spends_as_the_account_that_launched_it(
         halt_at_accuracy=0.9,
         ceiling=SpendCeilings(0.25, 40_000),
         operator=BudgetChange(0.25, None),
+        reserve=SpendCeilings(0.5, 80_000),
     )
     wire = JobSpec.of(
         stores=stores,
@@ -1595,7 +1704,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
 
     # No override must NOT read as uncapped in either unit. The USD arm is one STEP, not the whole
     # ceiling — the offer is denominated in runs, and a first run declaring the lot funds no second.
-    fresh = admit_launch(
+    fresh, _ = admit_launch(
         declared=SpendCeilings(None, None),
         user=free_tier,
         stores=_stores(issuer=web, ledgers=[]),
@@ -1650,7 +1759,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
     # `:nitro` is a route selector, so the call is unpriceable BY DESIGN and the account's USD
     # total reads $0.00 for 500k billed tokens. Trusting `ceiling - spent` would hand back nearly
     # the whole ceiling; the grace bounds it, and the token arm counts what the USD arm cannot.
-    blind = admit_launch(
+    blind, _ = admit_launch(
         declared=SpendCeilings(None, None),
         user=free_tier,
         stores=_stores(
@@ -1702,7 +1811,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
         stores=_stores(issuer=None, ledgers=[]),
         job_registry=idle,
         job_id="job-a",
-    ) == (None, None)
+    ) == ((None, None), (None, None))
 
 
 def test_an_exhausted_account_cannot_spend_before_a_campaign_exists(

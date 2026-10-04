@@ -1,5 +1,6 @@
 """Per-user quota + abuse-limit gates fired from the launcher. A launch is admitted at the ceiling it
-declares or refused outright, and holds that ceiling as a reservation for as long as it runs."""
+declares or refused outright, and reserves it — with a margin for the calls out when it is reached
+— for as long as it runs."""
 
 from __future__ import annotations
 
@@ -144,7 +145,7 @@ def read_account_wallet(
     job_registry: JobRegistry,
     excluding_job_id: str | None = None,
 ) -> AccountWallet:
-    """A running cycle holds its whole declared ceiling until it finishes: counting only what is on
+    """A running cycle holds its whole reserve until it finishes: counting only what is on
     the ledger admits two concurrent launches against one remainder and lets the pair spend double
     the ceiling. Its spend-so-far is therefore counted twice, which errs toward refusing — the safe
     direction for a wallet the account cannot top up. A stopped run's unreported sends bind the
@@ -185,10 +186,11 @@ def admit_launch(
     stores: Stores,
     job_registry: JobRegistry,
     job_id: str,
-) -> SpendCeilings:
+) -> tuple[SpendCeilings, SpendCeilings]:
     """**One host-wallet gate in two units** — owned by
     [`0003-spend-and-tenancy.md`](../../../docs/adr/0003-spend-and-tenancy.md) § D1; every launch
-    admits through here, and what it returns is the run's ceiling — nothing downstream re-bounds it.
+    admits through here, and what it returns is the run's ceiling and the reserve its bills may
+    never pass (:func:`_reserve`) — nothing downstream re-bounds either.
 
     *declared* is the run's WHOLE declaration (:func:`declare_run_ceiling`: config, seed, standing
     operator ceiling, launch flag), never a launch flag alone: a gate that admits only the flag
@@ -245,7 +247,8 @@ def admit_launch(
                 f"This account has {wallet.headroom.tokens:,} tokens left and the run declares "
                 f"{tokens:,}.",
             )
-    return SpendCeilings(usd, tokens)
+    ceiling = SpendCeilings(usd, tokens)
+    return ceiling, _reserve(ceiling, wallet, delegated)
 
 
 def admit_spend(*, stores: Stores, bucket: str) -> SpendBook:
@@ -293,7 +296,11 @@ def admit_spend(*, stores: Stores, bucket: str) -> SpendBook:
             ),
         )
     return SpendBook(
-        usd_cap=lambda: headroom.usd, tokens_cap=lambda: headroom.tokens, meters="bill"
+        usd_cap=lambda: headroom.usd,
+        tokens_cap=lambda: headroom.tokens,
+        usd_reserve=lambda: headroom.usd,
+        tokens_reserve=lambda: headroom.tokens,
+        meters="bill",
     )
 
 
@@ -361,7 +368,7 @@ def unadmitted_limits(
     Same composition as ``launcher/admission.py::admit_and_hold``, so a budget means one thing on
     every way in."""
     declared, operator = declare_run_ceiling(config, stores=stores, hop=hop, requested=requested)
-    return HeldLimits.admitted(requested, declared, operator)
+    return HeldLimits.admitted(requested, declared, operator, reserve=SpendCeilings(None, None))
 
 
 def clamp_budget_change(
@@ -371,10 +378,11 @@ def clamp_budget_change(
     stores: Stores,
     job_registry: JobRegistry,
     hop: CycleHop,
-) -> BudgetChange:
+) -> tuple[BudgetChange, BudgetChange]:
     """Moving a RUNNING cycle's ceiling clamps where a launch refuses: the campaign is already
     admitted, so the only question is how far the operator may move it, and lowering one must always
     work. The cycle's own reservation is excluded, or it would be denied headroom it holds itself.
+    Returns the move and the reserve that moves with it (:func:`_reserve`).
 
     Only a SUPPLIED arm composes: folded into an absent one, a delegate's grant becomes a ceiling
     the caller asked to leave alone, and the file merge downstream makes it stick."""
@@ -400,7 +408,21 @@ def clamp_budget_change(
     tokens = requested.tokens
     if tokens is not None and wallet.headroom.tokens is not None:
         tokens = min(tokens, wallet.headroom.tokens)
-    return BudgetChange(usd, tokens)
+    change = BudgetChange(usd, tokens)
+    return change, BudgetChange(*_reserve(change, wallet, delegated))
+
+
+def _reserve(
+    ceiling: SpendCeilings | BudgetChange, wallet: AccountWallet, delegated: float | None
+) -> SpendCeilings:
+    """What a run stopping at *ceiling* may never be billed past — the ONE rule, for a launch and a
+    ceiling moved mid-run. ``None`` on an arm no account bounds, or one *ceiling* leaves alone."""
+    usd = _lowest(wallet.headroom.usd, delegated)
+    tokens = wallet.headroom.tokens
+    return SpendCeilings(
+        None if usd is None or ceiling.usd is None else min(usd, 2 * ceiling.usd),
+        None if tokens is None or ceiling.tokens is None else min(tokens, 2 * ceiling.tokens),
+    )
 
 
 def hold_run_limits(
@@ -409,11 +431,19 @@ def hold_run_limits(
     stores: Stores,
     hop: CycleHop,
     change: BudgetChange,
+    reserve: BudgetChange,
     rounds: RoundsCap | None,
 ) -> None:
-    """Land *change* on the job's reservation and on the cycle's standing ceiling, each from its
-    OWN prior — the standing ceiling's absent arm defers to the run's admitted cap, often far below
-    the reservation. *rounds* ``None`` keeps the standing round cap; the job reserves no rounds."""
+    """Each lands on its OWN prior, the job's reservation first: the account commits the money
+    before the mirror lets the run hold it. *rounds* ``None`` keeps the standing round cap."""
+    held = BudgetChange(None, None)
+    job = job_registry.running_job_for(hop)
+    if job is not None:
+        held = BudgetChange(
+            job.cap_usd if reserve.usd is None else reserve.usd,
+            job.cap_tokens if reserve.tokens is None else reserve.tokens,
+        )
+        job_registry.set_caps(job.job_id, cap_usd=held.usd, cap_tokens=held.tokens)
     prior = stores.campaigns.read_run_limits(hop)
     stores.campaigns.write_run_limits(
         hop,
@@ -422,14 +452,8 @@ def hold_run_limits(
             prior.tokens if change.tokens is None else change.tokens,
         ),
         rounds=prior.rounds if rounds is None else rounds,
+        reserve=held,
     )
-    job = job_registry.running_job_for(hop)
-    if job is not None:
-        job_registry.set_caps(
-            job.job_id,
-            cap_usd=job.cap_usd if change.usd is None else change.usd,
-            cap_tokens=job.cap_tokens if change.tokens is None else change.tokens,
-        )
 
 
 def _contended(subject: str) -> QuotaExceededError:

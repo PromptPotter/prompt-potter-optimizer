@@ -4977,16 +4977,23 @@ def test_the_search_stops_short_by_what_the_bench_pass_costs() -> None:
     from promptpotter.infrastructure.llm.spend_book import SendBound, SpendBook
     from promptpotter.shared.errors import ErrorCategory
 
-    book = SpendBook(usd_cap=lambda: 1.0, tokens_cap=lambda: 10_000, meters="bill", usd_spent=0.6)
+    book = SpendBook(
+        usd_cap=lambda: 1.0,
+        tokens_cap=lambda: 10_000,
+        usd_reserve=lambda: 1.0,
+        tokens_reserve=lambda: 10_000,
+        meters="bill",
+        usd_spent=0.6,
+    )
     book.set_aside(0.3, 2_000)
     send = SendBound(input_tokens=100, output_tokens=100, usd=0.2)
     # $0.60 spent + $0.30 kept for the pass: a $0.20 send no longer fits the search.
-    assert book.fits(send) == 0
+    assert book.fits(send, send) == 0
     book.usd_spent = 0.7
     assert book.exhausted() is ErrorCategory.SPEND_CEILING, "the round boundary must stop too"
     # Released for the pass itself, the same ceiling admits it.
     book.set_aside(0.0, 0)
-    assert book.exhausted() is None and book.fits(send) == 1
+    assert book.exhausted() is None and book.fits(send, send) == 1
     # Tokens are held back on the same terms, so a token-capped run keeps the pass too.
     book.set_aside(0.0, 9_900)
-    assert book.fits(send) == 0
+    assert book.fits(send, send) == 0

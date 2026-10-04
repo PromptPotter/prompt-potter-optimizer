@@ -75,6 +75,8 @@ class JobSpec(StrictModel):
     ceiling_tokens: int | None
     operator_usd: float | None
     operator_tokens: int | None
+    reserve_usd: float | None
+    reserve_tokens: int | None
 
     @classmethod
     def of(
@@ -111,6 +113,8 @@ class JobSpec(StrictModel):
             ceiling_tokens=limits.ceiling.tokens,
             operator_usd=limits.operator.usd,
             operator_tokens=limits.operator.tokens,
+            reserve_usd=limits.reserve.usd,
+            reserve_tokens=limits.reserve.tokens,
         )
 
     @property
@@ -133,6 +137,7 @@ class JobSpec(StrictModel):
             halt_at_accuracy=self.halt_at_accuracy,
             ceiling=SpendCeilings(self.ceiling_usd, self.ceiling_tokens),
             operator=BudgetChange(self.operator_usd, self.operator_tokens),
+            reserve=SpendCeilings(self.reserve_usd, self.reserve_tokens),
         )
 
 
