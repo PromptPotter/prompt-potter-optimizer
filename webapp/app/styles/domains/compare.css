@@ -42,9 +42,12 @@
 }
 /* One item per line, full width: the lead numbers line up down the list, and an opened item's
    drill-in gets the whole row. */
+/* Side by side wherever two fit, so two searchpoints read against each other line for line; one
+   column on a narrow screen. Tops align, since one card can be open while its neighbour is not. */
 .cmp-channels {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr));
+  align-items: start;
   gap: var(--space-8);
   margin: 0;
   padding: 0;
@@ -305,6 +308,13 @@
   margin: 0;
   font-family: var(--font-mono);
   color: var(--color-text-secondary);
+}
+.cmp-channel-means {
+  padding: var(--space-8) var(--space-12) 0;
+  font-size: var(--text-base);
+}
+.cmp-channel-means dd {
+  color: var(--color-text-primary);
 }
 /* Drawn at `DENSE`, yet it can outgrow the card, so the box scrolls both axes — `overflow:hidden`
    would delete the part of the tree the operator opened it to reach. */

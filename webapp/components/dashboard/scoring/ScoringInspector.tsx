@@ -5,6 +5,7 @@ import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import type { SelectedCandidate } from "@/lib/types";
 import {
+  benchByLabel,
   candidateObserveConfig,
   liveCandidateObserveConfig,
   searchpointCopyChoices,
@@ -14,6 +15,7 @@ import { useConnector } from "@/lib/hooks/useConnector";
 import { SearchpointDrillIn } from "@/components/shell/searchpoint/SearchpointDrillIn";
 import { SteerForkAction } from "@/components/shell/searchpoint/SteerForkAction";
 import { VerifyAction } from "@/components/shell/searchpoint/VerifyAction";
+import { CompareOriginAction } from "@/components/shell/searchpoint/CompareOriginAction";
 import { MeasurementsPane } from "@/components/shell/measurements/MeasurementsPane";
 
 interface Props {
@@ -38,6 +40,8 @@ export function ScoringInspector({ selected, onClose }: Props) {
     : round.live
       ? liveCandidateObserveConfig(dash, selected.label)
       : candidateObserveConfig(round.doc, selected.label, selected.label);
+
+  const bench = selected ? benchByLabel(dash?.rounds ?? [], dash?.bench_pass).get(selected.label) : undefined;
 
   if (!selected) return null;
 
@@ -64,6 +68,7 @@ export function ScoringInspector({ selected, onClose }: Props) {
       <SearchpointDrillIn
         row={row}
         cfg={cfg}
+        bench={bench}
         measurements={
           <MeasurementsPane
             preset={{ candidateId: selected.candidate_id, scope: "cycle", groupBy: "none" }}
@@ -82,6 +87,7 @@ export function ScoringInspector({ selected, onClose }: Props) {
           // The VIEWED address, so an L4 inner searchpoint is refused rather than forked at the
           // outer cycle.
           <>
+            <CompareOriginAction candidate={selected} path={viewedPath} />
             <VerifyAction candidate={selected} path={viewedPath} />
             <SteerForkAction
               candidate={selected}

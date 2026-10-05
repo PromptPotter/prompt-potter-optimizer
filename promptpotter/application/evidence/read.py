@@ -779,6 +779,21 @@ def _score_cells(
     return (values, sorted(missed))
 
 
+# What a reader asks of any searchpoint beside the selected metric: the terms a composite fitness
+# prices a cell on. Channel names, so each resolves through `cell_channels_of` like the metric does.
+SIDE_CHANNELS: tuple[str, ...] = ("cost", "latency", "tokens", "target_prompt_chars")
+
+
+def _cell_means(channels: dict[str, dict[str, float]]) -> dict[str, float]:
+    """``channel -> mean over the cells that carry it``, over the same cells the level is read on."""
+    means: dict[str, float] = {}
+    for channel in SIDE_CHANNELS:
+        carried = [cell[channel] for cell in channels.values() if channel in cell]
+        if carried:
+            means[channel] = sum(carried) / len(carried)
+    return means
+
+
 def _spend_to_round(dash: dict[str, Any]) -> dict[str, float]:
     """``round -> USD this cycle had spent by the END of it``, cumulative and filled forward.
 
@@ -900,6 +915,7 @@ def _reading_row(
         cycle_spend_usd=cycle.spend_usd,
         cycle_rounds_scored=cycle.rounds_scored,
         spend_to_round=cycle.spend_to_round,
+        cell_means=_cell_means(channels),
         values=values,
         value=value,
         ci_lo=ci_lo,

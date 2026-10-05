@@ -26,6 +26,8 @@ interface CompareSelection {
   toggleCampaign: (rootCampaignId: string, subject: string) => void;
   addCampaigns: (channels: readonly CompareChannel[]) => void;
   addSubject: (channel: CompareChannel) => void;
+  /** The whole board at once, in this order: what was on it is dropped. */
+  show: (channels: readonly CompareChannel[]) => void;
   /** IN PLACE, so the channel keeps its position and its colour. */
   replace: (from: string, to: string) => void;
   remove: (subject: string) => void;
@@ -55,6 +57,7 @@ export function CompareSelectionProvider({ children }: { children: ReactNode }) 
       prev.some((c) => c.subject === channel.subject) ? prev : [...prev, channel],
     );
   }, []);
+  const show = useCallback((next: readonly CompareChannel[]) => setChannels(next), []);
   const replace = useCallback((from: string, to: string) => {
     setChannels((prev) =>
       prev.some((c) => c.subject === to)
@@ -76,11 +79,12 @@ export function CompareSelectionProvider({ children }: { children: ReactNode }) 
       toggleCampaign,
       addCampaigns,
       addSubject,
+      show,
       replace,
       remove,
       clear,
     }),
-    [channels, toggleCampaign, addCampaigns, addSubject, replace, remove, clear],
+    [channels, toggleCampaign, addCampaigns, addSubject, show, replace, remove, clear],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

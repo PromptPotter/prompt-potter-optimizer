@@ -3,7 +3,7 @@
 // Presentational: the host resolves row and spec, since only the dashboard holds a live stream.
 
 import type { ReactNode } from "react";
-import type { ElectedRow, PipelineStatus } from "@/lib/types";
+import type { CandidateView, ElectedRow, PipelineStatus } from "@/lib/types";
 import type { NodeConfigParam, NodeOutputSchema } from "@/lib/api";
 import { cacheShare, prefixReading, type ObserveConfig } from "@/lib/derivations";
 import { TERMS } from "@/lib/terms";
@@ -15,6 +15,8 @@ import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 export function SearchpointDrillIn({
   row,
   cfg,
+  bench,
+  stats,
   measurements,
   arms,
   schema,
@@ -28,6 +30,10 @@ export function SearchpointDrillIn({
   // `null` also where a round still scoring has written no document yet.
   row: ElectedRow | null;
   cfg: ObserveConfig | null;
+  // This searchpoint's held-out reading, off the dashboard: the round document carries none.
+  bench?: CandidateView["bench"];
+  // What this prompt costs to run, said ABOVE the prompt it describes.
+  stats?: ReactNode;
   measurements?: ReactNode;
   // `null` = the host cannot count the round's arms, a different fact from one.
   arms: number | null;
@@ -42,6 +48,7 @@ export function SearchpointDrillIn({
 }) {
   return (
     <>
+      {stats}
       {cfg ? (
         <NodeSurface
           node={null}
@@ -70,6 +77,23 @@ export function SearchpointDrillIn({
                   typeof row.n_samples === "number"
                     ? `${fmtPct1(row.accuracy)} of ${row.n_samples}`
                     : fmtPct1(row.accuracy)
+                }
+              />
+            )}
+            {bench != null && (
+              <Fact
+                k="bench · held out"
+                hint="This same searchpoint on the held-out bench set: questions no round of the search ever read, so no candidate was chosen on them. A different set of questions from the accuracy above, so the two rates are not differenced. Any bench lift is against the ORIGIN, not the parent."
+                v={
+                  bench.rows != null
+                    ? `${bench.accuracy == null ? "—" : fmtPct1(bench.accuracy)} so far · ${bench.scored} of ${bench.rows} in flight`
+                    : bench.accuracy == null
+                      ? `— of ${bench.scored}`
+                      : `${fmtPct1(bench.accuracy)} of ${bench.scored}${
+                          bench.ciLo != null && bench.ciHi != null
+                            ? ` [${fmtPct1(bench.ciLo)}, ${fmtPct1(bench.ciHi)}]`
+                            : ""
+                        }`
                 }
               />
             )}

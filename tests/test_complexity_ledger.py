@@ -924,7 +924,9 @@ LEDGER_BASELINE = {
     # that crashed or was refused at run init is not read as an arm still waiting on its grade.
     # +1: `LineageNode.stop_reason` — a course's ending as a `StopReason`, split out of `status`,
     # which carried it as a free string beside the candidate's own state.
-    "served_fields": 780,
+    # +1: `SubjectReading.cell_means` — what one cell of a compared point cost, how long it took
+    # and how long its prompt is, served so two searchpoints read side by side under any metric.
+    "served_fields": 781,
 }
 
 

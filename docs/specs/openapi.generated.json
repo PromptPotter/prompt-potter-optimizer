@@ -6761,6 +6761,13 @@
             "title": "Candidate Id",
             "type": "string"
           },
+          "cell_means": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Cell Means",
+            "type": "object"
+          },
           "ci_hi": {
             "anyOf": [
               {
@@ -6986,6 +6993,7 @@
           "cycle_spend_usd",
           "cycle_rounds_scored",
           "spend_to_round",
+          "cell_means",
           "values",
           "value",
           "ci_lo",

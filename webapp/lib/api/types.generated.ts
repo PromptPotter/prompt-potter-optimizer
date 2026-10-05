@@ -1476,6 +1476,7 @@ export interface SubjectReading {
   cycle_spend_usd: number | null;
   cycle_rounds_scored: number;
   spend_to_round: Record<string, number>;
+  cell_means: Record<string, number>;
   values: Record<string, number>;
   value: number | null;
   ci_lo: number | null;

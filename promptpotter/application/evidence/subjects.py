@@ -297,6 +297,10 @@ class SubjectReading(StrictModel):
     # surface answer "what had it cost to get to the point I am looking at" as the operator walks
     # the branch, which no single scalar can: the pick moves in the browser and the read does not.
     spend_to_round: dict[str, float]
+    # Mean per measured cell of `SIDE_CHANNELS`: what a cell of THIS point cost, how long it took
+    # and how long its prompt is, whatever metric the read selected. A channel none of its cells
+    # carries is absent, never 0.
+    cell_means: dict[str, float]
     values: dict[str, float]
     value: float | None
     ci_lo: float | None

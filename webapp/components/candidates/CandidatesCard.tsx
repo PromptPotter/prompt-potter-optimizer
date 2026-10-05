@@ -27,6 +27,7 @@ import { ABORT_LENS_LABELS } from "@/lib/api/types.generated";
 import type { DashboardCandidate, RoundSummary } from "@/lib/api/types";
 import { subjectKey, withMask } from "@/lib/api/reads";
 import { useCompareSelection } from "@/lib/compare-selection";
+import { useCompareWithOrigin } from "@/lib/hooks/useCompareWithOrigin";
 import { useSelection } from "@/lib/SelectionContext";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { ScoringMaskEditor } from "@/components/shell/mask/ScoringMaskEditor";
@@ -43,6 +44,7 @@ import type { LineageNode } from "@/lib/api";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import {
   barsAreCourses,
+  benchByLabel,
   candidateViews,
   forkKeysOf,
   DISPLAY_METRICS,
@@ -97,6 +99,7 @@ export function CandidatesCard() {
     setSelectionForSampleSet,
   } = useSelection();
   const comparing = useCompareSelection();
+  const withOrigin = useCompareWithOrigin(viewedPath, selectedCandidate?.candidate_id ?? null);
 
   const {
     showForest,
@@ -134,6 +137,11 @@ export function CandidatesCard() {
     }
     return m;
   }, [diagRunsResp, campaignId, cycleId]);
+
+  const benchReadings = useMemo(
+    () => benchByLabel(history, dash?.bench_pass),
+    [history, dash?.bench_pass],
+  );
 
   const { open: maskOpen, mask } = useScoringMask();
   const terms = useMaskTerms();
@@ -205,6 +213,7 @@ export function CandidatesCard() {
         inflightByLabel,
         sampleSet,
         diagByLabel,
+        benchByLabel: benchReadings,
         overlapByCandidate,
         overlapSize: overlap?.sample_ids.length ?? null,
         stampsTheta: dash?.stamps_theta ?? false,
@@ -214,6 +223,7 @@ export function CandidatesCard() {
       inflightByLabel,
       sampleSet,
       diagByLabel,
+      benchReadings,
       overlapByCandidate,
       overlap,
       dash?.stamps_theta,
@@ -506,6 +516,17 @@ export function CandidatesCard() {
                   }
                 >
                   Compare this searchpoint
+                </MenuCheck>
+                <MenuCheck
+                  on={false}
+                  disabled={withOrigin.run === null}
+                  onClick={() => {
+                    withOrigin.run?.();
+                    close();
+                  }}
+                  title="Open Compare on the origin and the selected searchpoint, or this branch's head with none selected. Replaces what is on the board."
+                >
+                  Compare with {withOrigin.originLabel ?? "the origin"}
                 </MenuCheck>
                 {dash?.stamps_theta && (
                   <>

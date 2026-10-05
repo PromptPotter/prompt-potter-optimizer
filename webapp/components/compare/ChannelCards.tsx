@@ -376,6 +376,41 @@ function SpentReading({ metered }: { metered: MeteredSpend | null }) {
   );
 }
 
+// The terms a composite fitness prices a cell on, as served means over this point's own cells
+// (`SubjectReading.cell_means`). Indexed through a guard: a channel no cell carries is absent.
+const CELL_MEAN_ROWS: readonly {
+  key: string;
+  label: string;
+  fmt: (v: number) => string;
+}[] = [
+  { key: "cost", label: "avg cost / cell", fmt: (v) => fmtMetricValue("usd", v) },
+  { key: "latency", label: "avg time / cell", fmt: (v) => fmtMetricValue("seconds", v) },
+  { key: "tokens", label: "avg tokens / cell", fmt: (v) => fmtMetricValue("tokens", v) },
+  {
+    key: "target_prompt_chars",
+    label: "prompt length",
+    fmt: (v) => `${Math.round(v).toLocaleString()} chars`,
+  },
+];
+
+function CellMeans({ means }: { means: Record<string, number> | undefined }) {
+  const rows = CELL_MEAN_ROWS.flatMap((r) => {
+    const v = means?.[r.key];
+    return v === undefined ? [] : [{ ...r, v }];
+  });
+  if (rows.length === 0) return null;
+  return (
+    <dl className="cmp-channel-facts cmp-channel-means">
+      {rows.map((r) => (
+        <div key={r.key}>
+          <dt>{r.label}</dt>
+          <dd>{r.fmt(r.v)}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 function CostFacts({ row }: { row: HeadToHeadRow }) {
   return (
     <dl className="cmp-channel-facts cmp-channel-cost">
@@ -503,7 +538,8 @@ function ChannelCard({
   const [mapOpen, setMapOpen] = useState(false);
   // Must NOT close when the pick moves — that is the moment the operator asked to see something.
   const [setupOpen, setSetupOpen] = useState(true);
-  const [detailOpen, setDetailOpen] = useState(false);
+  // A searchpoint channel is on the board to be READ, so it opens; a campaign's leads on its row.
+  const [detailOpen, setDetailOpen] = useState(reading?.kind === "candidate");
 
   // No live snapshot: exactly one cycle streams (`webapp/CLAUDE.md` § Polling shape), so a round
   // still scoring has nothing to read here.
@@ -839,6 +875,8 @@ function ChannelCard({
               <SearchpointDrillIn
                 row={pickedRow}
                 cfg={pickedCfg}
+                // Served for the point this channel READS, so a pick elsewhere shows none.
+                stats={pickedIsOwn && <CellMeans means={reading.cell_means} />}
                 measurements={
                   pickedPath &&
                   docId && (
