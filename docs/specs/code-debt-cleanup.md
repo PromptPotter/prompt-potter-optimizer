@@ -161,9 +161,9 @@ an untyped dict.
   against the recomputed cycle id) is CLI-only: web Resume, `step-cycle` and a fork's launch
   continue a cycle under an edited `pipeline.yaml`, starting prompt or framing. Silent. `grep -rn
   root_content_hash promptpotter/application/jobs promptpotter/application/runner promptpotter/application/bench/resume_and_fork` (empty).
-- `presentation/terminal/live/phase.py::render_progress_table` differences θ across rounds and
+- `application/views/render/phase.py::render_progress_table` differences θ across rounds and
   advises a "Plateau" stop without `AbilityReading.comparable_to` or the served caveat, where the
-  browser filters by ruler. `grep -n "theta - prev\|comparable_to" promptpotter/presentation/terminal/live/phase.py`.
+  browser filters by ruler. `grep -n "theta - prev\|comparable_to" promptpotter/application/views/render/phase.py`.
 - A fork's run limits are reconciled in the browser (`webapp/lib/derivations/forkReconcile.ts`: the
   parent's remaining rounds and dollars) and not by `fork_siblings.py::mint_operator_fork`, so a
   browser steer and `resume --steer` mint different ceilings. `grep -rln forkReconcileDefaults webapp/lib webapp/components`.
@@ -346,3 +346,9 @@ Closed items are not tracked here — `git log` is the history layer.
 - **Optimizer model repair-rate on heavy L2/L3** — VALID. `promptpotter/assets/optimizers/potter/pipeline.yaml` currently pins all five LLM nodes to `openai/gpt-6-luna` (changed from `deepseek/deepseek-v4-flash:nitro` noted in the 2026-09-16 check). Measurement (share of L2/L3 optimizer calls needing parse repair) still outstanding; no number reported. Entry stands.
 - **`_rebank_on_branch`'s re-bank has never been observed** — VALID. `application/bench/resume_and_fork/repair.py:163,166`: `cb.on_election(corrected)` and `cb.on_round_close(corrected)` — implementation intact. `tests/test_resume.py` covers only `repair_cut` (assertions at lines 1397, 1404); `round:complete|rebank|on_round_close` absent from test_resume.py (0 hits). No test asserts a corrected round carries its own `round:complete` on the branch ledger. Entry stands.
 - **The `prompt_info` trap has no GUARD** — VALID. `grep -rn 'raise.*prompt_info|prompt_info.*raise' promptpotter/` → 0 matches. No guard has been added; the no-skill silent-pass shape still holds.
+
+## verified 2026-10-05
+
+- **Swapping a model means hand-editing** — VALID. `presentation/cli/commands/` at HEAD: `verify.py`, `noise_floor.py`, `reset.py`, `maintenance.py`, `seed_screen.py`, `restamp.py`, `lifecycle.py`, `probe_reasoning.py`, `new.py`, `reindex.py`, `ab.py`, `resume_command.py`, `evidence.py`, `_shared.py` — no swap verb. `PipelineSchema._refused` confirmed at `domain/pipeline_schema.py:844`; `infrastructure/llm/capabilities.py:172` reads `supported_parameters` from the OpenRouter catalogue record — the closed half holds. Blocker (swap-verb capability) unchanged; entry stands.
+- **TermNorm `/version` endpoint** — VALID. `connectors/termnorm.py:232`: `_EXPECTED_REVISION: str | None = None`. Endpoint has not landed; entry stands.
+- **Reclaim** (Archive hygiene) — VALID. No reclaim verb in `application/maintenance/` or `presentation/cli/commands/`. `archive_maintenance.py:66–71` exports `compact_measurement_archive`, `inventory_measurement_archive`, `iter_cycle_ledgers`, `purge_cold_store`, `reindex_measurement_archive`, `restore_measurement_archive` — none implements the dataset-scoped reclaim (refusing while a producer can append, naming what it would strand). `archive_maintenance.py:193` names reclaim as planned-but-absent. Entry stands.
