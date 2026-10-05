@@ -35,6 +35,20 @@ class InProcessWorkload:
 PROBE_WORKLOAD = InProcessWorkload(experiment=None, program=None)
 
 
+class NoopSession:
+    """The session of a backend with no remote service: no handshake to make or recover."""
+
+    __slots__ = ()
+
+    async def set_terms(
+        self, http: httpx.AsyncClient, base_url: str, terms: list[str]
+    ) -> dict[str, Any]:
+        return {"status": "noop", "terms_count": len(terms)}
+
+    async def recover(self, http: httpx.AsyncClient, base_url: str) -> bool:
+        return True
+
+
 # The in-process execution arm: ``(workload, query, payload) -> resp`` where ``payload`` is
 # the connector's ``wire_adapter`` output and ``resp`` is the same ``{"data": {…}}``
 # shape ``measure_sample`` parses from an HTTP ``/matches`` body (so the scorer
@@ -311,6 +325,7 @@ __all__ = [
     "ExperimentResolver",
     "InProcessRun",
     "InProcessWorkload",
+    "NoopSession",
     "PreflightFn",
     "PromptDelivery",
     "VersionCheck",

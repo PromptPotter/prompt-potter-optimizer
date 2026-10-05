@@ -1,0 +1,111 @@
+diff --git a/src/core/src/model.rs b/src/core/src/model.rs
+index 5842588..565945a 100644
+--- a/src/core/src/model.rs
++++ b/src/core/src/model.rs
+@@ -34,12 +34,15 @@ impl Message {
+ pub struct TokenUsage {
+     pub input: u64,
+     pub output: u64,
++    /// The part of `input` the provider served from its prompt cache.
++    pub cached: u64,
+ }
+ 
+ impl TokenUsage {
+     pub fn add(&mut self, other: TokenUsage) {
+         self.input += other.input;
+         self.output += other.output;
++        self.cached += other.cached;
+     }
+ }
+ 
+diff --git a/src/output/src/lib.rs b/src/output/src/lib.rs
+index e8c533f..a3b5517 100644
+--- a/src/output/src/lib.rs
++++ b/src/output/src/lib.rs
+@@ -64,6 +64,7 @@ mod tests {
+             tokens: TokenUsage {
+                 input: 100,
+                 output: 10,
++                cached: 0,
+             },
+             latency_ms: 50,
+             db_latency_ms: 20,
+@@ -89,6 +90,7 @@ mod tests {
+             tokens: TokenUsage {
+                 input: 300,
+                 output: 30,
++                cached: 0,
+             },
+             latency_ms: 150,
+             db_latency_ms: 60,
+diff --git a/src/providers/claude/src/lib.rs b/src/providers/claude/src/lib.rs
+index ecc1abe..1993ec4 100644
+--- a/src/providers/claude/src/lib.rs
++++ b/src/providers/claude/src/lib.rs
+@@ -149,8 +149,11 @@ fn into_model_response(parsed: MessagesResponse) -> ModelResponse {
+     ModelResponse {
+         text,
+         tokens: TokenUsage {
+-            input: parsed.usage.input_tokens,
++            input: parsed.usage.input_tokens
++                + parsed.usage.cache_read_input_tokens
++                + parsed.usage.cache_creation_input_tokens,
+             output: parsed.usage.output_tokens,
++            cached: parsed.usage.cache_read_input_tokens,
+         },
+         stop,
+     }
+@@ -220,6 +223,11 @@ struct ContentBlock {
+ struct Usage {
+     input_tokens: u64,
+     output_tokens: u64,
++    /// Counted beside `input_tokens`, never inside it.
++    #[serde(default)]
++    cache_read_input_tokens: u64,
++    #[serde(default)]
++    cache_creation_input_tokens: u64,
+ }
+ 
+ #[cfg(test)]
+diff --git a/src/providers/dummy/src/lib.rs b/src/providers/dummy/src/lib.rs
+index 2426a59..cdd453c 100644
+--- a/src/providers/dummy/src/lib.rs
++++ b/src/providers/dummy/src/lib.rs
+@@ -139,6 +139,7 @@ impl ModelProvider for DummyProvider {
+                     tokens: TokenUsage {
+                         input: conversation.iter().map(|m| m.content.len() as u64).sum(),
+                         output: text.len() as u64,
++                        cached: 0,
+                     },
+                     text,
+                     stop: None,
+diff --git a/src/providers/openai-compatible/src/lib.rs b/src/providers/openai-compatible/src/lib.rs
+index 85e836b..bf3ca47 100644
+--- a/src/providers/openai-compatible/src/lib.rs
++++ b/src/providers/openai-compatible/src/lib.rs
+@@ -182,6 +182,9 @@ fn into_model_response(parsed: ChatResponse) -> Result<ModelResponse, ProviderEr
+         tokens: TokenUsage {
+             input: usage.prompt_tokens,
+             output: usage.completion_tokens,
++            cached: usage
++                .prompt_tokens_details
++                .map_or(0, |details| details.cached_tokens),
+         },
+         stop,
+     })
+@@ -229,6 +232,15 @@ struct Usage {
+     prompt_tokens: u64,
+     #[serde(default)]
+     completion_tokens: u64,
++    /// Absent or null where the provider reports no cache breakdown.
++    #[serde(default)]
++    prompt_tokens_details: Option<PromptTokensDetails>,
++}
++
++#[derive(Deserialize, Default)]
++struct PromptTokensDetails {
++    #[serde(default)]
++    cached_tokens: u64,
+ }
+ 
+ #[cfg(test)]

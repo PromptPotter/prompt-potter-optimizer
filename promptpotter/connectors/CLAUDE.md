@@ -24,6 +24,7 @@ operator instead of doing it themselves. The bar on any defect found while addin
 | `promptpotter` | `promptpotter.py` | `{query, optimizer_prompt_overrides}` → in-process inner cycle (`in_process_run` → `runner/inner/spawn.py`) | Noop (no remote service) | Optimizer-of-the-optimizer (L4) |
 | `dspy` | `dspy_module.py` | `{query, prompt, params}` → the caller's `dspy.Module` | Noop (no remote service) | PromptPotter as a DSPy `Teleprompter` (`presentation/teleprompter.py`) |
 | `harbor` | `harbor.py` | `{query, prompt, model_name, agent_kwargs}` → one containerized Harbor trial (`in_process_run` → `Trial.create(...).run()`) | Noop (no remote service) | Tuning an agent that works in a sandbox, graded by the task's own verifier |
+| `dbllmbench` | `dbllmbench.py` | `{query, prompt, config}` → one `db-llm-bench` run of that question in a container (`in_process_run` → `docker run <runner_image>`) | Noop (no remote service) | Tuning the prompt of a query-writing benchmark whose harness executes the query and grades the result |
 
 > **`import dspy` is function-local, and must stay that way.** Building the table imports every
 > built-in, so a module-level import would break every run for every install that did not ask
@@ -42,7 +43,7 @@ Three things the next connector should heed. **Wire payload shape is connector-s
 decides its own outer key (`termnorm` flattens `pipeline_params` into `node_config`,
 `promptpotter` nests under `optimizer_prompt_overrides`) and the protocol just carries the
 dict through. **The session contract works for in-process backends via a noop**
-(`PromptPotterSession` no-ops `set_terms`/`recover`), at the cost of the HTTP shape leaking
+(`protocol.py::NoopSession`, which every in-process connector passes), at the cost of the HTTP shape leaking
 into the rest of `BackendClient`. And **`extract_experiment` is the impedance-match seam**:
 both connectors yield `(queries, index_terms)` from very different bodies, so **a new
 connector shapes its `experiment_data` to fit the loader, never the reverse**.
@@ -135,6 +136,23 @@ and moves every round.
   downloads out of a cell, are
   [`../../docs/operations/package-cache.md`](../../docs/operations/package-cache.md).
 
+- **`dbllmbench`** — `in_process_run` writes TypeDB's `db-llm-bench` a config for ONE question, runs
+  its binary in a container built from a pinned upstream commit
+  (`resources/dbllmbench.Dockerfile`) and reads its results file. The retry loop and the scorer are
+  theirs, so nothing of the benchmark is ported. **The candidate prompt is the one skill file their
+  runner loads**, into their own template cut at its `{{skills}}` slot: everything below the slot
+  stays the harness's, and a cell's pair of files drops into their runner unchanged. **The dataset's
+  assets are the image's**, named by path in node config, so the image tag is measurement identity
+  and no dataset carries a second copy of a schema; the first cell refuses an image whose build
+  commit is not the one its tag names (`_check_image`). **The harness sends from its container**, so
+  the cell is held whole and billed off the token counts its results report — with the provider's
+  cache discount only on an image patched to report it (`_spent`). **One execution is
+  read at every retry budget** (`retry_levels`), the lower ones cut from the highest — sum across
+  them and an attempt is counted once per budget. A harness that ended without a full set of verdicts
+  measured its provider or its database (`_failure`), never the prompt. Where the database is rides
+  the environment (`DBLLMBENCH_DB_*`), because the same panel runs against a local container or a
+  cloud cluster.
+
 ## The answer shape — declared in `extract_experiment`, never inferred
 
 **What one cell's ANSWER is, a connector declares by whether the queries it yields carry a
@@ -143,7 +161,7 @@ and moves every round.
 | shape | `extract_experiment` yields | who decides the score | the formula reads |
 |---|---|---|---|
 | **ranked-label** (`termnorm`, `dspy`) | `ground_truth: "<label>"` | a node emitting a ranking; `predicted` is compared to the label | `label_match(predicted, ground_truth)` |
-| **verifier-graded** (`harbor`, `promptpotter`) | `ground_truth: None` | something else, with a NUMBER — the task's own verifier, L4's outer proxies | a `required_observation_keys` entry: `max(0.0, min(1.0, env_reward))` |
+| **verifier-graded** (`harbor`, `promptpotter`, `dbllmbench`) | `ground_truth: None` | something else, with a NUMBER — the task's own verifier, L4's outer proxies | a `required_observation_keys` entry: `max(0.0, min(1.0, env_reward))` |
 
 `domain/scoring.py::is_verifier_graded` (one label) and `all_verifier_graded` (a round, a bank,
 a dataset) are the ONE place that is asked. **Never `predicted == NO_RESULT`** — that sentinel is
@@ -227,7 +245,7 @@ roll-up does with a step that produced nothing — the answer is usually silence
 ## The measured unit — declared, never sniffed
 
 A connector declares what ONE measured row IS via `Connector.measured_unit` (`MeasuredUnit`):
-`sample` by default, `cell` on `promptpotter` (one outer row is a whole inner campaign) and on
+`sample` by default (`dbllmbench` included: one question, run `repetitions` times), `cell` on `promptpotter` (one outer row is a whole inner campaign) and on
 `harbor` (one row is a whole agent episode in a container). What the two share is not their
 transport but their SHAPE — a row that takes minutes, spends on its own account and can fail
 halfway — which is what the word marks. It rides the same declared-capability channel as

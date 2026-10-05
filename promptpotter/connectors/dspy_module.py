@@ -8,14 +8,12 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.connectors.protocol import Connector, InProcessWorkload
+from promptpotter.connectors.protocol import Connector, InProcessWorkload, NoopSession
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.spend import StepTokenUsage
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -63,20 +61,6 @@ def dspy_wire_adapter(query: str, pipeline_params: dict[str, Any] | None) -> dic
         if params := {k: v for k, v in cfg.items() if k != "prompt"}:
             payload["params"] = params
     return payload
-
-
-class DspySession:
-    """In-process noop session — no remote service, so no handshake to make or recover."""
-
-    __slots__ = ()
-
-    async def set_terms(
-        self, http: httpx.AsyncClient, base_url: str, terms: list[str]
-    ) -> dict[str, Any]:
-        return {"status": "noop", "terms_count": len(terms)}
-
-    async def recover(self, http: httpx.AsyncClient, base_url: str) -> bool:
-        return True
 
 
 def _extract_experiment(
@@ -201,7 +185,7 @@ CONNECTOR = Connector(
     name="dspy",
     execution="in_process",
     wire_adapter=dspy_wire_adapter,
-    session_factory=DspySession,
+    session_factory=NoopSession,
     extract_experiment=_extract_experiment,
     in_process_run=_in_process_run,
     # One call into the caller's module — no latency to hide behind, so overlapping two
@@ -222,5 +206,4 @@ __all__ = [
     "RESULT_KEY",
     "SCORE_KEY",
     "DspyProgram",
-    "DspySession",
 ]

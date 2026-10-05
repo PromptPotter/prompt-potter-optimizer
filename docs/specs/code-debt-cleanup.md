@@ -40,7 +40,28 @@ it.
 
 A leading `NEXT` marks the one to take up cold when nothing else is in hand.
 
-- **NEXT — raising the in-flight depth takes effect only when a call LANDS.**
+- **NEXT — the prompt cache is a cost lever only on a route that stays on ONE host, and nothing
+  makes a route stay.** `infrastructure/llm/openai_compat.py` pins hosts only where a node config
+  names `route_order` by hand, and so do `connectors/harbor.py` and `connectors/dbllmbench.py`. A
+  backend node declares none by default, so a gateway spreads its calls over every host it lists
+  and each one starts cold: the stored ledgers read 1.2% cache capture on the backend, which is
+  72% of spend. Measured 2026-10-05 on `reactome-typeql-42`, where every call re-sends one 16k
+  prefix: `xiaomi/mimo-v2.6-flash` billed $0.030 per M input tokens unpinned and $0.019 pinned to
+  `xiaomi`, against a $0.14 list price and a $0.0028 cached one. So any design that counts on the
+  cache — a cost term in fitness, a spend estimate, a search front on cached price — holds only
+  under a condition no layer establishes or reports. Action: make stickiness the default rather
+  than a per-node secret. OpenRouter keeps a route on the host that served a `session_id`
+  (ten minutes idle), so send one per prompt prefix from the one request builder and from each
+  connector that sends past it; keep `route_order` as the explicit override; and serve cache
+  capture per node beside its spend, so a scattered route reads as one. **Rides with:** any change
+  to the request builder in `openai_compat.py`, a connector's route handling, or the caching arc
+  (`.scratch/caching-arc-state.md`). **Re-test:** `grep -n session_id
+  promptpotter/infrastructure/llm/openai_compat.py` — no hit means still open; then run
+  `.scratch/typeql-bench/screen_model.py xiaomi/mimo-v2.6-flash none 0,4,5,6,7,8` with and without
+  a trailing `xiaomi` and compare billed dollars per input token — a gap means the default route
+  still scatters.
+
+- **Raising the in-flight depth takes effect only when a call LANDS.**
   `application/scoring/query_loop.py::run_walks` re-reads `_armed_cells` every step, then blocks
   on `asyncio.wait(calls, return_when=FIRST_COMPLETED)`, so a press that widens the window waits
   for whatever is already out — on Harbor a whole agent episode, minutes. Seen 2026-09-18: a

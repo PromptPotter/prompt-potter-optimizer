@@ -14,6 +14,7 @@ Single canonical view of the model + reasoning_effort + max_tokens defaults ship
 | `spreadsheetbench-s10` | `qwen/qwen3.7-flash:nitro` (agent) | unset | `4096` (a spend limit) | Harbor agent episode: the prompt is an injected `SKILL.md`. The agent model is chosen under § The agent model on a Harbor dataset. |
 | `spreadsheetbench-s20` | `qwen/qwen3.7-flash` (agent, `route_order: [alibaba]`) | `none` | `4096` (a spend limit) | s10's episode on twenty tasks, the search panel; origin on all twenty, fifteen per candidate per round. Pinned to the configuration the Qwen campaign on s10 ran its origin with, so their shared cells replay. |
 | `sealqa-longseal-12` | `qwen/qwen3.7-flash:nitro` (agent) | unset | `4096` (a spend limit) | Harbor agent episode, `max_turns: 4`, graded by a `gpt-oss-120b` judge. Same selection section. |
+| `reactome-typeql-42` | `xiaomi/mimo-v2.6-flash`, pinned to `xiaomi` | `none` | `8192` (upstream's reply cap) | TypeDB's query-generation benchmark: the model writes TypeQL, the harness executes it and feeds errors back. The development model only, chosen on price in [`model-screens.md`](../../datasets/reactome-typeql-42/model-screens.md) § One run per question, three models. |
 
 `max_tokens` is **never** set as a numeric default in any dataset's `pipeline.yaml` node config — the provider ceiling applies. Held by convention, not by a test, so check the overlay rather than assuming. **A Harbor agent node is the exception:** there `max_tokens`, `max_input_tokens` and `max_turns` are the limits we send the agent, and the only thing its cell's spend is bounded by — leave one out and no cell runs under a spend ceiling (`connectors/harbor.py::_sent_spend_bound`).
 
@@ -192,6 +193,34 @@ account codes). Seven campaigns, `llm_only`, all starting at 0.05–0.10:
 - **`openai/gpt-oss-20b`, `high`:** 1.00 at round 9 (`perfect_score`), $0.08 — but the last step's
   lift is +0.05 (−0.05 to +0.15), so the final climb is not separable.
 - **`inclusionai/ling-3.0-flash`:** 0.40, lift not separable.
+
+## The model on an executed-query dataset
+
+On `reactome-typeql-42` the model writes a query, the harness runs it, and a rejected query comes back with its error for another attempt. Every attempt re-sends the whole prompt, about 16k tokens, and replies are a few hundred. So the input price sets the cost, and a model that reasons before answering multiplies the clock without a matching gain.
+
+- **Turn reasoning off where the model allows it.** `qwen/qwen3.8-flash` at `low` and `xiaomi/mimo-v2.6-flash` at its default each took about two minutes per call and were stopped unscored; with `none` both answer in seconds. `z-ai/glm-5.3-flash` refuses `none` with HTTP 400, as `openai/gpt-oss-*` does, and runs at `low`.
+- **A model's listed price is its cheapest host's.** `deepseek/deepseek-v4.1-flash` lists at $0.003 per M input tokens, which is one host of thirty; the others charge $0.025 to $0.45. A cost is only known for a pinned host or from the bill.
+- **This is the development model only.** The published rows are Claude Sonnet 5 and DeepSeek V4 Pro, and the reported cells run on the operator's pick.
+
+The screens, their bills and the hour each was read are the dataset's own record: [`datasets/reactome-typeql-42/model-screens.md`](../../datasets/reactome-typeql-42/model-screens.md).
+
+## Pick the model for what the run does
+
+No one model is the development model for every kind of run on a dataset. Two things decide which fits, and both are read from a model screen, on any dataset:
+
+**Why the model is cheap.** The three models screened on `reactome-typeql-42` are cheap for three different reasons, and each reason holds only for some runs.
+
+| Model | What makes it cheap | Holds when | Breaks when |
+|---|---|---|---|
+| `xiaomi/mimo-v2.6-flash` on `xiaomi` | The prompt cache: almost all its input bills at the cached price. | Many calls share one prompt on one host, as within one candidate of a search. | The prompt changes between calls. Every ablation arm and every new candidate starts cold, at up to the list price. |
+| `deepseek/deepseek-v4.1-flash` on `relace` | Input costs almost nothing ($0.003 per M tokens), cached or not. The bill is nearly all output, at $2.40 per M. | The prompt keeps changing, since no cache is needed. | The model writes long replies or many retries. |
+| `z-ai/glm-5.3-flash` on `relace` | A moderate input price with no cache discount. | The prompt is short, or the run is about shortening it: a shorter prompt shows up directly as a lower bill. | The prompt is long and sent many times. |
+
+**How much room the accuracy leaves, and in which direction.** A question a model already misses cannot register harm, and one it already gets right cannot register a gain.
+
+- **A search needs room to climb.** Use a model that misses a fair share of the questions, so a better prompt has something to win.
+- **An ablation needs room to fall.** Use a model that gets most questions right, so a removed section it needed shows as a miss. On the twelve questions `mimo` already misses every hard one, so a removal can only show damage on the seven easier ones; `glm` gets eleven right, so nearly every question can show it.
+- **A reported comparison uses neither rule.** It runs on the model the published rows used, or the operator's pick.
 
 ## Per-sample timings understate wall-clock
 

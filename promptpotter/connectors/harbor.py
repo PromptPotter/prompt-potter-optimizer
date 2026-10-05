@@ -30,7 +30,7 @@ import httpx
 from filelock import FileLock, Timeout
 
 from promptpotter.config.settings import non_utf8_encoding
-from promptpotter.connectors.protocol import Connector, InProcessWorkload
+from promptpotter.connectors.protocol import Connector, InProcessWorkload, NoopSession
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import LLMSpendBound, stable_hash
@@ -248,20 +248,6 @@ def _system_skill_template(template: str, prompt: str) -> str:
     block = f'<skill name="{_SKILL_NAME}">\n{prompt.strip()}\n</skill>\n\n'
     # terminus-2 fills the template with `str.format`, so the skill's own braces are doubled.
     return block.replace("{", "{{").replace("}", "}}") + template
-
-
-class HarborSession:
-    """In-process noop session — no remote service, so no handshake to make or recover."""
-
-    __slots__ = ()
-
-    async def set_terms(
-        self, http: httpx.AsyncClient, base_url: str, terms: list[str]
-    ) -> dict[str, Any]:
-        return {"status": "noop", "terms_count": len(terms)}
-
-    async def recover(self, http: httpx.AsyncClient, base_url: str) -> bool:
-        return True
 
 
 @functools.cache
@@ -1622,7 +1608,7 @@ CONNECTOR = Connector(
     # Every send an episode makes is billed where it is made (`_in_process_run`), so a cell is no
     # send of its own: it RESERVES that bound, and its sends draw on the reservation.
     holds_own_sends=True,
-    session_factory=HarborSession,
+    session_factory=NoopSession,
     extract_experiment=_extract_experiment,
     in_process_run=_in_process_run,
     preflight=_preflight,
@@ -1682,6 +1668,5 @@ __all__ = [
     "CONNECTOR",
     "REWARD_KEY",
     "TASKS_FILE",
-    "HarborSession",
     "harbor_wire_adapter",
 ]

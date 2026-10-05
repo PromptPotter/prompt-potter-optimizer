@@ -15,7 +15,7 @@ from promptpotter.application.runner.inner.tasks import (
     resolve_inner_cells,
 )
 from promptpotter.application.scoring import metrics, selection
-from promptpotter.connectors.protocol import Connector, InProcessWorkload
+from promptpotter.connectors.protocol import Connector, InProcessWorkload, NoopSession
 from promptpotter.domain.l4 import proxies
 from promptpotter.domain.l4.inner_origin import INNER_ORIGIN_KEY
 from promptpotter.domain.l4.proxies import INNER_RESULT_KEY, OUTER_PROXY_KEYS
@@ -28,8 +28,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
     from types import ModuleType
-
-    import httpx
 
     from promptpotter.infrastructure.store.stores import Stores
 
@@ -135,29 +133,6 @@ def promptpotter_wire_adapter(
 
 
 # ---------------------------------------------------------------------------
-# Session lifecycle (in-process noop)
-# ---------------------------------------------------------------------------
-
-
-class PromptPotterSession:
-    """In-process noop session — there is no remote service, so there is no handshake and
-    ``set_terms`` / ``recover`` are no-ops."""
-
-    __slots__ = ()
-
-    async def set_terms(
-        self,
-        http: httpx.AsyncClient,
-        base_url: str,
-        terms: list[str],
-    ) -> dict[str, Any]:
-        return {"status": "noop", "terms_count": len(terms)}
-
-    async def recover(self, http: httpx.AsyncClient, base_url: str) -> bool:
-        return True
-
-
-# ---------------------------------------------------------------------------
 # Experiment-data extraction
 # ---------------------------------------------------------------------------
 
@@ -197,7 +172,7 @@ CONNECTOR = Connector(
     name="promptpotter",
     execution="in_process",
     wire_adapter=promptpotter_wire_adapter,
-    session_factory=PromptPotterSession,
+    session_factory=NoopSession,
     extract_experiment=_extract_experiment,
     in_process_run=_in_process_run,
     # One sample is a whole inner campaign — tens of minutes, almost all of it waiting on the
@@ -224,4 +199,4 @@ CONNECTOR = Connector(
 )
 
 
-__all__ = ["CONNECTOR", "PromptPotterSession"]
+__all__ = ["CONNECTOR"]

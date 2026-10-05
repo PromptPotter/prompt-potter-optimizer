@@ -189,7 +189,9 @@ LEDGER_BASELINE = {
     # +1: `application/jobs/launcher/run_job.py` — a server-launched run executes in its own
     # process. It holds both halves of that hand-over (the spawn and the run), which the
     # launcher held as a task on the server's event loop.
-    "modules": 389,
+    # +1: `connectors/dbllmbench.py` — a fifth backend kind: one benchmark question run by
+    # TypeDB's own `db-llm-bench` harness in a container, graded by executing the query.
+    "modules": 390,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     # +2: `application/optimizers/__init__.py` (the member registry) and its `potter/`, empty.
@@ -275,7 +277,11 @@ LEDGER_BASELINE = {
     # +1: `QUEUE_MAX_WAIT_S` — how long a launch may wait in line before it is withdrawn. It is a
     # setting and not a constant because it is the one queue number a HOST has to be able to
     # answer for: on a shared box it decides when someone else's waiting launch is given up on.
-    "settings_env": 32,
+    # +4: `DBLLMBENCH_DB_{URL,USERNAME,PASSWORD,TLS}` — where the dbllmbench connector's database
+    # is, declared on `Settings` like every other credential so a run launched from the API server
+    # reads the same `.env` as one launched from a shell; a bare `os.environ` read saw only the
+    # shell's exports and fell back to the local compose stack in silence.
+    "settings_env": 36,
     # -1: `TASK_CONTEXT_OVERRIDES` — the L1 context slot it keyed is gone; target text has one
     # carrier, `prompt_fields_updates`.
     # -1: `POBB_DEFAULT_EPSILON` — a second source for the `pobb` node's ε, which its manifest owns.
@@ -748,7 +754,9 @@ LEDGER_BASELINE = {
     # linked through this round's rows alone, so a selector's parent cells decide θ (§ 3).
     # +1: an input refused with a round open ending CRASHED, so the advice is a traceback and a
     # re-run for a config only the operator can change (test_resume).
-    "test_functions": 239,
+    # +1: a harness cell pooled across its derived retry levels reads nine verdicts where there
+    # are three, and a run the harness never finished scores as a miss (test_numerics § 2).
+    "test_functions": 240,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

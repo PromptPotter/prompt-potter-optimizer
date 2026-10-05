@@ -1,0 +1,24 @@
+campaign_config:
+  dataset_name: reactome-typeql-42
+  exclude_nodes: []
+  scoring:
+    # Accuracy after the retry budget: the share of a question's runs whose query returned the
+    # expected result within two retries — one run while searching, so 0 or 1. A query the database rejects comes back with its
+    # error, and recovering from that is what the benchmark's own finding rests on, so the score
+    # is read after the attempts rather than at the first. First-attempt accuracy is banked
+    # beside it and not scored.
+    #
+    # The harness is the grader, so there is no label: the term is the verifier's own number.
+    per_sample: max(0.0, min(1.0, accuracy_r2))
+    # No `per_cell` yet. A cost term needs a MEASURED anchor, and the skill is 33k characters, so
+    # a term that rewards deleting it has to be priced against what deleting it does to accuracy
+    # before it is allowed to decide a round.
+  # 14 of the 42 held out as the bench set, ranked by content hash. The published rows are over
+  # all 42, so the comparable number is a final pass over the whole panel; the bench set is what
+  # says a lift is not the search pool memorised.
+  dataset_split:
+    bench: 14
+  optimization:
+    max_rounds: null
+    degradation_threshold: 0.4
+    spend_budget_usd: 0.13

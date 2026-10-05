@@ -1,0 +1,106 @@
+name: Reactome TypeQL (db-llm-bench, 42 questions)
+version: v0.0
+description: >-
+  TypeDB's LLM query-generation benchmark, TypeQL arm, run through TypeDB's own harness. One cell
+  is ONE question: the model is asked for a TypeQL query, the harness executes it read-only against
+  the Reactome pathway database and compares the RESULT to a known answer — once per question
+  while searching, three times in the published protocol. An error is fed back for a corrected
+  query, twice while searching and up to four times in the protocol; a query that runs and
+  answers wrongly is final.
+
+  The harness, the scorer, the schema, the examples and the questions are all upstream's, at one
+  pinned commit inside the runner image. What this dataset varies is the head of their prompt —
+  the instruction lines and the TypeQL skill — and nothing else.
+backend_name: db-llm-bench
+backend_type: dbllmbench
+available_models:
+  - xiaomi/mimo-v2.6-flash
+nodes:
+  query_writer:
+    type: llm
+    runtime: backend
+    description: >-
+      One question through `db-llm-bench`. The rendered prompt is the one skill file the runner
+      loads into its template's `{{skills}}` slot; the schema, the examples, the fenced-block
+      footer and the question arrive from the harness below it. An `llm` and not an `agent`: no
+      tool is called, and a retry is the harness returning the database's error, not the model
+      choosing a step.
+    config:
+      provider: openrouter
+      # The DEVELOPMENT model, chosen for price and speed. The published rows are Claude Sonnet 5
+      # and DeepSeek V4 Pro, and a number on any other model is a different benchmark — so nothing
+      # measured on this one sits beside theirs. The reported cells take the operator's pick.
+      model: xiaomi/mimo-v2.6-flash
+      # Off: every attempt re-sends the whole prompt, and a model that reasons first multiplies
+      # the clock for no gain in accuracy (`docs/operations/dataset-reasoning-matrix.md`).
+      reasoning_effort: none
+      # One host, so the 16k-token prefix every call re-sends is read from that host's prompt
+      # cache; unpinned, a gateway spreads the calls and each host starts cold.
+      route_order: [xiaomi]
+      # Upstream's own reply cap: a model that thinks past a smaller one never reaches the fenced
+      # block, and scores as "no query" for a reason that is not its query.
+      max_tokens: 8192
+      # With `max_tokens`, what a cell's spend is held at before it runs
+      # (`connectors/dbllmbench.py::_sent_spend_bound`). The origin prompt is ~66k characters —
+      # skill 33k, schema 29k, five examples — and a retry adds the failed query and its error.
+      max_input_tokens: 32000
+      # The harness build every cell runs, and with it the template, schema, examples and scorer.
+      # It is node config, so it is measurement identity: a new upstream commit re-keys every cell.
+      # The `-search` tag is upstream plus a `repetitions:` config key and the provider's
+      # cached-token count (`dataset.md` § Our cut); a reported pass names the unpatched
+      # `dbllmbench:7072e6e3e286`.
+      runner_image: dbllmbench:7072e6e3e286-search
+      # ONE run per question while searching. The published protocol is three, and a reported pass
+      # drops this key.
+      repetitions: 1
+      db: typedb
+      database: reactome
+      # Paths inside the image's copy of upstream `data/`.
+      template: prompts/typedb.txt
+      schema: reactome/typedb/schema.tql
+      examples_dir: reactome/typedb
+      # All five, which is the published "with examples" configuration.
+      examples: 5
+      # Two retries, and the score is read after them: the search's budget, which bounds what a
+      # miss can cost. The published protocol reads 0, 2 and 4; a reported pass sets `[0, 2, 4]`.
+      retry_levels: [0, 2]
+    # DECLARED here rather than inherited: there is no server to ask. Without `prompt_info` this
+    # node is not prompt-bearing, no skill file is written, and every variant scores identically.
+    prompt_info:
+      family: dbllmbench_prompt_head
+      # None. The question, the schema and the examples are slots of the HARNESS's template, which
+      # the candidate's text is itself substituted into.
+      template_variables: []
+      description: The instruction lines and query-language skill that head the harness's prompt
+    optimizer:
+      # The six prompt fields and nothing else. `model` is a measurement premise here, and
+      # `examples` is the published configuration rather than an axis.
+      param_keys:
+        - persona
+        - task_intent
+        - problem_description
+        - instruction
+        - thinking_style
+        - answer_format
+      observation_name: query_writer
+      observation_mappings:
+        # Share of the cell's runs whose query returned the expected result within two retries —
+        # the score. `is_llm` marks the mapping the node's spend is attributed through.
+        - pipeline_key: accuracy_r2
+          output_field: accuracy_r2
+          is_llm: true
+        # The same runs cut at the FIRST attempt. A view of the one execution, never a second
+        # measurement.
+        - pipeline_key: accuracy_r0
+          output_field: accuracy_r0
+        # How a first attempt missed: an error the harness could feed back, against a query that
+        # ran and answered wrongly. With `accuracy_r0` the three sum to one.
+        - pipeline_key: visible_error_r0
+          output_field: visible_error_r0
+        - pipeline_key: silent_wrong_r0
+          output_field: silent_wrong_r0
+        - pipeline_key: retries_used
+          output_field: retries_used
+pipelines:
+  default:
+    - query_writer

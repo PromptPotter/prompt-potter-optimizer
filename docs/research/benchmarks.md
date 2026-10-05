@@ -46,6 +46,7 @@ Two ways to misread the bar:
 | 3 | **AIME 2025** | In band at 30%, wired. Limited by size (30 problems, no split), not by headroom. |
 | — | **`justlogic-d234`** | Not a publication benchmark — the **focus instrument**, where the optimizer's own behaviour is measured round over round. By far the most-measured dataset here. |
 | — | **`justlogic-d234-held`** | The head-to-head's bench instrument: that dataset's search and demo pools under a wider bench (`datasets/justlogic-d234-held/dataset.md`). Unmeasured. |
+| — | **`reactome-typeql-42`** | TypeDB's query-writing benchmark, run by their own harness (`datasets/reactome-typeql-42/dataset.md`): the model writes TypeQL, the query is executed and its result graded. Outside the head-to-head — the comparison is against TypeDB's published rows, on the model the operator picks. Development screens only so far ([`model-screens.md`](../../datasets/reactome-typeql-42/model-screens.md)). |
 | — | **GSM8K** | **Verdict withdrawn — pilot candidate.** Was rejected as saturated on a ~78% *literature* number never measured at the bar; CAPO's published run moves the same task 78.1 → 93.7 from a near-identical origin, so 78% is an origin, not a ceiling. Needs one measured origin pass before it is admitted or re-rejected. It is also the opponent's home turf, which makes it the strongest form of the comparison rather than the weakest. |
 
 BBEH is the headline but the wrong *iteration* target: at the bar every cycle ties at noise and PoBB

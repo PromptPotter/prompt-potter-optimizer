@@ -139,6 +139,14 @@ class Settings(BaseSettings):
     # TermNorm gates it behind its own flag, so unset is the normal local posture.
     TERMNORM_TOKEN: str = ""
 
+    # Where the dbllmbench connector's database is — the deployment's, never the dataset's. Empty
+    # is upstream's local compose stack; a TypeDB Cloud cluster is its gRPC `host:port`, the admin
+    # credentials and TLS on. Read ONLY by `connectors/dbllmbench.py::harness_config`.
+    DBLLMBENCH_DB_URL: str = ""
+    DBLLMBENCH_DB_USERNAME: str = ""
+    DBLLMBENCH_DB_PASSWORD: str = ""
+    DBLLMBENCH_DB_TLS: bool = False
+
     # Langfuse Observability (cloud.langfuse.com)
     LANGFUSE_PUBLIC_KEY: str = ""
     LANGFUSE_SECRET_KEY: str = ""

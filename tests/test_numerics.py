@@ -88,6 +88,7 @@ from promptpotter.application.scoring.metrics import (
 )
 from promptpotter.application.scoring.sample_measurement import measure_sample
 from promptpotter.application.scoring.search_point_scorer import score_search_point
+from promptpotter.connectors import dbllmbench
 from promptpotter.domain.bench import BenchPass, BenchPasses, DatasetSplit, partition_bank
 from promptpotter.domain.campaign import Arm, Campaign, HeadToHeadRecord
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
@@ -824,6 +825,48 @@ def test_the_mean_interval_is_clipped_to_the_support_the_metric_actually_has() -
         grade="fitness",
     )
     assert with_error == clean
+
+
+def test_a_harness_cell_reads_each_retry_level_once_and_never_scores_a_short_run() -> None:
+    """A db-llm-bench cell is three runs written at three retry levels, the lower two CUT from the
+    highest. Pooling the levels reads nine verdicts where there are three; a run the harness never
+    finished, scored as a miss, charges the prompt for the provider's stall."""
+
+    def record(level: int, repetition: int, errors: list[str | None], *, accurate: bool) -> dict:
+        kept = errors[: level + 1]
+        return {
+            "maxRetries": level,
+            "repetition": repetition,
+            "retriesUsed": len(kept) - 1,
+            "accurate": accurate and kept[-1] is None,
+            "attempts": [{"query": "match $x;", "error": e} for e in kept],
+        }
+
+    # Run 1 is right at once; run 2 errors twice, then is right; run 3 runs and answers wrongly.
+    runs = [([None], True), (["syntax", "syntax", None], True), ([None], False)]
+    records = [
+        record(level, n, errors, accurate=accurate)
+        for n, (errors, accurate) in enumerate(runs, start=1)
+        for level in dbllmbench.RETRY_LEVELS
+    ]
+    observed = dbllmbench.project_records(records)
+
+    assert observed["accuracy_r0"] == pytest.approx(1 / 3)
+    assert observed["accuracy_r2"] == observed["accuracy_r4"] == pytest.approx(2 / 3)
+    # The two ways the first attempt missed, which with the hit partition the three runs.
+    assert observed["visible_error_r0"] == pytest.approx(1 / 3)
+    assert observed["silent_wrong_r0"] == pytest.approx(1 / 3)
+    # Off the highest level alone: the levels pooled would report 4/3.
+    assert observed["retries_used"] == pytest.approx(2 / 3)
+
+    with pytest.raises(ValueError, match="repetitions"):
+        dbllmbench.project_records([r for r in records if r["repetition"] != 3])
+
+    # A search cell asks for one run, and three coming back is the unpatched harness answering.
+    one = [r for r in records if r["repetition"] == 2]
+    assert dbllmbench.project_records(one, runs=1)["accuracy_r2"] == 1.0
+    with pytest.raises(ValueError, match="repetitions"):
+        dbllmbench.project_records(records, runs=1)
 
 
 # 3. The δ ruler — the scale every θ is read on

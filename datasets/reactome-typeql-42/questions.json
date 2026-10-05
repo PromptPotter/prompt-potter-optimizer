@@ -1,0 +1,555 @@
+{
+  "questions": [
+    {
+      "question": "How many pathways are recorded?",
+      "difficulty": "easy",
+      "expected": 23604,
+      "queries": {
+        "sql": "SELECT COUNT(*) FROM Pathway;",
+        "cypher": "MATCH (p:Pathway) RETURN count(p)",
+        "typeql": "match $p isa pathway; reduce $count = count;"
+      }
+    },
+    {
+      "question": "How many compartments are recorded?",
+      "difficulty": "easy",
+      "expected": 158,
+      "queries": {
+        "sql": "SELECT COUNT(*) FROM Compartment;",
+        "cypher": "MATCH (c:Compartment) RETURN count(c)",
+        "typeql": "match $c isa compartment; reduce $count = count;"
+      }
+    },
+    {
+      "question": "What is the name of the pathway whose stable identifier is R-HSA-168256?",
+      "difficulty": "easy",
+      "expected": "Immune System",
+      "queries": {
+        "sql": "SELECT d._displayName FROM DatabaseObject d JOIN StableIdentifier s ON s.DB_ID = d.stableIdentifier JOIN Pathway p ON p.DB_ID = d.DB_ID WHERE s.identifier = 'R-HSA-168256';",
+        "cypher": "MATCH (p:Pathway {stId:'R-HSA-168256'}) RETURN p.displayName",
+        "typeql": "match $p isa pathway, has st-id \"R-HSA-168256\", has display-name $name; select $name;"
+      }
+    },
+    {
+      "question": "How many reaction-like events have an input?",
+      "difficulty": "easy",
+      "expected": 95723,
+      "queries": {
+        "sql": "SELECT COUNT(DISTINCT DB_ID) FROM ReactionlikeEvent_2_input;",
+        "cypher": "MATCH (r:ReactionLikeEvent)-[:input]->() RETURN count(DISTINCT r)",
+        "typeql": "match reaction-input (reaction: $r, consumed-entity: $e); select $r; distinct; reduce $count = count;"
+      }
+    },
+    {
+      "question": "How many reaction-like events have an output and an input?",
+      "difficulty": "medium",
+      "expected": 95012,
+      "queries": {
+        "sql": "SELECT COUNT(*) FROM ReactionlikeEvent r WHERE EXISTS (SELECT 1 FROM ReactionlikeEvent_2_input i WHERE i.DB_ID = r.DB_ID) AND EXISTS (SELECT 1 FROM ReactionlikeEvent_2_output o WHERE o.DB_ID = r.DB_ID);",
+        "cypher": "MATCH (r:ReactionLikeEvent) WHERE (r)-[:input]->() AND (r)-[:output]->() RETURN count(r)",
+        "typeql": "match $r isa reaction-like-event; reaction-input (reaction: $r, consumed-entity: $i); reaction-output (reaction: $r, produced-entity: $o); select $r; distinct; reduce $count = count;"
+      }
+    },
+    {
+      "question": "How many events record more than one species?",
+      "difficulty": "medium",
+      "expected": 387,
+      "queries": {
+        "sql": "SELECT COUNT(*) FROM (SELECT DB_ID FROM Event_2_species GROUP BY DB_ID HAVING COUNT(DISTINCT species) > 1) t;",
+        "cypher": "MATCH (e:Event)-[:species]->(s:Species) WITH e, count(DISTINCT s) AS n WHERE n > 1 RETURN count(e)",
+        "typeql": "match $e isa event; species-assignment (classified-thing: $e, species: $s); select $e, $s; distinct; reduce $n = count($s) groupby $e; match $n > 1; reduce $count = count;"
+      }
+    },
+    {
+      "question": "How many pathways have a reaction-like event?",
+      "difficulty": "medium",
+      "expected": 17951,
+      "queries": {
+        "sql": "SELECT COUNT(DISTINCT he.DB_ID) FROM Pathway_2_hasEvent he JOIN ReactionlikeEvent r ON r.DB_ID = he.hasEvent;",
+        "cypher": "MATCH (p:Pathway)-[:hasEvent]->(r:ReactionLikeEvent) RETURN count(DISTINCT p)",
+        "typeql": "match $p isa pathway; event-containment (containing-pathway: $p, contained-event: $r); $r isa reaction-like-event; select $p; distinct; reduce $count = count;"
+      }
+    },
+    {
+      "question": "How many compartments are recorded for at least one pathway?",
+      "difficulty": "medium",
+      "expected": 52,
+      "queries": {
+        "sql": "SELECT COUNT(DISTINCT compartment) FROM Pathway_2_compartment;",
+        "cypher": "MATCH (:Pathway)-[:compartment]->(c) RETURN count(DISTINCT c)",
+        "typeql": "match $p isa pathway; compartment-assignment (localised-thing: $p, compartment: $c); select $c; distinct; reduce $count = count;"
+      }
+    },
+    {
+      "question": "Report the display name and pathway count of the five species recorded by the most pathways, ordered by highest count first, then alphabetically by species name. Use columns named species and pathways.",
+      "difficulty": "medium",
+      "expected": [
+        {
+          "pathways": 2883,
+          "species": "Homo sapiens"
+        },
+        {
+          "pathways": 1845,
+          "species": "Mus musculus"
+        },
+        {
+          "pathways": 1841,
+          "species": "Gallus gallus"
+        },
+        {
+          "pathways": 1833,
+          "species": "Rattus norvegicus"
+        },
+        {
+          "pathways": 1822,
+          "species": "Bos taurus"
+        }
+      ],
+      "ordered": true,
+      "queries": {
+        "sql": "SELECT d._displayName AS species, COUNT(DISTINCT es.DB_ID) AS pathways FROM Event_2_species es JOIN Pathway p ON p.DB_ID = es.DB_ID JOIN DatabaseObject d ON d.DB_ID = es.species GROUP BY es.species, d._displayName ORDER BY pathways DESC, species ASC LIMIT 5;",
+        "cypher": "MATCH (p:Pathway)-[:species]->(s:Species) WITH s, count(DISTINCT p) AS pathways RETURN s.displayName AS species, pathways ORDER BY pathways DESC, species ASC LIMIT 5",
+        "typeql": "match $p isa pathway; species-assignment (classified-thing: $p, species: $s); $s has display-name $species; select $species, $p; distinct; reduce $pathways = count($p) groupby $species; sort $pathways desc, $species asc; limit 5;"
+      }
+    },
+    {
+      "question": "Consider reaction-like events assigned to Homo sapiens whose first input is a Complex. How many such events have a physical entity as part of their catalyst activity that's also directly or indirectly part of that first input complex?",
+      "difficulty": "expert",
+      "expected": 60,
+      "queries": {
+        "sql": "WITH RECURSIVE r0 AS (SELECT i.DB_ID AS ev, i.input AS cx FROM ReactionlikeEvent_2_input i JOIN Complex c ON c.DB_ID = i.input JOIN Event_2_species es ON es.DB_ID = i.DB_ID JOIN DatabaseObject sp ON sp.DB_ID = es.species AND sp._displayName = 'Homo sapiens' WHERE i.input_rank = 0), parts AS (SELECT r0.ev, hc.hasComponent AS ent FROM r0 JOIN Complex_2_hasComponent hc ON hc.DB_ID = r0.cx UNION SELECT p.ev, hc.hasComponent FROM parts p JOIN Complex_2_hasComponent hc ON hc.DB_ID = p.ent UNION SELECT p.ev, hm.hasMember FROM parts p JOIN EntitySet_2_hasMember hm ON hm.DB_ID = p.ent) SELECT COUNT(DISTINCT rc.DB_ID) FROM ReactionlikeEvent_2_catalystActivity rc JOIN CatalystActivity ca ON ca.DB_ID = rc.catalystActivity JOIN parts p ON p.ev = rc.DB_ID AND p.ent = ca.physicalEntity;",
+        "cypher": "MATCH (r:ReactionLikeEvent)-[:species]->(:Species {displayName:'Homo sapiens'})\nMATCH (r)-[i:input]->(cx:Complex) WHERE i.order = 0\nMATCH (r)-[:catalystActivity]->(:CatalystActivity)-[:physicalEntity]->(pe)\nWHERE (cx)-[:hasComponent|hasMember*]->(pe)\nRETURN count(DISTINCT r)",
+        "typeql": "with\nfun parts-of($w: physical-entity) -> { physical-entity }:\n  match\n    { composition (whole: $w, part: $x); } or\n    { composition (whole: $w, part: $m); let $x in parts-of($m); };\n  return { $x };\nmatch\n  $r isa reaction-like-event;\n  species-assignment (classified-thing: $r, species: $sp); $sp has display-name \"Homo sapiens\";\n  $i isa reaction-input, links (reaction: $r, consumed-entity: $cx), has ordering 0;\n  $cx isa complex;\n  catalysis (catalysed-reaction: $r, catalyst: $pe);\n  let $p in parts-of($cx);\n  $p is $pe;\nselect $r;\ndistinct;\nreduce $count = count;"
+      }
+    },
+    {
+      "question": "Which people are an author of the greatest number of distinct literature references that are summations of Homo sapiens pathways? Give each person as their surname, then a comma and a space, then their first name.",
+      "difficulty": "argmax",
+      "expected": [
+        "Casanova, Jean-Laurent",
+        "Shao, Feng"
+      ],
+      "queries": {
+        "sql": "WITH tally AS (SELECT pa.author AS person, COUNT(DISTINCT sl.literatureReference) AS n FROM Pathway pw JOIN Event_2_species es ON es.DB_ID = pw.DB_ID JOIN DatabaseObject sp ON sp.DB_ID = es.species AND sp._displayName = 'Homo sapiens' JOIN Event_2_summation s ON s.DB_ID = pw.DB_ID JOIN Summation_2_literatureReference sl ON sl.DB_ID = s.summation JOIN Publication_2_author pa ON pa.DB_ID = sl.literatureReference GROUP BY pa.author) SELECT CONCAT(pe.surname, ', ', pe.firstname) FROM tally t JOIN Person pe ON pe.DB_ID = t.person WHERE t.n = (SELECT MAX(n) FROM tally);",
+        "cypher": "MATCH (p:Pathway)-[:species]->(:Species {displayName:'Homo sapiens'})\nMATCH (p)-[:summation]->(:Summation)-[:literatureReference]->(lr)\nMATCH (lr)<-[:author]-(person:Person)\nWITH person, count(DISTINCT lr) AS n\nWITH collect({person: person, n: n}) AS rows, max(n) AS top\nUNWIND rows AS row\nWITH row WHERE row.n = top\nRETURN row.person.surname + ', ' + row.person.firstname",
+        "typeql": "match $p isa pathway; species-assignment (classified-thing: $p, species: $sp); $sp has display-name \"Homo sapiens\"; summarisation (summarised-thing: $p, summation: $s); literature-citation (citing-thing: $s, cited-publication: $lr); publication-authorship (publication: $lr, publication-author: $person); select $person, $lr; distinct; reduce $n = count($lr) groupby $person; reduce $m = max($n); match $p isa pathway; species-assignment (classified-thing: $p, species: $sp); $sp has display-name \"Homo sapiens\"; summarisation (summarised-thing: $p, summation: $s); literature-citation (citing-thing: $s, cited-publication: $lr); publication-authorship (publication: $lr, publication-author: $person); select $m, $person, $lr; distinct; reduce $n = count($lr) groupby $person, $m; match $n == $m; $person has surname $sn, has first-name $fn; let $name = $sn + \", \" + $fn; select $name;"
+      }
+    },
+    {
+      "question": "Consider Homo sapiens pathways where a reviewer of an edit is affiliated with a University. How many of those pathways directly contain an event with a negative preceding event whose reason is \"Futile Cycle\"?",
+      "difficulty": "expert",
+      "expected": 42,
+      "queries": {
+        "sql": "SELECT COUNT(DISTINCT pw.DB_ID) FROM Pathway pw JOIN Event_2_species es ON es.DB_ID = pw.DB_ID JOIN DatabaseObject sp ON sp.DB_ID = es.species AND sp._displayName = 'Homo sapiens' JOIN Event_2_reviewed rv ON rv.DB_ID = pw.DB_ID JOIN InstanceEdit_2_author ia ON ia.DB_ID = rv.reviewed JOIN Person_2_affiliation pa ON pa.DB_ID = ia.author JOIN Affiliation_2_name an ON an.DB_ID = pa.affiliation AND an.name LIKE '%University%' JOIN Pathway_2_hasEvent he ON he.DB_ID = pw.DB_ID JOIN Event_2_negativePrecedingEvent ne ON ne.DB_ID = he.hasEvent JOIN NegativePrecedingEvent np ON np.DB_ID = ne.negativePrecedingEvent JOIN DatabaseObject rn ON rn.DB_ID = np.reason AND rn._displayName = 'Futile Cycle';",
+        "cypher": "MATCH (p:Pathway)-[:species]->(:Species {displayName:'Homo sapiens'})\nMATCH (p)<-[:reviewed]-(ie:InstanceEdit)<-[:author]-(:Person)-[:affiliation]->(af:Affiliation)\nWHERE any(x IN af.name WHERE x CONTAINS 'University')\nMATCH (p)-[:hasEvent]->()-[:negativePrecedingEvent]->(:NegativePrecedingEvent)-[:reason]->(z)\nWHERE z.displayName = 'Futile Cycle'\nRETURN count(DISTINCT p)",
+        "typeql": "match\n  $p isa pathway;\n  species-assignment (classified-thing: $p, species: $sp);\n  $sp has display-name \"Homo sapiens\";\n  review (curated-object: $p, edit: $ie);\n  edit-authorship (authored-edit: $ie, edit-author: $person);\n  person-affiliation (affiliated-person: $person, affiliation: $af);\n  $af has affiliation-name $an;\n  $an contains \"University\";\n  event-containment (containing-pathway: $p, contained-event: $ev);\n  negative-precedence (following-event: $ev, exclusion-reason: $why);\n  $why has display-name \"Futile Cycle\";\nselect $p;\ndistinct;\nreduce $count = count;"
+      }
+    },
+    {
+      "question": "Consider the pathways directly contained by the pathway with stable identifier R-HSA-168256. For each one, take the inputs and outputs of every reaction-like event beneath it, along with anything directly or indirectly part of those entities. Which of them references the most gene products? Give its name.",
+      "difficulty": "expert",
+      "expected": "Innate Immune System",
+      "queries": {
+        "sql": "WITH RECURSIVE roots AS (SELECT he.hasEvent AS root FROM DatabaseObject d JOIN StableIdentifier s ON s.DB_ID = d.stableIdentifier JOIN Pathway_2_hasEvent he ON he.DB_ID = d.DB_ID WHERE s.identifier = 'R-HSA-168256'), tree AS (SELECT root, root AS ev FROM roots UNION SELECT t.root, he.hasEvent FROM tree t JOIN Pathway_2_hasEvent he ON he.DB_ID = t.ev), parts AS (SELECT t.root, i.input AS ent FROM tree t JOIN ReactionlikeEvent_2_input i ON i.DB_ID = t.ev UNION SELECT t.root, o.output FROM tree t JOIN ReactionlikeEvent_2_output o ON o.DB_ID = t.ev UNION SELECT p.root, hc.hasComponent FROM parts p JOIN Complex_2_hasComponent hc ON hc.DB_ID = p.ent UNION SELECT p.root, hm.hasMember FROM parts p JOIN EntitySet_2_hasMember hm ON hm.DB_ID = p.ent) SELECT d._displayName FROM parts p JOIN EntityWithAccessionedSequence e ON e.DB_ID = p.ent JOIN ReferenceGeneProduct rgp ON rgp.DB_ID = e.referenceEntity JOIN DatabaseObject d ON d.DB_ID = p.root GROUP BY p.root, d._displayName ORDER BY COUNT(DISTINCT e.referenceEntity) DESC LIMIT 1;",
+        "cypher": "MATCH (:Pathway {stId:'R-HSA-168256'})-[:hasEvent]->(child)\nMATCH (child)-[:hasEvent*0..]->(ev:ReactionLikeEvent)\nMATCH (ev)-[:input|output]->(part)\nMATCH (part)-[:hasComponent|hasMember*0..]->(x:EntityWithAccessionedSequence)\nMATCH (x)-[:referenceEntity]->(rgp:ReferenceGeneProduct)\nWITH child, count(DISTINCT rgp) AS n\nRETURN child.displayName ORDER BY n DESC LIMIT 1",
+        "typeql": "with\nfun sub-events($p: event) -> { event }:\n  match\n    { event-containment (containing-pathway: $p, contained-event: $e); } or\n    { event-containment (containing-pathway: $p, contained-event: $m);\n      let $e in sub-events($m); };\n  return { $e };\nwith\nfun parts-of($w: physical-entity) -> { physical-entity }:\n  match\n    { composition (whole: $w, part: $x); } or\n    { composition (whole: $w, part: $m); let $x in parts-of($m); };\n  return { $x };\nmatch\n  $root isa pathway, has st-id \"R-HSA-168256\";\n  event-containment (containing-pathway: $root, contained-event: $child);\n  { $ev is $child; } or { let $ev in sub-events($child); };\n  $ev isa reaction-like-event;\n  reaction-participation (reaction: $ev, participant: $part);\n  { $x is $part; } or { let $x in parts-of($part); };\n  $x isa entity-with-accessioned-sequence;\n  reference-assignment (instance-entity: $x, reference: $rgp);\n  $rgp isa reference-gene-product;\nselect $child, $rgp;\ndistinct;\nreduce $n = count($rgp) groupby $child;\nsort $n desc;\nlimit 1;\nmatch $child has display-name $name;\nselect $name;"
+      }
+    },
+    {
+      "question": "Call a compartment membrane-derived if it is, directly or indirectly, an instance of the GO cellular component with accession 0016020. Among Homo sapiens pathways that directly contain a reaction-like event, how many have a membrane-derived compartment on every one of those events?",
+      "difficulty": "expert",
+      "expected": 771,
+      "queries": {
+        "sql": "WITH RECURSIVE anc AS (SELECT DISTINCT rc.compartment AS node, rc.compartment AS root FROM ReactionlikeEvent_2_compartment rc UNION SELECT i.instanceOf, a.root FROM anc a JOIN GO_CellularComponent_2_instanceOf i ON i.DB_ID = a.node), memb AS (SELECT DISTINCT a.root AS cmp FROM anc a JOIN GO_CellularComponent g ON g.DB_ID = a.node AND g.accession = '0016020') SELECT COUNT(DISTINCT he.DB_ID) FROM Pathway_2_hasEvent he JOIN Event_2_species es ON es.DB_ID = he.DB_ID JOIN DatabaseObject sp ON sp.DB_ID = es.species AND sp._displayName = 'Homo sapiens' JOIN ReactionlikeEvent r ON r.DB_ID = he.hasEvent WHERE NOT EXISTS (SELECT 1 FROM Pathway_2_hasEvent h2 JOIN ReactionlikeEvent r2 ON r2.DB_ID = h2.hasEvent WHERE h2.DB_ID = he.DB_ID AND NOT EXISTS (SELECT 1 FROM ReactionlikeEvent_2_compartment rc JOIN memb m ON m.cmp = rc.compartment WHERE rc.DB_ID = h2.hasEvent));",
+        "cypher": "MATCH (p:Pathway)-[:species]->(:Species {displayName:'Homo sapiens'})\nWHERE EXISTS { (p)-[:hasEvent]->(:ReactionLikeEvent) }\n  AND NOT EXISTS {\n    MATCH (p)-[:hasEvent]->(r:ReactionLikeEvent)\n    WHERE NOT EXISTS { (r)-[:compartment]->()-[:instanceOf*]->(:GO_CellularComponent {accession:'0016020'}) }\n  }\nRETURN count(DISTINCT p)",
+        "typeql": "with\nfun membrane-derived() -> { go-cellular-component }:\n  match\n    { ontology-parenthood (ontology-child: $c, ontology-parent: $g);\n      $c isa go-cellular-component;\n      $g isa go-cellular-component, has accession \"0016020\"; } or\n    { ontology-parenthood (ontology-child: $c, ontology-parent: $m);\n      $c isa go-cellular-component;\n      let $m in membrane-derived(); };\n  return { $c };\nmatch\n  $p isa pathway;\n  species-assignment (classified-thing: $p, species: $sp);\n  $sp has display-name \"Homo sapiens\";\n  event-containment (containing-pathway: $p, contained-event: $r);\n  $r isa reaction-like-event;\n  not {\n    event-containment (containing-pathway: $p, contained-event: $bad);\n    $bad isa reaction-like-event;\n    not {\n      compartment-assignment (localised-thing: $bad, compartment: $c);\n      let $m in membrane-derived();\n      $c is $m;\n    };\n  };\nselect $p;\ndistinct;\nreduce $count = count;"
+      }
+    },
+    {
+      "question": "How many reaction-like events lie somewhere beneath the pathway with stable identifier R-HSA-168256 but nowhere beneath the pathway with stable identifier R-HSA-392499?",
+      "difficulty": "recursion",
+      "expected": 1896,
+      "queries": {
+        "sql": "WITH RECURSIVE a AS (SELECT he.hasEvent AS ev FROM DatabaseObject d JOIN StableIdentifier s ON s.DB_ID = d.stableIdentifier JOIN Pathway_2_hasEvent he ON he.DB_ID = d.DB_ID WHERE s.identifier = 'R-HSA-168256' UNION SELECT he.hasEvent FROM a JOIN Pathway_2_hasEvent he ON he.DB_ID = a.ev), b AS (SELECT he.hasEvent AS ev FROM DatabaseObject d JOIN StableIdentifier s ON s.DB_ID = d.stableIdentifier JOIN Pathway_2_hasEvent he ON he.DB_ID = d.DB_ID WHERE s.identifier = 'R-HSA-392499' UNION SELECT he.hasEvent FROM b JOIN Pathway_2_hasEvent he ON he.DB_ID = b.ev) SELECT COUNT(*) FROM a JOIN ReactionlikeEvent r ON r.DB_ID = a.ev WHERE a.ev NOT IN (SELECT ev FROM b);",
+        "cypher": "MATCH (:Pathway {stId:'R-HSA-168256'})-[:hasEvent*]->(e:ReactionLikeEvent)\nWHERE NOT EXISTS { (:Pathway {stId:'R-HSA-392499'})-[:hasEvent*]->(e) }\nRETURN count(DISTINCT e)",
+        "typeql": "with\nfun sub-events($p: event) -> { event }:\n  match\n    { event-containment (containing-pathway: $p, contained-event: $e); } or\n    { event-containment (containing-pathway: $p, contained-event: $m);\n      let $e in sub-events($m); };\n  return { $e };\nmatch\n  $a isa pathway, has st-id \"R-HSA-168256\";\n  let $e in sub-events($a);\n  $e isa reaction-like-event;\n  not {\n    $b isa pathway, has st-id \"R-HSA-392499\";\n    let $e2 in sub-events($b);\n    $e2 is $e;\n  };\nselect $e;\ndistinct;\nreduce $count = count;"
+      }
+    },
+    {
+      "question": "How many reaction-like events are regulated by a Complex that has the event's own catalyst among its parts, directly or indirectly? A regulator that is itself the catalyst does not count.",
+      "difficulty": "expert",
+      "expected": 411,
+      "queries": {
+        "sql": "WITH RECURSIVE regcx AS (SELECT rb.DB_ID AS ev, g.regulator AS cx FROM ReactionlikeEvent_2_regulatedBy rb JOIN Regulation g ON g.DB_ID = rb.regulatedBy JOIN Complex c ON c.DB_ID = g.regulator), parts AS (SELECT r.ev, hc.hasComponent AS ent FROM regcx r JOIN Complex_2_hasComponent hc ON hc.DB_ID = r.cx UNION SELECT p.ev, hc.hasComponent FROM parts p JOIN Complex_2_hasComponent hc ON hc.DB_ID = p.ent UNION SELECT p.ev, hm.hasMember FROM parts p JOIN EntitySet_2_hasMember hm ON hm.DB_ID = p.ent) SELECT COUNT(DISTINCT p.ev) FROM parts p JOIN ReactionlikeEvent_2_catalystActivity rc ON rc.DB_ID = p.ev JOIN CatalystActivity ca ON ca.DB_ID = rc.catalystActivity AND ca.physicalEntity = p.ent;",
+        "cypher": "MATCH (r:ReactionLikeEvent)-[:regulatedBy]->(:Regulation)-[:regulator]->(cx:Complex)\nMATCH (r)-[:catalystActivity]->(:CatalystActivity)-[:physicalEntity]->(pe)\nWHERE (cx)-[:hasComponent|hasMember*]->(pe)\nRETURN count(DISTINCT r)",
+        "typeql": "with\nfun parts-of($w: physical-entity) -> { physical-entity }:\n  match\n    { composition (whole: $w, part: $x); } or\n    { composition (whole: $w, part: $m); let $x in parts-of($m); };\n  return { $x };\nmatch\n  $r isa reaction-like-event;\n  regulation (regulated-event: $r, regulator: $cx);\n  $cx isa complex;\n  catalysis (catalysed-reaction: $r, catalyst: $pe);\n  let $p in parts-of($cx);\n  $p is $pe;\nselect $r;\ndistinct;\nreduce $count = count;"
+      }
+    },
+    {
+      "question": "How many Homo sapiens complexes have at least one direct component, with every one of those components being an EntityWithAccessionedSequence?",
+      "difficulty": "polymorphism",
+      "expected": 4822,
+      "queries": {
+        "sql": "SELECT COUNT(*) FROM (SELECT hc.DB_ID FROM Complex_2_hasComponent hc JOIN Complex_2_species cs ON cs.DB_ID = hc.DB_ID JOIN DatabaseObject sp ON sp.DB_ID = cs.species AND sp._displayName = 'Homo sapiens' LEFT JOIN EntityWithAccessionedSequence e ON e.DB_ID = hc.hasComponent GROUP BY hc.DB_ID HAVING COUNT(DISTINCT hc.hasComponent) = COUNT(DISTINCT e.DB_ID)) t;",
+        "cypher": "MATCH (c:Complex)-[:species]->(:Species {displayName:'Homo sapiens'})\nWHERE EXISTS { (c)-[:hasComponent]->() }\n  AND NOT EXISTS { MATCH (c)-[:hasComponent]->(x) WHERE NOT x:EntityWithAccessionedSequence }\nRETURN count(DISTINCT c)",
+        "typeql": "match\n  $c isa complex;\n  species-assignment (classified-thing: $c, species: $sp);\n  $sp has display-name \"Homo sapiens\";\n  complex-composition (containing-complex: $c, component: $any);\n  not {\n    complex-composition (containing-complex: $c, component: $bad);\n    not { $bad isa entity-with-accessioned-sequence; };\n  };\nselect $c;\ndistinct;\nreduce $count = count;"
+      },
+      "expected_by_db": {
+        "neo4j": 4821,
+        "typedb": 4821
+      },
+      "divergence": "The graph dump omits 19 Complex instances that the relational dump has (111,374 nodes against 111,393 rows); confirmed by looking the missing DB_IDs up directly — they have a DatabaseObject row with _class=Complex and no node in Neo4j at all. TypeDB is loaded from the graph, so it matches Neo4j."
+    },
+    {
+      "question": "For each Homo sapiens pathway, count the reaction-like events anywhere beneath it, and what percentage of those have catalyst activity. Report the five pathways with the most events, ordered by highest count first, then alphabetically by pathway name. Use columns named pathway, events and pct, with pct rounded to one decimal place.",
+      "difficulty": "expert",
+      "expected": [
+        {
+          "pathway": "Signal Transduction",
+          "events": 2589,
+          "pct": 31.9
+        },
+        {
+          "pathway": "Metabolism",
+          "events": 2380,
+          "pct": 86.4
+        },
+        {
+          "pathway": "Disease",
+          "events": 2177,
+          "pct": 38.4
+        },
+        {
+          "pathway": "Immune System",
+          "events": 1900,
+          "pct": 27.4
+        },
+        {
+          "pathway": "Infectious disease",
+          "events": 1228,
+          "pct": 30.8
+        }
+      ],
+      "queries": {
+        "sql": "WITH RECURSIVE t AS (SELECT he.DB_ID AS root, he.hasEvent AS ev FROM Pathway_2_hasEvent he JOIN Event_2_species es ON es.DB_ID = he.DB_ID JOIN DatabaseObject sp ON sp.DB_ID = es.species AND sp._displayName = 'Homo sapiens' UNION SELECT t.root, he.hasEvent FROM t JOIN Pathway_2_hasEvent he ON he.DB_ID = t.ev), rle AS (SELECT DISTINCT t.root, t.ev FROM t JOIN ReactionlikeEvent r ON r.DB_ID = t.ev), agg AS (SELECT root, COUNT(*) AS n, SUM(CASE WHEN EXISTS (SELECT 1 FROM ReactionlikeEvent_2_catalystActivity c WHERE c.DB_ID = rle.ev) THEN 1 ELSE 0 END) AS wc FROM rle GROUP BY root) SELECT d._displayName AS pathway, a.n AS events, ROUND(100 * a.wc / a.n, 1) AS pct FROM agg a JOIN DatabaseObject d ON d.DB_ID = a.root ORDER BY a.n DESC, pathway LIMIT 5;",
+        "cypher": "MATCH (p:Pathway)-[:species]->(:Species {displayName:'Homo sapiens'})\nMATCH (p)-[:hasEvent*]->(e:ReactionLikeEvent)\nWITH p, count(DISTINCT e) AS events,\n     count(DISTINCT CASE WHEN EXISTS { (e)-[:catalystActivity]->() } THEN e END) AS wc\nRETURN p.displayName AS pathway, events, round(100.0 * wc / events, 1) AS pct\nORDER BY events DESC, pathway LIMIT 5",
+        "typeql": "with fun sub-events($p: event) -> { event }: match { event-containment (containing-pathway: $p, contained-event: $e); } or { event-containment (containing-pathway: $p, contained-event: $m); let $e in sub-events($m); }; return { $e }; match $p isa pathway, has display-name $pathway; species-assignment (classified-thing: $p, species: $sp); $sp has display-name \"Homo sapiens\"; let $e in sub-events($p); $e isa reaction-like-event; select $p, $pathway, $e; distinct; reduce $events = count($e) groupby $p, $pathway; match $events > 0; let $e in sub-events($p); $e isa reaction-like-event; catalysis (catalysed-reaction: $e, catalyst: $cat); select $p, $pathway, $events, $e; distinct; reduce $withcat = count($e) groupby $p, $pathway, $events; match let $pct = round(100.0 * $withcat / $events * 10.0) / 10.0; select $pathway, $events, $pct; sort $events desc, $pathway asc; limit 5;"
+      },
+      "ordered": true
+    },
+    {
+      "question": "Of the Homo sapiens reaction-like events that are regulated at all, what percentage are never negatively regulated? Round to one decimal place.",
+      "difficulty": "polymorphism",
+      "expected": 62.4,
+      "queries": {
+        "sql": "SELECT ROUND(100 * SUM(pos_only) / COUNT(*), 1) FROM (SELECT rb.DB_ID AS ev, MAX(CASE WHEN EXISTS (SELECT 1 FROM ReactionlikeEvent_2_regulatedBy b JOIN NegativeRegulation nr ON nr.DB_ID = b.regulatedBy WHERE b.DB_ID = rb.DB_ID) THEN 0 ELSE 1 END) AS pos_only FROM ReactionlikeEvent_2_regulatedBy rb JOIN Event_2_species es ON es.DB_ID = rb.DB_ID JOIN DatabaseObject sp ON sp.DB_ID = es.species AND sp._displayName = 'Homo sapiens' GROUP BY rb.DB_ID) t;",
+        "cypher": "MATCH (r:ReactionLikeEvent)-[:species]->(:Species {displayName:'Homo sapiens'})\nWHERE EXISTS { (r)-[:regulatedBy]->() }\nWITH DISTINCT r\nWITH count(r) AS total,\n     sum(CASE WHEN NOT EXISTS { (r)-[:regulatedBy]->(:NegativeRegulation) } THEN 1 ELSE 0 END) AS pos\nRETURN round(100.0 * pos / total, 1)",
+        "typeql": "match $r isa reaction-like-event; species-assignment (classified-thing: $r, species: $sp); $sp has display-name \"Homo sapiens\"; regulation (regulated-event: $r, regulator: $any); select $r; distinct; reduce $total = count; match $r isa reaction-like-event; species-assignment (classified-thing: $r, species: $sp); $sp has display-name \"Homo sapiens\"; regulation (regulated-event: $r, regulator: $any); not { negative-regulation (regulated-event: $r, regulator: $neg); }; select $total, $r; distinct; reduce $pos = count groupby $total; match let $pct = round(100.0 * $pos / $total * 10.0) / 10.0; select $pct;"
+      }
+    },
+    {
+      "question": "How many Homo sapiens reaction-like events were inferred from an event of another species?",
+      "difficulty": "expert",
+      "expected": 2256,
+      "queries": {
+        "sql": "SELECT COUNT(DISTINCT inf.DB_ID) FROM Event_2_inferredFrom inf JOIN ReactionlikeEvent r ON r.DB_ID = inf.DB_ID JOIN Event_2_species hs ON hs.DB_ID = inf.DB_ID JOIN DatabaseObject h ON h.DB_ID = hs.species AND h._displayName = 'Homo sapiens' WHERE EXISTS (SELECT 1 FROM Event_2_species es2 JOIN DatabaseObject d2 ON d2.DB_ID = es2.species WHERE es2.DB_ID = inf.inferredFrom AND d2._displayName <> 'Homo sapiens');",
+        "cypher": "MATCH (r:ReactionLikeEvent)-[:species]->(:Species {displayName:'Homo sapiens'})\nMATCH (src:Event)-[:inferredTo]->(r)\nMATCH (src)-[:species]->(s:Species) WHERE s.displayName <> 'Homo sapiens'\nRETURN count(DISTINCT r)",
+        "typeql": "match\n  $r isa reaction-like-event;\n  species-assignment (classified-thing: $r, species: $sp); $sp has display-name \"Homo sapiens\";\n  event-inference (inferred-event: $r, source-event: $src);\n  species-assignment (classified-thing: $src, species: $ss);\n  $ss has display-name $sn;\n  $sn != \"Homo sapiens\";\nselect $r;\ndistinct;\nreduce $count = count;"
+      }
+    },
+    {
+      "question": "What is the mean catalytic rate constant (kcat) recorded across the catalyst activities of Homo sapiens reaction-like events?",
+      "difficulty": "unanswerable",
+      "unanswerable": true
+    },
+    {
+      "question": "Which of the gene products referenced by EntityWithAccessionedSequence instances has the greatest molecular mass in daltons?",
+      "difficulty": "unanswerable",
+      "unanswerable": true
+    },
+    {
+      "question": "Among the drugs whose reference therapeutic is approved, what is the most frequently recorded recommended daily dosage?",
+      "difficulty": "unanswerable",
+      "unanswerable": true
+    },
+    {
+      "question": "The pathway with stable identifier R-HSA-168256 directly contains three pathways. Compare each pair of them by the reaction-like events beneath each, reporting how many events they share and the Jaccard similarity of the two sets, rounded to four decimal places. Use columns pathway_a and pathway_b for the two names, with pathway_a the alphabetically earlier of the pair, then shared and jaccard, ordered by highest similarity first, then alphabetically by pathway_a, then pathway_b.",
+      "difficulty": "expert",
+      "ordered": true,
+      "expected": [
+        {
+          "pathway_a": "Cytokine Signaling in Immune system",
+          "pathway_b": "Innate Immune System",
+          "shared": 60,
+          "jaccard": 0.0388
+        },
+        {
+          "pathway_a": "Adaptive Immune System",
+          "pathway_b": "Innate Immune System",
+          "shared": 10,
+          "jaccard": 0.0088
+        },
+        {
+          "pathway_a": "Adaptive Immune System",
+          "pathway_b": "Cytokine Signaling in Immune system",
+          "shared": 2,
+          "jaccard": 0.0017
+        }
+      ],
+      "queries": {
+        "sql": "WITH RECURSIVE roots AS (SELECT he.hasEvent AS root FROM DatabaseObject o JOIN StableIdentifier s ON s.DB_ID = o.stableIdentifier JOIN Pathway_2_hasEvent he ON he.DB_ID = o.DB_ID WHERE s.identifier = 'R-HSA-168256'), tree AS (SELECT root, root AS ev FROM roots UNION SELECT t.root, he.hasEvent FROM tree t JOIN Pathway_2_hasEvent he ON he.DB_ID = t.ev), rset AS (SELECT DISTINCT t.root, t.ev FROM tree t JOIN ReactionlikeEvent r ON r.DB_ID = t.ev), sizes AS (SELECT root, COUNT(*) AS n FROM rset GROUP BY root), inter AS (SELECT a.root AS ra, b.root AS rb, COUNT(*) AS k FROM rset a JOIN rset b ON b.ev = a.ev AND b.root > a.root GROUP BY a.root, b.root) SELECT LEAST(da._displayName, db2._displayName) AS pathway_a, GREATEST(da._displayName, db2._displayName) AS pathway_b, i.k AS shared, ROUND(i.k / (sa.n + sb.n - i.k), 4) AS jaccard FROM inter i JOIN sizes sa ON sa.root = i.ra JOIN sizes sb ON sb.root = i.rb JOIN DatabaseObject da ON da.DB_ID = i.ra JOIN DatabaseObject db2 ON db2.DB_ID = i.rb ORDER BY jaccard DESC, pathway_a, pathway_b;",
+        "cypher": "MATCH (:Pathway {stId:'R-HSA-168256'})-[:hasEvent]->(child)\nMATCH (child)-[:hasEvent*]->(e:ReactionLikeEvent)\nWITH child, collect(DISTINCT e) AS es\nWITH collect({c: child, es: es}) AS rows\nUNWIND rows AS a\nUNWIND rows AS b\nWITH a, b WHERE a.c.displayName < b.c.displayName\nWITH a, b, size([x IN a.es WHERE x IN b.es]) AS shared\nRETURN a.c.displayName AS pathway_a, b.c.displayName AS pathway_b, shared,\n       round(1.0 * shared / (size(a.es) + size(b.es) - shared), 4) AS jaccard\nORDER BY jaccard DESC, pathway_a, pathway_b",
+        "typeql": "with fun sub-events($p: event) -> { event }: match { event-containment (containing-pathway: $p, contained-event: $e); } or { event-containment (containing-pathway: $p, contained-event: $m); let $e in sub-events($m); }; return { $e }; match $root isa pathway, has st-id \"R-HSA-168256\"; event-containment (containing-pathway: $root, contained-event: $a); event-containment (containing-pathway: $root, contained-event: $b); $a has display-name $pathway_a; $b has display-name $pathway_b; $pathway_a < $pathway_b; let $ea in sub-events($a); let $eb in sub-events($b); $ea isa reaction-like-event; $ea is $eb; select $a, $b, $pathway_a, $pathway_b, $ea; distinct; reduce $shared = count($ea) groupby $a, $b, $pathway_a, $pathway_b; match let $ea in sub-events($a); $ea isa reaction-like-event; select $a, $b, $pathway_a, $pathway_b, $shared, $ea; distinct; reduce $na = count($ea) groupby $a, $b, $pathway_a, $pathway_b, $shared; match let $eb in sub-events($b); $eb isa reaction-like-event; select $a, $b, $pathway_a, $pathway_b, $shared, $na, $eb; distinct; reduce $nb = count($eb) groupby $a, $b, $pathway_a, $pathway_b, $shared, $na; match let $jaccard = round(10000.0 * $shared / ($na + $nb - $shared)) / 10000.0; select $pathway_a, $pathway_b, $shared, $jaccard; sort $jaccard desc, $pathway_a asc, $pathway_b asc;"
+      }
+    },
+    {
+      "question": "Take the three species with the most reaction-like events. For each, report the pathway that directly contains the most reaction-like events of that species. Use columns species, pathway and reactions, ordered by highest count first, then alphabetically by species.",
+      "difficulty": "expert",
+      "ordered": true,
+      "expected": [
+        {
+          "species": "Homo sapiens",
+          "pathway": "Estrogen-dependent gene expression",
+          "reactions": 66
+        },
+        {
+          "species": "Mus musculus",
+          "pathway": "Interleukin-20 family signaling",
+          "reactions": 52
+        },
+        {
+          "species": "Rattus norvegicus",
+          "pathway": "Interleukin-20 family signaling",
+          "reactions": 52
+        }
+      ],
+      "queries": {
+        "sql": "WITH sp3 AS (SELECT es.species AS sp, COUNT(DISTINCT es.DB_ID) AS n FROM Event_2_species es JOIN ReactionlikeEvent r ON r.DB_ID = es.DB_ID GROUP BY es.species ORDER BY n DESC LIMIT 3), cnt AS (SELECT es.species AS sp, he.DB_ID AS pw, COUNT(DISTINCT he.hasEvent) AS n FROM Pathway_2_hasEvent he JOIN ReactionlikeEvent r ON r.DB_ID = he.hasEvent JOIN Event_2_species es ON es.DB_ID = he.hasEvent WHERE es.species IN (SELECT sp FROM sp3) GROUP BY es.species, he.DB_ID), rk AS (SELECT c.sp, c.pw, c.n, ROW_NUMBER() OVER (PARTITION BY c.sp ORDER BY c.n DESC, c.pw) AS r FROM cnt c) SELECT ds._displayName AS species, dp._displayName AS pathway, rk.n AS reactions FROM rk JOIN DatabaseObject ds ON ds.DB_ID = rk.sp JOIN DatabaseObject dp ON dp.DB_ID = rk.pw WHERE rk.r = 1 ORDER BY rk.n DESC, species;",
+        "cypher": "MATCH (r:ReactionLikeEvent)-[:species]->(s:Species)\nWITH s, count(DISTINCT r) AS total ORDER BY total DESC LIMIT 3\nMATCH (p:Pathway)-[:hasEvent]->(e:ReactionLikeEvent)-[:species]->(s)\nWITH s, p, count(DISTINCT e) AS n\nORDER BY n DESC, p.dbId\nWITH s, collect({p: p, n: n})[0] AS best\nRETURN s.displayName AS species, best.p.displayName AS pathway, best.n AS reactions\nORDER BY reactions DESC, species",
+        "typeql": "match species-assignment (classified-thing: $r, species: $s); $r isa reaction-like-event; select $s, $r; distinct; reduce $total = count($r) groupby $s; sort $total desc; limit 3; match event-containment (containing-pathway: $p, contained-event: $e); $e isa reaction-like-event; species-assignment (classified-thing: $e, species: $s); select $s, $total, $p, $e; distinct; reduce $reactions = count($e) groupby $s, $total, $p; reduce $best = max($reactions) groupby $s, $total; match event-containment (containing-pathway: $p, contained-event: $e); $e isa reaction-like-event; species-assignment (classified-thing: $e, species: $s); select $s, $total, $best, $p, $e; distinct; reduce $reactions = count($e) groupby $s, $total, $best, $p; match $reactions == $best; $s has display-name $species; $p has display-name $pathway; select $species, $pathway, $reactions; sort $reactions desc, $species asc;"
+      }
+    },
+    {
+      "question": "How many edits authored by the person with surname D'Eustachio and first name Peter are not recorded as having created a pathway?",
+      "difficulty": "expert",
+      "expected": 9081,
+      "queries": {
+        "sql": "SELECT COUNT(*) FROM InstanceEdit ie JOIN InstanceEdit_2_author ia ON ia.DB_ID = ie.DB_ID JOIN Person pe ON pe.DB_ID = ia.author AND pe.surname = 'D''Eustachio' AND pe.firstname = 'Peter' WHERE NOT EXISTS (SELECT 1 FROM Pathway pw JOIN DatabaseObject o ON o.DB_ID = pw.DB_ID AND o.created = ie.DB_ID);",
+        "cypher": "MATCH (ie:InstanceEdit)<-[:author]-(pe:Person)\nWHERE pe.surname = \"D'Eustachio\" AND pe.firstname = 'Peter'\n  AND NOT EXISTS { (ie)-[:created]->(:Pathway) }\nRETURN count(DISTINCT ie)",
+        "typeql": "match\n  $ie isa instance-edit;\n  edit-authorship (authored-edit: $ie, edit-author: $person);\n  $person has surname \"D'Eustachio\", has first-name \"Peter\";\n  not { creation (curated-object: $p, edit: $ie); $p isa pathway; };\nselect $ie;\ndistinct;\nreduce $count = count;"
+      },
+      "expected_by_db": {
+        "neo4j": 5400,
+        "typedb": 5400
+      },
+      "divergence": "Reactome's relational and graph dumps of release 97 disagree on InstanceEdit: 126,230 rows against 160,392 nodes, counted directly rather than through this question's query. TypeDB is loaded from the graph, so it matches Neo4j."
+    },
+    {
+      "question": "Starting from the pathway with stable identifier R-HSA-168256, consider the events it contains, directly or indirectly, and every event that directly or indirectly precedes one of those. How many reaction-like events are there?",
+      "difficulty": "recursion",
+      "expected": 3453,
+      "queries": {
+        "sql": "WITH RECURSIVE reach AS (SELECT he.hasEvent AS ev FROM DatabaseObject o JOIN StableIdentifier s ON s.DB_ID = o.stableIdentifier JOIN Pathway_2_hasEvent he ON he.DB_ID = o.DB_ID WHERE s.identifier = 'R-HSA-168256' UNION SELECT he.hasEvent FROM reach r JOIN Pathway_2_hasEvent he ON he.DB_ID = r.ev UNION SELECT p.precedingEvent FROM reach r JOIN Event_2_precedingEvent p ON p.DB_ID = r.ev) SELECT COUNT(*) FROM reach JOIN ReactionlikeEvent x ON x.DB_ID = reach.ev;",
+        "cypher": "MATCH (start:Pathway {stId:'R-HSA-168256'})-[:hasEvent|precedingEvent*]->(e:ReactionLikeEvent)\nRETURN count(DISTINCT e)",
+        "typeql": "with\nfun outward($p: event) -> { event }:\n  match\n    { event-containment (containing-pathway: $p, contained-event: $e); } or\n    { event-precedence (preceding-event: $e, following-event: $p); };\n  return { $e };\nwith\nfun reachable($p: event) -> { event }:\n  match\n    { let $e in outward($p); } or\n    { let $m in outward($p);\n      let $e in reachable($m); };\n  return { $e };\nmatch\n  $root isa pathway, has st-id \"R-HSA-168256\";\n  let $e in reachable($root);\n  $e isa reaction-like-event;\nselect $e;\ndistinct;\nreduce $count = count;"
+      }
+    },
+    {
+      "question": "How many Homo sapiens pathways directly contain a reaction-like event that does not also appear beneath any of the pathways they directly contain?",
+      "difficulty": "expert",
+      "expected": 2362,
+      "queries": {
+        "sql": "WITH RECURSIVE cp AS (SELECT c.DB_ID AS p, c.hasEvent AS ch FROM Pathway_2_hasEvent c JOIN Pathway x ON x.DB_ID = c.hasEvent), desc_ AS (SELECT cp.p, cp.ch AS node FROM cp UNION SELECT d.p, he.hasEvent FROM desc_ d JOIN Pathway_2_hasEvent he ON he.DB_ID = d.node) SELECT COUNT(DISTINCT he.DB_ID) FROM Pathway_2_hasEvent he JOIN Event_2_species es ON es.DB_ID = he.DB_ID JOIN DatabaseObject sp ON sp.DB_ID = es.species AND sp._displayName = 'Homo sapiens' JOIN ReactionlikeEvent r ON r.DB_ID = he.hasEvent WHERE NOT EXISTS (SELECT 1 FROM desc_ d WHERE d.p = he.DB_ID AND d.node = he.hasEvent);",
+        "cypher": "MATCH (p:Pathway)-[:species]->(:Species {displayName:'Homo sapiens'})\nMATCH (p)-[:hasEvent]->(r:ReactionLikeEvent)\nWHERE NOT EXISTS { MATCH (p)-[:hasEvent]->(sub:Pathway)-[:hasEvent*]->(r) }\nRETURN count(DISTINCT p)",
+        "typeql": "with\nfun sub-events($p: event) -> { event }:\n  match\n    { event-containment (containing-pathway: $p, contained-event: $e); } or\n    { event-containment (containing-pathway: $p, contained-event: $m);\n      let $e in sub-events($m); };\n  return { $e };\nmatch\n  $p isa pathway;\n  species-assignment (classified-thing: $p, species: $sp);\n  $sp has display-name \"Homo sapiens\";\n  event-containment (containing-pathway: $p, contained-event: $r);\n  $r isa reaction-like-event;\n  not {\n    event-containment (containing-pathway: $p, contained-event: $sub);\n    $sub isa pathway;\n    let $under in sub-events($sub);\n    $under is $r;\n  };\nselect $p;\ndistinct;\nreduce $count = count;"
+      }
+    },
+    {
+      "question": "An event below the pathway with stable identifier R-HSA-168256 may be reachable by more than one route, at different depths. Counting the events it directly contains as depth 1, what is the mean shortest depth of the reaction-like events below it, rounded to four decimal places?",
+      "difficulty": "recursion",
+      "expected": 4.3942,
+      "queries": {
+        "sql": "WITH RECURSIVE lv AS (SELECT he.hasEvent AS ev, 1 AS d FROM DatabaseObject o JOIN StableIdentifier s ON s.DB_ID = o.stableIdentifier JOIN Pathway_2_hasEvent he ON he.DB_ID = o.DB_ID WHERE s.identifier = 'R-HSA-168256' UNION SELECT he.hasEvent, lv.d + 1 FROM lv JOIN Pathway_2_hasEvent he ON he.DB_ID = lv.ev) SELECT ROUND(AVG(md), 4) FROM (SELECT lv.ev, MIN(lv.d) AS md FROM lv JOIN ReactionlikeEvent r ON r.DB_ID = lv.ev GROUP BY lv.ev) t;",
+        "cypher": "MATCH path = (:Pathway {stId:'R-HSA-168256'})-[:hasEvent*]->(e:ReactionLikeEvent)\nWITH e, min(length(path)) AS d\nRETURN round(avg(d), 4)",
+        "typeql": "with\nfun sub-depths($p: event) -> { event, integer }:\n  match\n    { event-containment (containing-pathway: $p, contained-event: $e); let $d = 1; } or\n    { event-containment (containing-pathway: $p, contained-event: $m);\n      let $e, $d0 in sub-depths($m);\n      let $d = $d0 + 1; };\n  return { $e, $d };\nmatch\n  $root isa pathway, has st-id \"R-HSA-168256\";\n  let $e, $d in sub-depths($root);\n  $e isa reaction-like-event;\nselect $e, $d;\ndistinct;\nreduce $shallowest = min($d) groupby $e;\nreduce $avg = mean($shallowest);\nmatch\n  let $rounded = round($avg * 10000.0) / 10000.0;\nselect $rounded;"
+      }
+    },
+    {
+      "question": "Walk down from the pathway with stable identifier R-HSA-168256 into the events it contains, but only continue past a pathway that has a reviewed edit; a pathway without one may still be reached, but nothing below it. How many reaction-like events are reachable that way?",
+      "difficulty": "recursion",
+      "expected": 1881,
+      "queries": {
+        "sql": "WITH RECURSIVE con AS (SELECT he.hasEvent AS ev FROM DatabaseObject o JOIN StableIdentifier s ON s.DB_ID = o.stableIdentifier JOIN Pathway_2_hasEvent he ON he.DB_ID = o.DB_ID WHERE s.identifier = 'R-HSA-168256' UNION SELECT he.hasEvent FROM con c JOIN Pathway_2_hasEvent he ON he.DB_ID = c.ev WHERE EXISTS (SELECT 1 FROM Event_2_reviewed rv WHERE rv.DB_ID = c.ev)) SELECT COUNT(*) FROM con c JOIN ReactionlikeEvent r ON r.DB_ID = c.ev;",
+        "cypher": "MATCH (start:Pathway {stId:'R-HSA-168256'})\n      ((a)-[:hasEvent]->(b) WHERE EXISTS { (a)<-[:reviewed]-(:InstanceEdit) })+ (e:ReactionLikeEvent)\nRETURN count(DISTINCT e)",
+        "typeql": "with\nfun reviewed-descendants($p: event) -> { event }:\n  match\n    { event-containment (containing-pathway: $p, contained-event: $e); } or\n    { event-containment (containing-pathway: $p, contained-event: $m);\n       review (curated-object: $m, edit: $ie);\n       let $e in reviewed-descendants($m); };\n  return { $e };\nmatch\n  $root isa pathway, has st-id \"R-HSA-168256\";\n  let $e in reviewed-descendants($root);\n  $e isa reaction-like-event;\nselect $e;\ndistinct;\nreduce $count = count;"
+      }
+    },
+    {
+      "question": "Rank the compartments by how many Homo sapiens reaction-like events record them, highest count first, with equal counts sharing a rank. What rank does the compartment named \"endoplasmic reticulum membrane\" hold?",
+      "difficulty": "aggregation",
+      "expected": 5,
+      "queries": {
+        "cypher": "MATCH (r:ReactionLikeEvent)-[:species]->(:Species {displayName:'Homo sapiens'})\nMATCH (r)-[:compartment]->(c:Compartment)\nWITH c, count(DISTINCT r) AS n\nWITH collect({name: c.displayName, n: n}) AS rows\nWITH rows, [x IN rows WHERE x.name = 'endoplasmic reticulum membrane'][0].n AS target\nRETURN size([x IN rows WHERE x.n > target]) + 1",
+        "sql": "WITH cnt AS (SELECT rc.compartment AS c, COUNT(DISTINCT rc.DB_ID) AS n FROM ReactionlikeEvent_2_compartment rc JOIN Compartment cm ON cm.DB_ID = rc.compartment JOIN Event_2_species es ON es.DB_ID = rc.DB_ID JOIN DatabaseObject sp ON sp.DB_ID = es.species AND sp._displayName = 'Homo sapiens' GROUP BY rc.compartment), rk AS (SELECT c, RANK() OVER (ORDER BY n DESC) AS r FROM cnt) SELECT rk.r FROM rk JOIN DatabaseObject d ON d.DB_ID = rk.c WHERE d._displayName = 'endoplasmic reticulum membrane';",
+        "typeql": "match\n  $r isa reaction-like-event;\n  species-assignment (classified-thing: $r, species: $sp); $sp has display-name \"Homo sapiens\";\n  compartment-assignment (localised-thing: $r, compartment: $c);\n  $c isa compartment, has display-name \"endoplasmic reticulum membrane\";\nselect $r;\ndistinct;\nreduce $target = count;\nmatch\n  $r isa reaction-like-event;\n  species-assignment (classified-thing: $r, species: $sp); $sp has display-name \"Homo sapiens\";\n  compartment-assignment (localised-thing: $r, compartment: $c);\n  $c isa compartment;\nselect $target, $r, $c;\ndistinct;\nreduce $n = count($r) groupby $target, $c;\nmatch $n > $target;\nselect $c;\ndistinct;\nreduce $above = count;\nmatch let $rank = $above + 1;\nselect $rank;"
+      }
+    },
+    {
+      "question": "Consider the Homo sapiens reaction-like events that take at least one input, grouped by how many distinct input entities they take. Report the five largest groups: the number of inputs, how many events are in the group, and the group's share of those events as a percentage rounded to one decimal place. Use columns inputs, events and pct, ordered by most events first, then by fewest inputs.",
+      "difficulty": "aggregation",
+      "ordered": true,
+      "expected": [
+        {
+          "inputs": 2,
+          "events": 10013,
+          "pct": 61.0
+        },
+        {
+          "inputs": 1,
+          "events": 4396,
+          "pct": 26.8
+        },
+        {
+          "inputs": 3,
+          "events": 1360,
+          "pct": 8.3
+        },
+        {
+          "inputs": 4,
+          "events": 418,
+          "pct": 2.5
+        },
+        {
+          "inputs": 5,
+          "events": 107,
+          "pct": 0.7
+        }
+      ],
+      "queries": {
+        "cypher": "MATCH (r:ReactionLikeEvent)-[:species]->(:Species {displayName:'Homo sapiens'})\nMATCH (r)-[:input]->(i)\nWITH r, count(DISTINCT i) AS inputs\nWITH inputs, count(r) AS events\nWITH collect({inputs: inputs, events: events}) AS rows, sum(events) AS total\nUNWIND rows AS row\nWITH row.inputs AS inputs, row.events AS events, total\nORDER BY events DESC, inputs\nLIMIT 5\nRETURN inputs, events, round(100.0 * events / total, 1) AS pct",
+        "sql": "WITH per AS (SELECT ri.DB_ID AS r, COUNT(DISTINCT ri.input) AS inputs FROM ReactionlikeEvent_2_input ri JOIN Event_2_species es ON es.DB_ID = ri.DB_ID JOIN DatabaseObject sp ON sp.DB_ID = es.species AND sp._displayName = 'Homo sapiens' GROUP BY ri.DB_ID), grp AS (SELECT inputs, COUNT(*) AS events FROM per GROUP BY inputs) SELECT inputs, events, ROUND(100.0 * events / SUM(events) OVER (), 1) AS pct FROM grp ORDER BY events DESC, inputs LIMIT 5;",
+        "typeql": "match\n  $r isa reaction-like-event;\n  species-assignment (classified-thing: $r, species: $sp); $sp has display-name \"Homo sapiens\";\n  reaction-input (reaction: $r, consumed-entity: $i);\nselect $r;\ndistinct;\nreduce $total = count;\nmatch\n  $r isa reaction-like-event;\n  species-assignment (classified-thing: $r, species: $sp); $sp has display-name \"Homo sapiens\";\n  reaction-input (reaction: $r, consumed-entity: $i);\nselect $total, $r, $i;\ndistinct;\nreduce $inputs = count($i) groupby $total, $r;\nreduce $events = count($r) groupby $total, $inputs;\nmatch let $pct = round(100.0 * $events / $total * 10.0) / 10.0;\nselect $inputs, $events, $pct;\nsort $events desc, $inputs asc;\nlimit 5;"
+      }
+    },
+    {
+      "question": "How many Homo sapiens pathways have been through any kind of curation act by an edit whose author is affiliated with an organisation whose name contains \"University\"?",
+      "difficulty": "polymorphism",
+      "expected": 1046,
+      "queries": {
+        "cypher": "MATCH (p:Pathway)-[:species]->(:Species {displayName:'Homo sapiens'})\nMATCH (p)-[:created|modified|authored|reviewed|revised|internalReviewed|edited|structureModified]-(ie:InstanceEdit)\nMATCH (ie)<-[:author]-(:Person)-[:affiliation]->(af:Affiliation)\nWHERE any(x IN af.name WHERE x CONTAINS 'University')\nRETURN count(DISTINCT p)",
+        "sql": "WITH hs AS (SELECT pw.DB_ID AS p FROM Pathway pw JOIN Event_2_species es ON es.DB_ID = pw.DB_ID JOIN DatabaseObject sp ON sp.DB_ID = es.species AND sp._displayName = 'Homo sapiens'), cur AS (SELECT hs.p AS obj, d.created AS edit FROM hs JOIN DatabaseObject d ON d.DB_ID = hs.p WHERE d.created IS NOT NULL UNION SELECT hs.p, m.modified FROM hs JOIN DatabaseObject_2_modified m ON m.DB_ID = hs.p UNION SELECT hs.p, a.authored FROM hs JOIN Event_2_authored a ON a.DB_ID = hs.p UNION SELECT hs.p, r.reviewed FROM hs JOIN Event_2_reviewed r ON r.DB_ID = hs.p UNION SELECT hs.p, v.revised FROM hs JOIN Event_2_revised v ON v.DB_ID = hs.p UNION SELECT hs.p, i.internalReviewed FROM hs JOIN Event_2_internalReviewed i ON i.DB_ID = hs.p UNION SELECT hs.p, e.edited FROM hs JOIN Event_2_edited e ON e.DB_ID = hs.p UNION SELECT hs.p, s.structureModified FROM hs JOIN Event_2_structureModified s ON s.DB_ID = hs.p) SELECT COUNT(DISTINCT cur.obj) FROM cur JOIN InstanceEdit_2_author ia ON ia.DB_ID = cur.edit JOIN Person_2_affiliation pa ON pa.DB_ID = ia.author JOIN Affiliation_2_name an ON an.DB_ID = pa.affiliation AND an.name LIKE '%University%';",
+        "typeql": "match\n  $p isa pathway;\n  species-assignment (classified-thing: $p, species: $sp);\n  $sp has display-name \"Homo sapiens\";\n  curation (curated-object: $p, edit: $ie);\n  edit-authorship (authored-edit: $ie, edit-author: $person);\n  person-affiliation (affiliated-person: $person, affiliation: $af);\n  $af has affiliation-name $an;\n  $an contains \"University\";\nselect $p;\ndistinct;\nreduce $count = count;"
+      },
+      "expected_by_db": {
+        "neo4j": 826,
+        "typedb": 826
+      },
+      "divergence": "Reactome's relational and graph dumps of release 97 hold different InstanceEdit sets (126,230 rows against 160,392 nodes), and their edit->author links differ with them: 126,390 rows in InstanceEdit_2_author against 160,516 :author relationships, counted directly rather than through this question. Every endpoint of this question agrees across the stores - 184 affiliations whose name contains University, 250 people affiliated with one, 502 person-affiliation links, and 2,883 Homo sapiens pathways carrying a curation act whose edit has an author - so what differs is only which edit each pathway is linked to, and therefore whose affiliation is reached. TypeDB is loaded from the graph, so it matches Neo4j."
+    },
+    {
+      "question": "Counting every kind of part-whole structure Reactome records among physical entities, how many physical entities are directly a part of at least three different wholes?",
+      "difficulty": "polymorphism",
+      "expected": 29721,
+      "queries": {
+        "cypher": "MATCH (w:PhysicalEntity)-[:hasComponent|hasMember|hasCandidate|repeatedUnit]->(x:PhysicalEntity)\nWITH x, count(DISTINCT w) AS n\nWHERE n >= 3\nRETURN count(x)",
+        "sql": "WITH parts AS (SELECT DB_ID AS whole, hasComponent AS part FROM Complex_2_hasComponent UNION SELECT DB_ID, hasMember FROM EntitySet_2_hasMember UNION SELECT DB_ID, hasCandidate FROM CandidateSet_2_hasCandidate UNION SELECT DB_ID, repeatedUnit FROM Polymer_2_repeatedUnit) SELECT COUNT(*) FROM (SELECT part FROM parts GROUP BY part HAVING COUNT(DISTINCT whole) >= 3) t;",
+        "typeql": "match\n  composition (whole: $w, part: $x);\nselect $x, $w;\ndistinct;\nreduce $n = count($w) groupby $x;\nmatch $n >= 3;\nreduce $count = count;"
+      },
+      "expected_by_db": {
+        "neo4j": 29720,
+        "typedb": 29720
+      },
+      "divergence": "Reactome's relational and graph dumps of release 97 disagree on Complex: the graph omits instances the relational dump has. Confirmed for this question by diffing the answer sets — the single extra entity SQL reports is 5663163 (Per1 gene [nucleoplasm]), whose three containing complexes in MySQL are 8878911, 9926587 and 9933412; the first two have no node in Neo4j at all, so its whole-count falls from 3 to 1 there. TypeDB is loaded from the graph, so it matches Neo4j."
+    },
+    {
+      "question": "Counting every way a physical entity can take part in a reaction as a reactant or product, how many physical entities take part in more than 100 distinct Homo sapiens reaction-like events?",
+      "difficulty": "polymorphism",
+      "expected": 22,
+      "queries": {
+        "cypher": "MATCH (r:ReactionLikeEvent)-[:species]->(:Species {displayName:'Homo sapiens'})\nMATCH (r)-[:input|output|requiredInputComponent]->(x:PhysicalEntity)\nWITH x, count(DISTINCT r) AS n\nWHERE n > 100\nRETURN count(x)",
+        "sql": "WITH part AS (SELECT DB_ID AS ev, input AS pe FROM ReactionlikeEvent_2_input UNION SELECT DB_ID, output FROM ReactionlikeEvent_2_output UNION SELECT DB_ID, requiredInputComponent FROM ReactionlikeEvent_2_requiredInputComponent), hs AS (SELECT DISTINCT es.DB_ID AS ev FROM Event_2_species es JOIN DatabaseObject sp ON sp.DB_ID = es.species AND sp._displayName = 'Homo sapiens') SELECT COUNT(*) FROM (SELECT p.pe FROM part p JOIN hs ON hs.ev = p.ev GROUP BY p.pe HAVING COUNT(DISTINCT p.ev) > 100) t;",
+        "typeql": "match\n  reaction-participation (reaction: $r, participant: $x);\n  species-assignment (classified-thing: $r, species: $sp);\n  $sp has display-name \"Homo sapiens\";\nselect $x, $r;\ndistinct;\nreduce $n = count($r) groupby $x;\nmatch $n > 100;\nreduce $count = count;"
+      }
+    },
+    {
+      "question": "Among Homo sapiens reaction-like events, a disease entity may be recorded as standing in for the normal entity it replaces. How many distinct pairs of a disease entity and its normal entity are both Complexes that have no part in common — no component, member, candidate or repeated unit shared between them?",
+      "difficulty": "reification",
+      "expected": 36,
+      "queries": {
+        "cypher": "MATCH (r:ReactionLikeEvent)-[:species]->(:Species {displayName:'Homo sapiens'})\nMATCH (r)-[:entityFunctionalStatus]->(efs:EntityFunctionalStatus)\nMATCH (efs)-[:diseaseEntity]->(de:Complex)\nMATCH (efs)-[:normalEntity]->(ne:Complex)\nWHERE NOT EXISTS {\n  MATCH (de)-[:hasComponent|hasMember|hasCandidate|repeatedUnit]->(x)\n  MATCH (ne)-[:hasComponent|hasMember|hasCandidate|repeatedUnit]->(x) }\nWITH DISTINCT de, ne\nRETURN count(*)",
+        "sql": "WITH parts AS (SELECT DB_ID AS whole, hasComponent AS part FROM Complex_2_hasComponent UNION SELECT DB_ID, hasMember FROM EntitySet_2_hasMember UNION SELECT DB_ID, hasCandidate FROM CandidateSet_2_hasCandidate UNION SELECT DB_ID, repeatedUnit FROM Polymer_2_repeatedUnit) SELECT COUNT(*) FROM (SELECT DISTINCT efs.diseaseEntity AS de, efs.normalEntity AS ne FROM ReactionlikeEvent_2_entityFunctionalStatus re JOIN EntityFunctionalStatus efs ON efs.DB_ID = re.entityFunctionalStatus JOIN Complex dc ON dc.DB_ID = efs.diseaseEntity JOIN Complex nc ON nc.DB_ID = efs.normalEntity JOIN Event_2_species es ON es.DB_ID = re.DB_ID JOIN DatabaseObject sp ON sp.DB_ID = es.species AND sp._displayName = 'Homo sapiens' WHERE NOT EXISTS (SELECT 1 FROM parts p1 JOIN parts p2 ON p2.part = p1.part WHERE p1.whole = efs.diseaseEntity AND p2.whole = efs.normalEntity)) t;",
+        "typeql": "match\n  $r isa reaction-like-event;\n  species-assignment (classified-thing: $r, species: $sp);\n  $sp has display-name \"Homo sapiens\";\n  entity-functional-status (affected-event: $r, disease-entity: $de, normal-entity: $ne);\n  $de isa complex;\n  $ne isa complex;\n  not { composition (whole: $de, part: $x); composition (whole: $ne, part: $x); };\nselect $de, $ne;\ndistinct;\nreduce $count = count;"
+      }
+    },
+    {
+      "question": "Physical entity has several direct subtypes in the Reactome class hierarchy. For how many of them is at least one instance an input to a Homo sapiens reaction-like event?",
+      "difficulty": "polymorphism",
+      "expected": 8,
+      "queries": {
+        "cypher": "MATCH (r:ReactionLikeEvent)-[:species]->(:Species {displayName:'Homo sapiens'})\nMATCH (r)-[:input]->(x)\nUNWIND ['EntitySet','Cell','Drug','Complex','GenomeEncodedEntity','OtherEntity','Polymer','SimpleEntity'] AS t\nWITH x, t WHERE t IN labels(x)\nRETURN count(DISTINCT t)",
+        "sql": "WITH hsinput AS (SELECT DISTINCT ri.input AS pe FROM ReactionlikeEvent_2_input ri JOIN Event_2_species es ON es.DB_ID = ri.DB_ID JOIN DatabaseObject sp ON sp.DB_ID = es.species AND sp._displayName = 'Homo sapiens') SELECT (EXISTS (SELECT 1 FROM hsinput JOIN EntitySet t ON t.DB_ID = hsinput.pe)) + (EXISTS (SELECT 1 FROM hsinput JOIN Cell t ON t.DB_ID = hsinput.pe)) + (EXISTS (SELECT 1 FROM hsinput JOIN Drug t ON t.DB_ID = hsinput.pe)) + (EXISTS (SELECT 1 FROM hsinput JOIN Complex t ON t.DB_ID = hsinput.pe)) + (EXISTS (SELECT 1 FROM hsinput JOIN GenomeEncodedEntity t ON t.DB_ID = hsinput.pe)) + (EXISTS (SELECT 1 FROM hsinput JOIN OtherEntity t ON t.DB_ID = hsinput.pe)) + (EXISTS (SELECT 1 FROM hsinput JOIN Polymer t ON t.DB_ID = hsinput.pe)) + (EXISTS (SELECT 1 FROM hsinput JOIN SimpleEntity t ON t.DB_ID = hsinput.pe)) AS subtypes;",
+        "typeql": "match\n  $t sub! physical-entity;\n  $st sub $t;\n  $x isa $st;\n  reaction-input (reaction: $r, consumed-entity: $x);\n  species-assignment (classified-thing: $r, species: $sp);\n  $sp has display-name \"Homo sapiens\";\nselect $t;\ndistinct;\nreduce $count = count;"
+      }
+    },
+    {
+      "question": "An object may be created, modified, authored, reviewed, internally reviewed, revised, edited or structurally modified by an edit — the kinds of curation act. How many Homo sapiens pathways have been through at least five different kinds?",
+      "difficulty": "polymorphism",
+      "expected": 2473,
+      "queries": {
+        "cypher": "MATCH (p:Pathway)-[:species]->(:Species {displayName:'Homo sapiens'})\nWITH p,\n  (CASE WHEN EXISTS { (p)<-[:created]-(:InstanceEdit) } THEN 1 ELSE 0 END +\n   CASE WHEN EXISTS { (p)<-[:modified]-(:InstanceEdit) } THEN 1 ELSE 0 END +\n   CASE WHEN EXISTS { (p)<-[:authored]-(:InstanceEdit) } THEN 1 ELSE 0 END +\n   CASE WHEN EXISTS { (p)<-[:reviewed]-(:InstanceEdit) } THEN 1 ELSE 0 END +\n   CASE WHEN EXISTS { (p)<-[:revised]-(:InstanceEdit) } THEN 1 ELSE 0 END +\n   CASE WHEN EXISTS { (p)-[:internalReviewed]->(:InstanceEdit) } THEN 1 ELSE 0 END +\n   CASE WHEN EXISTS { (p)<-[:edited]-(:InstanceEdit) } THEN 1 ELSE 0 END +\n   CASE WHEN EXISTS { (p)-[:structureModified]->(:InstanceEdit) } THEN 1 ELSE 0 END) AS kinds\nWHERE kinds >= 5\nRETURN count(DISTINCT p)",
+        "sql": "WITH hs AS (SELECT DISTINCT pw.DB_ID AS p FROM Pathway pw JOIN Event_2_species es ON es.DB_ID = pw.DB_ID JOIN DatabaseObject sp ON sp.DB_ID = es.species AND sp._displayName = 'Homo sapiens') SELECT COUNT(*) FROM hs WHERE ((EXISTS (SELECT 1 FROM DatabaseObject d WHERE d.DB_ID = hs.p AND d.created IS NOT NULL)) + (EXISTS (SELECT 1 FROM DatabaseObject_2_modified m WHERE m.DB_ID = hs.p)) + (EXISTS (SELECT 1 FROM Event_2_authored a WHERE a.DB_ID = hs.p)) + (EXISTS (SELECT 1 FROM Event_2_reviewed r WHERE r.DB_ID = hs.p)) + (EXISTS (SELECT 1 FROM Event_2_revised v WHERE v.DB_ID = hs.p)) + (EXISTS (SELECT 1 FROM Event_2_internalReviewed i WHERE i.DB_ID = hs.p)) + (EXISTS (SELECT 1 FROM Event_2_edited e WHERE e.DB_ID = hs.p)) + (EXISTS (SELECT 1 FROM Event_2_structureModified s WHERE s.DB_ID = hs.p))) >= 5;",
+        "typeql": "match\n  $p isa pathway;\n  species-assignment (classified-thing: $p, species: $sp);\n  $sp has display-name \"Homo sapiens\";\n  $c isa $ct, links (curated-object: $p, edit: $ie);\n  $ct sub! curation;\nselect $p, $ct;\ndistinct;\nreduce $n = count($ct) groupby $p;\nmatch $n >= 5;\nreduce $count = count;"
+      }
+    },
+    {
+      "question": "Ignoring case, how many database objects go by a name of some kind that contains \"PIK3\" although their display name does not?",
+      "difficulty": "polymorphism",
+      "expected": 189,
+      "queries": {
+        "cypher": "MATCH (x)\nWHERE NOT toLower(coalesce(x.displayName, '')) CONTAINS 'pik3'\n  AND (any(v IN coalesce(x.name, []) WHERE toLower(v) CONTAINS 'pik3')\n    OR any(v IN coalesce(x.geneName, []) WHERE toLower(v) CONTAINS 'pik3')\n    OR toLower(coalesce(x.systematicName, '')) CONTAINS 'pik3'\n    OR toLower(coalesce(x.firstname, '')) CONTAINS 'pik3'\n    OR toLower(coalesce(x.surname, '')) CONTAINS 'pik3')\nRETURN count(x)",
+        "sql": "WITH names AS (SELECT DB_ID, name AS n FROM Event_2_name UNION ALL SELECT DB_ID, name FROM PhysicalEntity_2_name UNION ALL SELECT DB_ID, name FROM ReferenceEntity_2_name UNION ALL SELECT DB_ID, name FROM ExternalOntology_2_name UNION ALL SELECT DB_ID, name FROM GO_BiologicalProcess_2_name UNION ALL SELECT DB_ID, name FROM GO_CellularComponent_2_name UNION ALL SELECT DB_ID, name FROM GO_MolecularFunction_2_name UNION ALL SELECT DB_ID, name FROM ControlledVocabulary_2_name UNION ALL SELECT DB_ID, name FROM Taxon_2_name UNION ALL SELECT DB_ID, name FROM FunctionalStatusType_2_name UNION ALL SELECT DB_ID, name FROM ReferenceDatabase_2_name UNION ALL SELECT DB_ID, name FROM Affiliation_2_name UNION ALL SELECT DB_ID, geneName FROM ReferenceSequence_2_geneName UNION ALL SELECT DB_ID, systematicName FROM PhysicalEntity WHERE systematicName IS NOT NULL UNION ALL SELECT DB_ID, systematicName FROM ReactionlikeEvent WHERE systematicName IS NOT NULL UNION ALL SELECT DB_ID, firstname FROM Person WHERE firstname IS NOT NULL UNION ALL SELECT DB_ID, surname FROM Person WHERE surname IS NOT NULL) SELECT COUNT(DISTINCT names.DB_ID) FROM names JOIN DatabaseObject d ON d.DB_ID = names.DB_ID WHERE names.n LIKE '%PIK3%' AND (d._displayName IS NULL OR d._displayName NOT LIKE '%PIK3%');",
+        "typeql": "match\n  $x has name $n;\n  $n contains \"PIK3\";\n  not { $x has display-name $d; $d contains \"PIK3\"; };\nselect $x;\ndistinct;\nreduce $count = count;"
+      },
+      "expected_by_db": {
+        "neo4j": 201,
+        "typedb": 201
+      },
+      "divergence": "The graph carries ReferenceDNASequence and ReferenceRNASequence nodes the relational dump does not have (624,054 ReferenceDNASequence nodes against 119,723 rows). Confirmed for this question by diffing the answer sets: the twelve extra objects Neo4j reports (db-ids 11395662 to 12781774, all reference DNA or RNA sequences for the gene HCST) each carry PIK3AP among their gene names and have no row in MySQL. TypeDB is loaded from the graph, so it matches Neo4j."
+    },
+    {
+      "question": "Counting the names recorded in an entity's name slot rather than its display name, how many distinct names are carried both by a physical entity assigned to Homo sapiens and by a physical entity assigned to Bos taurus?",
+      "difficulty": "polymorphism",
+      "expected": 26517,
+      "queries": {
+        "cypher": "CALL {\n  MATCH (p:PhysicalEntity)-[:species]->(:Species {displayName:'Homo sapiens'})\n  UNWIND p.name AS n RETURN DISTINCT n, 'hs' AS k\n  UNION\n  MATCH (p:PhysicalEntity)-[:species]->(:Species {displayName:'Bos taurus'})\n  UNWIND p.name AS n RETURN DISTINCT n, 'bt' AS k\n}\nWITH n, count(*) AS c WHERE c = 2\nRETURN count(n)",
+        "sql": "WITH pesp AS (SELECT DB_ID, species FROM GenomeEncodedEntity WHERE species IS NOT NULL UNION ALL SELECT DB_ID, species FROM SimpleEntity WHERE species IS NOT NULL UNION ALL SELECT DB_ID, species FROM Cell_2_species UNION ALL SELECT DB_ID, species FROM Complex_2_species UNION ALL SELECT DB_ID, species FROM EntitySet_2_species UNION ALL SELECT DB_ID, species FROM Polymer_2_species), hs AS (SELECT DISTINCT n.name FROM PhysicalEntity_2_name n JOIN pesp ON pesp.DB_ID = n.DB_ID JOIN DatabaseObject s ON s.DB_ID = pesp.species AND s._displayName = 'Homo sapiens'), bt AS (SELECT DISTINCT n.name FROM PhysicalEntity_2_name n JOIN pesp ON pesp.DB_ID = n.DB_ID JOIN DatabaseObject s ON s.DB_ID = pesp.species AND s._displayName = 'Bos taurus') SELECT COUNT(*) FROM hs JOIN bt ON hs.name = bt.name;",
+        "typeql": "match\n  $h isa physical-entity, has entity-name $n;\n  species-assignment (classified-thing: $h, species: $hs);\n  $hs has display-name \"Homo sapiens\";\n  $b isa physical-entity, has entity-name $n;\n  species-assignment (classified-thing: $b, species: $bt);\n  $bt has display-name \"Bos taurus\";\nselect $n;\ndistinct;\nreduce $count = count;"
+      }
+    },
+    {
+      "question": "How many Homo sapiens physical entities share a non-empty name, taken from the name slot and matched exactly and case-sensitively, with a reference entity other than their own reference entity? An entity with no reference entity counts if it shares a name with any reference entity.",
+      "difficulty": "polymorphism",
+      "expected": 2090,
+      "queries": {
+        "cypher": "CALL {\n  MATCH (p:PhysicalEntity)-[:species]->(:Species {displayName:'Homo sapiens'})\n  UNWIND p.name AS n RETURN n, p AS x, 'pe' AS k\n  UNION ALL\n  MATCH (r:ReferenceEntity) UNWIND r.name AS n RETURN n, r AS x, 're' AS k\n}\nWITH n, collect(CASE WHEN k = 'pe' THEN x END) AS ps, collect(CASE WHEN k = 're' THEN x END) AS rs\nWHERE n <> '' AND size(ps) > 0 AND size(rs) > 0\nUNWIND ps AS p UNWIND rs AS r\nWITH DISTINCT p, r WHERE NOT (p)-[:referenceEntity]->(r)\nRETURN count(DISTINCT p)",
+        "sql": "WITH pesp AS (SELECT DB_ID, species FROM GenomeEncodedEntity WHERE species IS NOT NULL UNION ALL SELECT DB_ID, species FROM SimpleEntity WHERE species IS NOT NULL UNION ALL SELECT DB_ID, species FROM Cell_2_species UNION ALL SELECT DB_ID, species FROM Complex_2_species UNION ALL SELECT DB_ID, species FROM EntitySet_2_species UNION ALL SELECT DB_ID, species FROM Polymer_2_species), hs AS (SELECT DISTINCT pesp.DB_ID FROM pesp JOIN DatabaseObject s ON s.DB_ID = pesp.species AND s._displayName = 'Homo sapiens'), refs AS (SELECT DB_ID, referenceEntity FROM EntityWithAccessionedSequence WHERE referenceEntity IS NOT NULL UNION ALL SELECT DB_ID, referenceEntity FROM SimpleEntity WHERE referenceEntity IS NOT NULL UNION ALL SELECT DB_ID, referenceEntity FROM Drug WHERE referenceEntity IS NOT NULL) SELECT COUNT(DISTINCT hs.DB_ID) FROM hs JOIN PhysicalEntity_2_name pn ON pn.DB_ID = hs.DB_ID JOIN ReferenceEntity_2_name rn ON BINARY rn.name = BINARY pn.name WHERE pn.name <> '' AND NOT EXISTS (SELECT 1 FROM refs WHERE refs.DB_ID = hs.DB_ID AND refs.referenceEntity = rn.DB_ID);",
+        "typeql": "match\n  $p isa physical-entity, has entity-name $n;\n  species-assignment (classified-thing: $p, species: $sp);\n  $sp has display-name \"Homo sapiens\";\n  $r isa reference-entity, has entity-name $n;\n  not { reference-assignment (instance-entity: $p, reference: $r); };\nselect $p;\ndistinct;\nreduce $count = count;"
+      },
+      "expected_by_db": {
+        "neo4j": 2089,
+        "typedb": 2089
+      },
+      "divergence": "The relational dump holds a ReferenceGeneProduct the graph does not: 9663770 (UniProt:Q9JKQ2 SLC26A5), whose name SLC26A5 is also a name of the human entity 5216108 (SLC26A5 [plasma membrane]), which points at a different reference gene product (62142). Confirmed by diffing the answer sets: that entity is the single one MySQL reports and Neo4j does not. TypeDB is loaded from the graph, so it matches Neo4j. The question says non-empty because 65 Reactome name lists carry a trailing empty string (e.g. RHOG's [\"RHOG\", \"RhoG\", \"\"]); the TypeDB export drops it as a data-entry artefact, so without the exclusion Neo4j and MySQL match 22 more entities to reference entities through the empty string (2111 and 2112) while TypeDB reports 2089. MySQL's default collation compares strings case-insensitively; joining the two name tables without BINARY returns 5217, because human names such as INS then match names such as Ins on reference entities of other species."
+    },
+    {
+      "question": "Ignoring case, how many schema classes have at least one object that goes by a name of some kind containing \"ras\"?",
+      "difficulty": "polymorphism",
+      "expected": 47,
+      "queries": {
+        "cypher": "MATCH (x)\nWHERE toLower(coalesce(x.displayName, '')) CONTAINS 'ras'\n   OR any(v IN coalesce(x.name, []) WHERE toLower(v) CONTAINS 'ras')\n   OR any(v IN coalesce(x.geneName, []) WHERE toLower(v) CONTAINS 'ras')\n   OR toLower(coalesce(x.systematicName, '')) CONTAINS 'ras'\n   OR toLower(coalesce(x.firstname, '')) CONTAINS 'ras'\n   OR toLower(coalesce(x.surname, '')) CONTAINS 'ras'\nRETURN count(DISTINCT x.schemaClass)",
+        "sql": "WITH names AS (SELECT DB_ID, _displayName AS n FROM DatabaseObject WHERE _displayName IS NOT NULL UNION ALL SELECT DB_ID, name FROM Event_2_name UNION ALL SELECT DB_ID, name FROM PhysicalEntity_2_name UNION ALL SELECT DB_ID, name FROM ReferenceEntity_2_name UNION ALL SELECT DB_ID, name FROM ExternalOntology_2_name UNION ALL SELECT DB_ID, name FROM GO_BiologicalProcess_2_name UNION ALL SELECT DB_ID, name FROM GO_CellularComponent_2_name UNION ALL SELECT DB_ID, name FROM GO_MolecularFunction_2_name UNION ALL SELECT DB_ID, name FROM ControlledVocabulary_2_name UNION ALL SELECT DB_ID, name FROM Taxon_2_name UNION ALL SELECT DB_ID, name FROM FunctionalStatusType_2_name UNION ALL SELECT DB_ID, name FROM ReferenceDatabase_2_name UNION ALL SELECT DB_ID, name FROM Affiliation_2_name UNION ALL SELECT DB_ID, geneName FROM ReferenceSequence_2_geneName UNION ALL SELECT DB_ID, systematicName FROM PhysicalEntity WHERE systematicName IS NOT NULL UNION ALL SELECT DB_ID, systematicName FROM ReactionlikeEvent WHERE systematicName IS NOT NULL UNION ALL SELECT DB_ID, firstname FROM Person WHERE firstname IS NOT NULL UNION ALL SELECT DB_ID, surname FROM Person WHERE surname IS NOT NULL) SELECT COUNT(DISTINCT d._class) FROM names JOIN DatabaseObject d ON d.DB_ID = names.DB_ID WHERE names.n LIKE '%ras%';",
+        "typeql": "match\n  $x has name $n;\n  $n contains \"ras\";\n  $x has schema-class $c;\nselect $c;\ndistinct;\nreduce $count = count;"
+      }
+    }
+  ]
+}

@@ -105,6 +105,13 @@ _OPENAI_COMPAT_SPECS: dict[str, ProviderSpec] = {
 }
 
 
+def openai_compat_spec(provider: str) -> ProviderSpec | None:
+    """The OpenAI-compatible gateway ``provider`` names — for a sender OUTSIDE this process (a
+    containerized harness) that has to be pointed at the endpoint and key our own client would use.
+    ``None`` for a provider that is not one of them."""
+    return _OPENAI_COMPAT_SPECS.get(provider)
+
+
 def _rate_caps(provider: str) -> tuple[int | None, int | None]:
     caps = settings.RATE_LIMITS.get(provider) or []
     return (caps[0] if len(caps) > 0 else None, caps[1] if len(caps) > 1 else None)
@@ -148,4 +155,10 @@ def get_llm_client(provider: str) -> LLMClientBase:
     return factory()
 
 
-__all__ = ["ModelProfile", "ProviderSpec", "get_llm_client", "model_profile"]
+__all__ = [
+    "ModelProfile",
+    "ProviderSpec",
+    "get_llm_client",
+    "model_profile",
+    "openai_compat_spec",
+]

@@ -1,0 +1,125 @@
+diff --git a/src/cli/src/main.rs b/src/cli/src/main.rs
+index c515334..bc9d6da 100644
+--- a/src/cli/src/main.rs
++++ b/src/cli/src/main.rs
+@@ -317,6 +317,7 @@ struct RunPlan<'a> {
+     max_retries: u32,
+     /// Whether skilled DBs also run a skills-off baseline (see [`skills_variants`]).
+     skills_baseline: bool,
++    repetitions: u32,
+ }
+ 
+ /// Run every DB x model x example-count x skills combination, folding
+@@ -350,6 +351,7 @@ async fn run_benchmarks(
+                         examples: prepared.assets.examples[..example_count as usize].to_vec(),
+                         skills,
+                         max_retries: plan.max_retries,
++                        repetitions: plan.repetitions,
+                     };
+                     match runner.run(&questions.questions).await {
+                         Ok(runs) => {
+@@ -414,6 +416,7 @@ async fn main() -> anyhow::Result<()> {
+         retry_levels: &retry_levels,
+         max_retries,
+         skills_baseline: config.skills_baseline,
++        repetitions: config.repetitions,
+     };
+     let abort = run_benchmarks(&questions, &dbs, &models, &plan, &mut outputs).await;
+ 
+diff --git a/src/config/src/lib.rs b/src/config/src/lib.rs
+index a5db3f7..de88ba3 100644
+--- a/src/config/src/lib.rs
++++ b/src/config/src/lib.rs
+@@ -62,12 +62,19 @@ pub struct Config {
+     /// their only mode either way.
+     #[serde(default = "default_true")]
+     pub skills_baseline: bool,
++    /// Runs per question, to account for LLM non-determinism. Defaults to 3.
++    #[serde(default = "default_repetitions")]
++    pub repetitions: u32,
+ }
+ 
+ fn default_true() -> bool {
+     true
+ }
+ 
++fn default_repetitions() -> u32 {
++    3
++}
++
+ #[derive(Debug, Deserialize)]
+ pub struct DbConfig {
+     /// The prompt template file. Templates are dataset-independent, so the
+diff --git a/src/runner/src/lib.rs b/src/runner/src/lib.rs
+index 32e8f50..6ed5e81 100644
+--- a/src/runner/src/lib.rs
++++ b/src/runner/src/lib.rs
+@@ -10,7 +10,8 @@ use bench_core::{
+ };
+ use thiserror::Error;
+ 
+-/// Repetitions per question/setup cell, to account for LLM non-determinism.
++/// Default repetitions per question/setup cell, to account for LLM
++/// non-determinism. The config's `repetitions` key overrides it.
+ pub const REPETITIONS: u32 = 3;
+ 
+ /// Harness-level retries for transient provider errors (rate limits, network
+@@ -159,6 +160,8 @@ pub struct BenchmarkRunner<'a> {
+     pub skills: Option<Vec<String>>,
+     /// The highest configured retry count — the only level actually run.
+     pub max_retries: u32,
++    /// Runs per question.
++    pub repetitions: u32,
+ }
+ 
+ #[derive(Debug)]
+@@ -341,21 +344,21 @@ fn retry_feedback(query_ran: bool, message: &str) -> String {
+ }
+ 
+ impl BenchmarkRunner<'_> {
+-    /// For each question, REPETITIONS times: assemble the prompt, send it to
++    /// For each question, `repetitions` times: assemble the prompt, send it to
+     /// the model, extract and execute the query, feeding model-fault errors
+     /// back until success or the retry budget is spent, then compare against
+     /// the expected result.
+     pub async fn run(&self, questions: &[Question]) -> Result<Vec<QuestionRun>, RunFailure> {
+         let mut runs = Vec::with_capacity(questions.len());
+         for (question_index, question) in questions.iter().enumerate() {
+-            let mut records = Vec::with_capacity(REPETITIONS as usize);
+-            for repetition in 1..=REPETITIONS {
++            let mut records = Vec::with_capacity(self.repetitions as usize);
++            for repetition in 1..=self.repetitions {
+                 eprintln!(
+                     "Running question: {} - {} of {} repetition {repetition} of {}",
+                     question.question,
+                     question_index + 1,
+                     questions.len(),
+-                    REPETITIONS
++                    self.repetitions
+                 );
+                 match self.run_once(question, repetition).await {
+                     Ok(record) => records.push(record),
+@@ -771,6 +774,7 @@ mod run_tests {
+             examples: vec![],
+             skills: None,
+             max_retries,
++            repetitions: REPETITIONS,
+         }
+     }
+ 
+@@ -1207,6 +1211,7 @@ mod run_tests {
+             examples: vec![],
+             skills: None,
+             max_retries: 0,
++            repetitions: REPETITIONS,
+         }
+         .run(&[question(Value::Int(3))])
+         .await
+@@ -1256,6 +1261,7 @@ mod run_tests {
+             examples: vec![],
+             skills: None,
+             max_retries: 0,
++            repetitions: REPETITIONS,
+         }
+         .run(&[question(Value::Int(3))])
+         .await

@@ -14,6 +14,7 @@ datasets/{name}/
 ├── task_description.md    # L1's framing input — what the task IS
 ├── task_context.yaml      # …decomposed into the framing fields (optional; see below)
 ├── dataset.md             # Human-facing description: source, split, sample shape
+├── model-screens.md       # Every model comparison run here, with its bill (optional; the choice rule is the matrix doc's)
 ├── prompts/{node}.yaml    # Per-node PromptTemplate overrides (optional)
 └── cache.json             # The dataset ITEM BANK (write-managed; don't hand-edit)
 ```
