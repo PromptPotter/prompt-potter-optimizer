@@ -153,9 +153,15 @@ class BenchPassProgress(StrictModel):
     """``dashboard.json::bench_pass`` — the held-out pass in flight. Its rows are no round's cells."""
 
     subject: BenchSubject
+    label: str = Field(description="The candidate the pass grades, as its row is labelled.")
+    sp_hash: str = Field(description="The searchpoint scored — the archive's `prompt_fields_id`.")
     round: int = Field(description="The round whose selection is graded; 0 is the origin.")
     rows: int = Field(description="Bench rows the pass sends.")
     scored: int = Field(description="Rows of it scored so far.")
+    accuracy: float | None = Field(
+        default=None,
+        description="The gateway's running accuracy over the rows scored; null before the first.",
+    )
 
 
 class CurrentRound(StrictModel):

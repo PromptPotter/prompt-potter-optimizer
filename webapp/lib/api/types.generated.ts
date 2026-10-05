@@ -51,6 +51,7 @@ export interface DashboardCandidate {
   changes_description: string;
   theta: number | null;
   theta_se: number | null;
+  bench: BenchReading | null;
   theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
   mean_fitness_ci_lo: number | null;
   mean_fitness_ci_hi: number | null;
@@ -127,6 +128,7 @@ export interface RoundSummaryCandidate {
   changes_description: string;
   theta: number | null;
   theta_se: number | null;
+  bench: BenchReading | null;
   theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
   mean_fitness_ci_lo: number | null;
   mean_fitness_ci_hi: number | null;
@@ -614,6 +616,7 @@ export interface LiveCandidate {
   changes_description: string;
   theta: number | null;
   theta_se: number | null;
+  bench: BenchReading | null;
   theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
   mean_fitness_ci_lo: number | null;
   mean_fitness_ci_hi: number | null;
@@ -646,12 +649,18 @@ export interface CurrentRound {
 /** ``dashboard.json::bench_pass`` — the held-out pass in flight. Its rows are no round's cells. */
 export interface BenchPassProgress {
   subject: 'origin' | 'selected';
+  /** The candidate the pass grades, as its row is labelled. */
+  label: string;
+  /** The searchpoint scored — the archive's `prompt_fields_id`. */
+  sp_hash: string;
   /** The round whose selection is graded; 0 is the origin. */
   round: number;
   /** Bench rows the pass sends. */
   rows: number;
   /** Rows of it scored so far. */
   scored: number;
+  /** The gateway's running accuracy over the rows scored; null before the first. */
+  accuracy: number | null;
 }
 
 /** ``dashboard.json`` — operator-facing snapshot, polled by the webapp. */

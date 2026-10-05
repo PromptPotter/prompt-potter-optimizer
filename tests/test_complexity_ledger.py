@@ -756,7 +756,9 @@ LEDGER_BASELINE = {
     # re-run for a config only the operator can change (test_resume).
     # +1: a harness cell pooled across its derived retry levels reads nine verdicts where there
     # are three, and a run the harness never finished scores as a miss (test_numerics § 2).
-    "test_functions": 240,
+    # +1: a bench pass served with no candidate on it is anonymous while it runs and absent once
+    # it ends, and the origin's reading lands before the round row it belongs on (test_integrity).
+    "test_functions": 241,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

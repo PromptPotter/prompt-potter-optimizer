@@ -177,6 +177,8 @@ class MeasureEnterView:
 class BenchEnterView:
     # The dashboard folds `bench_pass` from it; `round` is the graded round, 0 for the origin.
     subject: BenchSubject
+    label: str
+    sp_hash: str
     round: int
     rows: int
 
@@ -190,9 +192,10 @@ class BenchScoredView:
 @dataclass(frozen=True)
 class BenchGradedView:
     # One pass's `BenchReading.model_dump(mode="json")`, or ``None`` with `missing` saying why —
-    # the dashboard folds it onto the round it names.
+    # the dashboard folds it onto the round it names and the candidate `label` names.
     reading: dict[str, Any] | None
     missing: str | None
+    label: str
 
 
 @dataclass(frozen=True)

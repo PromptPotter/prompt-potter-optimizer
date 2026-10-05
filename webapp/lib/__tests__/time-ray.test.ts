@@ -56,6 +56,35 @@ describe("raySteps", () => {
     expect(fmtGap(steps[1]!.gapBeforeS)).toBe("");
   });
 
+  it("names a held-out pass's row ticks after the candidate it grades", () => {
+    // The ticks carry no round slot, so on their own they read as the last candidate scoring
+    // again; only the pass's bracket says whose they are, and a click must select that candidate.
+    const bench = (sec: number, offset: number, event: string, view: object) =>
+      item({ ts: at(sec), offset, payload: { phase: "bench", event, payload: { view } } });
+    const tick = (sec: number, offset: number, i: number) =>
+      item({
+        ts: at(sec),
+        offset,
+        kind: "snapshot",
+        payload: { event: "sample_scored", round: 0, candidate_idx: -1, sample_idx: i, sample_total: 14 },
+      });
+    const steps = raySteps(
+      [
+        bench(0, 0, "enter", { subject: "origin", label: "C0", round: 0, rows: 14 }),
+        tick(5, 1, 3),
+        bench(9, 2, "exit", {}),
+        tick(12, 3, 4),
+      ],
+      ROOT,
+    );
+    expect(steps.map((s) => s.activity.label)).toEqual([
+      "C0 · bench pass (origin) · 14 held-out rows",
+      "C0 bench 3/14",
+      "scoring 4/14",
+    ]);
+    expect(steps.map((s) => s.candidateLabel)).toEqual(["C0", "C0", null]);
+  });
+
   it("marks a real silence when nothing at all was recorded", () => {
     const steps = raySteps([round(0, 1, 0), round(600, 2, 1)], ROOT);
     expect(steps[1]?.gapBeforeS).toBe(600);
@@ -92,7 +121,7 @@ describe("raySteps", () => {
 
 describe("rayHead", () => {
   const label = (items: RayItem[], phase: string, nowSec: number) =>
-    rayHead(raySteps(items, ROOT), items, phase, "Finished", T0 + nowSec * 1000, ROOT);
+    rayHead(raySteps(items, ROOT), items, phase, "Finished", T0 + nowSec * 1000, ROOT, null);
 
   it("reads wedged when the server still says running and nothing has progressed", () => {
     // Every await past RUN_FRESH_S heartbeats, so freshness proves attachment, never
@@ -101,6 +130,19 @@ describe("rayHead", () => {
     const head = label(items, "running", WEDGED_AFTER_S + 61);
     expect(head.state).toBe("wedged");
     expect(head.detail).toContain("no progress");
+  });
+
+  it("reads an open cell as measuring, with its clock, instead of wedged", () => {
+    // A harness or agent cell runs for minutes and is no step until it lands.
+    const items = [round(0, 1, 0), heartbeat(WEDGED_AFTER_S + 60, 1)];
+    const nowSec = WEDGED_AFTER_S + 61;
+    const head = rayHead(raySteps(items, ROOT), items, "running", "Finished", T0 + nowSec * 1000, ROOT, {
+      on: "C1.1 · sample 12",
+      since: T0 / 1000 + 100,
+    });
+    expect(head.state).toBe("running");
+    expect(head.label).toBe("Measuring");
+    expect(head.detail).toContain("C1.1 · sample 12 · open");
   });
 
   it("never reads wedged at the origin gate, however long it is held", () => {

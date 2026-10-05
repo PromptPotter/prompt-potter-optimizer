@@ -197,6 +197,7 @@ async def score_on_bench(
     search_point: JobSearchPoint,
     *,
     subject: BenchSubject,
+    label: str,
     round_num: int,
     cb: RunCallbacks,
 ) -> BenchPass:
@@ -209,6 +210,8 @@ async def score_on_bench(
         CampaignPhase.BENCH,
         "enter",
         subject=subject,
+        label=label,
+        sp_hash=sp_hash,
         graded_round=round_num,
         rows=len(bench),
     )
@@ -267,8 +270,8 @@ def _tolerance(session: Session) -> int:
     return split.tolerance if split is not None else 0
 
 
-def graded(cb: RunCallbacks, session: Session, bench_pass: BenchPass) -> None:
-    """One pass on the ledger as the trend's per-round bench series reads it."""
+def graded(cb: RunCallbacks, session: Session, bench_pass: BenchPass, *, label: str) -> None:
+    """One pass on the ledger, as a reading of the individual *label* names."""
     read = read_pass(
         session.store,
         bench_pass,
@@ -276,7 +279,12 @@ def graded(cb: RunCallbacks, session: Session, bench_pass: BenchPass) -> None:
         tolerance=_tolerance(session),
     )
     emit_phase(
-        cb.on_phase, CampaignPhase.BENCH, "graded", reading=read.reading, missing=read.missing
+        cb.on_phase,
+        CampaignPhase.BENCH,
+        "graded",
+        reading=read.reading,
+        missing=read.missing,
+        label=label,
     )
 
 
@@ -291,12 +299,19 @@ async def grade_round_selection(
         and session.scoring.require_partition().bench
     ):
         return
+    label = round_result.selected_labels[0]
     graded(
         cb,
         session,
         await score_on_bench(
-            session, cycle.selected_sp, subject="selected", round_num=round_result.round, cb=cb
+            session,
+            cycle.selected_sp,
+            subject="selected",
+            label=label,
+            round_num=round_result.round,
+            cb=cb,
         ),
+        label=label,
     )
 
 
@@ -323,7 +338,12 @@ async def bench_selection(
     else:
         try:
             selected = await score_on_bench(
-                session, selected_sp, subject="selected", round_num=picked.round, cb=cb
+                session,
+                selected_sp,
+                subject="selected",
+                label=picked.selected_labels[0],
+                round_num=picked.round,
+                cb=cb,
             )
         except RUN_STOPS as stop:
             reason = run_stop_reason(stop)

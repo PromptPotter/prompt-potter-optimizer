@@ -2,6 +2,7 @@
 // mask panel read. Every number is served; a picked sample set reaches only the overlap channel.
 
 import type {
+  BenchPassProgress,
   DashboardCandidate,
   DiagnosticRunRecord,
   LineageNode,
@@ -44,6 +45,38 @@ function diagView(d: DiagnosticRunRecord | undefined): CandidateView["diag"] {
     : undefined;
 }
 
+// Each candidate's held-out reading, keyed by label: closed off its round row, and the pass in
+// flight on the candidate it names. Both are served; nothing here is folded from rows.
+export function benchByLabel(
+  rounds: readonly { candidates: readonly DashboardCandidate[] }[],
+  pass: BenchPassProgress | null | undefined,
+): Map<string, NonNullable<CandidateView["bench"]>> {
+  const m = new Map<string, NonNullable<CandidateView["bench"]>>();
+  for (const r of rounds) {
+    for (const c of r.candidates) {
+      const b = c.bench;
+      if (b == null) continue;
+      const col = b[b.headline];
+      m.set(c.label, {
+        accuracy: col?.value ?? null,
+        ciLo: col?.ci_lo ?? null,
+        ciHi: col?.ci_hi ?? null,
+        scored: b.n_scored,
+      });
+    }
+  }
+  if (pass?.label != null) {
+    m.set(pass.label, {
+      accuracy: pass.accuracy ?? null,
+      ciLo: null,
+      ciHi: null,
+      scored: pass.scored,
+      rows: pass.rows,
+    });
+  }
+  return m;
+}
+
 export interface CandidateViewsInput {
   viewedNode: LineageNode | undefined;
   // Keyed by label: a course's own candidates keep their minted label, and `dash` is its telemetry.
@@ -51,6 +84,7 @@ export interface CandidateViewsInput {
   // null ⇒ the served reading.
   sampleSet: number[] | null;
   diagByLabel: ReadonlyMap<string, DiagnosticRunRecord>;
+  benchByLabel: ReadonlyMap<string, NonNullable<CandidateView["bench"]>>;
   overlapByCandidate: ReadonlyMap<string, OverlapMember>;
   // The denominator a member must match to be readable.
   overlapSize: number | null;
@@ -63,6 +97,7 @@ export function candidateViews({
   inflightByLabel,
   sampleSet,
   diagByLabel,
+  benchByLabel,
   overlapByCandidate,
   overlapSize,
   stampsTheta,
@@ -121,6 +156,7 @@ export function candidateViews({
       // nobody and reads exactly like one still scoring.
       electionPending: !isCourse && !n.election_held,
       diag: diagView(diagByLabel.get(label)),
+      bench: isCourse ? undefined : benchByLabel.get(n.label),
       overlapAccuracy: whole
         ? pickedSet
           ? (n.sample_set_accuracy ?? null)

@@ -1587,8 +1587,12 @@ paths:
         `rounds[].optimizer_facts` are the optimizer's own words about each closed
         round (`OptimizerFact`); `rounds[].best_so_far` is the cycle's best on shared
         cells as each round closed, and `rounds[].bench` the bench's `BenchReading` of the
-        selection that round declared — the origin, the final pick, and under
-        `bench_each_round` every round that selected; `state: optimizer_step`
+        selection that round declared — the origin as every launch begins, the
+        final pick, and under `bench_each_round` every round that selected. The same
+        reading rides `rounds[].candidates[].bench` on the candidate it read, and
+        `bench_pass` (`BenchPassProgress`) is the pass in flight: its candidate's
+        `label` and `sp_hash`, the rows `scored` of `rows`, and their running
+        `accuracy`; `state: optimizer_step`
         names a phase the optimizer declares for itself, its words in
         `optimizer_step`.
       tags: [cycles]

@@ -67,6 +67,15 @@ export interface CandidateView extends CandidateRow {
   // earlier, so only this may explain an absent crown.
   electionPending: boolean;
   diag?: { accuracy: number; workspaceN: number; samplesAdded: number };
+  // This candidate read on the held-out bench set. `rows` is set only while its pass is still
+  // in flight, when `accuracy` is the running one over `scored` rows and there is no band yet.
+  bench?: {
+    accuracy: number | null;
+    ciLo: number | null;
+    ciHi: number | null;
+    scored: number;
+    rows?: number;
+  };
   // `null` unless the candidate answered the WHOLE basis; unlike `accuracy`, it is read on one
   // shared set of cells.
   overlapAccuracy: number | null;

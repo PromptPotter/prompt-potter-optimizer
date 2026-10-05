@@ -133,6 +133,8 @@ export function sampleScoredCandidate(env: ProjectionEnvelope): ActivityItem | n
   if (str(p.event) !== "sample_scored") return null;
   const running = asRec(asRec(asRec(p.payload).result)._running);
   if (Object.keys(running).length === 0) return null;
+  // A slotless measurement (a bench pass, the parent's re-score) is no candidate of the round.
+  if ((num(p.candidate_idx) ?? 0) < 0) return null;
   return candidateItem(candidateLabel(num(p.round) ?? 0, num(p.candidate_idx) ?? 0), fitPct(running));
 }
 
@@ -140,14 +142,26 @@ export function sampleScoredCandidate(env: ProjectionEnvelope): ActivityItem | n
 // "scoring i/n" beside it reads as a round that stalled. Null where the file carries no pass.
 export function benchPassActivity(pass: BenchPassProgress | null | undefined): ActivityItem | null {
   if (!pass) return null;
-  const subject = pass.subject === "origin" ? "origin" : `R${pass.round} selection`;
   return {
     id: "bench-pass",
     kind: "progress",
     icon: "·",
-    label: `bench pass · ${subject} · ${pass.scored}/${pass.rows} held-out rows`,
+    label: `${benchPassOf(pass.label, pass.subject, pass.round)} · ${pass.scored}/${pass.rows} held-out rows`,
+    detail: pass.accuracy == null ? undefined : `${Math.round(pass.accuracy * 100)}% so far`,
     tone: "muted",
   };
+}
+
+function benchSubject(subject: unknown, round: unknown): string {
+  return subject === "origin" ? "origin" : `R${num(round) ?? "?"} selection`;
+}
+
+// The candidate first: the pass is a second reading of that searchpoint, and every other surface
+// finds it by this label.
+function benchPassOf(label: unknown, subject: unknown, round: unknown): string {
+  const who = benchSubject(subject, round);
+  const name = str(label);
+  return name ? `${name} · bench pass (${who})` : `bench pass · ${who}`;
 }
 
 // Narrower than `ProjectionEnvelope`: a `RayItem` carries no `version` and no `cycle_id`.
@@ -198,6 +212,13 @@ export function projectionToActivity(env: ActivitySource): ActivityItem | null {
       return null;
     }
     case "phase": {
+      // The header the pass's "scoring i/n" ticks read under: without it they continue the last
+      // candidate's, and a held-out pass reads as that candidate scoring again.
+      if (str(p.phase) === "bench" && str(p.event) === "enter") {
+        const view = asRec(asRec(p.payload).view);
+        const label = `${benchPassOf(view.label, view.subject, view.round)} · ${num(view.rows) ?? "?"} held-out rows`;
+        return { id, kind: "round", icon: "◇", label, tone: "muted" };
+      }
       if (str(p.phase) !== "round" || str(p.event) !== "display") return null;
       const rr = asRec(asRec(p.payload).round_result);
       const round = num(p.round) ?? num(rr.round) ?? 0;

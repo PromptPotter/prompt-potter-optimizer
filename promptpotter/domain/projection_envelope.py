@@ -167,8 +167,19 @@ RAY_PAYLOAD_FIELDS: dict[ProjectionKind, frozenset[str]] = {
         {"call_id", "node", "round", "candidate_idx", "model", "started_at_ms", "prompt_chars"}
     ),
     # `payload.view` is the phase's own bulk and 95% of the record; the round's headline is
-    # the one thing a chronology reads off a phase.
-    "phase": frozenset({"phase", "event", "round", "payload.round_result"}),
+    # what a chronology reads off a phase, and a bench pass's header is whose pass it is.
+    "phase": frozenset(
+        {
+            "phase",
+            "event",
+            "round",
+            "payload.round_result",
+            "payload.view.subject",
+            "payload.view.label",
+            "payload.view.round",
+            "payload.view.rows",
+        }
+    ),
     # `detail` is the warning's structured bulk; the sentence is the step.
     "round_warning": frozenset({"kind", "severity", "message", "round"}),
     # The scalar readings only. `payload.result` is the sample's query, prediction and

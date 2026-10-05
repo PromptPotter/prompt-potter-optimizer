@@ -191,6 +191,9 @@ class DashboardCandidate(StrictModel):
     # carry rather than defaulting it to a position on the scale.
     theta: float | None = None
     theta_se: float | None = None
+    # This candidate read on the held-out bench set, a second reading beside the search cells
+    # above. `None` unless a bench pass graded it: the origin, and each selection the bench read.
+    bench: BenchReading | None = None
     # Why the θ above is NOT this arm's ability (`ScoredCandidate.theta_caveat`) — `FLOOR_PINNED`
     # or `UNMEASURED_DELTA`, since the rest are facts about the round's scale and ride
     # `RoundResult.ability` once instead of being copied onto every row. Served rather than

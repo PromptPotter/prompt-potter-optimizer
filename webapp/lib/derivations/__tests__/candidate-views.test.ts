@@ -73,6 +73,7 @@ const EMPTY = {
   inflightByLabel: new Map<string, DashboardCandidate>(),
   sampleSet: null,
   diagByLabel: new Map(),
+  benchByLabel: new Map(),
   overlapByCandidate: new Map(),
   overlapSize: null,
   stampsTheta: true,

@@ -13,6 +13,7 @@ export type SeriesKey =
   | "mask"
   | "overlap"
   | "verify"
+  | "bench"
   | "cached";
 
 export interface SeriesCtx {
@@ -143,6 +144,27 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
         : `verify: ${fmtNum(v.diag.accuracy)} (workspace acc on n=${v.diag.workspaceN}, +${v.diag.samplesAdded} fresh)`,
   },
   {
+    key: "bench",
+    legend: () => "bench · held out",
+    hint: () =>
+      "This candidate on the held-out bench set — questions no round of the search ever read. Graded for the origin as the run starts and for the selection as it ends, so most bars carry none.",
+    // The trend chart's bench series wears the accent; the same reading keeps the same ink here.
+    ink: () => "--color-accent",
+    hollow: true,
+    kind: "bar",
+    axis: "y",
+    gap: "sparse",
+    valueOf: (v) => v.bench?.accuracy ?? null,
+    applies: (c) => c.views.some((v) => v.bench != null),
+    tip: (v, c) => {
+      const b = v.bench;
+      if (b == null) return "bench: —";
+      if (b.rows != null)
+        return `bench: ${b.accuracy == null ? "—" : fmtNum(b.accuracy)} so far · ${b.scored} of ${unitCount(b.rows, c.unit)} held out`;
+      return `bench: ${b.accuracy == null ? "—" : fmtNum(b.accuracy)} on ${unitCount(b.scored, c.unit)} held out`;
+    },
+  },
+  {
     key: "cached",
     legend: () => "share from cache",
     hint: () =>
@@ -204,6 +226,13 @@ export function whiskerBands(ctx: SeriesCtx): WhiskerBand[] {
       anchor: "accuracy",
       lo: ctx.views.map((v) => v.meanFitnessCiLo),
       hi: ctx.views.map((v) => v.meanFitnessCiHi),
+    });
+  }
+  if (ctx.views.some((v) => v.bench != null)) {
+    bands.push({
+      anchor: "bench",
+      lo: ctx.views.map((v) => v.bench?.ciLo ?? null),
+      hi: ctx.views.map((v) => v.bench?.ciHi ?? null),
     });
   }
   if (ctx.metrics.has("ability")) {

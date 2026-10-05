@@ -1956,6 +1956,7 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
             session,
             cycle.searchpoint(origin.lineage.id),
             subject="origin",
+            label="C0",
             round_num=0,
             cb=_QUIET_CALLBACKS,  # type: ignore[arg-type]
         )
@@ -2046,6 +2047,7 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
             session,
             cycle.searchpoint(unread.candidate_id),
             subject="selected",
+            label=unread.label,
             round_num=1,
             cb=_QUIET_CALLBACKS,  # type: ignore[arg-type]
         )
@@ -2091,7 +2093,14 @@ def test_bench_passes_read_under_a_second_formula_read_as_a_fresh_pass_under_it(
         reserve_tokens=0,
         **{
             role: asyncio.run(
-                score_on_bench(session, sp, subject=role, round_num=r, cb=_QUIET_CALLBACKS)  # type: ignore[arg-type]
+                score_on_bench(
+                    session,
+                    sp,
+                    subject=role,
+                    label=role,
+                    round_num=r,
+                    cb=_QUIET_CALLBACKS,  # type: ignore[arg-type]
+                )
             )
             for r, (role, sp) in enumerate(zip(("origin", "selected"), points, strict=True))
         },

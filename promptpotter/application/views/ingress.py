@@ -188,7 +188,13 @@ def _measure_enter(d: dict[str, Any], ctx: ViewContext) -> MeasureEnterView:
 
 
 def _bench_enter(d: dict[str, Any], ctx: ViewContext) -> BenchEnterView:
-    return BenchEnterView(subject=d["subject"], round=int(d["graded_round"]), rows=int(d["rows"]))
+    return BenchEnterView(
+        subject=d["subject"],
+        label=str(d["label"]),
+        sp_hash=str(d["sp_hash"]),
+        round=int(d["graded_round"]),
+        rows=int(d["rows"]),
+    )
 
 
 def _bench_scored(d: dict[str, Any], ctx: ViewContext) -> BenchScoredView:
@@ -198,7 +204,9 @@ def _bench_scored(d: dict[str, Any], ctx: ViewContext) -> BenchScoredView:
 def _bench_graded(d: dict[str, Any], ctx: ViewContext) -> BenchGradedView:
     reading = d["reading"]
     return BenchGradedView(
-        reading=None if reading is None else reading.model_dump(mode="json"), missing=d["missing"]
+        reading=None if reading is None else reading.model_dump(mode="json"),
+        missing=d["missing"],
+        label=str(d["label"]),
     )
 
 

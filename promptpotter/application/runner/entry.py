@@ -43,7 +43,6 @@ from promptpotter.application.run_observers import (
 from promptpotter.application.run_phase_control import declare_run_phase
 from promptpotter.application.runner.bench import (
     bench_selection,
-    graded,
     headline,
     nothing_held_out,
 )
@@ -646,8 +645,6 @@ async def _run_single_cycle(
             )
             if banked is not None and budget_gate.book.binds("bench"):
                 budget_gate.book.set_aside(banked.reserve_usd, banked.reserve_tokens)
-            if banked is not None and campaign_config.bench_each_round:
-                graded(cb, session, banked.origin)
         elif not session.scoring.require_partition().bench:
             unheld = nothing_held_out(cb, scorer_id=session.scoring.scorer_id)
         stop_reason, cycle_error, fork, open_round, cancel_exc = await run_round_loop(

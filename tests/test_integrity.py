@@ -5396,7 +5396,7 @@ def test_the_bench_pass_bills_and_clocks_under_its_own_name(built_stores, tmp_pa
     )
 
     async def _passes() -> None:
-        await score_on_bench(session, sp, subject="origin", round_num=0, cb=cb)
+        await score_on_bench(session, sp, subject="origin", label="C0", round_num=0, cb=cb)
         with telemetry.filed_as("diagnostic"):
             await score_search_point(
                 sp,
@@ -5673,6 +5673,79 @@ def test_a_backend_retry_is_served_with_the_reason_it_happened(tmp_path: Path) -
     assert served[0].detail is not None and "could not download" in served[0].detail, (
         "the retry is served without the backend's own reason, so every surface reading it can "
         "say only that a cell failed — which is the state this test exists to end"
+    )
+
+
+def test_a_bench_pass_is_a_reading_of_the_candidate_it_graded(tmp_path: Path) -> None:
+    """The held-out pass grades ONE searchpoint, and every surface draws searchpoints by label.
+
+    Served as a run-level counter with no candidate on it, the pass was a strip of anonymous
+    ``scoring k/N`` steps while it ran and nothing at all once it ended: the origin's reading
+    reached the dashboard only inside the campaign's final headline. It is the origin's from its
+    first row, and it lands before round 0's summary does, so the reading must wait for its row.
+    """
+    from promptpotter.infrastructure.projections.live_dashboard.round_summary import (
+        build_round_summary,
+    )
+    from tests.factories import round_result
+
+    view = LiveDashboardProjection(
+        CycleDir(tmp_path),
+        state_path=None,
+        hop=CycleHop(campaign_id="c", cycle_id="cy"),
+        session_id="s",
+        arms_per_round=2,
+        sp_budget_round=20,
+        display_metric="composite",
+    )
+    summary = build_round_summary(round_result(0), [], best_so_far=None)
+    graded, other = summary.candidates[0].label, summary.candidates[1].label
+
+    def bench(event: str, **fields: object) -> None:
+        view.on_record(PhaseRecord(phase="bench", event=event, payload={"view": fields}), 0)
+
+    bench("enter", subject="origin", label=graded, sp_hash="h0", round=0, rows=14)
+    view.on_record(
+        SnapshotRecord(
+            event="sample_scored",
+            round=0,
+            candidate_idx=NO_ROUND_SLOT,
+            candidate_total=0,
+            sample_idx=0,
+            sample_total=14,
+            payload={
+                "result": {
+                    "sample_id": 3,
+                    "fitness": 1.0,
+                    "cached": False,
+                    "_running": {"accuracy": 1.0},
+                }
+            },
+        ),
+        1,
+    )
+    in_flight = view.state.bench_pass
+    assert in_flight is not None
+    assert (in_flight.label, in_flight.scored, in_flight.accuracy) == (graded, 1, 1.0)
+
+    bench("exit")
+    reading = {
+        "round": 0,
+        "sp_hash": "h0",
+        "headline": "accuracy",
+        "n_scored": 14,
+        "accuracy": {"value": 0.5, "ci_lo": 0.25, "ci_hi": 0.75},
+        "composite": None,
+    }
+    bench("graded", reading=reading, missing=None, label=graded)
+    assert view.state.bench_pass is None and view.state.rounds == []
+
+    placed = view._with_bench(summary)
+    by_label = {c.label: c.bench for c in placed.candidates}
+    assert placed.bench is not None and by_label[other] is None
+    assert by_label[graded] is not None and by_label[graded].n_scored == 14, (
+        "the origin's bench reading is on the round but on no candidate, so the bar chart and "
+        "the expanded searchpoint have nothing to draw it from"
     )
 
 

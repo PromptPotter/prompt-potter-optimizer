@@ -170,6 +170,9 @@ class LiveDashboardProjection(Projection):
         # sample_id -> (query_text, candidate_idx, cand_total, depth)
         # The depth it LAUNCHED at is what separates look-ahead cost from a plain failure.
         self._open_samples: dict[int, tuple[str, int, int, int]] = {}
+        # A bench reading names a round and a searchpoint; the pass's own events name the label.
+        self._bench_labels: dict[tuple[int, str], str] = {}
+        self._bench_readings: dict[int, BenchReading] = {}
         # The last `flight` reading (out, allowed, most); all zero while nothing is scoring. And the
         # call a decision waits on, as (sample_id, launched at), and the provider holding calls.
         self._flight: tuple[int, int, int] = (0, 0, 0)
@@ -441,13 +444,18 @@ class LiveDashboardProjection(Projection):
         if record.phase == CampaignPhase.BENCH and record.event == "scored":
             score = BenchScore.model_validate(view_fields(record)["bench"])
             self.state.bench_score = score
-            self._place_bench(score.origin, score.selected)
+            for reading in (score.origin, score.selected):
+                if reading is not None:
+                    self._place_bench(reading)
             self._flush_pending_persist()
             return
 
         if record.phase == CampaignPhase.BENCH and record.event == "graded":
-            raw = view_fields(record)["reading"]
-            self._place_bench(None if raw is None else BenchReading.model_validate(raw))
+            view = view_fields(record)
+            if (raw := view["reading"]) is not None:
+                reading = BenchReading.model_validate(raw)
+                self._bench_labels[reading.round, reading.sp_hash] = view["label"]
+                self._place_bench(reading)
             self._flush_pending_persist()
             return
 
@@ -473,7 +481,9 @@ class LiveDashboardProjection(Projection):
                 summary = build_round_summary(
                     round_result, origin_rows, best_so_far=self.state.best
                 )
-                self.state.rounds = sorted([*prior, summary], key=lambda r: r.round)
+                self.state.rounds = sorted(
+                    [*prior, self._with_bench(summary)], key=lambda r: r.round
+                )
                 self._flush_pending_persist()
             return
 
@@ -528,13 +538,26 @@ class LiveDashboardProjection(Projection):
         self._buffer.slot(record.idx)["changes_description"] = record.changes_description
         self._flush_pending_persist()
 
-    def _place_bench(self, *readings: BenchReading | None) -> None:
-        """Each bench reading onto the round whose selection it graded."""
-        by_round = {r.round: r for r in readings if r is not None}
-        self.state.rounds = [
-            r.model_copy(update={"bench": by_round[r.round]}) if r.round in by_round else r
-            for r in self.state.rounds
-        ]
+    def _place_bench(self, reading: BenchReading) -> None:
+        """A bench reading onto the round whose selection it graded and the candidate it read.
+        Kept, because the origin's lands before round 0's summary does."""
+        self._bench_readings[reading.round] = reading
+        self.state.rounds = [self._with_bench(r) for r in self.state.rounds]
+
+    def _with_bench(self, r: RoundSummary) -> RoundSummary:
+        reading = self._bench_readings.get(r.round)
+        if reading is None:
+            return r
+        label = self._bench_labels.get((reading.round, reading.sp_hash))
+        return r.model_copy(
+            update={
+                "bench": reading,
+                "candidates": [
+                    c.model_copy(update={"bench": reading}) if c.label == label else c
+                    for c in r.candidates
+                ],
+            }
+        )
 
     @staticmethod
     def _restamp_ability(r: RoundSummary, ability: AbilityReading) -> RoundSummary:
@@ -591,7 +614,10 @@ class LiveDashboardProjection(Projection):
                 self._buffer.append_sample(ci, ct, qi, qt, result)
             elif (bench_pass := self.state.bench_pass) is not None:
                 self.state.bench_pass = bench_pass.model_copy(
-                    update={"scored": bench_pass.scored + 1}
+                    update={
+                        "scored": bench_pass.scored + 1,
+                        "accuracy": (result.get("_running") or {}).get("accuracy"),
+                    }
                 )
         elif ev == "candidate_started":
             # Seed it empty so the lineage draws the round's path the instant a candidate is
@@ -697,8 +723,14 @@ class LiveDashboardProjection(Projection):
             if short is not None:
                 self.short_formula_template = short
         elif event.phase == CampaignPhase.BENCH and event.event == "enter":
+            self._bench_labels[view["round"], view["sp_hash"]] = view["label"]
             s.bench_pass = BenchPassProgress(
-                subject=view["subject"], round=view["round"], rows=view["rows"], scored=0
+                subject=view["subject"],
+                label=view["label"],
+                sp_hash=view["sp_hash"],
+                round=view["round"],
+                rows=view["rows"],
+                scored=0,
             )
         elif event.phase == CampaignPhase.BENCH and event.event == "exit":
             s.bench_pass = None

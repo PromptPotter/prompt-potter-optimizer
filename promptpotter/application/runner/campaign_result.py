@@ -8,10 +8,16 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.datasets.authored import config_cell_scorer
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
-from promptpotter.application.runner.bench import read_bench, score_on_bench, unheld_bench
+from promptpotter.application.runner.bench import (
+    graded,
+    read_bench,
+    score_on_bench,
+    unheld_bench,
+)
 from promptpotter.domain.bench import BenchPasses, BenchScore
 from promptpotter.domain.campaign import ArmCost, Campaign, CampaignResult, Launch
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.results import candidate_label
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_spend,
@@ -121,7 +127,9 @@ async def bench_origin(
     else:
         # The bench bucket's own delta: a search call landing while this pass is out is not reserve.
         usd_before, tokens_before = _bench_counted(spend)
-        origin_pass = await score_on_bench(session, origin_sp, subject="origin", round_num=0, cb=cb)
+        origin_pass = await score_on_bench(
+            session, origin_sp, subject="origin", label=candidate_label(0, 0), round_num=0, cb=cb
+        )
         split = session.scoring.require_partition().split
         usd_after, tokens_after = _bench_counted(spend)
         banked = BenchPasses(
@@ -131,6 +139,8 @@ async def bench_origin(
             reserve_tokens=tokens_after - tokens_before,
             selected=None,
         )
+    # Held or sent now, the origin's reading is on this cycle's ledger before round 1.
+    graded(cb, session, banked.origin, label=candidate_label(0, 0))
     bank_campaign_result(
         stores,
         hop,

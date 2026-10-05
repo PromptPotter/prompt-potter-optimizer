@@ -371,12 +371,16 @@ components:
         `PhaseRecord.payload.view` of `phase: bench`, `event: enter` — one
         individual's pass over the bench set begins, and every `sample_scored`
         up to the matching `exit` is one of its rows. `subject` says whose pass
-        it is, `round` the round whose selection that is (0 is the origin) and
-        `rows` the size of the bench set; the dashboard serves it as
-        `bench_pass`, with the rows scored so far beside it.
-      required: [subject, round, rows]
+        it is, `label` the candidate it grades as its row is labelled, `sp_hash`
+        the searchpoint scored, `round` the round whose selection that is (0 is
+        the origin) and `rows` the size of the bench set; the dashboard serves
+        it as `bench_pass`, with the rows scored so far and their running
+        accuracy beside it.
+      required: [subject, label, sp_hash, round, rows]
       properties:
         subject: { type: string, enum: [origin, selected] }
+        label: { type: string }
+        sp_hash: { type: string }
         round: { type: integer, minimum: 0 }
         rows: { type: integer, minimum: 0 }
 
@@ -394,13 +398,15 @@ components:
     BenchGradedPayload:
       type: object
       description: |
-        `PhaseRecord.payload.view` of `phase: bench`, `event: graded` — under
-        `bench_each_round`, one pass grading a round's declared selection (the
-        origin at round 0). `reading` is the `BenchReading` the OpenAPI file
-        declares, null with `missing` saying why; the dashboard serves it as
-        `rounds[].bench` on the round it names.
-      required: [reading, missing]
+        `PhaseRecord.payload.view` of `phase: bench`, `event: graded` — one
+        pass read: the origin's as every launch begins, and under
+        `bench_each_round` each round's declared selection. `reading` is the
+        `BenchReading` the OpenAPI file declares, null with `missing` saying
+        why; the dashboard serves it as `rounds[].bench` on the round it names
+        and as `bench` on the candidate `label` names.
+      required: [reading, missing, label]
       properties:
+        label: { type: string }
         reading: { type: [object, 'null'], additionalProperties: true }
         missing: { type: [string, 'null'] }
 

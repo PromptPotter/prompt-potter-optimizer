@@ -4,10 +4,12 @@
 import type { RayItem } from "@/lib/api/types";
 import { projectionToActivity, type ActivityItem } from "@/lib/chat/activity";
 import { candidateLabel } from "@/lib/candidate-label";
+import { fmtDuration } from "@/lib/format";
 import { encodeCyclePath, type CyclePath } from "@/lib/ids";
 
 // 2.5× the longest legitimately silent-but-progressing wait, `measure_sample`'s 120 s
-// QUERY_TIMEOUT. `gate` is excluded (see `rayHead`).
+// QUERY_TIMEOUT. `gate` is excluded (see `rayHead`), and so is a cell the dashboard serves as
+// open: a harness or agent cell runs for minutes and is no step until it lands.
 export const WEDGED_AFTER_S = 300;
 
 // Nine missed 10 s heartbeats.
@@ -83,6 +85,9 @@ export function raySteps(items: readonly RayItem[], rootPathKey: string): RaySte
   const steps: RayStep[] = [];
   // Across ALL items: a heartbeat resets the silence clock without becoming a step.
   let lastAt: number | null = null;
+  // The candidate a held-out pass is grading, per ledger: its row ticks carry no slot, so only
+  // the pass's own bracket says whose they are.
+  const benchOf = new Map<string, string>();
 
   for (const item of items) {
     const raw = Date.parse(item.ts);
@@ -92,6 +97,12 @@ export function raySteps(items: readonly RayItem[], rootPathKey: string): RaySte
     lastAt = parsed;
 
     if (isHeartbeat(item)) continue;
+    if (item.kind === "phase" && str(item.payload.phase) === "bench") {
+      const key = encodeCyclePath(toPath(item));
+      const label = str(rec(rec(item.payload.payload).view).label);
+      if (str(item.payload.event) === "enter" && label) benchOf.set(key, label);
+      else if (str(item.payload.event) === "exit") benchOf.delete(key);
+    }
     const activity = projectionToActivity({
       kind: item.kind,
       sequence: item.offset,
@@ -102,6 +113,10 @@ export function raySteps(items: readonly RayItem[], rootPathKey: string): RaySte
     const path = toPath(item);
     const pathKey = encodeCyclePath(path);
     const prev = steps[steps.length - 1];
+    const graded = benchTick(item, benchOf.get(pathKey));
+    if (graded && item.kind === "snapshot") {
+      activity.label = `${graded} bench ${activity.label.replace(/^scoring /, "")}`;
+    }
 
     // Fold into the newest (furthest-along) step, keeping the gap before the run began.
     if (prev && prev.pathKey === pathKey && pathKey !== rootPathKey) {
@@ -113,6 +128,7 @@ export function raySteps(items: readonly RayItem[], rootPathKey: string): RaySte
         cluster: prev.cluster + 1,
         activity,
         ...addressOf(item),
+        ...(graded ? { candidateLabel: graded } : {}),
       };
       continue;
     }
@@ -127,9 +143,21 @@ export function raySteps(items: readonly RayItem[], rootPathKey: string): RaySte
       cluster: 1,
       activity,
       ...addressOf(item),
+      ...(graded ? { candidateLabel: graded } : {}),
     });
   }
   return steps;
+}
+
+// Opens and closes `benchOf` on the pass's bracket, and answers the graded candidate's label for
+// the bracket's header and for each slotless row tick inside it.
+function benchTick(item: RayItem, open: string | undefined): string | null {
+  const p = item.payload;
+  if (item.kind === "phase" && str(p.phase) === "bench") {
+    return str(p.event) === "enter" ? (str(rec(rec(p.payload).view).label) ?? null) : null;
+  }
+  if (open == null || item.kind !== "snapshot" || str(p.event) !== "sample_scored") return null;
+  return (num(p.candidate_idx) ?? 0) < 0 ? open : null;
 }
 
 export type RayHeadState =
@@ -158,6 +186,8 @@ export function rayHead(
   terminalLabel: string,
   nowMs: number,
   rootPathKey: string,
+  // `dashboard.json::waiting_on` / `waiting_since`: the open cell the round's next step waits on.
+  openCell: { on: string; since: number } | null,
 ): RayHead {
   const newestStep = steps[steps.length - 1];
   const target = newestStep && newestStep.pathKey !== rootPathKey ? newestStep.path : null;
@@ -179,6 +209,14 @@ export function rayHead(
   }
 
   const sinceProgressS = newestStep ? (nowMs - newestStep.at) / 1000 : Infinity;
+  if (openCell && sinceProgressS > RECENT_S) {
+    return {
+      state: "running",
+      label: "Measuring",
+      detail: `${openCell.on} · open ${fmtDuration(Math.max(0, nowMs / 1000 - openCell.since))}`,
+      target,
+    };
+  }
   if (sinceProgressS > WEDGED_AFTER_S) {
     const mins = Number.isFinite(sinceProgressS) ? `${Math.round(sinceProgressS / 60)}m` : "";
     return {

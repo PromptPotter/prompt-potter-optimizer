@@ -5,7 +5,7 @@ import { useHardSamples } from "@/lib/hard-samples";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { MeasurementsPane } from "@/components/shell/measurements/MeasurementsPane";
 import { sampleBucket, sampleSpread, sampleWalk, type SampleBucket } from "@/lib/derivations";
-import { fmtPct0 } from "@/lib/format";
+import { fmtDuration, fmtPct0 } from "@/lib/format";
 import { cx } from "@/lib/cx";
 
 // Hard-samples middle rung: a sliding three-line window over the declared scoring order while a
@@ -73,6 +73,9 @@ export function HardSamplesPreview({ sampleOrder = null }: Props) {
     };
   };
   const itemOf = (id: number): DatasetItem | undefined => byId.get(id);
+  // How long the open cell has been out (`waiting_since`, served). Re-read on every dashboard
+  // poll, which is the clock: one slow cell otherwise reads as a walk that stopped.
+  const openFor = running ? openedFor(dash?.waiting_since ?? null) : null;
 
   return (
     <div className="hsp">
@@ -116,6 +119,7 @@ export function HardSamplesPreview({ sampleOrder = null }: Props) {
                 </span>
                 <span className="hsp-tag" title={item?.query}>
                   {labelAt(at, cursor, item?.hard_sample_rank)}
+                  {at === cursor && openFor ? ` · ${openFor}` : ""}
                 </span>
               </li>
             );
@@ -155,6 +159,10 @@ export function HardSamplesPreview({ sampleOrder = null }: Props) {
 
     </div>
   );
+}
+
+function openedFor(since: number | null): string | null {
+  return since === null ? null : fmtDuration(Math.max(0, Date.now() / 1000 - since));
 }
 
 type Tone = "done" | "now" | "next" | "rank";

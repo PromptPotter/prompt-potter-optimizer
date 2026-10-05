@@ -35,6 +35,8 @@ export const TimeRay = memo(function TimeRay() {
     el.scrollLeft = el.scrollWidth;
   }, [steps.length, at]);
 
+  const waitingOn = dash?.waiting_on ?? null;
+  const waitingSince = dash?.waiting_since ?? null;
   // Run-phase is the server's (I6); the ray adds only whether anything is progressing.
   const head = useMemo(
     () =>
@@ -45,8 +47,20 @@ export const TimeRay = memo(function TimeRay() {
         runPhaseLabel(dash?.run_phase, dash?.stop_reason),
         nowMs,
         rootKey,
+        waitingOn !== null && waitingSince !== null
+          ? { on: waitingOn, since: waitingSince }
+          : null,
       ),
-    [steps, items, dash?.run_phase, dash?.stop_reason, nowMs, rootKey],
+    [
+      steps,
+      items,
+      dash?.run_phase,
+      dash?.stop_reason,
+      nowMs,
+      rootKey,
+      waitingOn,
+      waitingSince,
+    ],
   );
 
   if (!viewedPath || (!loaded && steps.length === 0)) return null;

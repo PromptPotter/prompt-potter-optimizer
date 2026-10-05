@@ -1307,6 +1307,7 @@ def test_a_resumed_campaign_clocks_every_launch_and_sends_its_origin_pass_once(
         )
 
     monkeypatch.setattr(campaign_result, "score_on_bench", score_on_bench)
+    monkeypatch.setattr(campaign_result, "graded", lambda *_, **__: sent.append("graded"))
 
     def launch(day: str, opened: str, running: str, closed: str) -> Any:
         """One launch that held at the origin gate until `running`, then ran until `closed`."""
@@ -1337,7 +1338,9 @@ def test_a_resumed_campaign_clocks_every_launch_and_sends_its_origin_pass_once(
 
     paused = launch("01", "10:00:00", "10:10:00", "11:00:00")
     finished = launch("02", "12:00:00", "12:05:00", "12:30:00")
-    assert sent == ["origin"], "a resume re-sent the origin's bench pass"
+    assert sent == ["origin", "graded", "graded"], (
+        "a resume re-sent the origin's bench pass, or left the pass it held off its own ledger"
+    )
     assert finished == paused and finished.selected is None
     result = stores.campaigns.load_result(_CAMPAIGN)
     assert result is not None and result.bench == paused
