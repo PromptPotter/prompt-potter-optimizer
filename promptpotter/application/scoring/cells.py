@@ -199,18 +199,45 @@ def open_cell(stores: Stores, name: str, run_id: str, sample_id: int) -> Cell:
     return assemble_cell(detail, graded, schema, run_id=run_id)
 
 
+def _recorded_roster(
+    stores: Stores, campaign_id: str | None, cycle_id: str | None
+) -> tuple[frozenset[int], dict[str, Any] | None]:
+    """What the cycles in scope wrote at run init: the bank ids they partitioned and the panel
+    they measured. Both empty at dataset scope and before a first run init.
+
+    A panel only grows under one name, so where the cycles pinned more than one, the cycle that
+    recorded the most ids holds the panel every other cycle's ids resolve in."""
+    if not campaign_id:
+        return frozenset(), None
+    campaigns = stores.campaigns
+    cycle_ids = (
+        [cycle_id] if cycle_id else [p.name for p in campaigns.campaign_cycle_dirs(campaign_id)]
+    )
+    hops = [CycleHop(campaign_id=campaign_id, cycle_id=c) for c in cycle_ids]
+    recorded = [(campaigns.read_bank_ids(h), campaigns.read_resolved_experiment(h)) for h in hops]
+    ids = frozenset().union(*(i for i, _ in recorded))
+    pinned = [(len(i), e) for i, e in recorded if e]
+    return ids, max(pinned, key=lambda p: p[0])[1] if pinned else None
+
+
 def _load_dataset_rows(
-    stores: Stores, name: str
+    stores: Stores,
+    name: str,
+    recorded_ids: frozenset[int],
+    experiment: dict[str, Any] | None,
 ) -> tuple[dict[str, Any], dict[int, dict[str, Any]]]:
     """Resolve *name*'s rows, normalising the sample-id key at the read boundary. Missing rows are
     not an unknown dataset but a bank-less one, so this answers an honest empty 200, not a 404.
+
+    A campaign's roster is the one its cycles RECORDED: a recorded id this read cannot resolve is
+    an unreadable roster, and only a scope that recorded nothing may answer empty.
 
     Connector-owned panels FIRST, through the gateway's own pair: a harbor dataset or an L4 inner
     benchmark declares its bank in an ``experiment_file`` and materializes no rows, so the
     materialized half alone answers an empty roster for exactly those campaigns."""
     raw: dict[str, Any] | None
     try:
-        panel = dataset_panel_rows(stores, name)
+        panel = dataset_panel_rows(stores, name, experiment=experiment)
     except (ValueError, OSError, ImportError) as exc:
         # Never an empty roster: "this panel could not be read" and "this dataset has no bank" are
         # different facts, and the browser already spells them differently.
@@ -224,12 +251,21 @@ def _load_dataset_rows(
     else:
         raw = readable_dataset_rows(stores, name)
     if raw is None:
-        return {"name": name, "items": []}, {}
+        raw = {"name": name, "items": []}
     sample_lookup: dict[int, dict[str, Any]] = {}
     for item in raw["items"]:
         sid = int(item["sample_id"] if "sample_id" in item else item["id"])
         sample_lookup[sid] = item
-    return raw, sample_lookup
+    if not recorded_ids:
+        return raw, sample_lookup
+    if missing := recorded_ids - sample_lookup.keys():
+        raise PayloadInvalidError(
+            f"This campaign recorded {len(recorded_ids)} samples on {name!r} and "
+            f"{len(missing)} of them could not be resolved from the dataset.",
+            code="campaign_roster_unreadable",
+            details={"dataset_name": name, "missing": len(missing)},
+        )
+    return raw, {sid: sample_lookup[sid] for sid in sorted(recorded_ids)}
 
 
 def _artifact_scope_store(
@@ -371,10 +407,15 @@ def _resolve_leaderboard_page(
     *Measured* is a GRADED cell in THIS scope, not a δ entry — the ruler persists across rounds
     and inherits from parent fits, so a sample carries a δ it never earned here.
     """
-    raw, sample_lookup = _load_dataset_rows(stores, name)
     art_store, art_campaign, art_cycle = _artifact_scope_store(
         stores, campaign_id, cycle_id, descend
     )
+    recorded = (
+        (frozenset[int](), None)
+        if scope == "dataset"
+        else _recorded_roster(art_store, art_campaign, art_cycle if scope == "cycle" else None)
+    )
+    raw, sample_lookup = _load_dataset_rows(stores, name, *recorded)
     artifact = _resolve_scope_artifact(
         art_store, scope=scope, name=name, campaign_id=art_campaign, cycle_id=art_cycle
     )

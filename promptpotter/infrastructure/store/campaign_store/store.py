@@ -1181,6 +1181,13 @@ class CampaignStore:
         raw = read_yaml_optional(self._layout(hop).resolved_experiment)
         return raw if isinstance(raw, dict) else None
 
+    def read_bank_ids(self, hop: CycleHop) -> frozenset[int]:
+        """Every bank row this cycle partitioned at run init, or empty where it never ran one."""
+        raw = read_json_tolerant(self._layout(hop).bank_partition, {})
+        return frozenset(
+            int(i) for part in ("search_ids", "bench_ids", "demo_ids") for i in raw.get(part) or []
+        )
+
     def write_bank_partition(self, hop: CycleHop, partition: BankPartition) -> None:
         """Re-written every run init: the partition is a pure function of the bank and the frozen
         declaration, so a disagreement between runs is a changed bank, which the id lists show."""

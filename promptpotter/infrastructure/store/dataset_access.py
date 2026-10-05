@@ -114,16 +114,28 @@ def extract_panel_rows(
 
 
 def dataset_panel_rows(
-    stores: Stores, dataset_name: str
+    stores: Stores, dataset_name: str, *, experiment: dict[str, Any] | None = None
 ) -> tuple[list[dict[str, Any]], list[str]] | None:
     """The panel a CONNECTOR owns — ``(rows, index_terms)`` — or ``None`` where this box has no
     connector-owned panel to read. It sits beside :func:`readable_dataset_rows` because the two ARE
     the one ladder this module promises: a resolver that knows only materialized banks answers
-    EMPTY for a connector-owned one, which is not a fact about the dataset."""
-    connector = connectors.registered().get(backend_type_of_dataset(stores, dataset_name))
+    EMPTY for a connector-owned one, which is not a fact about the dataset.
+
+    *experiment* is the panel a cycle already pinned (``resolved_experiment``): a campaign is read
+    off what it measured, and the dataset's own file answers only where nothing is pinned yet."""
+    backend_type = backend_type_of_dataset(stores, dataset_name)
+    connector = connectors.registered().get(backend_type)
     if connector is None:
+        if backend_type:
+            # A declared connector this PROCESS does not hold — a server older than the connector.
+            # Its panel cannot be ruled out, so the roster is unreadable, never empty.
+            raise ValueError(
+                f"Dataset {dataset_name!r} declares backend_type {backend_type!r}, which this "
+                f"process has no connector for. Restart the server."
+            )
         return None
-    experiment = dataset_experiment(readable_dataset_dir(stores, dataset_name), connector)
+    if experiment is None:
+        experiment = dataset_experiment(readable_dataset_dir(stores, dataset_name), connector)
     return None if experiment is None else extract_panel_rows(connector, dataset_name, experiment)
 
 
