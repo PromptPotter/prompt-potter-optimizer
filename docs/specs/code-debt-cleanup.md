@@ -121,10 +121,6 @@ through every nested loop.
   as for an unpriceable route, so an OpenRouter outage stops a capped run as `SPEND_BUDGET` with
   advice that cannot help, and re-fetches on every send. Loud, wrong reason. `grep -n -A3 "except
   (urllib.error.URLError, OSError, TimeoutError, json.JSONDecodeError)" promptpotter/infrastructure/llm/pricing.py`.
-- `sample_measurement.py::_classify_http_error` files a 4xx by bare status, skipping
-  `shared/errors.py::is_provider_credit_refusal`, so an empty account relayed by TermNorm aborts
-  every walk as a CLIENT config error instead of halting as PROVIDER_CREDIT. `grep -n
-  is_provider_credit_refusal promptpotter/application/scoring/sample_measurement.py` (empty).
 - `connectors/dspy_module.py::_in_process_run` calls its student through litellm with none of the
   typed cell errors harbor raises, so a 429 or an empty account becomes UNKNOWN rows (the spend
   half is the DSPy entry above). `grep -c "CellThrottledError\|CellSendRefusedError"

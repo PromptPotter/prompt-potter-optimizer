@@ -105,7 +105,7 @@ export interface CladogramAnchor {
   candidateId: string;
 }
 
-// A point's extent (`webapp/CLAUDE.md` § Component conventions) as `nodeKeyOf` addresses.
+// A point's extent (`webapp/components/CLAUDE.md` § Component conventions) as `nodeKeyOf` addresses.
 // `null` where this tree does not hold the anchor.
 export function extentKeys(
   root: LineageNode,

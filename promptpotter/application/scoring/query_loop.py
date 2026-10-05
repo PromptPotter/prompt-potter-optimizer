@@ -14,7 +14,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
-from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
+from promptpotter.application.run_phase_control import pause_requested
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.sample_measurement import (
     STALE_DATA_LOAD_PROTOCOL,
@@ -30,7 +30,6 @@ from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.phases import (
     REFUSAL_STOPS,
     STOP_REASON_INFO,
-    RunPhase,
     StopLoop,
     StopReason,
 )
@@ -926,7 +925,6 @@ async def run_walks(
                     # Between samples, where every TAKEN result is already on disk, so this exits
                     # cleanly and `resume` continues into the remaining samples.
                     logger.debug("Pause after query %d/%d.", len(walk.results), walk.n)
-                    declare_run_phase(session, RunPhase.PAUSED)
                     raise KeyboardInterrupt("graceful")
                 logger.warning(
                     "Budget ceiling reached after query %d/%d (%s); halting mid-round.",

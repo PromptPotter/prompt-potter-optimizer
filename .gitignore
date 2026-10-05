@@ -55,6 +55,7 @@ htmlcov/
 *.log
 logs/
 *.out
+!paper/evidence/**/*.log
 
 # Docker
 .dockerignore
@@ -80,8 +81,8 @@ data/
 # Linting cache
 .ruff_cache/
 
-# The last run's terminal readout, ANSI-stripped and truncated per run.
-# Sole writer: LiveDisplay._write. Nothing else belongs in here.
+# `latest-readout-path.txt`: where the newest terminal launch's `readout.log` is.
+# Sole writer: the CLI launch. Nothing else belongs in here.
 logs/
 
 # Ad-hoc human/agent dumps — launch logs, scratch notes. Never engine-written.

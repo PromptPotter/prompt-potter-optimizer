@@ -24,6 +24,7 @@ from promptpotter.application.pipeline_resolve import (
     configure_and_apply_pipeline,
     resolved_dataset_name,
 )
+from promptpotter.application.preflight import check_search_pool_holds_round
 from promptpotter.application.runner.campaign_ids import build_origin_cycle_id, mint_campaign_id
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import (
@@ -32,6 +33,7 @@ from promptpotter.domain.campaign import (
     ArmRequest,
     HeadToHeadRecord,
     Instrument,
+    Treatment,
     bench_instrument,
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
@@ -76,6 +78,15 @@ class CyclePlan:
     pipeline_params: dict[str, Any]
     origin: OptSearchPoint
     cycle_id: str
+    treatment: Treatment
+
+
+def _refuse_unrunnable(campaign_config: CampaignConfig, dataset: list[Sample]) -> None:
+    """What the config and the bank alone decide, refused before a mint writes or a check-in bills:
+    an overlay the optimizer refuses (``select_optimizer``), a pool holding no round."""
+    search = partition_bank(dataset, campaign_config.dataset_split).search
+    if (refusal := check_search_pool_holds_round(campaign_config, len(search))) is not None:
+        raise PayloadInvalidError(refusal, code="search_pool_below_round")
 
 
 @dataclass(frozen=True)
@@ -97,6 +108,8 @@ def resolve_cycle_plan(
 ) -> CyclePlan:
     """``origin_override`` IS the origin when set, so the cycle_id derives from it. No disk mint:
     ``resume`` calls this to recompute the expected id and compare it for drift."""
+    _refuse_unrunnable(campaign_config, dataset)
+    treatment = select_optimizer(campaign_config.optimization).treatment()
     schema = session.pipeline_schema
     pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=log or _noop_log)
     origin = resolve_origin_opt_search_point(
@@ -122,6 +135,7 @@ def resolve_cycle_plan(
             framing=campaign_framing(session.store, campaign_config, session.dataset_name),
             demo=partition.demo,
         ),
+        treatment=treatment,
     )
 
 
@@ -256,15 +270,20 @@ def _join_head_to_head(
     return Arm(
         head_to_head_id=request.head_to_head_id,
         arm_key=request.arm_key,
-        treatment_digest=select_optimizer(optimization).treatment().digest,
+        treatment_digest=plan.treatment.digest,
     )
 
 
 def _under_declaration(
-    campaign_config: CampaignConfig, declared: HeadToHeadRecord
+    session: Session, campaign_config: CampaignConfig, arm: ArmRequest | None
 ) -> CampaignConfig:
     """The config a later arm runs: the declaration owns the split and the budget, so an arm adopts
     both rather than repeating them — before its origin resolves, whose id the split moves."""
+    declared = (
+        None if arm is None else session.store.campaigns.load_head_to_head(arm.head_to_head_id)
+    )
+    if declared is None:
+        return campaign_config
     optimization = campaign_config.optimization
     budget = declared.budget
     adopted = type(optimization).model_validate(
@@ -342,11 +361,7 @@ def prepare_fresh_cycle(
     """Mint a fresh campaign + session + root cycle. ``campaign_id`` is a REQUIRED keyword with no
     default: who owns the campaign's identity is a decision, and a default picks it for you."""
     seed = _campaign_origin_seed(origin_override)
-    if (
-        arm is not None
-        and (declared := session.store.campaigns.load_head_to_head(arm.head_to_head_id)) is not None
-    ):
-        campaign_config = _under_declaration(campaign_config, declared)
+    campaign_config = _under_declaration(session, campaign_config, arm)
     plan = resolve_cycle_plan(
         session, campaign_config, dataset, origin_override=origin_override, log=log
     )
@@ -366,6 +381,7 @@ def prepare_fresh_cycle(
         dataset_size=len(dataset),
         pipeline_params=plan.pipeline_params,
         active_steps=list(plan.pipeline_params.get("steps", [])),
+        treatment=plan.treatment,
         arm=arm_of,
     )
     if seed is not None:
@@ -413,6 +429,8 @@ async def mint_framed_cycle(
         raise PayloadInvalidError(
             "an arm runs the head-to-head's origin and framing: no task text, no origin override"
         )
+    # Before the check-in below bills: the plan that refuses the same things needs its framing.
+    _refuse_unrunnable(_under_declaration(session, campaign_config, arm), dataset)
     description = _description_to_decompose(session, campaign_config, task_text)
     # The cycle id hashes the framing this commits, so the check-in bills a scratch ledger first
     # and its records are carried onto the minted cycle — the run's own meter.

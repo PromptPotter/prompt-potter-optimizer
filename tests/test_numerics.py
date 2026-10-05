@@ -1840,7 +1840,7 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
     ).measurement
     assert (m.reference_lift, m.reference_accuracy) == (0.25, 0.50)
 
-    # A provider refusing the first bench row aborts the pass. Its one errored row is no 0.0 over
+    # A backend refusing the first bench row aborts the pass. Its one errored row is no 0.0 over
     # one row: the pass yields no reading, and the headline says why in its place.
     from promptpotter.shared.errors import ErrorCategory
 
@@ -1851,7 +1851,7 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
             "query": sample.query,
             "ground_truth": sample.ground_truth,
             "predicted": "ERROR",
-            "error": "HTTP 403: Key limit exceeded (daily limit)",
+            "error": "HTTP 403 — caller config rejected by backend :: model is not allowed",
             "error_category": ErrorCategory.CLIENT,
             "cached": False,
             "pipeline_data": {},
@@ -1880,7 +1880,7 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
         ),
     )
     assert (cut.origin, cut.lift, cut.selected) == (None, None, bench.selected)
-    assert cut.missing_reason is not None and "Key limit exceeded" in cut.missing_reason
+    assert cut.missing_reason is not None and "model is not allowed" in cut.missing_reason
 
 
 def test_bench_passes_read_under_a_second_formula_read_as_a_fresh_pass_under_it(
@@ -1923,6 +1923,24 @@ def test_bench_passes_read_under_a_second_formula_read_as_a_fresh_pass_under_it(
         "length_rewarded",
         "plain",
     )
+
+    # No round closed on this line, so the optimizer selected nothing: the headline carries no
+    # selection, never the origin against itself at a lift of 0.0 a head-to-head would rank.
+    unsearched = read_bench(
+        session.store,
+        asyncio.run(
+            bench_selection(
+                cycle,
+                session,
+                banked=passes.model_copy(update={"selected": None}),
+                cb=_QUIET_CALLBACKS,  # type: ignore[arg-type]
+            )
+        ),
+        plain,
+        scorer_id="plain",
+    )
+    assert (unsearched.selected, unsearched.lift) == (None, None)
+    assert unsearched.origin == read.origin and "no round closed" in unsearched.missing_reason
 
     # Fresh under the second formula: nothing replayed, nothing filed, graded as measured.
     session.backend_id, session.scoring.scorer = "", plain

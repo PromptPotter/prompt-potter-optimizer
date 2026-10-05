@@ -511,7 +511,7 @@ components:
           * `LiveDashboardProjection._handle_round_warning` — sole writer of
             `dashboard.json::recent_loop_warnings` (rolling, capped).
           * `AuditTrailProjection` — accumulates into `round_NNNN.json::warnings`.
-          * `LiveDisplay` — prints a one-line CLI/notebook marker.
+          * `ReadoutProjection` — writes a one-line marker to the readout.
           * `CycleLedgerTail` — tails this record to SSE subscribers.
       required: [kind, severity, message, timestamp]
       additionalProperties: false
@@ -522,6 +522,13 @@ components:
             - l1_zero_candidates
             - injection_budget_overrun
             - layer_parse_failure
+            - layer_terminated_cycle
+            - layer_terminate_blank
+            - l1_critique_unavailable
+            # The run STOPPED on a send refused before it left (`SendRefusedError`):
+            # `message` is the refusal's own sentence — which ceiling, and the sums
+            # behind it, or that no rate prices the route. `severity: error`.
+            - send_refused
             # The round measured cleanly and still resolved nothing: no arm's
             # blocked lift over the parent excluded 0
             # (`ScoredCandidate.reference_lift_ci_*`). The round's numbers

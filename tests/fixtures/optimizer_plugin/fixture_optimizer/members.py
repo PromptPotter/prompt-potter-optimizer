@@ -82,7 +82,9 @@ class FixtureState:
     def replay(self, last: RoundResult) -> None:
         self.absorb(last)
 
-    def resume(self, ledger: CycleEventLog | None, selected: SelectedOptimizer) -> None:
+    def resume(
+        self, ledger: CycleEventLog | None, selected: SelectedOptimizer, *, before_round: int
+    ) -> None:
         return None
 
     def absorb(self, round_result: RoundResult) -> None:
@@ -268,6 +270,10 @@ class FixtureRuntime:
     def pacing(self, selected: SelectedOptimizer) -> nodes.OptimizerPacing:
         n = cast("RephraseKnobs", selected.knobs(Rephrase.name)).variants
         return nodes.OptimizerPacing(patience=None, stalls_left=None, arms_per_round=n, limits=())
+
+    def round_cells_ceiling(self, selected: SelectedOptimizer, pool: int) -> int:
+        n = cast("RephraseKnobs", selected.knobs(Rephrase.name)).variants
+        return (n + 1) * selected.round_cells(pool)
 
     def opening(self, ctx: RoundContext) -> nodes.RoundOpening:
         return nodes.standing_opening(ctx)

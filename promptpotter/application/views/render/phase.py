@@ -1,4 +1,4 @@
-"""Round-summary renderers (``LiveDisplay.on_round_complete``). Pure: no campaign
+"""Round-summary renderers (``ReadoutProjection.on_round_complete``). Pure: no campaign
 I/O, no mutation (errors log, never abort the live readout)."""
 
 from __future__ import annotations
@@ -12,20 +12,20 @@ from promptpotter.application.scoring.classification import (
 )
 from promptpotter.application.scoring.row_diagnostics import find_rank
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
-from promptpotter.domain.connector import MeasuredUnit, unit_count
-from promptpotter.domain.results import (
-    ArmOutcome,
-    overlap_series,
-    resolved_fitness,
-    scoreboard_rank_key,
-)
-from promptpotter.presentation.terminal.primitives import (
+from promptpotter.application.views.render.primitives import (
     BOLD,
     GREEN,
     RED,
     RESET,
     YELLOW,
     _node_line,
+)
+from promptpotter.domain.connector import MeasuredUnit, unit_count
+from promptpotter.domain.results import (
+    ArmOutcome,
+    overlap_series,
+    resolved_fitness,
+    scoreboard_rank_key,
 )
 from promptpotter.shared.errors import is_error_result
 
@@ -105,6 +105,35 @@ def render_progress_table(rounds: list[dict[str, Any]], *, stamps_theta: bool) -
     return "\n".join(lines)
 
 
+def round_verdict_basis(round_result: RoundResult) -> list[str]:
+    """The two readings a verdict is checked against, known only once the round has closed."""
+    lines: list[str] = []
+    # The selected arm's blocked lift over its reference WITH its interval — the served
+    # `RoundResult` pair, not a recomputation. The verdict line prints a point estimate and reads
+    # the same on a round that resolved nothing as on one that resolved something; this is the
+    # line that separates them. Silent when the round selected nobody or the panel held under two
+    # shared cells, where the absence is the honest answer.
+    selected = next(iter(round_result.selected_scores), None)
+    lift = selected.reference_lift if selected else None
+    lo = selected.reference_lift_ci_lo if selected else None
+    hi = selected.reference_lift_ci_hi if selected else None
+    if lift is not None and lo is not None and hi is not None:
+        spans_zero = lo <= 0.0 <= hi
+        verdict = (
+            f"{YELLOW}spans 0 — not separable from its reference{RESET}"
+            if spans_zero
+            else "clears 0"
+        )
+        lines.append(f"lift vs reference: {lift:+.3f} [{lo:+.3f}, {hi:+.3f}]  |  {verdict}")
+
+    # The 1-to-1 series: the best-so-far line read on the cells all of it has answered. It is the
+    # ONLY line two rounds can be differenced on — every other number in the verdict is read on
+    # the subset this round happened to buy. Silent until the line has a second member.
+    if series := overlap_series(round_result.overlap):
+        lines.append(f"overlap ({series})")
+    return lines
+
+
 def render_round_stats(
     round_result: RoundResult,
     pipeline_schema: PipelineSchema | None,
@@ -145,32 +174,6 @@ def render_round_stats(
             f"{round_result.candidates_scored} candidates"
         )
     )
-
-    # The selected arm's blocked lift over its reference WITH its interval — the served
-    # `RoundResult` pair, not a recomputation. The header above prints a point estimate and every
-    # other line reads the same on a round that resolved nothing as on one that resolved
-    # something; this is the line that separates them. Silent when the round selected nobody or
-    # the panel held under two shared cells, where the absence is the honest answer.
-    selected = next(iter(round_result.selected_scores), None)
-    lift = selected.reference_lift if selected else None
-    lo = selected.reference_lift_ci_lo if selected else None
-    hi = selected.reference_lift_ci_hi if selected else None
-    if lift is not None and lo is not None and hi is not None:
-        spans_zero = lo <= 0.0 <= hi
-        verdict = (
-            f"{YELLOW}spans 0 — not separable from its reference{RESET}"
-            if spans_zero
-            else "clears 0"
-        )
-        lines.append(
-            _node_line(f"lift vs reference: {lift:+.3f} [{lo:+.3f}, {hi:+.3f}]  |  {verdict}")
-        )
-
-    # The 1-to-1 series: the best-so-far line read on the cells all of it has answered. It is the
-    # ONLY line here two rounds can be differenced on — every other number above is read on the
-    # subset this round happened to buy. Silent until the line has a second member.
-    if series := overlap_series(round_result.overlap):
-        lines.append(_node_line(f"overlap ({series})"))
 
     # Degradation verdict — the served ``round_result.health`` (rendered, not
     # recomputed). Loudness scales with grade; ``healthy`` stays silent.
@@ -236,4 +239,5 @@ __all__ = [
     "render_patience_status",
     "render_progress_table",
     "render_round_stats",
+    "round_verdict_basis",
 ]

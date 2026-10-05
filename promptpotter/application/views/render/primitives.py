@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.pipeline_overlay import node_config_items
@@ -206,15 +207,16 @@ def _scoreboard(
         ),
         reverse=True,
     )
-    w = 78
+    w = 108
 
     # Column ORDER is the row's, and the two disagreed: the header named Composite before 95% CI
     # while the row printed them the other way round, so every CI was read against the wrong
     # column. The interval brackets mean per-cell fitness — accuracy's own fold — so it sits
     # beside Accuracy, and `Ability θ` closes the table with what a θ selector decides on.
+    # `Cells` leads the numbers because it is their basis: every rate to its right is read over it.
     theta_hdr = f"   {'Ability θ':>9s}" if theta else ""
     hdr = (
-        f"{'#':<4s}{'Label':<8s}{'Accuracy':>8s}   {'95% CI':>16s}   "
+        f"{'#':<4s}{'Label':<8s}{'Cells':>7s}   {'Accuracy':>8s}   {'95% CI':>16s}   "
         f"{'Composite':>9s}{theta_hdr}   {'Delta':>7s}"
     )
     lines = [f"  {_box_top('SCOREBOARD', width=w)}", f"  {_box_line(hdr, width=w)}"]
@@ -239,8 +241,10 @@ def _scoreboard(
         # ruler is cold NO row has one — a zero there would read as a measured mid-scale ability.
         theta_str = "---" if s.theta is None else f"{s.theta:+.3f}"
         theta_cell = f"   {theta_str:>9s}" if theta else ""
+        cells = f"{s.scored}/{s.expected}" if s.expected else str(s.total)
+        acc_str = "—" if acc is None else f"{acc:.1%}"
         row = (
-            f"{i:<4d}{label:<8s}{acc:>8.1%}   {ci_str:>16s}   "
+            f"{i:<4d}{label:<8s}{cells:>7s}   {acc_str:>8s}   {ci_str:>16s}   "
             f"{comp_val:>9.4f}{theta_cell}   {delta_str:>7s}{winner_mark}"
         )
         lines.append(f"  {_box_line(row, width=w)}")
@@ -248,11 +252,6 @@ def _scoreboard(
     lines.append(f"  {_box_bottom(width=w)}")
     return "\n".join(lines)
 
-
-# Display tags — populated from _build_display_tags() at init.
-# Mutated in place by set_display_tags so importers can keep a stable
-# reference (``from .primitives import DISPLAY_TAGS``).
-DISPLAY_TAGS: dict[str, str] = {}
 
 # `ai` marks a node that OWNS a model (`is_llm`, as `llm_only` does); an optimizer node, which
 # owns none, reads better as `l1_g`/`l1_c` than as `ai_1`/`ai_2`.
@@ -263,9 +262,10 @@ _WIRE_TYPE_TAGS: dict[NodeKind, str] = {
 }
 
 
-def _build_display_tags(schema: PipelineSchema) -> dict[str, str]:
-    from collections import Counter
-
+def display_tags(schema: PipelineSchema | None) -> dict[str, str]:
+    """Node name → the short tag a sample line prints it under; a run with no schema has none."""
+    if not schema:
+        return {}
     base_tags: list[tuple[str, str]] = [
         # An UNDECLARED node has no kind to read a tag off, so it falls to its own initials —
         # the same place a declared kind this map does not carry lands.
@@ -289,23 +289,15 @@ def _build_display_tags(schema: PipelineSchema) -> dict[str, str]:
     return result
 
 
-def set_display_tags(schema: PipelineSchema | None) -> None:
-    """Set display tags from a ``PipelineSchema``, once at pipeline init. Mutates ``DISPLAY_TAGS`` in
-    place so every module that imported it keeps a live reference."""
-    DISPLAY_TAGS.clear()
-    if schema:
-        DISPLAY_TAGS.update(_build_display_tags(schema))
-
-
-def _step_tag(step_name: str | None) -> str:
+def _step_tag(step_name: str | None, tags: dict[str, str]) -> str:
     if step_name is None:
         return ""
-    return f"[{DISPLAY_TAGS.get(step_name, step_name[:4])}]"
+    return f"[{tags.get(step_name, step_name[:4])}]"
 
 
 # ===========================================================================
 # Live-display formatting helpers shared across views.
-# Markdown/box helpers consumed by ``terminal/live/`` and the notebook ↔ Claude exchange
+# Markdown/box helpers consumed by the readout and the notebook ↔ Claude exchange
 # channel; plus the ``fmt_*`` numeric formatters
 # (``fmt_ci`` / ``fmt_pvalue``) — single import surface.
 # ===========================================================================

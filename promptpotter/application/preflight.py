@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 __all__ = [
     "PreflightWarning",
     "check_model_reasoning_floors",
+    "check_search_pool_holds_round",
     "run_preflight_checks",
 ]
 
@@ -134,16 +135,61 @@ def _check_task_context_present(
     )
 
 
+def _check_cap_funds_round(
+    config: CampaignConfig, search_pool: int, cell_usd: float | None
+) -> PreflightWarning | None:
+    """A warning, never a block: ``cell_usd`` prices every retry at its token ceiling on the
+    dearest host and an eliminator cuts arms short, so a cap under the product can still close."""
+    cap = config.optimization.spend_budget_usd
+    if cap is None or cell_usd is None:
+        return None
+    selected = select_optimizer(config.optimization)
+    cells = selected.round_cells_ceiling(search_pool)
+    need = cells * cell_usd
+    if need <= cap:
+        return None
+    return PreflightWarning(
+        code="spend_cap_below_round",
+        title=f"spend cap ${cap:.2f} is under one round's ceiling (${need:.2f})",
+        detail=(
+            f"One round of {selected.name} can measure {cells} cells off the {search_pool} search "
+            f"rows, and the spend book admits a cell at up to ${cell_usd:.4f}, so only a cap of "
+            f"${need:.2f} is certain to close a round. A cell usually bills well under its bound "
+            "and an eliminator cuts arms short, so this run may still close rounds — or stop on "
+            "`spend_budget` inside round 1 with none closed. Raise it with `set-limits --max-usd`, "
+            "or narrow the round in `optimization.nodes`."
+        ),
+    )
+
+
+def check_search_pool_holds_round(config: CampaignConfig, search_pool: int) -> str | None:
+    """A HARD block, decidable before a mint: the sampler raises on such a pool at round 1, after
+    the origin's cells are paid."""
+    selected = select_optimizer(config.optimization)
+    if selected.round_cells_ceiling(search_pool) > 0:
+        return None
+    return (
+        f"the search pool holds {search_pool} rows, which optimizer {selected.name!r} cannot draw "
+        "one round's panel from. Grow the dataset, hold fewer rows out in `dataset_split`, or "
+        "narrow the round in `optimization.nodes`."
+    )
+
+
 def run_preflight_checks(
     config: CampaignConfig,
     dataset: list[Sample],
     target_models: tuple[str, ...] = (),
     task_context: Mapping[str, Any] | None = None,
+    *,
+    cell_usd: float | None,
 ) -> list[PreflightWarning]:
     """``target_models`` are the resolved per-node target/scoring model ids, empty when the backend
-    owns the model. Pure — no mutation, no I/O."""
+    owns the model; ``dataset`` is the search pool and ``cell_usd`` the most one of its cells can
+    bill, ``None`` where nothing prices it. Pure — no mutation, no I/O."""
     warnings: list[PreflightWarning] = []
     if (w := _check_sp_budget_vs_dataset(config, dataset)) is not None:
+        warnings.append(w)
+    if (w := _check_cap_funds_round(config, len(dataset), cell_usd)) is not None:
         warnings.append(w)
     opt_model = select_optimizer(config.optimization).model()
     if (w := _check_optimizer_below_target(opt_model, target_models)) is not None:

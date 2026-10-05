@@ -14,7 +14,6 @@ function bucket(over: Partial<SpendBucket> = {}): SpendBucket {
     cache_read_tokens: 0,
     cache_write_tokens: 0,
     rate_known: false,
-    model: null,
     unpriced_tokens: 0,
     incurred_usd: 0,
     incurred_unpriced_tokens: 0,

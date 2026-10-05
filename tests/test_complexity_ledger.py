@@ -1,6 +1,6 @@
 """Ratchet: the package's conceptual surface never moves unexamined, in either direction.
 
-The rules are ``docs/developer/conventions.md`` § Reasoning doctrine ``<surface-ledger>``; a
+The rules are ``docs/developer/reasoning-doctrine.md`` ``<surface-ledger>``; a
 move's reason goes in the COMMIT BODY, and ``git log -p`` is the history layer. This file is
 only where the surface stands now — never a target to reach.
 """
@@ -183,7 +183,10 @@ LEDGER_BASELINE = {
     # scale anchor through it, and inside `cycle.py` the ruler would read as Cycle state again.
     # -1: `scoring/formula/round_scorer.py` — a lens compiles to the cell scorer the loop runs, so
     # no formula reads a round's evaluator map.
-    "modules": 389,
+    # -1: `presentation/terminal/live/__init__.py` — the package is gone. The readout projection
+    # and its renderers moved to `application/views/` (`readout.py`, `render/`), module for module,
+    # so a cycle launched with no terminal writes the same `readout.log`.
+    "modules": 388,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     # +2: `application/optimizers/__init__.py` (the member registry) and its `potter/`, empty.
@@ -192,7 +195,8 @@ LEDGER_BASELINE = {
     # +1: `optimizers/levi/__init__.py`, empty, as `capo/`'s is.
     # +1: `optimizers/gepa/__init__.py`, empty, as `levi/`'s is.
     # -1: `application/optimization/__init__.py`, the split package's, as `modules` says.
-    "init_files": 56,
+    # -1: `presentation/terminal/live/__init__.py`, as `modules` says.
+    "init_files": 55,
     # +1: `judges/__init__.py` — flagged for the same reason `connectors/__init__.py` is, and by
     # the same text test: a registry module has both an `__all__` and imports. Named rather than
     # emptied; the protocol types are deliberately NOT re-exported through it.
@@ -367,7 +371,9 @@ LEDGER_BASELINE = {
     # carry a stop.
     # -1: `BenchReading.run_id` (-2, one per reading) is a FACT and moves to the pass, and
     # `BenchScore.scorer_id` (+1) stamps the reading with the grader it was read under.
-    "cycle_result_fields": 232,
+    # -5: `SpendBucket.model`, one per bucket — the first model a bucket banked, which named one
+    # of a two-model optimizer's and which nothing read.
+    "cycle_result_fields": 227,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
@@ -713,7 +719,11 @@ LEDGER_BASELINE = {
     # own bench pass — each arm halts at its number on a different search (test_security).
     # +1: a resumed arm charged twice for cells its ledger already priced, or its bench pass held
     # to its spent search ceiling — the selection is never graded (test_integrity § 7).
-    "test_functions": 231,
+    # +1: a mint refused after its framing's check-in billed leaves that call on no ledger, the
+    # scratch one it filed to never being inherited (test_security).
+    # +1: a rewind's discarded rounds still on the ledger fold into the stall count and the lives
+    # bank, so the re-run escalates or stops on rounds it never ran (test_resume).
+    "test_functions": 233,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -868,7 +878,8 @@ LEDGER_BASELINE = {
     # what a spend cap COUNTS, by bucket, beside the bill. A controlled arm's cap meters its search's
     # incurred USD, so every surface read the bill beside it; picking the meter or the buckets in the
     # browser is the arithmetic `webapp/CLAUDE.md` forbids, and `SpendRollup` names no meter.
-    "served_fields": 770,
+    # -1: `SpendBucket.model` leaves the wire with the field.
+    "served_fields": 769,
 }
 
 

@@ -37,7 +37,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.launch_limits import LaunchLimits
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.stores import Stores
-    from promptpotter.presentation.terminal.live.display import LiveDisplay
     from promptpotter.shared.identity import IdentityContext
 
 # `submit_gate_decision` is re-exported under its OWN name because this module IS the embedded
@@ -58,8 +57,8 @@ __all__ = [
     "submit_gate_decision",
 ]
 
-# Where a host program's progress lines go. ``None`` is silent, which is the right default for a
-# library: a caller that wants the run readout passes a ``LiveDisplay`` to the next step instead.
+# Where a host program's lines go. ``None`` is silent, the right default for a library; the run
+# readout is on disk either way, and ``run_campaign(readout_sink=print)`` shows it too.
 StatusFn = Callable[[str], None]
 
 
@@ -96,7 +95,7 @@ async def run_campaign(
     train_data: list[Sample],
     campaign_config: CampaignConfig,
     *,
-    display: LiveDisplay | None = None,
+    readout_sink: StatusFn | None = None,
     langfuse_session_id: str | None = None,
     limits: LaunchLimits,
     mode: RunMode,
@@ -129,7 +128,7 @@ async def run_campaign(
         observers=build_run_observers(
             session=session,
             campaign_config=campaign_config,
-            display=display,
+            readout_sink=readout_sink,
         ),
         langfuse_session_id=langfuse_session_id,
         limits=held,

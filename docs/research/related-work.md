@@ -27,8 +27,8 @@ the same table. That is where PromptPotter is pointed, and
 it is why the direction of travel is a **bench**: a place a third party's search method plugs in as
 an optimizer manifest and is measured under one model, one budget meter, one grader, one
 split and one archive. Status and design of that plug point are
-[`../specs/roadmap.md`](../specs/roadmap.md) § The optimizer plug point — **not built yet**, and
-this page will not claim it before a peer actually runs inside it.
+[`../specs/roadmap.md`](../specs/roadmap.md) § The optimizer plug point, and this page will not
+claim a head-to-head before a peer actually runs a real campaign inside it.
 
 ## The family PromptPotter's own algorithm belongs to
 
@@ -177,4 +177,4 @@ exists to argue against. It lands when a peer has actually run.
   schemas — so "we also move parameters, not just words" is **not** the line between us. Ours is that a whole declared *pipeline* — every node's model,
   thresholds and config — moves jointly with the prompt, and that nothing is held constant across
   their six, which is the argument above. "More algorithms, available sooner" stays a real
-  advantage until the plug point ships.
+  advantage until their methods run inside the plug point.

@@ -19,6 +19,12 @@ this page owns:
 | `related/algorithm-configuration-lineage.md` | `git show 69d170d1^` | deleted in a consolidation pass |
 | `related/pevol-bench.md` | `git show c0ac0c88^` | superseded by `docs/research/benchmarks.md` § PEvol-Bench, which is shorter and current |
 
+`evidence/` holds run output a claim rests on, kept as the run wrote it: each arm's console log
+from the four-optimizer head-to-head of 2026-09-28, and the EP 04 wall-clock breakdown. The
+head-to-head logs are a placeholder — the first run after the bugs they surfaced are fixed
+replaces them. `notes/ep04-findings.md` is the record of what EP 04 surfaced on its day, not
+current state.
+
 Method sections stay where the code is: `docs/methods/` and `docs/research/benchmarks.md`. Cite
 them; copying one here is what makes two of them.
 

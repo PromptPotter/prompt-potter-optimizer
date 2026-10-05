@@ -58,7 +58,6 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
 from promptpotter.application.optimizers.potter.escalation.state import NextAction, PotterPhase
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
 from promptpotter.application.optimizers.potter.records import (
-    POTTER_MANIFEST,
     L1Layout,
     L2L3Memory,
     PotterCheckpointKind,
@@ -68,7 +67,6 @@ from promptpotter.application.views.view_models import (
     OptimizerStepEnterView,
     OptimizerStepExitView,
 )
-from promptpotter.domain.opt_search_point import OptSearchPoint, node_source
 from promptpotter.domain.phases import PhaseEvent, StopLoop, StopReason, emit_phase
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.results import merge_known_outcomes
@@ -89,7 +87,6 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.optimizers.potter.dispatch.bundle import InjectionBundle
     from promptpotter.application.optimizers.potter.state import PotterState
-    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.ruler import AbilityReading
     from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 
@@ -105,7 +102,8 @@ class TransitionResult:
     """One fire's output. Either layer may emit a ``fork_proposal``: the post-apply hook raises it as
     ``StopLoop(REBASED, fork=...)``, which ``runner.entry`` resolves to a fork."""
 
-    opt_sp: OptSearchPoint
+    # A fire mints no individual: it writes `PotterState.memory`, and the parent stays the parent.
+    described: str
     # The whole post-fire map, or ``None`` when the fire left the cycle's untouched.
     l1_overrides: dict[str, Any] | None = None
     plan: str = ""
@@ -159,7 +157,7 @@ def _high_water(cycle: Cycle) -> _HighWater:
     )
 
 
-ParseFn = Callable[[Any, OptSearchPoint, L2L3Memory], TransitionResult]
+ParseFn = Callable[[Any, L2L3Memory], TransitionResult]
 ApplyFn = Callable[["Cycle", "PotterState", TransitionResult], None]
 EnterFn = Callable[["Cycle", "PotterState"], OptimizerStepEnterView]
 ExitFn = Callable[["PotterState", TransitionResult], OptimizerStepExitView]
@@ -183,7 +181,7 @@ class LayerStrategy:
         return OptimizerPhase(phase=self.phase, node=self.template_name, activity=self.activity)
 
 
-def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, memory: L2L3Memory) -> TransitionResult:
+def _parse_l2(raw: L2ContextOutput, memory: L2L3Memory) -> TransitionResult:
     # An absent reason is REPORTED, never replaced. The placeholder that stood here read as a
     # sentence L2 had written, so the one surface carrying the fire forward said "refine_strategy
     # transition" whether L2 had diagnosed anything or not — and the empty state survived only as a
@@ -228,11 +226,7 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, memory: L2L3Memory) 
         )
 
     return TransitionResult(
-        opt_sp=OptSearchPoint.derive(
-            [opt_sp],
-            source=node_source(POTTER_MANIFEST, "l2_context"),
-            changes_description=f"L2: {rationale}",
-        ),
+        described=f"L2: {rationale}",
         l1_overrides=overrides,
         axis_targeted=raw.axis_targeted,
         l1_layout=accepted_layout,
@@ -286,7 +280,7 @@ def _l2_exit(state: PotterState, result: TransitionResult) -> OptimizerStepExitV
     esc = state.escalation
     return OptimizerStepExitView(
         headline=f"L2 decision: {len(state.memory.l1_overrides)} param changes{layout}{axis}",
-        details=_described(result),
+        details=(result.described,),
         # No prompt/response: the call is this ledger's `l2_context` LLMCallRecord already.
         audit=("L2 call", L2.template_name),
         state={
@@ -296,11 +290,6 @@ def _l2_exit(state: PotterState, result: TransitionResult) -> OptimizerStepExitV
             "l2_best_theta_at_entry": esc.l2_best_theta_at_entry,
         },
     )
-
-
-def _described(result: TransitionResult) -> tuple[str, ...]:
-    described = result.opt_sp.lineage.changes_description
-    return (described,) if described else ()
 
 
 L2 = LayerStrategy(
@@ -316,7 +305,7 @@ L2 = LayerStrategy(
 )
 
 
-def _parse_l3(raw: L3PlanOutput, opt_sp: OptSearchPoint, memory: L2L3Memory) -> TransitionResult:
+def _parse_l3(raw: L3PlanOutput, memory: L2L3Memory) -> TransitionResult:
     new_plan = raw.plan or memory.plan
     rationale = truncate(raw.rationale, 80) if raw.rationale else "(no rationale given)"
     failures = run_l3_output_validators({"plan": new_plan}, prior_plan=memory.plan)
@@ -327,11 +316,7 @@ def _parse_l3(raw: L3PlanOutput, opt_sp: OptSearchPoint, memory: L2L3Memory) -> 
             ", ".join(o.validator_id for o in failures),
         )
     return TransitionResult(
-        opt_sp=OptSearchPoint.derive(
-            [opt_sp],
-            changes_description=f"L3: {rationale}",
-            source=node_source(POTTER_MANIFEST, "l3_plan"),
-        ),
+        described=f"L3: {rationale}",
         plan=new_plan,
         l3_note=raw.note,
         l3_guard_breaches=failures,
@@ -367,11 +352,11 @@ def _l3_enter(cycle: Cycle, state: PotterState) -> OptimizerStepEnterView:
 
 
 def _l3_exit(state: PotterState, result: TransitionResult) -> OptimizerStepExitView:
-    # `record_l3_fired` resets L2's counters to the `l3_*_at_entry` pair, so a resume folds both.
+    # `record_l3_fired` clears L2's counters and its entry pair, so a resume folds both.
     esc = state.escalation
     return OptimizerStepExitView(
         headline=f"New plan: {truncate(result.plan[:120], 55, '...')}",
-        details=_described(result),
+        details=(result.described,),
         audit=None,
         state={
             "l3_round": esc.l3_round,
@@ -399,18 +384,14 @@ async def _run_transition(
     transition: LayerStrategy,
     cycle: Cycle,
     state: PotterState,
-    pipeline_schema: PipelineSchema,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
     *,
     obs: ObservabilityBridge | None,
     tracing_campaign_id: str,
 ) -> TransitionResult | None:
-    """enter → LLM → parse → adopt → side-effects → exit; ``None`` when the layer's output never
-    parsed. Layer-agnostic — everything layer-specific reads off the `LayerStrategy` spec."""
-    assert cycle.tracking.current_sp is not None
-    current_pp = cycle.tracking.current_sp.pipeline_params
-
+    """enter → LLM → parse → apply → exit; ``None`` when the layer's output never parsed.
+    Layer-agnostic — everything layer-specific reads off the `LayerStrategy` spec."""
     emit_phase(
         on_phase,
         transition.phase,
@@ -444,7 +425,7 @@ async def _run_transition(
                     injection_silent=tuple(injection_silent_panels(coverage)),
                 ),
             )
-            result = transition.parse(raw, cycle.opt_sp, state.memory)
+            result = transition.parse(raw, state.memory)
         except OptimizerPromptParseError as parse_err:
             # A refinement that never parsed costs a REFINEMENT, not a MEASUREMENT. Unhandled
             # it kills the cycle — and under L4 that voids a whole outer sample, scoring one
@@ -479,16 +460,6 @@ async def _run_transition(
             )
             return None
 
-    # Same adoption seam as an L1 win: identity advances (fresh lineage, parent = the outgoing
-    # parent). The frame surfaces L2/L3 own land in `state.memory` through `transition.apply`.
-    new_opt = result.opt_sp
-    cycle.adopt(new_opt)
-    cycle.tracking.current_sp = new_opt.to_job_search_point(
-        base_pipeline_params=current_pp,
-        schema=pipeline_schema,
-        framing=cycle.framing,
-        demo=cycle.session.scoring.require_partition().demo,
-    )
     transition.apply(cycle, state, result)
     emit_phase(
         on_phase,
@@ -643,7 +614,6 @@ def _trigger_payload(
 async def escalate_l2(
     cycle: Cycle,
     state: PotterState,
-    pipeline_schema: PipelineSchema,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None = None,
     obs: ObservabilityBridge | None = None,
@@ -681,7 +651,6 @@ async def escalate_l2(
             L2,
             cycle,
             state,
-            pipeline_schema,
             round_num,
             on_phase,
             obs=obs,
@@ -700,7 +669,6 @@ async def escalate_l2(
                 L3,
                 cycle,
                 state,
-                pipeline_schema,
                 round_num,
                 on_phase,
                 obs=obs,
@@ -725,7 +693,6 @@ async def escalate_l2(
             L3,
             cycle,
             state,
-            pipeline_schema,
             round_num,
             on_phase,
             obs=obs,

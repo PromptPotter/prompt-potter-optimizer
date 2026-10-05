@@ -3,7 +3,7 @@ import { cx } from "@/lib/cx";
 import s from "./Chip.module.css";
 
 // An independent on/off toggle (a `SegmentedControl` is the exclusive set). A lit chip wears the ink
-// of what it put ON SCREEN (webapp/CLAUDE.md § Component conventions).
+// of what it put ON SCREEN (webapp/components/CLAUDE.md § Component conventions).
 export function Chip({
   on,
   onClick,

@@ -112,7 +112,9 @@ bench set with ONE evaluator, and that is the headline every surface serves and 
 reports. An optimizer's own selection decides what it KEEPS; it never grades what it kept. **What
 the bench grades is the pick the optimizer DECLARED** — its selector's last selection, which the
 envelope carries as `selected_labels` and the `opt_sp` the round ended on — never one the bench
-makes by comparing rounds read on different rows.
+makes by comparing rounds read on different rows. A line that closed no round declared none, so
+its headline carries no selection rather than the origin at a lift of 0.0; which stops end a line
+holding one is `domain/phases.py::STOP_REASON_INFO`'s `grades_selection`.
 Why the two must be different rows: [`research/benchmarks.md`](research/benchmarks.md) § The
 winner's own number is biased upward.
 
@@ -494,7 +496,11 @@ mint a sibling at the first hash mismatch.
 
 #### Display
 
-Ledger subscribers, read-only, never writing campaign artifacts.
+Ledger subscribers, read-only over the ledger, never writing a campaign artifact beyond the one
+each declares — `dashboard.json`, the audit round cache, the race stream, `readout.log`; the
+roster is [`../promptpotter/infrastructure/CLAUDE.md`](../promptpotter/infrastructure/CLAUDE.md)
+§ Persistence — one ingress, two projections. Every entry point binds the same set, so a cycle's
+artifacts do not depend on what launched it; a terminal is one optional sink of the readout.
 
 **Run-state is owned state, not a freshness guess** — and the declaration is an INPUT, never the
 answer: its only writer is the process that dies, so served raw it reads `running` after a kill.
@@ -733,8 +739,8 @@ The entry points (**how many there are, and the parity rule over them, is owned 
   unmetered) and a move of one a `BudgetChange` (a `None` arm untouched), and every `dispatch_*`
   takes one `CommandCall`.
 - **One word per concept** — a ledger subscriber is a `Projection`, a typed read-out the loop
-  emits is a `*View` (`application/views/`, whose `render/` turns one into text), and the ANSI
-  adapter is `presentation/terminal/`.
+  emits is a `*View` (`application/views/`, whose `render/` turns one into text, markdown or
+  ANSI), and `presentation/terminal/` holds only what a terminal alone prints.
 - **`application/`'s top level is its core** — the modules
   [`../promptpotter/application/CLAUDE.md`](../promptpotter/application/CLAUDE.md)
   § Top-level modules lists, with every verb family in a subpackage.

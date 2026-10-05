@@ -3,7 +3,7 @@ import { cx } from "@/lib/cx";
 import s from "./Toolbar.module.css";
 
 // A card header — ONE row, never wrapping; what does not fit folds into `Menu`
-// (webapp/CLAUDE.md § Component conventions).
+// (webapp/components/CLAUDE.md § Component conventions).
 export function Toolbar({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cx(s.bar, className)}>{children}</div>;
 }

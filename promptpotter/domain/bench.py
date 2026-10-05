@@ -166,13 +166,17 @@ class BenchScore(StrictModel):
     )
     missing_reason: str | None = Field(
         description="Why a reading above is `None`: each pass that stopped before its last row, "
-        "or ended past its split's `tolerance` of rows with no verdict. `None` when both read."
+        "or ended past its split's `tolerance` of rows with no verdict — and, for `selected`, a "
+        "line that closed no round and so selected nothing. `None` when both read."
     )
     lift: float | None = Field(
         description="`selected` over `origin` in `composite_fitness`, paired per bench row both "
         "scored; `None` below two shared rows, and 0.0 where the origin is the selection."
     )
-    lift_ci_lo: float | None
+    lift_ci_lo: float | None = Field(
+        description="The 95% band on `lift`; `None` where `lift` is, and where the origin is the "
+        "selection — one pass read twice has no spread."
+    )
     lift_ci_hi: float | None
 
     def lift_per_usd(self, spend: SpendRollup) -> float | None:

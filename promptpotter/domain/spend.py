@@ -237,7 +237,6 @@ class SpendBucket(StrictModel):
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     rate_known: bool = False
-    model: str | None = None
     # Billed tokens whose USD cost could not be resolved (no wire cost AND no rate on file).
     # >0 means the USD cap is blind to real spend here; the token cap backstops.
     unpriced_tokens: int = 0
@@ -285,8 +284,6 @@ class SpendRollup(StrictModel):
         usd = record.cost_usd
         in_tok = int(record.input_tokens)
         out_tok = int(record.output_tokens)
-        if record.model and not bucket.model:
-            bucket.model = record.model
 
         if usd is not None:
             bucket.incurred_usd = round(bucket.incurred_usd + usd, 6)

@@ -4,10 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
-from promptpotter.domain.candidate_diff import flatten_sp_summary
-from promptpotter.domain.connector import MeasuredUnit, unit_count
-from promptpotter.domain.results import ArmOutcome
-from promptpotter.presentation.terminal.primitives import (
+from promptpotter.application.views.render.primitives import (
     CYAN,
     DIM,
     GREEN,
@@ -16,6 +13,9 @@ from promptpotter.presentation.terminal.primitives import (
     _fmt_delta,
     fmt_ci,
 )
+from promptpotter.domain.candidate_diff import flatten_sp_summary
+from promptpotter.domain.connector import MeasuredUnit, unit_count
+from promptpotter.domain.results import ArmOutcome
 from promptpotter.shared import truncate
 from promptpotter.shared.composite import render_composite_fitness_oneliner
 

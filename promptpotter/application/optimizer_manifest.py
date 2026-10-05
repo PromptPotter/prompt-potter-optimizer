@@ -161,6 +161,9 @@ class SelectedOptimizer:
         """The cells a round draws off a search pool of ``pool`` rows (``Sampler.draws``)."""
         return self.sampler.draws(self, pool)
 
+    def round_cells_ceiling(self, pool: int) -> int:
+        return self.runtime.round_cells_ceiling(self, pool)
+
     def node_config(self, name: str) -> dict[str, Any]:
         return dict(self.node(name).current_config)
 

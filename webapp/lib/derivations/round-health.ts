@@ -1,4 +1,4 @@
-// Twin of the CLI's "round degraded" line (`presentation/terminal/live/phase.py`). A `degraded`
+// Twin of the readout's "round degraded" line (`application/views/render/phase.py`). A `degraded`
 // round is a quiet chip, never a banner — the banner (`critical-alert.ts`) owns `critical`.
 
 import type { DegradationHealth } from "@/lib/api/types";

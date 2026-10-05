@@ -20,7 +20,7 @@ assistant" endpoint is a deferred Arc 2 —
   inline decision buttons), over the durable `ChatMsg` model
   (`lib/hooks/useIngestFlow.ts`).
 - **The activity translator** — `lib/chat/activity.ts`
-  (`ProjectionEnvelope → ActivityItem`, 1:1 with the CLI's `LiveDisplay`; curated,
+  (`ProjectionEnvelope → ActivityItem`, 1:1 with the run readout's `ReadoutProjection`; curated,
   with the per-sample firehose mapped to `null` / a single progress chip).
 - **The SSE client** — `lib/chat/useCycleEvents.ts` (snapshot → tail →
   heartbeat → reconnect), the webapp's first EventSource consumer. It carries one

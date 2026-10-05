@@ -352,7 +352,6 @@ class Escalation:
         stop = await escalate_l2(
             ctx.cycle,
             potter_state(ctx.state),
-            session.pipeline_schema,
             ctx.round_num,
             ctx.callbacks.on_phase,
             obs=session.state.obs,
@@ -510,6 +509,11 @@ class PotterRuntime:
                 ),
             ),
         )
+
+    def round_cells_ceiling(self, selected: SelectedOptimizer, pool: int) -> int:
+        knobs = potter_knobs(selected)
+        panel = min(knobs.adaptive_queue.sp_budget_round, pool)
+        return (knobs.l1_generate.n_variants + 1) * panel
 
 
 MEMBERS = (AdaptiveQueue(), L1Generate(), PoBB(), ThetaElection(), L1Critique(), Escalation())

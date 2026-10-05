@@ -201,7 +201,7 @@ one campaign inside its own event loop:
 ```python
 session = await open_session(dataset_name, *, backend_url=…, backend_id=…, on_status=None,
                              identity=None, stores=None, program=None)
-result = await run_campaign(session, train_data, campaign_config, *, display=None,
+result = await run_campaign(session, train_data, campaign_config, *, readout_sink=None,
                             langfuse_session_id=None, limits, mode)
 ```
 
@@ -222,9 +222,9 @@ buys over a private loop. The origin's accuracy is `result.origin_accuracy`. `id
 **`origin_gate` defaults to `strict` and a host has no TTY**, so `run_campaign` blocks at round 0
 until something answers — call
 `submit_gate_decision(cycle_dir, "rescore"|"proceed"|"abort")` from another task, or set the knob
-off. It is `application/`, so it renders nothing: pass `LiveDisplay.for_campaign(session,
-campaign_config)` for the run readout, and `presentation/terminal/completion.py::report_completion`
-for the closing box.
+off. The run readout lands in the cycle's `readout.log` whatever the host passes; `readout_sink=print`
+shows it as it is written, and `presentation/terminal/completion.py::report_completion` prints
+the closing box.
 
 Nothing on this path imports a server, and the dependency list says so: `pip install
 promptpotter` is the engine, `[api]` is what a host adds if it also wants to serve the API and

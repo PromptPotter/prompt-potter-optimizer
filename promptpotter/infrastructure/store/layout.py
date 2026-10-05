@@ -233,7 +233,7 @@ class CycleLayout:
 
     @property
     def readout(self) -> Path:
-        """The terminal readout ANSI-stripped, every launch appended — ``LiveDisplay``'s mirror."""
+        """The run readout ANSI-stripped, every launch appended — ``ReadoutProjection``'s file."""
         return self.cycle_dir / "readout.log"
 
     # --- resume state (heavy: dropped by ``delete --keep-results``) ---

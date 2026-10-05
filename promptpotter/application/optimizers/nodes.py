@@ -162,9 +162,12 @@ class WorkingState(Protocol):
         """Take up the state ``last`` banked: a resume, a fork or a repair re-seats the cycle there."""
         ...
 
-    def resume(self, ledger: CycleEventLog | None, selected: SelectedOptimizer) -> None:
+    def resume(
+        self, ledger: CycleEventLog | None, selected: SelectedOptimizer, *, before_round: int
+    ) -> None:
         """Rebuild what the round documents do not bank, off the cycle's ledger, once a resume has
-        replayed its priors."""
+        replayed its priors. ``before_round`` is the round the run continues at: a rewind leaves the
+        ledger whole, so records at or past it belong to rounds this run re-runs."""
         ...
 
     def absorb(self, round_result: RoundResult) -> None:
@@ -248,6 +251,11 @@ class OptimizerRuntime(Protocol):
         ...
 
     def pacing(self, selected: SelectedOptimizer) -> OptimizerPacing: ...
+
+    def round_cells_ceiling(self, selected: SelectedOptimizer, pool: int) -> int:
+        """The most cells one round can measure off a search pool of ``pool`` rows, its parent's
+        re-score included — 0 where the pool holds no round's panel."""
+        ...
 
     def opening(self, ctx: RoundContext) -> RoundOpening:
         """Read as the bench opens the round's proposing, before any proposer runs."""

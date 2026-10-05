@@ -65,7 +65,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_le
 from promptpotter.infrastructure.store.io import rmtree_robust
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.stores import build_stores
-from promptpotter.presentation.terminal.live.display import LiveDisplay
 from promptpotter.shared.errors import ConflictError
 from promptpotter.shared.hashing import module_source_digest
 from promptpotter.shared.identity import default_identity
@@ -602,7 +601,7 @@ async def run_one(
         session,
         list(session.samples),
         config,
-        display=LiveDisplay.for_campaign(session, config),
+        readout_sink=print,
         limits=LaunchLimits(),
         mode=RunMode(),
         arm=arm,

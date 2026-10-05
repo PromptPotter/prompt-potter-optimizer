@@ -131,15 +131,11 @@ def _scan(
     files: Sequence[Path],
     needle: re.Pattern[str],
     *,
-    allow_line: re.Pattern[str] | None = None,
     allow_path: re.Pattern[str] | None = None,
 ) -> list[str]:
-    """Grep with an exemption, and the two exemptions are not interchangeable.
-
-    An allowed LINE is a sanctioned use (the CLI-seam imports); an allowed PATH is a
-    file exempt whatever it says (`_MAY_IMPORT_POTTER`). Honouring a path pattern
-    against line text would exempt any line that merely names one of those files — a
-    comment pointing at one would hide a real violation beside it.
+    """Grep with an exemption: an allowed PATH is a file exempt whatever it says
+    (`_MAY_IMPORT_POTTER`). Honouring the pattern against line text would exempt any line that
+    merely names one of those files — a comment pointing at one would hide a real violation.
 
     Split on ``\\n`` rather than ``splitlines()``, which also breaks on five of the characters
     ``_CONTROL_CHAR`` hunts and would consume them as line terminators. ``read_text`` already
@@ -151,7 +147,7 @@ def _scan(
         if allow_path is not None and allow_path.search(rel):
             continue
         for num, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
-            if needle.search(line) and not (allow_line is not None and allow_line.search(line)):
+            if needle.search(line):
                 hits.append(f"{rel}:{num}: {line.strip()}")
     return hits
 
@@ -161,9 +157,6 @@ def _sources(root: Path, *patterns: str) -> list[Path]:
 
 
 _IMPORTS_PRESENTATION = re.compile(r"(?:from|import) promptpotter\.presentation")
-# CLI-seam debt; shrink it to zero. The fix is to move the shared piece into
-# application/ — presentation imports upward.
-_LAYERING_ALLOW = re.compile(r"presentation\.terminal\.live\.display import LiveDisplay")
 
 
 # The bench reaches an optimizer only through the registry (`application/optimizers/__init__.py`)
@@ -173,11 +166,7 @@ _MAY_IMPORT_POTTER = re.compile(r"^promptpotter/application/optimizers/")
 
 
 def _layering(_: Sel) -> Outcome:
-    hits = _scan(
-        _sources(_REPO / "promptpotter" / "application", "*.py"),
-        _IMPORTS_PRESENTATION,
-        allow_line=_LAYERING_ALLOW,
-    )
+    hits = _scan(_sources(_REPO / "promptpotter" / "application", "*.py"), _IMPORTS_PRESENTATION)
     if hits:
         return 1, "application must not import presentation:\n" + "\n".join(hits)
     hits = _scan(

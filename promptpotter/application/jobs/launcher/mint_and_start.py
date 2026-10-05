@@ -466,7 +466,6 @@ async def _run_in_background(
         observers = build_run_observers(
             session=session,
             campaign_config=campaign_config,
-            display=None,
             resumed_from_round=None,
             origin_accuracy=0.0,
         )

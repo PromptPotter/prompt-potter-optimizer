@@ -94,7 +94,7 @@ Read this before proposing any new run. It is the reason a year of panels produc
 - **A panel cell whose constant-answer floor exceeds its origin accuracy is disqualified** (`application/diagnostics/seed_screen.py::rewards_collapse`) — a candidate that stops reasoning and hedges to one label then outscores the parent, every round. The raw floor is the wrong reading; the *gap* is. Of the first six seeds, three were retired and only **one** on this criterion — `inner_tasks.yaml` records the grounds per seat and explicitly forbids citing the collapse verdict for seed-5.
 - **Calibration — what a WIN is worth here.** A winning inner round buys **1-4 rows in 28** (`+0.036 / +0.071 / +0.107 / +0.143` are the only positive matched-parent lifts ever recorded). Improvement is granular and infrequent; do not read a +0.036 round as noise, and do not expect an edit to produce more than a few rows.
 - **Where lift lands says how long to run.** The round carrying a campaign's best accuracy is spread uniformly across the whole budget, and the strongest run on disk peaked on its LAST round, still climbing. A flat round 2 is not evidence the search is done.
-- **A limit stated on one axis binds all of them** — owned by `docs/developer/conventions.md` § Reasoning doctrine `<one-budget>`; here it means pricing every panel proposal in wall-clock *and* dollars before proposing it.
+- **A limit stated on one axis binds all of them** — owned by `docs/developer/reasoning-doctrine.md` `<one-budget>`; here it means pricing every panel proposal in wall-clock *and* dollars before proposing it.
 
 ## The plan, as a proposal — not a contract
 
@@ -262,6 +262,6 @@ Paths below are repo-relative; this file sits at `.claude/skills/potter-self/`.
 - **Dispatch hub + info flow** — `docs/developer/dispatch-hub.md`. How slots reach optimizer prompts.
 - **The measurand, the invariants, what a panel may claim** — `docs/specs/l4-outer-loop.md`. Read it before trusting any outer number, and before touching a file mid-run.
 - **Persistence + the identity fingerprint** — `docs/operations/persistence-and-state.md` (fact 4 owns what `_identity_config` reads).
-- **Conventions** — `docs/developer/conventions.md`. Style, no-back-compat, no-hidden-defaults, the reasoning doctrines.
+- **Conventions** — `docs/developer/conventions.md`. Style, no-back-compat, no-hidden-defaults; the reasoning doctrines are `docs/developer/reasoning-doctrine.md`.
 
 **When an edit does not produce its predicted effect, reclassify rather than rewording it** — rewording a failed edit is the same failure one level up.

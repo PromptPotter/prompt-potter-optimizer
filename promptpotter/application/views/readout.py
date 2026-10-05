@@ -1,17 +1,46 @@
-"""``LiveDisplay`` — RunCallbacks adapter; CLI + notebook share this one class."""
+"""``ReadoutProjection`` — the ledger stream as readout lines: every cycle's ``readout.log``, and
+the line sink an entry point with a terminal hands in."""
 
 from __future__ import annotations
 
-import contextlib
+import logging
 import re
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.formula import split_scoring_block
+from promptpotter.application.views.render.ansi import render_round_verdict, to_text
+from promptpotter.application.views.render.candidate import (
+    fmt_individual_header,
+    individual_summary_from_dict,
+)
+from promptpotter.application.views.render.phase import (
+    fmt_elapsed,
+    render_patience_status,
+    render_progress_table,
+    render_round_stats,
+    round_verdict_basis,
+)
 from promptpotter.application.views.render.prefix_reading import prefix_reading
-from promptpotter.application.views.view_models import AnyView
+from promptpotter.application.views.render.primitives import (
+    DIM,
+    GREEN,
+    RESET,
+    YELLOW,
+    _box_bottom,
+    _box_bottom_info,
+    _box_line,
+    _box_top,
+    _fmt_delta,
+    _node_bottom,
+    _node_line,
+    _node_top,
+    _round_rule,
+    display_tags,
+)
+from promptpotter.application.views.render.sample import fmt_query_result
+from promptpotter.application.views.view_models import AnyView, RoundCompleteView
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.dashboard_rows import RunStanding
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -20,7 +49,6 @@ from promptpotter.domain.results import (
     ArmOutcome,
     ScoreboardRankKey,
     candidate_label,
-    overlap_series,
     scoreboard_rank_key,
 )
 from promptpotter.domain.run_records import (
@@ -39,57 +67,33 @@ from promptpotter.infrastructure.projections.live_state import (
     apply_phase,
     apply_race_standing,
     roll_p_best_at_round_complete,
-    top_n_p_best,
 )
-from promptpotter.infrastructure.store.io import write_text
+from promptpotter.infrastructure.store.io import append_line
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.judges import judge_instrument
-from promptpotter.presentation.terminal.ansi import to_text
-from promptpotter.presentation.terminal.live.candidate import (
-    fmt_individual_header,
-    individual_summary_from_dict,
-)
-from promptpotter.presentation.terminal.live.phase import (
-    fmt_elapsed,
-    render_patience_status,
-    render_progress_table,
-    render_round_stats,
-)
-from promptpotter.presentation.terminal.live.sample import fmt_query_result
-from promptpotter.presentation.terminal.primitives import (
-    DIM,
-    GREEN,
-    RESET,
-    YELLOW,
-    _box_bottom,
-    _box_bottom_info,
-    _box_line,
-    _box_top,
-    _fmt_delta,
-    _node_bottom,
-    _node_line,
-    _node_top,
-    _round_rule,
-)
 from promptpotter.shared.composite import render_composite_fitness_block
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.application.embedded_run import StatusFn
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import RoundResult
 
 
-# Holds the PATH of the newest launch's readout, never a copy: parallel runs each own their
-# cycle's file, and one shared copy interleaves them.
-_LATEST_READOUT_POINTER = Path("logs/latest-readout-path.txt")
+logger = logging.getLogger(__name__)
+
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
-class LiveDisplay(Projection):
+class ReadoutProjection(Projection):
     def __init__(
         self,
         *,
+        # Where each styled line also goes; `None` leaves the cycle's file the only reader.
+        sink: StatusFn | None,
         origin_acc: float,
         # The optimizer's patience (`OptimizerPacing.patience`); `None` on one that keeps none,
         # which prints no patience line at all.
@@ -100,8 +104,10 @@ class LiveDisplay(Projection):
         measured_unit: MeasuredUnit = "sample",
     ) -> None:
         self._core = LiveStateCore(origin_acc=origin_acc)
+        self._sink = sink
         self.patience = patience
         self.pipeline_schema = pipeline_schema
+        self._display_tags = display_tags(pipeline_schema)
         self.scoring_formula = scoring_formula
         # The terminal's half of the one noun (`Connector.measured_unit`).
         self.measured_unit = measured_unit
@@ -130,6 +136,7 @@ class LiveDisplay(Projection):
         self._headed: set[int] = set()
         self._pending_calls: dict[str, int] = {}
         self._readout: Path | None = None
+        self._verdict: RoundCompleteView | None = None
 
     @classmethod
     def for_campaign(
@@ -137,12 +144,11 @@ class LiveDisplay(Projection):
         session: Session,
         campaign_config: CampaignConfig,
         *,
-        origin_acc: float = 0.0,
-    ) -> LiveDisplay:
-        """The one construction from a session + its config. Every entry point spelled these four
-        arguments out by hand, so the per-sample half of the scoring block was re-derived per caller."""
-
+        sink: StatusFn | None,
+        origin_acc: float,
+    ) -> ReadoutProjection:
         return cls(
+            sink=sink,
             origin_acc=origin_acc,
             patience=select_optimizer(campaign_config.optimization).pacing.patience,
             pipeline_schema=session.pipeline_schema,
@@ -153,29 +159,29 @@ class LiveDisplay(Projection):
         )
 
     def open_readout(self, cycle_dir: Path) -> None:
-        """Mirror every later line into *cycle_dir*'s readout. A fork rebinds the display, so the
+        """Mirror every later line into *cycle_dir*'s readout. A fork rebinds the projection, so the
         readout follows the ledger, and the file it leaves ends on the line naming the next one."""
         path = CycleLayout(cycle_dir.absolute()).readout
         line = f"Readout: {path} · {time.strftime('%Y-%m-%d %H:%M:%S')}"
         self._write(line)
         self._readout = path
         self._mirror(line)
-        with contextlib.suppress(OSError):
-            write_text(_LATEST_READOUT_POINTER, f"{path}\n")
 
     def _write(self, line: str) -> None:
-        print(line, flush=True)
+        if self._sink is not None:
+            self._sink(line)
         self._mirror(line)
 
     def _mirror(self, line: str) -> None:
         if self._readout is None:
             return
-        # Reopened per line, as the ledger is: a held handle blocks a stub fork's delete on Windows.
         try:
-            with self._readout.open("a", encoding="utf-8") as fh:
-                fh.write(_ANSI_RE.sub("", line) + "\n")
-        except OSError:
-            self._readout = None  # stop retrying; never break the run for its mirror
+            append_line(self._readout, _ANSI_RE.sub("", line))
+        except OSError as exc:
+            # Stop retrying and never break the run for its mirror — but say so once, where the
+            # operator is looking: a readout that just ends reads as a run that stopped.
+            logger.warning("readout.log stopped at %s: %s", self._readout, exc)
+            self._readout = None
 
     @property
     def origin_acc(self) -> float:
@@ -239,8 +245,8 @@ class LiveDisplay(Projection):
         file's block, the same fact on every channel. ``message`` is composed at the emit site, so this just prints it."""
         round_tag = f"r{record.round}" if record.round is not None else ""
         glyph = "✗" if record.severity == "error" else "⚠"
-        prefix = f"{glyph} {round_tag} ".rstrip() if round_tag else f"{glyph} "
-        self._write(f"  {YELLOW}{prefix}{record.message}{RESET}")
+        prefix = f"{glyph} {round_tag}".rstrip()
+        self._write(f"  {YELLOW}{prefix} {record.message}{RESET}")
 
     def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
         """Heartbeat tick; cached replays skip it. A BARE tick proves only that the process is alive, one carrying ``detail`` reports
@@ -288,22 +294,19 @@ class LiveDisplay(Projection):
         self._write(f"  {DIM}✓ {' · '.join(bits)}{RESET}")
 
     def _handle_election(self, record: ElectionRecord) -> None:
-        """The verdict, where the election makes it — not at the round close two LLM calls later.
+        """The news, where the election makes it — not at the round close two LLM calls later.
 
-        The browser reads it off this same record; the terminal was the entry point still waiting
-        for the summary block. ``verdict_reason`` rides the live handle rather than the wire, so a
-        replay off disk prints nothing and the summary stays the only readout there."""
+        One line and no numbers: the board, the reason and the overlap series print together in
+        the verdict block at round close, which is the first moment all three exist. Silent where
+        the selector gave no reason — the origin round, which chose between nobody."""
         rr = record.live_round_result
-        if rr is None or not (reason := rr.verdict_reason):
+        if rr is None or not rr.verdict_reason:
             return
-        verdict = (
-            f"{GREEN}✓ selected {', '.join(record.selected_labels)}{RESET}"
+        self._write(
+            f"  {GREEN}✓ selected {', '.join(record.selected_labels)}{RESET}"
             if record.selected_labels
-            else f"{DIM}· held the best-so-far{RESET}"
+            else f"  {DIM}· held the best-so-far{RESET}"
         )
-        self._write(f"  {verdict} {DIM}— {reason}{RESET}")
-        if series := overlap_series(rr.overlap):
-            self._write(f"  {DIM}overlap ({series}){RESET}")
 
     def _handle_snapshot(self, record: SnapshotRecord) -> None:
         payload = record.payload
@@ -312,7 +315,7 @@ class LiveDisplay(Projection):
         qi = int(record.sample_idx or 0)
         qt = int(record.sample_total or 0)
         ev = record.event
-        # sample_started: LiveDashboardProjection pulses the in-flight row; CLI has no equivalent (sample_scored covers it).
+        # sample_started: LiveDashboardProjection pulses the in-flight row; the readout has no equivalent (sample_scored covers it).
         if ev == "sample_started":
             # …except a look-ahead TRANSITION: armed mid-run, expiring a round later, and nothing
             # else on the tape would show it. Per-sample repetition would bury the tape.
@@ -384,7 +387,11 @@ class LiveDisplay(Projection):
         # under no round marker.
         if event.phase == CampaignPhase.ORIGIN and event.event == "enter":
             self._write("\n" + _round_rule("ROUND 0 — ORIGIN", "C0 · campaign root"))
-        if view is not None and (rendered := to_text(view)):
+        if isinstance(view, RoundCompleteView):
+            # Held, not printed: the panel gate can still unwind this round, and a re-run's
+            # `select:exit` replaces it here.
+            self._verdict = view
+        elif view is not None and (rendered := to_text(view)):
             self._write(rendered)
         apply_phase(self._core, event, view)
         if event.phase == CampaignPhase.PROPOSE and event.event == "enter":
@@ -438,6 +445,7 @@ class LiveDisplay(Projection):
                 cached=bool(result.get("cached", False)),
                 prefix=prefix,
                 scoring_formula=self.scoring_formula,
+                display_tags=self._display_tags,
             )
         )
 
@@ -494,26 +502,6 @@ class LiveDisplay(Projection):
             return
         tags = [cid if cid == "origin" or cid.endswith("_winner") else cid[:6] for cid in prior_ids]
         self._write(f"  {DIM}↻ {member} catch-up #{sample_id}:{RESET} " + ", ".join(tags))
-
-    def _render_p_best_line(self) -> str | None:
-        """Top-5 P(best) across the round's CANDIDATES, with each arrow against that candidate's own previous reading. Ranking one
-        snapshot's dict instead ranks its odds against each prior, and last round's ids never match — they are round-scoped."""
-        if not self._core.round_p_best:
-            return None
-        last = self._core.round_p_best_prev
-        parts: list[str] = []
-        for cid, prob in top_n_p_best(self._core.round_p_best):
-            prev = last.get(cid)
-            arrow = ""
-            if prev is not None:
-                if prob > prev + 1e-4:
-                    arrow = "▲"
-                elif prob < prev - 1e-4:
-                    arrow = "▼"
-            tag = f"*{cid[:6]}*" if cid == self._core.current_p_best_id else cid[:6]
-            parts.append(f"{tag} {prob * 100:4.1f}%{arrow}")
-        member = self._core.race_member
-        return f"{member} P(best) @ q{self._core.current_p_best_n}: " + " | ".join(parts)
 
     def _render_block_lines(self) -> list[str]:
         lines = []
@@ -640,21 +628,23 @@ class LiveDisplay(Projection):
             elapsed = time.monotonic() - self._round_started_at
             elapsed_label = f" — {fmt_elapsed(elapsed)}"
         self._round_started_at = None
+        # The round's verdict, whole and once. The origin round elects nobody, so it has none and
+        # its composite prints in the summary below instead.
+        verdict, self._verdict = self._verdict, None
+        if verdict is not None:
+            self._write(render_round_verdict(verdict, round_verdict_basis(round_result)))
         self._write("")
         self._write(_node_top(f"ROUND {rn} SUMMARY{elapsed_label}"))
         table = render_progress_table(self.campaign_rounds, stamps_theta=round_result.stamps_theta)
         for line in table.split("\n"):
             self._write(line)
-        if self._block_racing:
-            for line in self._render_block_lines():
-                self._write(_node_line(line))
-        elif (p_best_line := self._render_p_best_line()) is not None:
-            self._write(_node_line(p_best_line))
+        for line in self._render_block_lines():
+            self._write(_node_line(line))
         roll_p_best_at_round_complete(self._core)
         self._block_racing, self._block_decided, self._headed = {}, {}, set()
         formula_short = self._phase_ctx.get("composite_fitness_formula_short")
         formula_full = self._phase_ctx.get("composite_fitness_formula")
-        if formula_short or formula_full:
+        if verdict is None and (formula_short or formula_full):
             # Under per_round_resubset the round-0 composite is a different subset, so
             # a cross-subset fallback would read draw difficulty as candidate lift.
             for line in render_composite_fitness_block(
@@ -680,4 +670,4 @@ class LiveDisplay(Projection):
         self._write(_node_bottom())
 
 
-__all__ = ["LiveDisplay"]
+__all__ = ["ReadoutProjection"]

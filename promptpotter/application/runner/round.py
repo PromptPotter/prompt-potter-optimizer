@@ -18,7 +18,6 @@ from promptpotter.application.diagnostics.verify import verify_on_saturation
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizers.nodes import RoundContext, RoundOpening
 from promptpotter.application.run_observers import RunCallbacks
-from promptpotter.application.run_phase_control import declare_run_phase
 from promptpotter.application.runner.bench import grade_round_selection
 from promptpotter.application.runner.measurement import measure_population
 from promptpotter.application.runner.output import (
@@ -37,7 +36,6 @@ from promptpotter.domain.dashboard_rows import RunStanding
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
     CampaignPhase,
-    RunPhase,
     StopLoop,
     emit_phase,
 )
@@ -343,7 +341,6 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult) -> None:
         sum(1 for c in round_result.candidate_scores if is_leader_eligible(c)),
         STOP_REASON_INFO[reason].next_step,
     )
-    declare_run_phase(session, RunPhase.PAUSED)
     raise StopLoop(reason)
 
 

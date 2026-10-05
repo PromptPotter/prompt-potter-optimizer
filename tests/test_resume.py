@@ -531,6 +531,37 @@ def test_unresolved_round_stalls_and_replays_as_one() -> None:
     assert unreadable.l1_stall_count == 0
 
 
+def test_a_rewound_round_leaves_the_escalation_state(tmp_path) -> None:
+    """A rewind deletes round files and leaves the ledger whole, so the rounds it discarded are
+    still on it. Folded, they hand the re-run a stall count and a lives bank from rounds that no
+    longer exist: the cycle escalates or stops on a round it never ran, every number rendering."""
+    from promptpotter.application.optimizers.potter.escalation.state import EscalationFSM
+    from promptpotter.domain.run_records import PhaseRecord
+    from promptpotter.infrastructure.ledger import CycleEventLog
+
+    def close(round_num: int, improved: bool) -> PhaseRecord:
+        return PhaseRecord(
+            phase="round",
+            event="complete",
+            round=round_num,
+            payload={"improved": improved, "electable_count": 2, "separable": None},
+        )
+
+    ledger = CycleEventLog(tmp_path / "ledger.jsonl")
+    for round_num, improved in [(1, True), (2, True), (3, False), (4, False), (5, False)]:
+        ledger.append(close(round_num, improved))
+
+    # `resume --from 2`: rounds 3..5 are discarded before any of them is re-run.
+    rewound = EscalationFSM.from_ledger(ledger, lives=None, before_round=3)
+    assert rewound.l1_stall_count == 0
+
+    # The re-run closes round 3 with a win and stalls once; a plain resume at round 5 then sees
+    # both epochs on one ledger and must fold the second alone.
+    ledger.append(close(3, True))
+    ledger.append(close(4, False))
+    assert EscalationFSM.from_ledger(ledger, lives=None, before_round=5).l1_stall_count == 1
+
+
 def test_l2_l3_escalation_state_survives_resume() -> None:
     """Resume-integrity: L2/L3 counters rebuilt from the ledger must equal the live in-run ones.
 
@@ -551,7 +582,7 @@ def test_l2_l3_escalation_state_survives_resume() -> None:
     from promptpotter.application.views.view_models import OptimizerStepExitView
     from promptpotter.domain.run_records import PhaseRecord
 
-    def snapshot(f: EscalationFSM) -> tuple[int, int, float, int, int, float, int]:
+    def snapshot(f: EscalationFSM) -> tuple[int, int, float | None, int, int, float | None, int]:
         return (
             f.l2_round,
             f.l2_stall_count,
@@ -571,7 +602,7 @@ def test_l2_l3_escalation_state_survives_resume() -> None:
         l1_layout=None,
         axis_targeted="",
         plan="",
-        opt_sp=SimpleNamespace(lineage=SimpleNamespace(changes_description="")),
+        described="",
     )
 
     def fired(layer) -> None:
@@ -610,12 +641,12 @@ def test_l2_l3_escalation_state_survives_resume() -> None:
         replay_trace.append(snapshot(replay))
 
     assert replay_trace == live_trace
-    # Pinned literally too: an arm that never matches leaves every one of these at 0/0.0.
+    # Pinned literally too: an arm that never matches leaves every one of these at 0/None.
     assert replay_trace == [
-        (1, 0, 0.60, 0, 0, 0.0, 0),
-        (2, 1, 0.60, 0, 0, 0.0, 0),
-        (2, 1, 0.60, 0, 0, 0.0, 0),
-        (0, 0, 0.75, 1, 0, 0.75, 0),
+        (1, 0, 0.60, 0, 0, None, 0),
+        (2, 1, 0.60, 0, 0, None, 0),
+        (2, 1, 0.60, 0, 0, None, 0),
+        (0, 0, None, 1, 0, 0.75, 0),
     ]
 
 

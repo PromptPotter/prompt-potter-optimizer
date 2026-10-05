@@ -30,6 +30,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     CallLabel,
     SendBound,
     admitted,
+    connection_broke,
     may_have_billed,
     never_sent,
     reserved,
@@ -390,8 +391,9 @@ class BackendClient:
         run's spend book and settled off what the reply says it billed (``billed`` reads a reply's
         ``data``). Where the backend's own sends are each admitted as they are made
         (``Connector.holds_own_sends``) the cell only RESERVES ``bound``, and ``bound`` is ``None``
-        where nothing bounds it. A request that may have reached the backend is never sent
-        again: only a throttle, a 5xx, a connection never made and a lost session are — a throttle
+        where nothing bounds it. A request the backend may still be working is never sent
+        again: only a throttle, a 5xx, a connection never made or broken before any reply
+        (``connection_broke``, the rule our own sends retry on) and a lost session are — a throttle
         whenever the run's :attr:`backpressure` lets it, a connection never made until the backend
         answers within :data:`BACKEND_OUTAGE_S`, the rest a bounded number of times, each landing
         on the ledger through :func:`emit_backend_warning`. A 5xx whose body says a resend ends the
@@ -439,9 +441,9 @@ class BackendClient:
                 **extra,
             )
 
-        # 429 → the run's backpressure; a connection never made → wait out the outage; a 5xx → exp
-        # backoff (1, 2, 4, 8s); a lost session → one recovery; everything else, a read timeout
-        # included, exits.
+        # 429 → the run's backpressure; a connection never made → wait out the outage; a 5xx or a
+        # connection broken before any reply → exp backoff (1, 2, 4, 8s); a lost session → one
+        # recovery; everything else, a read timeout included, exits.
         recovered = False
         attempt = 0
         down_since: float | None = None
@@ -457,17 +459,22 @@ class BackendClient:
                             timeout=QUERY_TIMEOUT,
                         )
                     except httpx.TransportError as exc:
-                        if not never_sent(exc):
+                        if never_sent(exc):
+                            admission.release()
+                            unreachable = exc
+                        else:
+                            # Left open, so each broken send stays held at its bound.
+                            resend = connection_broke(exc) and attempt + 1 < MAX_SEND_ATTEMPTS
+                            wait = float(2**attempt) if resend else None
                             _warn(
                                 "transport_error",
                                 attempt=attempt,
-                                wait_s=0.0,
+                                wait_s=wait or 0.0,
                                 error_class=exc.__class__.__name__,
-                                final=True,
+                                final=not resend,
                             )
-                            raise
-                        admission.release()
-                        unreachable = exc
+                            if not resend:
+                                raise
                     else:
                         down_since = None
                         code = resp.status_code

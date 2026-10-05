@@ -20,9 +20,8 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import (
 )
 from promptpotter.application.optimizers.potter.dispatch.schemas import L1CritiqueOutput
 from promptpotter.application.optimizers.potter.records import PotterRoundState
-from promptpotter.application.run_phase_control import declare_run_phase
 from promptpotter.domain.optimizer_state import CritiqueReadout
-from promptpotter.domain.phases import RunPhase, StopLoop, StopReason
+from promptpotter.domain.phases import StopLoop, StopReason
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 from promptpotter.shared.errors import SendRefusedError, graceful
 
@@ -106,7 +105,6 @@ async def ensure_prior_critique(cycle: Cycle, state: PotterState) -> None:
                 "error": str(last)[:200],
             },
         )
-        declare_run_phase(session, RunPhase.PAUSED)
         raise StopLoop(StopReason.PAUSED)
     # On disk, or the next resume re-sends a call this one already paid for — and the round file
     # would keep saying the generator had no steer when it did.

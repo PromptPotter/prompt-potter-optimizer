@@ -106,7 +106,12 @@ def read_bench(
         selected = origin
     else:
         selected = read_pass(stores, passes.selected, scorer, tolerance=passes.tolerance)
-    paired = matched_parent_lift(selected.rows, origin.rows, grade="objective")
+    paired: tuple[float, float | None, float | None] | None
+    if passes.selected == passes.origin:
+        # One pass read twice is no comparison: 0.0 by identity, and no interval to draw.
+        paired = None if origin.reading is None else (0.0, None, None)
+    else:
+        paired = matched_parent_lift(selected.rows, origin.rows, grade="objective")
     reads = (("origin", origin), ("selected", selected))
     missing = "; ".join(f"{name}: {r.missing}" for name, r in reads if r.missing is not None)
     return BenchScore(
@@ -229,7 +234,16 @@ async def bench_selection(
     origin = banked.origin
     picked, selected_sp = cycle.selection, cycle.selected_sp
     selected_hash = selected_sp.sp_hash(session.pipeline_schema)
-    if selected_hash == origin.sp_hash:
+    if not any(rr.round > 0 for rr in cycle.rounds):
+        selected = BenchPass(
+            round=picked.round,
+            sp_hash=selected_hash,
+            run_id=None,
+            sample_ids=origin.sample_ids,
+            stopped="no round closed, so the optimizer selected nothing",
+            scorer_id=session.scoring.scorer_id,
+        )
+    elif selected_hash == origin.sp_hash:
         selected = origin
     else:
         try:
