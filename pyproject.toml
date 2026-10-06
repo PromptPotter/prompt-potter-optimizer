@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "promptpotter"
-version = "0.8.15"
+version = "0.8.16"
 description = "Automatic prompt optimization for LLMs — give it a dataset, it finds a better prompt"
 readme = "README.md"
 license = "MIT"
@@ -201,6 +201,7 @@ promptpotter = [
     "config/prompt_variants.json",  # config/prompt_blocks.py::BUNDLED_PATH
     "connectors/resources/*.json",  # n8n workflow templates
     "connectors/resources/*.yaml",  # connectors/harbor.py::_DOCKER_OVERLAY
+    "connectors/resources/*.Dockerfile",  # connectors/dbllmbench.py runner image
     "assets/optimizers/*/*.yaml",   # one pipeline manifest per optimizer
     "assets/optimizers/*/*.json",   # + each one's generated schema registry
     "assets/checkin/*.yaml",        # the bench's check-in node

@@ -4,6 +4,93 @@ All notable changes to this project will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.16] — 2026-10-06
+
+> PromptPotter stops being one optimizer and becomes a **bench that optimizers run on**. Every optimizer, ours included, is a manifest the bench executes: it inherits measurement, the content-addressed archive, one spend ledger, persistence, all five entry points and the control plane. CAPO, LEVI and GEPA ship as presets at their paper configurations, and every result is graded the same way on a held-out bench set that no optimizer ever sees. A head-to-head now holds two optimizers to one instrument and one budget, and Compare puts them side by side. Around the bench, a run got lighter: it runs in its own process, a low spend ceiling no longer throttles how many cells are out, and the screens reading it answer in milliseconds. 78 commits since `v0.8.15`.
+
+### Added
+
+- **Pick the optimizer.** `optimizer: potter | capo | levi | gepa` is a campaign field. You can set it at check-in, with `new --set`, through the API or the embedded run, or with DSPy's teleprompter `Loop`. Each optimizer's knobs are node config in its own manifest, editable per campaign.
+- **Three peers as presets, not wrappers.**
+  - **CAPO:** population, crossover, few-shot mutation, block racing, paired-t elimination.
+  - **LEVI:** proxy sampler, CVT-MAP-Elites archive, 90/10 small/large model routing.
+  - **GEPA:** reflection on its own model, minibatch gate, Pareto-front pool.
+  - Paper values and templates are cited in each manifest, and every deviation from the paper is listed.
+- **A held-out bench score is the headline.** At run init the bank splits into a search pool, a bench set and a demo pool. An optimizer never sees the bench set. The bench grades each optimizer's pick with one evaluator, bills that pass under its own name, and serves a per-round series and a BEST line. A pass names the candidate it grades and leaves its reading on that candidate's row.
+- **Head-to-heads.**
+  - `new --arm <h2h>:<key>` mints a controlled arm of a declared head-to-head.
+  - Every arm runs on one instrument (split, origin, scorer) and one budget.
+  - A later arm adopts the declared split and budget, and is refused if its instrument differs.
+  - `evidence` pairs the arms only when their instrument matches. Each arm is priced by spend, calls, worked clock and replay share.
+- **Compare.** Campaigns side by side under a verdict the server computes, with spend read live from each arm's ledgers. One action opens any candidate against the origin, and each card shows what a cell of that point averaged: time, tokens, prompt length, and cost where the connector bills per cell.
+- **Few-shot examples by demo-pool id.** L1 and CAPO both edit them, and they render inside the prompt structure.
+- **A campaign's result has a home:** `campaigns/{id}/result.json`, holding the terminal cycle, the bench passes and the arm's cost.
+- **Every optimizer has an offline run** (`scripts/offline_run.py`). It is how parity is proven: requests and decisions came out byte-equal across all four optimizers.
+- **Node types beyond `llm` and `measurement`:** `sampler`, `eliminator`, `selector` and `algorithm`. The shared parser checks how they are wired.
+- **The time ray shows how long the open cell has been out**, so one slow cell no longer reads as a stuck run.
+- **TypeDB's own query benchmark as a backend.** The `dbllmbench` connector runs db-llm-bench's runner in a container built at a pinned upstream commit, keeps its retry loop and scorer, and optimizes the one skill file its template loads. `reactome-typeql-42` ships as its first dataset, with 14 of its 42 questions held out.
+- **One measurement log.** Records → Measurements is one table of every measured cell for a cycle, a campaign or a whole dataset, ranked by sample, by candidate or in time order. A cell opens in a side panel at an address you can link.
+- **`set-limits` moves a running cycle's spend, tokens and round cap**, from the CLI, the REST API and the webapp alike. The round loop picks up a new cap at the next clean round.
+- **L2 and L3 check an agent skill against three tiers** before anything else: valid and safe, no repeated guidance, and lift. L2 names the tier that failed.
+- **Every run writes its readout to `cycles/{id}/readout.log`**, whatever launched it: CLI, embedded run, API or webapp. `logs/latest-readout-path.txt` names the newest.
+- **Campaign rows lead with the vendor's mark**, so a stack of campaigns reads by brand straight down, and the card carries every setting whole. A preference opens a campaign straight into its candidates. The webapp wears the new PromptPotter vessel mark.
+
+### Changed
+
+- **The round walks its optimizer's manifest.** Potter's L1/L2/L3 ladder, PoBB and θ election are now potter's own nodes and controller, not the loop's spine. The generic surfaces (dashboard, racing stream, review, webapp) speak no potter vocabulary.
+- **θ surfaces only where a round's selector stamps it.** A peer's round is read on its own objective.
+- **A mask lens is a cell scorer over each arm's rows.** A lens therefore reads exactly what a fresh run under that formula would report, on any subset.
+- **L4 reads its outer graph and cells off the inner manifest**, so it tunes any optimizer, not only potter.
+- **Default model:** `openai/gpt-6-luna`
+- **A launched run executes in its own process**, so a running campaign no longer slows the screens reading it, and an API restart leaves a paid run alone. With one run measuring, the time ray's 95th-percentile read went from 663 ms to 37 ms.
+- **Reads are fast, and a run stops re-reading what it holds.** A polled read folds only what a ledger appended since the last one, and responses answer "not modified" when nothing moved. The campaigns list went from 4.1 s to 50 ms, a two-round run's local time from 31 s to 11 s, and run init from 6.7 s to 2.8 s.
+- **A low spend ceiling no longer throttles concurrency.** A send is held against the run's ceiling at the dearest bill its node has actually returned, and at its worst-case bound only against the account's reserve. On `justlogic-d234` at a $0.15 ceiling a run went from 662 s to 321 s.
+- **Every paid send is admitted before it leaves**, litellm's included. A cell reserves the run it declares rather than every retry it could need, and a cell carried into a wider panel replays instead of being measured again.
+- **L1 reads the failing problems.** The generator is shown whole transcripts of the parent's misses, and one variant per round rewrites instruction, thinking style and task intent together as one method. The critique names one highlight per failure cluster.
+- **A round is separable when its pick clears the origin on the shared cells**, not on one round's interval against a moving parent.
+- **The task framing is frozen after run init.** L2 and L3 no longer rewrite it.
+- **One round verdict, printed once at round close:** the board with scored and expected cells, SELECTED or HELD, why, the lift interval and the overlap. The readout ends on the bench headline.
+- **A run's ending is one `stop_reason` everywhere it is named**, from one table.
+
+### Fixed
+
+- **An OpenRouter "Insufficient credits" 402 stops the run** instead of being retried as a transient error.
+- **A validation wound that is not fatal keeps its score.**
+- **The scorer id is the one the run graded under.** `log.md` now reads the config the run actually executes.
+- **A peer rewrites the whole prompt.** CAPO, LEVI and GEPA used to append to the origin's prompt and could never take a line back, and GEPA's first reflection saw an empty instruction. A peer's fan-out also lands every send before it stops, so a budget stop no longer strands part of LEVI's budget.
+- **A retry that recovered is not a failed node.** A round whose every cell answered after one schema repair read as starved of evidence, and potter ended the run at half its budget. The degraded count reads the same rule.
+- **An optimizer call cut at its token cap says so**, in the readout and in the round file.
+- **The ruler links a cell it has not seen instead of failing the round**, and marks the arm's reading with an `unmeasured_delta` caveat.
+- **A killed Harbor run no longer leaves containers behind.** The next run sweeps what a hard kill left and spares every live cell.
+- **The held-out pass fits under the ceiling.** Its set-aside follows the selection's cell price, where the origin's price cut the pass short for a pick that writes more.
+- **L2's layout listing has the shape of its edit.** Shown slot by slot, a model answered with slot names as keys and the edit was refused. L2 is offered only panels that render something.
+- **Parallel runs share the machine.** A run armed to the slot pool's depth no longer keeps every slot until its round ends, and runs launched together on Windows no longer collide reading one archived run.
+
+### Removed
+
+- **The `stats` extra and scipy.** The seven calls it served are stdlib plus local routines now, which saves every process 69 MB.
+- **`set-budget` and the `change-spend-budget` command**, replaced by `set-limits` and `change-run-limits` on every surface.
+- **The `exact_match` scorer**, replaced by `label_match`.
+- **`GET /datasets/{name}/preview` and `GET /datasets/{name}/measurement-series`**, replaced by `GET /datasets/{name}/cells`.
+- **`index.json` `status`**, replaced by `finished_at` + `stop_reason`, and the unread `spend.loop.model`.
+
+### Technical Details
+
+- **78 commits since `v0.8.15`** (2026-09-21 → 2026-10-06): 30 features, 14 fixes, 14 refactors, 6 performance, 13 docs, 1 chore. 924 files changed.
+- **BREAKING — start clean.** Wipe `campaigns/`, `measurements/` and the reuse caches. Content keys, the individual and the round document all changed shape.
+  - Potter's treatment digest moved and L2/L3's prompts changed, so banked L4 outer origins re-measure. `justlogic-d234` has a new origin.
+  - `application/optimization/` split into `application/bench/` and `application/optimizers/potter/`.
+  - `assets/optimizer/` moved to `assets/optimizers/<name>/`.
+  - Potter's knobs left `OptimizationConfig` for its manifest's node config.
+  - Patiences, epsilon and the lives cap moved from `RunLimits` to `PotterLimits`.
+  - `headline_metric` is renamed `display_metric`.
+  - `index.json` `final.bench` is gone; read `result.json`.
+  - `dataset_split` is now real, not display-only.
+- **Identity:** a `Treatment` names which optimizer ran, and swapping the optimizer is a new treatment. The bench set is the `Instrument`. Each llm node has its own call digest, taken off the manifest.
+- Connectors, judges and optimizer members load through one entry-point registry.
+- The wheel carries the `dbllmbench` runner's Dockerfile.
+- `pyproject.toml` → 0.8.16; `APP_VERSION` derives from it and `uv.lock` records it.
+
 ## [0.8.15] — 2026-09-18
 
 > Campaigns run fast: a round measures all of its candidates at once, and still reads like a round that took them one at a time. Around that, a campaign says what it runs with and holds what it may spend, an agent's skill actually reaches the agent, and a round says which clock its verdict quotes. 42 commits since `v0.8.14`.
