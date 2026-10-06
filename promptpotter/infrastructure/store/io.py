@@ -63,6 +63,17 @@ def unlink_robust(path: Path) -> None:
             time.sleep(0.05 * attempt)
 
 
+def open_text_robust(path: Path) -> IO[str]:
+    """Open one FILE to read — retried, since Windows refuses for the instant another process swaps
+    it (:func:`_atomic_replace`). Missing raises as ``open`` does."""
+    for attempt in range(3):
+        try:
+            return open(_long_path(path), encoding="utf-8")
+        except PermissionError:
+            time.sleep(0.05 * (attempt + 1))
+    return open(_long_path(path), encoding="utf-8")
+
+
 def rmtree_robust(path: Path) -> None:
     """Delete a tree — long-path safe, read-only tolerant, retried. **The one deleter.**
     Raises on genuine failure: a sandbox that could not be reclaimed is a fact its caller needs."""
@@ -333,6 +344,7 @@ __all__ = [
     "ensure_parent_dir",
     "iter_files",
     "newest_mtime_ns",
+    "open_text_robust",
     "read_bytes_optional",
     "read_json",
     "read_json_optional",

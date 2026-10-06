@@ -170,32 +170,49 @@ class MachineSlots:
     for every run on the box, one OS lock file per slot in the machine-global jobs dir. The kernel
     drops a lock with its holder, so a crashed run frees its slots without a heartbeat. A cell
     waits for one like it waits out the provider's pushback: tick by tick, breaking on a pause,
-    reported as stall so its wall-clock envelope gives the wait back."""
+    reported as stall so its wall-clock envelope gives the wait back.
+
+    **A slot is taken only by the cell holding the TURN**, one more lock every cell passes through
+    and a waiting cell keeps until a slot is its own. Without it the pool belongs to whichever run
+    filled it: that run's next cell asks the instant one lands, a waiting run asks on its next tick,
+    so a run armed to the pool's depth holds every slot until its round ends."""
 
     def __init__(self, root: Path, capacity: int) -> None:
         self._root = root
         self._capacity = capacity
 
+    def _lock(self, name: str) -> BaseFileLock | None:
+        held = FileLock(str(self._root / f"{name}.lock"), timeout=0)
+        try:
+            held.acquire()
+        except Timeout:
+            return None
+        return held
+
     def _take(self) -> BaseFileLock | None:
-        self._root.mkdir(parents=True, exist_ok=True)
         for i in range(self._capacity):
-            slot = FileLock(str(self._root / f"{i}.lock"), timeout=0)
-            try:
-                slot.acquire()
-            except Timeout:
-                continue
-            return slot
+            if (slot := self._lock(str(i))) is not None:
+                return slot
         return None
 
-    @asynccontextmanager
-    async def hold(self) -> AsyncIterator[None]:
+    async def _wait(self, take: Callable[[], BaseFileLock | None]) -> BaseFileLock:
         abort = get_abort_check()
-        while (slot := self._take()) is None:
+        while (held := take()) is None:
             if abort is not None and abort():
                 raise asyncio.CancelledError("machine-slot wait aborted")
             started = time.monotonic()
             await asyncio.sleep(_MACHINE_POLL_S)
             report_throttle_stall(time.monotonic() - started)
+        return held
+
+    @asynccontextmanager
+    async def hold(self) -> AsyncIterator[None]:
+        self._root.mkdir(parents=True, exist_ok=True)
+        turn = await self._wait(lambda: self._lock("turn"))
+        try:
+            slot = await self._wait(self._take)
+        finally:
+            turn.release()
         try:
             yield
         finally:

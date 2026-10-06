@@ -40,11 +40,14 @@ def _truncate(max_len: int) -> Callable[[Any], Any]:
     return _v
 
 
-# Per-variant prose ceiling for `l1_generate` — `changes_description` and
-# `evidence_grounding.citation`. 320 is this file's established prose cap (`l1_critique`'s
-# `priority_fix`, sized so a mandated format can still hold a verbatim quote), and it sits ~29%
-# above the measured 249-chars-per-variant, so it binds the tail and leaves the median untouched.
+# Per-variant prose ceiling for `l1_generate`'s `changes_description`. 320 is this file's
+# established prose cap, and it binds the tail and leaves the median untouched.
 VARIANT_PROSE_MAX = 320
+
+# A citation PINS an entry the prompt already holds; it does not reproduce it. Its one machine
+# reader (`_citation_in_prompt`) needs a short verbatim run, so a row id plus its decisive phrase is
+# the whole job, and every char past that is the prompt decoded back out of the answer.
+CITATION_MAX = 120
 
 # The only two keys anything reads off `l1_overrides` (`l1/candidate_source.py`). Filtered at parse
 # because `_parse_l2` MERGES this LLM-written dict forward on every fire: an invented key was
@@ -119,7 +122,7 @@ class VariantEvidenceGrounding(OptimizerResponseModel):
     # class down. `maxLength` states the budget where the model reads it; the parse boundary must
     # NOT truncate, because `_citation_in_prompt` (`validators/l1_behavior.py`) substring-matches
     # this against the rendered prompt, and a truncation marker would fail every real quote.
-    citation: Annotated[str, WithJsonSchema({"type": "string", "maxLength": VARIANT_PROSE_MAX})]
+    citation: Annotated[str, WithJsonSchema({"type": "string", "maxLength": CITATION_MAX})]
 
 
 class L1Variant(OptimizerResponseModel):
@@ -146,11 +149,17 @@ class L1Variant(OptimizerResponseModel):
     # instead of requesting it. Optional here for the reason `evidence_grounding` is — a provider
     # omitting it must not empty a round — and required on the wire, where duplicates are scored.
     targets_cluster: str = ""
+    # The slot's prose rides its own description, so a round that withdraws the slot
+    # (`l1_wire_schema._SLOT_PANEL`) stops paying for it with no second rule.
     pipeline_overlay: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
         description=(
-            "Per-node tunables, shape {node_name: {param: value}}. Inner per-node "
-            "properties are grafted from the active PipelineSchema at runtime."
+            "Nested {node: {param: value}} — scalar backend tunables, and "
+            '"output_schema_descriptions.<path>": prose, which rewrites the `description` of that '
+            "field of the node's output schema. Each is a param under ITS NODE like any other, "
+            "NEVER a top-level key beside the nodes. Paths are FIXED: you describe a field, never "
+            "rename or invent one. Scalar params (temperature, tokens, effort) are a last resort: "
+            "at most one, and only where a panel or a runtime failure points there."
         ),
     )
     # Blank values dropped at the boundary, so nothing downstream ever holds a "" that one reader
@@ -271,13 +280,12 @@ class L1CritiqueOutput(OptimizerResponseModel):
         default_factory=list,
         max_length=3,
         description=(
-            "≤3 failure diagnoses quoting the decisive transcript evidence — claim, "
-            "broken reasoning step, predicted vs GT. Each item ≤320 chars (downstream truncates)."
+            "One diagnosis per DISTINCT failure cluster, ≤3 — claim, broken reasoning step, "
+            "predicted vs GT. Each item ≤320 chars (downstream truncates)."
         ),
     )
-    # 320 (not 200): the mandated format `<axis>: <change> - addresses <quoted
-    # pattern>` cannot hold a real verbatim quote in 200c — observed truncating
-    # mid-quote, and the clipped steer still drove candidates (b786e9).
+    # Carries no quote: the evidence behind the steer is `failure_highlights`, rendered beside it in
+    # the same panel, and a quote here is decoded again by every reader that cites the steer.
     priority_fix: Annotated[str, BeforeValidator(_truncate_marked(320))] = Field(
         default="",
         max_length=320,

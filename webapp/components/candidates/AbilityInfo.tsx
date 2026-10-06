@@ -26,8 +26,8 @@ export const CAVEAT_COPY: Record<Caveat, { head: string; body: string }> = {
     body: "Most of this round's cells share a difficulty the ruler handed to several cells at once — that is its prior, not a reading of any of them: every candidate that ever saw them answered the same way. θ still counts them, and the value they are pinned to moves as the ruler grows, so a θ higher than last round's can be the scale shifting rather than the prompt improving. Compare candidates within this round; don't read the level across rounds.",
   },
   floor_pinned: {
-    head: "θ is not ability for this candidate",
-    body: "It scored zero on every cell it answered, so the fit had no response to separate ability from the prior and θ settled on the floor the cells imply. Read the lift with the same suspicion: any difference measured against a floor constant reads 0.000 whatever the candidate did.",
+    head: "θ reads nothing for an all-miss arm",
+    body: "This arm missed every cell it answered. With no hit the fit has nothing to read: every all-miss arm lands on the same floor whatever cells it saw, so its θ, and any lift taken from it, is not a measurement. The ruler, the election and the other arms' θ are unaffected.",
   },
 };
 

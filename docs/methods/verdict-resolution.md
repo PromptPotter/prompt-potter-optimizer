@@ -188,8 +188,8 @@ responses. A sound round can carry a pinned arm, and a pinned arm can sit on a s
 
 ## What an arm's lift is read against — `lift_reference`
 
-Every arm's `reference_*` numbers — the blocked lift and its interval, the matched floor — the
-round's `separable` and its `p_value` are read against ONE individual per arm, named by
+Every arm's `reference_*` numbers — the blocked lift and its interval, the matched floor — and
+the round's `p_value` are read against ONE individual per arm, named by
 `ScoredCandidate.reference_id`, with its rows banked in `RoundResult.reference_results`. Which
 individual is a campaign-level choice, `OptimizationConfig.lift_reference`, and both values run
 under every optimizer so a comparison of the two readings is one knob apart:
@@ -212,7 +212,8 @@ under every optimizer so a comparison of the two readings is one knob apart:
 Neither value moves what an optimizer's selector reads: potter elects on θ against the round's
 best-so-far and CAPO keeps its population on its own length-penalised objective, whichever lift is
 reported. What
-moves is every number above — and through `separable`, potter's stall ladder. Under `parents`
+moves is every number above. The round's `separable` reads neither: it is the pick's lead over C0
+on the origin panel (`OverlapReading.lead_interval`), and it drives potter's stall ladder. Under `parents`
 arms read against several individuals leave a sample-set mask no single bar to re-derive
 (`mask/load.py::_parent`), so a masked election there is undecidable rather than guessed.
 
@@ -228,9 +229,13 @@ provisional, and say so rather than passing it on.
   lift over the parent above zero — the earned `parent_selection_bias` credit only reorders
   admitted arms — with no interval and no multiplicity correction — and `runner/round.py::_round_result` sets `improved = bool(winner_id)`. With three arms,
   P(at least one positive | every arm identical to the parent) is **0.875 per round**.
-- **Almost nothing separates.** `separable=True` in 6 of 508 banked rounds; `round_not_separable`
-  fired 362 times. `separable` gates the L1 patience reset and is the clock a result quotes
-  (`index.json::final.rounds_to_separable`) — it does NOT gate adoption, which stays `improved`.
+- **Separability is read against C0, not the parent.** One round's interval over its parent
+  spans 0 for almost any real edit at panel width (`separable=True` in 6 of 508 rounds banked
+  under that rule), so `separable` asks whether the round's pick leads C0 on the origin panel by
+  an interval clear of 0 and tops every earlier pick there. It gates the L1 patience reset and is
+  the clock a result quotes (`index.json::final.rounds_to_separable`) — it does NOT gate adoption,
+  which stays `improved`. The panel is fixed, so the LEAD accumulates across rounds; its width
+  does not shrink.
 - **The posterior did no work, and that half is FIXED.** The quasi-likelihood dispersion φ was
   floored at a constant, which caught 8 of 9 outer arms (raw median 0.0127) and left θ_se not
   varying with the arm at all — `p_exceeds` reduced to a monotone map of the raw gap, so

@@ -106,6 +106,8 @@ def _action_to_node_block(action: dict[str, Any]) -> dict[str, Any]:
         block["duration_s"] = action["duration_s"]
     if "timestamp" in action:
         block["timestamp"] = action["timestamp"]
+    if finish_reason := action.get("finish_reason"):
+        block["finish_reason"] = finish_reason
     # Surfaces only when a retry was paid — keeps the common (clean parse) audit terse.
     if repairs := action.get("schema_repair_errors"):
         block["schema_repair_errors"] = repairs

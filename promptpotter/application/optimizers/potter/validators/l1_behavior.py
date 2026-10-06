@@ -237,12 +237,18 @@ def _check_distinct_clusters(round_dict: dict[str, Any], ctx: ValidatorContext) 
     full measurement per copy — at L4 a copy is a whole panel arm. Reads `targets_cluster`, which the
     schema requires, rather than the citation: a shared citation was the wrong proxy, passing 2/2 on a
     round that re-proposed both of the previous round's measured losses. SCORED, never rejected —
-    rejecting the duplicate would leave the round measuring one arm, which is the worse failure."""
+    rejecting the duplicate would leave the round measuring one arm, which is the worse failure.
+
+    The method rewrite — variant 1 where it replaces several prompt fields as one hypothesis —
+    stays out of the tally, as `l1_generate`'s answer_format lets it share a cluster with one
+    single-mechanism variant; two of THOSE on one cluster are still counted."""
     variants = extract_l1_variants(round_dict)
     if not variants:
         return CheckResult("distinct_clusters", True, "no variants emitted")
     seen: dict[str, int] = {}
-    for v in variants:
+    for i, v in enumerate(variants):
+        if i == 0 and len(v.get("prompt_fields_updates") or {}) > 1:
+            continue
         cluster = str(v.get("targets_cluster") or "").strip().lower()
         if cluster and cluster != "none":
             seen[cluster] = seen.get(cluster, 0) + 1

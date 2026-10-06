@@ -416,6 +416,7 @@ def build_bundle(
         terminate_capability=knobs.escalation.terminate_capability,
         schema_field_rename=knobs.l1_generate.schema_field_rename,
         measured_unit=cycle.session.backend_client.measured_unit,
+        prompt_delivery=cycle.session.backend_client.prompt_delivery(cycle.session.pipeline_params),
         is_origin_round=latest_round is cycle.origin_round,
         demo_pool=cycle.session.scoring.require_partition().demo,
         shot_k_max=knobs.l1_generate.k_max,

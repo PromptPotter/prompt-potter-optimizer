@@ -20,13 +20,14 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 from promptpotter.application.scoring.classification import scoreable_rows
 from promptpotter.application.scoring.formula.compiler import CELL_INTRINSIC_NAMES, CELL_TERMS
 from promptpotter.domain.pipeline_schema import NodeType
+from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.scoring import (
     all_verifier_graded,
     extract_item_label,
     is_verifier_graded,
 )
 from promptpotter.shared.composite import to_short_formula
-from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
+from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
@@ -74,7 +75,7 @@ def compute_error_rate(*, results: list[QueryMeasurement], **_: Any) -> float | 
 def compute_degraded_rate(*, results: list[QueryMeasurement], **_: Any) -> float | None:
     if not results:
         return None
-    return sum(1 for r in results if has_pipeline_warnings(r)) / len(results)
+    return sum(1 for r in results if is_degraded(r)) / len(results)
 
 
 def _compute_recall(
@@ -235,7 +236,7 @@ _REGISTRY: list[Evaluator] = [
     ),
     Evaluator(
         name="degraded_rate",
-        description="Fraction of queries that completed with pipeline degradation warnings.",
+        description="Fraction of queries where a pipeline node did not finish cleanly.",
         scope="per_round",
         compute=compute_degraded_rate,
         direction="low",

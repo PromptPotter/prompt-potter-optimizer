@@ -102,18 +102,14 @@ async def l1_generate(
     template, injection_vars, rendered, coverage = DispatchHub.fill(
         load_optimizer_prompt("l1_generate"), bundle, node="l1_generate"
     )
-    # What L1 may cite IS what L1 was shown — one derivation, feeding the prompt's menu and
-    # the wire schema's enum, so the two can't disagree about which panels exist this round.
+    # What L1 may cite IS what L1 was shown. The wire schema's enum is the one place the menu is
+    # stated, so the prompt and the check cannot disagree about which panels exist this round.
     citable = citable_fields(
         state.memory.l1_layout,
         exploration_budget=bundle.cycle_slice.exploration_budget,
         rendered=rendered,
     )
-    prompt_vars: dict[str, str] = {
-        "n_variants": str(n_variants),
-        "citable_fields": ", ".join(citable),
-        **injection_vars,
-    }
+    prompt_vars: dict[str, str] = {"n_variants": str(n_variants), **injection_vars}
 
     schema_field_rename = potter_knobs(cycle.optimizer).l1_generate.schema_field_rename
     output_schema = (

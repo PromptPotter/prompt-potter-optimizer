@@ -31,7 +31,7 @@ STALL_EXPLORATION: Annotated[str, shapes_optimizer_prompt] = "stall_exploration"
 # Caller-supplied `compile_prompt` extras (not signals). Anything outside
 # `injection_table() ∪ extras` in a template body is a typo — `validate_template` raises.
 _TEMPLATE_EXTRAS: Annotated[dict[str, set[str]], shapes_optimizer_prompt] = {
-    "l1_generate": {"n_variants", "citable_fields"},
+    "l1_generate": {"n_variants"},
     "l1_critique": set(),
     "l2_context": set(),
     "l3_plan": set(),
@@ -125,8 +125,8 @@ def citable_fields(
     ``parent_panel``/``sibling_yield`` names were excised, and by the time it was deleted four of its
     nine names rendered nothing on ``l1_generate``'s floor while two rendered panels were uncitable.
     ``@signal(citable=…)`` declares evidence-vs-menu at each renderer and this function intersects
-    it with the node's LIVE layout — one derivation feeding the prompt's ``{{citable_fields}}`` menu,
-    the wire-schema enum and ``evidence_grounding_present``. A citable panel that never renders
+    it with the node's LIVE layout — one derivation feeding the wire-schema enum and
+    ``evidence_grounding_present``. A citable panel that never renders
     invites a fabricated citation; deriving one from the other is the only defence that holds."""
     table = injection_table()
     names = [

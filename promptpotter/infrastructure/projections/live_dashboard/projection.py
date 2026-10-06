@@ -26,6 +26,7 @@ from promptpotter.domain.results import (
     candidate_label,
     overlap_row,
 )
+from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_records import (
     CandidateMintedRecord,
@@ -94,7 +95,7 @@ from promptpotter.infrastructure.store.layout import (
     round_number,
 )
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
+from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.instrument import NO_ROUND_SLOT
 
 if TYPE_CHECKING:
@@ -776,7 +777,7 @@ class LiveDashboardProjection(Projection):
         if not is_cached:
             s.total_backend_calls += 1
             # Counted where it was MEASURED: a replay re-reads the banked row, it degrades nothing.
-            if has_pipeline_warnings(result):
+            if is_degraded(result):
                 s.degraded_count += 1
 
         # Not cleared outright: under look-ahead another sample is often still open when this

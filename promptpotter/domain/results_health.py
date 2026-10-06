@@ -236,6 +236,18 @@ def classify_sample_failure(
     return None, None
 
 
+def row_failure(result: Mapping[str, Any]) -> tuple[str | None, str | None]:
+    diag = (result.get("pipeline_data") or {}).get("diagnostics") or {}
+    return classify_sample_failure(diag.get("step_statuses") or {}, diag.get("warnings") or [])
+
+
+def is_degraded(result: Mapping[str, Any]) -> bool:
+    """The ONE reading of "this cell degraded", shared by the round's grade and every count, rate
+    and formula term under the word: a node that did not finish. A cell that warned and still
+    answered is not one, and an errored cell is ``is_error_result``'s."""
+    return not is_error_result(result) and row_failure(result)[0] is not None
+
+
 def evidence_starved_node(rates: dict[str, float]) -> str | None:
     """The ONE definition of evidence-starved, read by both the degradation grade and the L2
     router — so the verdict the operator sees and the routing the loop takes cannot disagree."""
@@ -585,10 +597,7 @@ def compute_round_health(
         if is_error_result(r):
             holes += 1
             continue
-        diag = (r.get("pipeline_data") or {}).get("diagnostics") or {}
-        statuses = diag.get("step_statuses") or {}
-        warnings = diag.get("warnings") or []
-        kind, node = classify_sample_failure(statuses, warnings)
+        kind, node = row_failure(r)
         if kind == "structural":
             structural += 1
             if node is not None:

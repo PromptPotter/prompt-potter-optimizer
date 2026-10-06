@@ -138,11 +138,10 @@ class EscalationFSM:
         diverge on ``compared``: an uncompared round still advances the STALL counter, at no life cost.
 
         Only an ADVANCE clears the stall. A round crowns a winner whenever one arm out-ranks the
-        parent on θ, which is a point estimate — so a round whose arms all bracket 0 sets
-        ``improved`` and resolved nothing, and resetting patience on it spends the whole budget
-        re-asking a question the panel cannot answer. ``separable is None`` means the round could
-        not be read either way (no arm carried an interval), and an unreadable round is not
-        evidence of a stall, so it banks as ``improved`` alone decides."""
+        parent on θ, which is a point estimate — so a pick that has not separated from C0 on the
+        origin panel sets ``improved`` and advanced nothing, and resetting patience on it spends
+        the budget on coin flips. ``separable is None`` means the line carried no interval, and an
+        unreadable round is not evidence of a stall, so it banks as ``improved`` alone decides."""
         advanced = improved and separable is not False
         self._l1_stall_count = 0 if advanced else self._l1_stall_count + 1
         # The life bank still reads `improved` alone: patience asks "does L1 need help", which a

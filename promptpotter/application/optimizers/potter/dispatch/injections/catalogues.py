@@ -17,6 +17,9 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     Item,
     signal,
 )
+from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
+    injection_table,
+)
 from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS
 from promptpotter.application.scoring.formula.matchers import extraction_note_for_scoring
 from promptpotter.config.prompt_blocks import general_reasoning_blocks, prompt_blocks
@@ -37,12 +40,16 @@ def _schema_description_block(
     """The CURRENT prose under each open description key — without it the lever is offered blind.
     Read off the point being improved, whose folded schema carries what earlier winners wrote: the
     declaration shows the prose they replaced. An UNDESCRIBED field is marked, being the
-    highest-value target."""
+    highest-value target.
+
+    Named as what it is on the wire — a second instruction sent with the node's prompt — so a
+    prompt-field edit is checked against it rather than left contradicting it."""
     schema = current.get(OUTPUT_SCHEMA_KEY) or (
         node.output_schema.json_schema if node.output_schema else None
     )
     lines = [
-        f"    {SCHEMA_DESCRIPTION_PREFIX}<path> — current prose (rewrite what underspecifies):"
+        f"    {SCHEMA_DESCRIPTION_PREFIX}<path> — sent with the node's prompt; rewrite any your "
+        "edit contradicts:"
     ]
     for key in keys:
         path = key.removeprefix(SCHEMA_DESCRIPTION_PREFIX)
@@ -91,7 +98,7 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> list[Item]:
     npk = schema.node_param_keys()
     if not npk:
         return []
-    lines = ["PIPELINE PARAM CATALOGUE (use only these — do not invent):"]
+    lines = ["PIPELINE PARAM CATALOGUE:"]
     for node_name, params in npk.items():
         node = schema.get_node(node_name)
         if not node or not params:
@@ -205,8 +212,14 @@ def _r_demo_pool(b: InjectionBundle) -> list[Item]:
 
 
 def withheld_l1_panels(b: InjectionBundle) -> frozenset[str]:
-    """The panels L2's layout menu leaves out: ones this campaign cannot fill on any round."""
-    return frozenset() if b.offers_shots else frozenset({"demo_pool"})
+    """The panels L2's layout menu leaves out: ones that render nothing for this bundle, so a move
+    of one changes no byte L1 reads and spends the fire."""
+    table = injection_table()
+    return frozenset(
+        name
+        for name in NODE_LAYOUTS["l1_generate"].possible
+        if not any(item.text for item in table[name].render(b))
+    )
 
 
 @signal(

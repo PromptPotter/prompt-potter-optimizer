@@ -36,6 +36,7 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
 )
 from promptpotter.application.optimizers.potter.escalation.state import ExplorationBudget
 from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
+from promptpotter.application.scoring.classification import scoreable_rows
 from promptpotter.application.scoring.evaluators import DEFAULT_CELL_FORMULA, compute_accuracy
 from promptpotter.application.scoring.row_diagnostics import judge_readings
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
@@ -64,7 +65,7 @@ from promptpotter.domain.scoring import (
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.shared.composite import render_composite_fitness_block
 from promptpotter.shared.errors import is_error_result
-from promptpotter.shared.statistics import min_detectable_effect
+from promptpotter.shared.statistics import min_detectable_effect, paired_diff_posterior
 
 
 @signal(
@@ -77,7 +78,8 @@ def _r_escalation_panel(b: InjectionBundle) -> list[Item]:
     cs = b.cycle_slice
     budget = cs.exploration_budget
     guidance = {
-        ExplorationBudget.TIGHT: "exploit the parent — stall_exploration citations are rejected",
+        ExplorationBudget.TIGHT: "build on the parent, its method open to rewrite — "
+        "stall_exploration citations are rejected",
         ExplorationBudget.NORMAL: "stalling — stall_exploration citations are permitted",
         ExplorationBudget.WIDE: "explore freely — a PEAKED axis may be mutated with an "
         "exploration_budget=wide rebut",
@@ -642,6 +644,16 @@ def _tally(counts: Counter[str], total: int, *, rows: int | None = None) -> str:
     return " | ".join(parts)
 
 
+def _truth_labels(rows: list[dict[str, Any]]) -> Counter[str] | None:
+    return enumerable_truth_labels([r for r in rows if r.get("ground_truth") not in (None, "")])
+
+
+def _constant_answer(truth: Counter[str]) -> tuple[str, float]:
+    """The label a constant answerer gives, and the score it earns for giving it."""
+    label, n = truth.most_common(1)[0]
+    return label, n / sum(truth.values())
+
+
 @signal(
     "answer_distribution",
     kind=InjectionKind.MEASUREMENT,
@@ -660,8 +672,7 @@ def _r_answer_distribution(b: InjectionBundle) -> list[Item]:
     said = _label_counts(rows, "predicted")
     n = len(rows)
 
-    top_label, top_n = truth.most_common(1)[0]
-    constant = top_n / n
+    top_label, constant = _constant_answer(truth)
     # Mean fitness — the SAME quantity `accuracy` reports, and the only one comparable to the
     # constant-answer floor beside it. A `fitness >= 1.0` count reads 0.00 on every graded
     # scorer, telling the generator a constant answer beat it while the run is climbing.
@@ -754,8 +765,7 @@ def _r_failing_samples(b: InjectionBundle) -> list[Item]:
         *graded,
         *((None, r) for r in ungraded),
     ]
-    labelled = [r for r in b.trajectory_results if r.get("ground_truth") not in (None, "")]
-    grouped = enumerable_truth_labels(labelled) is not None
+    grouped = _truth_labels(b.trajectory_results) is not None
     if grouped:
         # Over a label set the query's opening is the same preamble on every row and says nothing
         # about the miss; what does is WHICH wrong answer, and that is a confusion group. One line
@@ -1027,13 +1037,23 @@ def _edit_row(edit: _Edit, unit: MeasuredUnit, *, charged: bool) -> str:
 )
 def _r_origin_strengths(b: InjectionBundle) -> list[Item]:
     """Reports the origin's MEAN fitness, never a count of maxed-out samples: the count silenced the
-    panel on every graded scorer, which is the one thing a don't-strip-this warning must never do."""
-    rows = b.origin_per_sample
+    panel on every graded scorer, which is the one thing a don't-strip-this warning must never do.
+
+    Silent where that mean does not clear the constant-answer floor by its own error: one label to
+    every row would score the same, so there is no scaffolding earning it and the warning would
+    hold L1 to a parent that has nothing to protect."""
+    rows = cast("list[QueryMeasurement]", b.origin_per_sample)
     if not rows:
         return []
-    acc = compute_accuracy(results=cast("list[QueryMeasurement]", rows))
+    acc = compute_accuracy(results=rows)
     if acc is None:
         return []
+    if (truth := _truth_labels(b.origin_per_sample)) is not None:
+        fits = [r.get("fitness", 0.0) for r in scoreable_rows(rows)]
+        _, floor = _constant_answer(truth)
+        lead, se, _ = paired_diff_posterior(fits, [floor] * len(fits))
+        if lead <= _CELL_SEPARATION_SIGMAS * se:
+            return []
     return [
         Item(
             f"ORIGIN STRENGTHS: origin scores {acc:.0%} across "
@@ -1120,7 +1140,7 @@ def _r_measurand(b: InjectionBundle) -> list[Item]:
         else "ELECTION — a round is won on θ lift over the parent, and on nothing else."
     ]
     if (a := b.digest.ability) is not None:
-        lines.append(f"  this round: θ {a.theta:+.3f}  ({a.scale()})")
+        lines.append(f"  this round: θ {a.theta:+.3f}  ({a.scale(named=False)})")
     lines.append("REPORTED FITNESS — the headline number and the degradation scale:")
     lines.extend(f"  {ln}" for ln in body)
     return [Item("\n".join(lines))]
@@ -1133,7 +1153,7 @@ def _r_precision(b: InjectionBundle) -> list[Item]:
     d = b.digest
     rows: list[str] = []
     if (a := d.ability) is not None and a.se is not None:
-        rows.append(f"ability θ {a.theta:+.3f} ±{a.se:.3f}  ({a.scale()})")
+        rows.append(f"ability θ {a.theta:+.3f} ±{a.se:.3f}  ({a.scale(named=False)})")
     for arm in d.arms[:PRECISION_ARM_ROWS]:
         if arm.mean_fitness_ci_lo is None or arm.mean_fitness_ci_hi is None:
             continue

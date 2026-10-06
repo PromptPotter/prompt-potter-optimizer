@@ -291,7 +291,15 @@ class ReadoutProjection(Projection):
         # `cached` now names the provider-side discount one line up, and one word cannot mean both.
         if cached:
             bits.append("replayed")
-        self._write(f"  {DIM}✓ {' · '.join(bits)}{RESET}")
+        # The two ways a call that landed still went wrong: every attempt before the last is a
+        # whole paid round trip, and an answer cut at `max_tokens` parsed only as far as it got.
+        flags: list[str] = []
+        if retries := len(payload.get("schema_repair_errors") or ()):
+            flags.append(f"re-asked {retries}x")
+        if payload.get("finish_reason") == "length":
+            flags.append("TRUNCATED at max_tokens")
+        lead = f"{YELLOW}⚠" if flags else f"{DIM}✓"
+        self._write(f"  {lead} {' · '.join([*bits, *flags])}{RESET}")
 
     def _handle_election(self, record: ElectionRecord) -> None:
         """The news, where the election makes it — not at the round close two LLM calls later.

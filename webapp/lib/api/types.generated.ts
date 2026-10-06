@@ -184,6 +184,7 @@ export interface OverlapReading {
   sample_ids: number[];
   members: OverlapMember[];
   measured: number;
+  lead_interval: [number, number] | null;
 }
 
 /** One labelled reading an optimizer reports about a round, worded by its own runtime. */
@@ -2550,7 +2551,7 @@ export const CELL_TERM_META: CellTermMeta[] = [
   { name: 'tokens', direction: 'low', description: 'Input plus output tokens the cell spent.' },
   { name: 'target_prompt_chars', direction: 'low', description: "Characters of the candidate's prompt template." },
   { name: 'errored', direction: 'low', description: '1 where the cell errored, else 0.' },
-  { name: 'degraded', direction: 'low', description: '1 where the pipeline reported degradation, else 0.' },
+  { name: 'degraded', direction: 'low', description: '1 where a pipeline node did not finish cleanly, else 0.' },
   { name: 'cached', direction: 'high', description: '1 where the cell was replayed from the archive, else 0.' },
   { name: 'retrieval_shortfall', direction: 'high', description: 'Per-sample min(observed/target, 1.0) across nodes with max_*/num_* limits on list-valued outputs. 1.0 = target met or exceeded.' },
 ];

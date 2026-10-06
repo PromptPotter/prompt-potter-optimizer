@@ -515,9 +515,10 @@ class OverlapReading(StrictModel):
     ability rather than spread, so consecutive rounds can share almost no cells at all. This is
     one exam, sat by C0 and by each new best since — each pick the optimizer declared, whichever.
 
-    REPORT-ONLY, and that is what makes measuring OUTSIDE the election unbiased. These rows reach
-    no election, no parent floor, no lift, no ruler and no acquisition — fed to any of them the
-    parent would be better-identified than the arms it was judged against. The rows live on
+    Its rows reach no election, no parent floor, no lift, no ruler and no acquisition — fed to any
+    of them the parent would be better-identified than the arms it was judged against — and that
+    is what makes measuring OUTSIDE the election unbiased. One reading leaves: ``lead_interval`` decides
+    ``RoundResult.separable``, the stall clock, after every pick is made. The rows live on
     ``RoundResult.overlap_results``, outside ``results`` and
     ``all_candidate_results``, because those two are exactly where every one of those paths reads.
     """
@@ -533,6 +534,10 @@ class OverlapReading(StrictModel):
     # and more only where an earlier one predates the panel it is now read on. Zero on a round
     # whose line already sat it. Sole count of those rows — nothing re-derives it from the rows.
     measured: int = 0
+    # The two-sided interval on the newest member's paired fitness lift over C0 on the set: the
+    # one place a gain is read cumulatively, on cells no acquisition chose for it. `None` under
+    # two shared cells.
+    lead_interval: tuple[float, float] | None = None
 
 
 class LineStep(NamedTuple):
@@ -819,10 +824,11 @@ class RoundResult(StrictModel):
     unscored: int = 0
     # Fatal-warning samples discarded from total/accuracy on the winner's run.
     deprecated: int = 0
-    # Did ANY electable arm's lift interval clear 0? Not `improved` beside it, which is the point
-    # estimate: a round can crown a winner out of arms none of which separated from the parent.
-    # Escalation reads BOTH, so a round that resolved nothing stalls instead of resetting patience.
-    # `None` when no arm carries an interval — not the same fact as measuring cleanly and tying.
+    # Did this round ADVANCE the best-so-far line: its pick leads C0 on the origin panel by an
+    # interval clear of 0 (`OverlapReading.lead_interval`) and tops every earlier pick there. Not
+    # `improved` beside it, which is the point estimate. Escalation reads BOTH, so a round that
+    # advanced nothing stalls instead of resetting patience. Stamped once the overlap pass lands;
+    # `None` when the line carries no interval — not the same fact as measuring cleanly and tying.
     separable: bool | None = None
     # Subset-invariant peer of this round's `accuracy`: the cumulative frontier's ability with the
     # scale it was read on, so a drifting subset cannot inflate the outer signal. `None` = never

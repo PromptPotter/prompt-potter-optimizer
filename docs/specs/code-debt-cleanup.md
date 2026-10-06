@@ -129,6 +129,36 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
 
 - **`webapp/lib/derivations/round-samples.ts` re-walks the sample mark with three arms** (ERR / HIT / MISS) over raw round-file rows, where `domain/dashboard_rows.py::sample_status` has four — so a historical UNSC row reads as a wrong answer. Action: serve the mark on the row the client reads (the round file's `all_candidate_results`, or route the reader through `/cells`, which already serves `CellRow.status`), then delete the client ladder. **Rides with:** any change to `round-samples.ts` or the round-file result row. **Re-test:** `grep -n '"UNSC"' webapp/lib/derivations/round-samples.ts` — empty while the client ladder still has three arms.
 
+- **The dashboard is a single-page React app that carries Next.js as its build tool.**
+  `webapp/next.config.ts` sets `output: "export"`, so no Next server runs anywhere: FastAPI serves
+  `webapp/out`. The source reaches the framework through `next/dynamic` in
+  `components/shell/AppShell.tsx` and through type imports in `app/layout.tsx` and
+  `app/manifest.ts`; the route tree is `/` and `/login` under one layout, with no API route, no
+  server action, no middleware, and neither `next/link`, `next/navigation` nor `next/image`. What
+  Next supplies is Turbopack, the React Compiler switch, the dev-mode `/api` rewrite and the ESLint
+  preset — and for that the lock carries `next`, which draws advisories of its own (a critical one
+  was patched 2026-10-06), and `eslint-config-next`, whose
+  `@next/eslint-plugin-next → fast-glob → micromatch → braces` chain holds a high advisory with no
+  patched release (GHSA-vfj7-8cjw-p6xm), which fails `gate.py --only npm-audit` and so the audit
+  step in `publish.yml`. Action: build with Vite, which Vitest already runs on. That is a new
+  build config with the `/api` dev proxy and the React Compiler plugin, an `index.html` shell and
+  client entry in place of `app/layout.tsx` and `app/manifest.ts`, `React.lazy` for `next/dynamic`,
+  two routes (the export's trailing-slash layout is what FastAPI's `StaticFiles(html=True)`
+  resolves, so keep it), and the ESLint config rebuilt from `typescript-eslint` and the React,
+  hooks and a11y plugins while keeping the barrel-import rule in `webapp/eslint.config.mjs`. Then
+  everything keyed to Next's commands and output: the `next-build` check and its `tsc` /
+  `playwright` ordering in `scripts/gate.py`, the `.next/types` include in `tsconfig.json`,
+  `webapp/e2e/serve.mjs`, `scripts/build_release.py::_WEBAPP_SRC`, `build:deploy` in `publish.yml`,
+  the eslint cache step in `ci.yml`, the `/serve` skill and `webapp/CLAUDE.md`. Keep the output
+  directory named `out` and most of that list falls away. Unverified: whether the rebuilt ESLint
+  set brings `braces` back through its own `micromatch` — settle that FIRST, since it decides
+  whether the migration closes the audit or only shrinks the lock. **Rides with:** the next
+  webapp dependency pass — a `next` advisory, a Dependabot bump of `webapp/package-lock.json`, or
+  the release audit going red on `braces`. **Re-test:** `git grep -n '"next"' webapp/package.json`
+  — a hit means Next is still the build; `npm ls braces` in `webapp/` names what still pulls it;
+  and `git grep -hoE 'from "next(/[a-z/-]+)?"' -- webapp | sort | uniq -c` recounts the imports,
+  which is the size of the job.
+
 ## Open — surfaced by the head-to-head arc
 
 Filed at the operator's ask rather than under the multi-arc bar above. A leading **INVESTIGATE**

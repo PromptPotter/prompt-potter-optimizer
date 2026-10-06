@@ -38,6 +38,16 @@ _UNSENDABLE_HERE: frozenset[str] = (
     PROVIDER_REQUEST_PARAMS - {"temperature", "max_tokens", "response_format", "top_p"}
 ) | {"route_order"}
 
+# Anthropic's `stop_reason` in the OpenAI spelling `LLMResponse.finish_reason` declares; a reason
+# with no counterpart rides through under its own name.
+_FINISH_REASONS: dict[str, str] = {
+    "end_turn": "stop",
+    "stop_sequence": "stop",
+    "max_tokens": "length",
+    "tool_use": "tool_calls",
+    "refusal": "content_filter",
+}
+
 
 def _usage(response: Message) -> TokenAccount:
     """Anthropic reports its cache counts BESIDE its input count; the OpenAI-compat wire reports
@@ -178,7 +188,13 @@ class AnthropicClient(LLMClientBase):
         content = "".join(block.text for block in response.content if hasattr(block, "text"))
         parsed = parse_response_content(content, response_model, response_schema, "Anthropic")
 
-        return LLMResponse(content=content, model=response.model, usage=usage, parsed=parsed)
+        return LLMResponse(
+            content=content,
+            model=response.model,
+            usage=usage,
+            finish_reason=_FINISH_REASONS.get(response.stop_reason or "", response.stop_reason),
+            parsed=parsed,
+        )
 
 
 __all__ = ["AnthropicClient"]

@@ -56,6 +56,14 @@ class LLMResponse(StrictModel):
             "Analytical like ``reasoning`` — never a gate, metric or cache key."
         ),
     )
+    finish_reason: str | None = Field(
+        None,
+        description=(
+            "Why the provider stopped the FINAL attempt, in the OpenAI spelling every client "
+            "normalizes to — ``length`` is a ``max_tokens`` hit. An earlier attempt's own reason "
+            "leads its ``schema_repair_errors`` entry. ``None`` where the provider reported none."
+        ),
+    )
     parsed: Any | None = Field(
         None,
         description=(

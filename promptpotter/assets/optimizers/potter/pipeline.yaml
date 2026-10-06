@@ -37,7 +37,7 @@ nodes:
       prompt_version: 1
       schema_family: l1_generate
       schema_version: 1
-      reasoning_effort: low
+      reasoning_effort: medium
       # A truncated answer is a zero-candidate round, and 12000 was measured truncating.
       max_tokens: 20000
       provider: openrouter
@@ -81,10 +81,9 @@ nodes:
       schema_version: 1
       prompt_family: l1_critique
       prompt_version: 1
-      reasoning_effort: low
-      # A runaway critique spends whatever cap it is given, so the cap prices that call: it sits
-      # at the reasoning floor a launch refuses below.
-      max_tokens: 8000
+      reasoning_effort: medium
+      # A truncated critique never lands; the measured tail at `low` was 11,370 tokens.
+      max_tokens: 16000
       provider: openrouter
       model: openai/gpt-6-luna
     description: >-
@@ -96,7 +95,7 @@ nodes:
       temperature: 0.3
       prompt_family: l2_context
       prompt_version: 1
-      reasoning_effort: low
+      reasoning_effort: medium
       max_tokens: 8000
       provider: openrouter
       model: openai/gpt-6-luna
@@ -110,7 +109,7 @@ nodes:
       temperature: 0.5
       prompt_family: l3_plan
       prompt_version: 1
-      reasoning_effort: low
+      reasoning_effort: medium
       max_tokens: 8000
       provider: openrouter
       model: openai/gpt-6-luna
@@ -162,14 +161,12 @@ resolved_prompts:
     persona: >-
       You are a senior prompt engineer with taste. Before editing, you ask what cognitive stance this
       task needs — the mental move a strong solver would make — and shape the prompt to induce it. You
-      trust a lean prompt that makes the model reason well over a long one that recites rules.
+      spend words where they teach the solver a method, and nowhere else.
     task_intent: >-
       Propose up to {{n_variants}} candidates that beat the parent searchpoint. Read the context blocks
       below for the pipeline, domain, critique, and failures; let these define the fix rather than a presumed
       task type. A critique's priority_fix is your primary steer.
-    problem_description: &l1_generate_problem >-
-      CITABLE FIELDS — "evidence_grounding.field" must be EXACTLY one of: {{citable_fields}}. Nothing
-      else is admissible.
+    problem_description: ''
     instruction: |-
       THINK FIRST — diverge, then converge. Before writing any variant, name {{n_variants}} distinct
       MECHANISMS for why the parent fails, then develop each one a panel supports. A round's chance of a
@@ -183,20 +180,20 @@ resolved_prompts:
           commit under uncertainty.
         - EVIDENCE — what it does with input that is missing, contradictory, or irrelevant.
         - SCOPE — what it is told to ignore, refuse, or stop doing.
-        - OUTPUT SHAPE — the `output_schema_descriptions` strings, which steer harder per token than the
-          instruction. An undescribed field is the cheapest win on the board.
         - RECOMBINATION — take a mechanism that MEASURABLY worked, on another cluster or in an earlier
           round, and apply it where it has not been tried. Cite the panel that measured it.
-      Scalar params (temperature, tokens, effort) are a last resort: at most one, and only where a panel
-      or a runtime failure points there.
 
-      TEMPERAMENT — read escalation_panel.exploration_budget and mutation_memory. At tight/normal REFINE,
-      and refinement cuts BOTH ways: add a missing instruction, OR distill an overloaded one. If
-      mutation_memory shows a recent addition scored at or BELOW its parent, the prompt is over-saturated
-      — cut the weakest addition rather than piling on. At wide (a measured stall, or a round whose
-      candidates regressed below the parent), abandon the attractor for a categorically different and
-      LEANER stance. Lean means the RESPONSE too: this prompt becomes next round's parent and rides every
-      call, so text that makes the solver EMIT more is paid on every sample from here on.
+      VARIANT 1 IS THE METHOD REWRITE while the parent misses over a third of its samples. It replaces
+      instruction, thinking_style and task_intent TOGETHER, as one procedure in one voice and one
+      hypothesis: how to read each construct the SAMPLE TRANSCRIPTS show misread, the test that decides
+      the answer, and two or three short worked inferences of the move those traces miss. The other
+      variants stay one mechanism each.
+
+      TEMPERAMENT — read escalation_panel.exploration_budget and mutation_memory. If mutation_memory
+      shows a recent addition scored at or BELOW its parent, cut it rather than piling on. At wide (a
+      measured stall, or a round whose candidates regressed below the parent), abandon the attractor for
+      a categorically different stance. Lean applies to the RESPONSE: this prompt becomes next round's
+      parent, so text that makes the solver EMIT more is paid on every sample from here on.
 
       GROUND EVERY CHOICE — each evidence_grounding cites a real panel entry; no data, no gamble. An axis
       tagged PEAKED sits at its measured peak: leave it unless your citation names a real rebut.
@@ -209,10 +206,10 @@ resolved_prompts:
     thinking_style: ''
     answer_format: |-
       Return JSON: {"variants": [...]}. Each variant, IN THIS ORDER:
-        - "evidence_grounding": {field, citation}. field one of the CITABLE FIELDS listed below — nothing else is admissible; citation quotes the cited entry verbatim, <=320c.
-        - "targets_cluster": the ONE failure this variant attacks — the critique's cluster label verbatim where one fits, else your own short name for a failure the panel you cite actually shows. Two variants may NOT name the same target.
-        - Two delta slots, carrying ONLY what changes: omit a field you keep, since an empty string or the current text is no edit. A variant with no new value anywhere is rejected — describing a change is not making one.
-          * "pipeline_overlay": nested {node: {param: value}} — scalar backend tunables, and "output_schema_descriptions.<path>": prose, which rewrites the `description` of that field of the node's output schema. Each is a param under ITS NODE like any other, NEVER a top-level key beside the nodes. Paths are FIXED: you describe a field, never rename or invent one.
+        - "evidence_grounding": {field, citation}. citation is the shortest verbatim span that pins the cited entry, <=120c.
+        - "targets_cluster": the ONE failure this variant attacks — the critique's cluster label verbatim where one fits, else your own short name for a failure the panel you cite actually shows. Only the METHOD REWRITE may share its target, with ONE other variant.
+        - The delta slots, carrying ONLY what changes: omit a field you keep, since an empty string or the current text is no edit.
+          * "pipeline_overlay": nested {node: {param: value}}, as its schema description states.
           * "prompt_fields_updates": flat {field: new full text}, over the prompt fields its schema offers.
         - "changes_description": 1-2 sentences, <=320c, REPORTING the change you just emitted — the failure pattern it targets, the concrete change, and the expected directional effect ("improve reasoning" is too vague).
   l1_critique/1:
@@ -232,26 +229,24 @@ resolved_prompts:
       input, a formatting miss) is usually fixed better by instruction or answer_format; reserve thinking_style
       for when the reasoning STRATEGY itself is wrong, and vary the axis when a prior fix on it did not
       convert. <concrete change> is a specific edit ("add a coordinate-verification step", not "improve
-      reasoning"); <quoted failure pattern> matches a cluster you name in failure_highlights.
+      reasoning").
 
 
-      failure_highlights: each entry quotes ONE CONTIGUOUS span of SAMPLE TRANSCRIPTS, copied exactly and
-      unabridged — the decisive step where the reasoning went wrong. Never stitch or ellipse fragments
-      into one quote: an abridged quote is a reconstruction, the next round cites it back verbatim as
-      evidence, and nothing downstream can tell it from text the model actually wrote. Give the claim at
-      stake and predicted vs ground truth in your OWN words around the quote.
+      failure_highlights: ONE ENTRY PER CLUSTER YOU NAME — a DIFFERENT root cause each, largest first,
+      up to 3. The next L1 gives each candidate a different entry, so a single entry spends its whole
+      round on one idea: every group FAILING SAMPLES shows failing for its own reason is its own entry,
+      and only misses that truly share one root are one. Label each with the MECHANISM and its share of
+      the misses ("Coordinate geometry (4 of 9): ...") — a label naming no mechanism ("Cluster 1", a
+      bare sample id) steers nothing. Where SAMPLE TRANSCRIPTS shows the cluster, quote ONE CONTIGUOUS
+      span of it, copied exactly and unabridged — the decisive step where the reasoning went wrong.
+      Never stitch or ellipse fragments into one quote: the next round cites it back verbatim, and
+      nothing downstream can tell a reconstruction from text the model actually wrote. A cluster no
+      transcript shows carries NO quote: name what was said against the truth, its count and sample
+      ids. Give the claim at stake and predicted vs ground truth in your OWN words.
       Diagnose the mechanism: WHY the model landed wrong, not just that it did. Before claiming a bias
       (e.g. "over-hedges"), check it against the shown ground-truth labels — a fix that trades one error
-      class for another is not a fix. ONE ENTRY PER CLUSTER — a DIFFERENT root cause each, largest first,
-      labelled with the MECHANISM and its share of the misses ("Coordinate geometry (4 of 9): ...") —
-      a label naming no mechanism ("Cluster", "Cluster 1", a bare sample id) steers nothing and wastes
-      the entry, which is the whole budget for that root cause. Three quotes from one
-      cluster is ONE highlight: the next L1 gives each candidate a different failure mode, so naming one
-      mode three times spends its whole round on one idea. 3 is a CEILING, not a quota — name a small
-      second cluster, but where the misses truly share one root emit ONE entry and let the count say so.
-      L2 and the next L1 see only these plus your priority_fix — make them carry the mechanism, not the
-      symptom. If any sample MISSED, failure_highlights MUST hold >=1 entry naming the broken reasoning
-      step; an empty list when misses exist is a defect of THIS node, not a clean run.
+      class for another is not a fix. L2 and the next L1 see only these plus your priority_fix. An
+      empty list when a sample missed is a defect of THIS node, not a clean run.
 
 
       suggested_axes: up to 4 real pipeline axes for L2 to consider.
@@ -264,11 +259,11 @@ resolved_prompts:
     answer_format: &l1_critique_answer |-
       Return JSON with the fields in EXACTLY this order — failure_highlights FIRST so it is never dropped when the output runs long:
       {
-        "failure_highlights": ["<cluster_label? Query: ... | Predicted: ... | GT: ...>", ...],
-        "priority_fix": "<axis>: <concrete change> - addresses <quoted failure pattern>",
+        "failure_highlights": ["<cluster label: Query: ... | Predicted: ... | GT: ...>", "<next cluster: ...>", ...],
+        "priority_fix": "<axis>: <concrete change>",
         "suggested_axes": ["<real pipeline axis>", ...]
       }
-      failure_highlights is REQUIRED and MUST be non-empty whenever any sample missed — write it before priority_fix/suggested_axes. Caps: failure_highlights <=3 each <=320c, priority_fix <=320c, suggested_axes <=4.
+      failure_highlights holds one entry per distinct cluster and is never empty when a sample missed. Caps: failure_highlights <=3 each <=320c, priority_fix <=320c, suggested_axes <=4.
   l2_context/1:
     persona: >-
       You are L2, the attention layer. You never author a candidate prompt yourself — your whole
@@ -287,11 +282,6 @@ resolved_prompts:
       THE FRAMING IS EVIDENCE. It is what the OPERATOR measured across many runs, so OBEY it: where it says an approach backfires here, routing L1 into it anyway is the failure this rule exists to prevent.
 
       L3 NOTE (if present): a sticky pointer — honor it unless the data contradicts it.
-
-      SKILL TARGETS (the candidate is an agent skill an agent loads, e.g. a SKILL.md): before routing, check the three tiers in order and name the first one failing in axis_targeted.
-        1 VALID — is the skill well-formed and safe? The candidate is the skill's body: it must stay under 500 lines, and it must never tell the agent to leak secrets, disable checks, or run unvetted downloads.
-        2 NO REPEATS — does it restate guidance it already carries? Route L1 to merge or delete the overlap, never to append another version of it.
-        3 LIFT — does each line earn its place? A line whose removal would not lower the score is dead weight; route L1 to delete it rather than reword it.
     thinking_style: &l2_context_thinking >-
       Work in this order: the failure cluster you are attacking (from critique.failure_highlights)
       first, then the L1 axis it routes to, then the lever — never the reverse. A lever picked
@@ -315,20 +305,15 @@ resolved_prompts:
       Propose a categorically different strategy, not a refinement of this one. Runtime-failure
       patterns below are discovered constraints — steer around them. L2 OUTPUT FAILURES mean
       validators caught L2 emitting broken output: coach L2 out of that mode in the plan text.
-      When the candidate is an agent skill, the plan orders the search by three tiers:
-      validity and safety first (a body under 500 lines, no instruction that leaks secrets or
-      disables checks), then no repeated guidance (merge or delete overlap rather than append),
-      then lift (delete any line that cannot beat its own absence). Replan onto the first tier the
-      data shows failing.
     thinking_style: >-
-      Before replanning, ask which pipeline dimensions the data shows as under-explored — the plan's
+      Before replanning, name the pipeline dimensions the data shows as under-explored — the plan's
       job is to send the search somewhere it has not been, not to restate where it has.
     answer_format: |2-
 
       Return a JSON object with:
-        "plan": the new strategy as AT MOST 6 bullets, ONE sentence each (required). Bullets, not prose. It rides every downstream optimizer prompt, so each bullet evicts failure evidence from L1's and L2's context.
-        "note": OPTIONAL sticky pointer for L2 (string; leave empty when unused), persisting until your next replan. Use it only when L2 keeps drifting off a constraint the plan needs honored — a runtime ceiling, a dead axis, a cohort. Leave it empty when the plan is enough.
-        "rationale": 1-2 sentences on the strategic shift
+        "plan": the new strategy as AT MOST 6 bullets, ONE sentence each (required). Each bullet is an instruction L2 or L1 acts on next round, naming the axis, panel or failure cluster it means — never a question, and never a step you still owe. It rides every downstream optimizer prompt, so each bullet evicts failure evidence from L1's and L2's context.
+        "note": OPTIONAL sticky pointer for L2 (string; leave empty when unused), persisting until your next replan. Use it only when L2 keeps drifting off a constraint the plan needs honored — a runtime ceiling, a dead axis, a cohort.
+        "rationale": one sentence naming the under-explored dimension the plan moves the search to
   # Read when the campaign optimizes an inner optimizer's prompts (`datasets/promptpotter-self`,
   # via `nodes.{node}.config.prompt_family`). Spec: docs/specs/l4-outer-loop.md.
   l1_generate_self_optimizing/1:
@@ -339,7 +324,7 @@ resolved_prompts:
       Propose up to {{n_variants}} candidates. Each rewrites ONE field of ONE inner optimizer prompt node, to
       make the inner optimizer climb faster on its benchmark. The PIPELINE PARAM CATALOGUE below lists your
       levers: the inner nodes and their editable fields.
-    problem_description: *l1_generate_problem
+    problem_description: ''
     instruction: >-
       Emit every change in `pipeline_overlay` as {inner_node: {field: text}}, keyed by a node +
       field from the catalogue below. One candidate per critique failure cluster — the spread is carried
@@ -403,7 +388,7 @@ resolved_prompts:
     thinking_style: ''
     answer_format: |-
       Return JSON: {"variants": [...]}. Each variant, IN THIS ORDER:
-        - "evidence_grounding": {field, citation} — field is EXACTLY one of the CITABLE FIELDS listed below (any other value, e.g. 'failure', is invalid); citation quotes the panel entry.
+        - "evidence_grounding": {field, citation} — citation is the shortest verbatim span that pins the panel entry.
         - "targets_cluster": the verbatim label of the ONE critique failure cluster this candidate attacks; "none" when there is no critique yet. Two candidates may NOT name the same cluster.
         - "pipeline_overlay": {inner_node: {field: "complete replacement text"}} — inner_node one of l1_generate/l1_critique/l2_context/l3_plan; field one of persona/task_intent/instruction/thinking_style. MUST be non-empty: a variant that changes nothing mutates nothing and is rejected.
         - Instead of a prose field, a variant may edit information flow: "pipeline_overlay": {inner_node: {"layout": {"<panel>": "<slot>"}}} — inner_node one of l1_critique/l2_context/l3_plan; panels from that node's `layout` enum, each moved to the named slot.

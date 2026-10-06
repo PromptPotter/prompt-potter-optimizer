@@ -18,7 +18,7 @@ from promptpotter.application.diagnostics.verify import verify_on_saturation
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizers.nodes import RoundContext, RoundOpening
 from promptpotter.application.run_observers import RunCallbacks
-from promptpotter.application.runner.bench import grade_round_selection
+from promptpotter.application.runner.bench import grade_round_selection, reserve_selection_pass
 from promptpotter.application.runner.measurement import measure_population
 from promptpotter.application.runner.output import (
     write_hard_samples_artifacts,
@@ -46,6 +46,7 @@ from promptpotter.domain.results import (
     RoundResult,
     candidate_label,
     is_leader_eligible,
+    overlap_series,
     proposal_collapses,
     unscoreable_cells,
 )
@@ -73,7 +74,6 @@ if TYPE_CHECKING:
         Selector,
     )
     from promptpotter.domain.opt_search_point import OptSearchPoint
-    from promptpotter.domain.results import ScoredCandidate
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
 
@@ -162,28 +162,37 @@ def round_plan(selected: SelectedOptimizer) -> RoundPlan:
     )
 
 
-def _separability(round_num: int, electable: list[ScoredCandidate]) -> bool | None:
-    # `None` below two shared cells, where there is nothing to be inconclusive ABOUT.
-    bracketed = [c for c in electable if c.reference_lift_ci_lo is not None]
-    if not bracketed:
+def _separability(round_result: RoundResult) -> bool | None:
+    """Did this round ADVANCE the best-so-far line — read on the origin panel, where a gain
+    accumulates against C0 instead of being re-asked as one round's increment over its parent.
+    A single round's interval at panel width spans 0 for almost any real edit, so it stalled every
+    round alike. ``None`` where the line carries no interval: there is nothing to be inconclusive
+    ABOUT."""
+    overlap = round_result.overlap
+    if overlap is None or overlap.lead_interval is None:
         return None
-    if any(
-        (c.reference_lift_ci_lo or 0.0) > 0.0 or (c.reference_lift_ci_hi or 0.0) < 0.0
-        for c in bracketed
-    ):
-        return True
-    widest = max(bracketed, key=lambda c: c.reference_lift_ci_hi or 0.0)
+    if not round_result.improved:
+        return False
+    *earlier, newest = overlap.members
+    return overlap.lead_interval[0] > 0.0 and newest.accuracy > max(m.accuracy for m in earlier)
+
+
+def _warn_not_separable(round_result: RoundResult) -> None:
+    overlap = round_result.overlap
+    if round_result.separable is not False or not round_result.improved:
+        return
+    assert overlap is not None and overlap.lead_interval is not None
+    lo, hi = overlap.lead_interval
     emit_round_warning(
         kind="round_not_separable",
         message=(
-            f"round {round_num} resolved nothing: every one of its {len(bracketed)} readable arms "
-            f"has a lift interval spanning 0 (best reaches {widest.reference_lift_ci_hi:+.3f} "
-            "at its upper bound). An arm this round selects is the best of what it saw, not a "
-            "measured improvement over its reference"
+            f"round {round_result.round} selected {overlap.members[-1].label}, which has not "
+            f"separated from C0: lift interval [{lo:+.3f}, {hi:+.3f}] on "
+            f"{overlap_series(overlap)}. The selection is the best of what the round saw, not "
+            "yet a measured improvement"
         ),
-        detail={"arms": len(bracketed), "best_ci_hi": widest.reference_lift_ci_hi},
+        detail={"lead_ci_lo": lo, "lead_ci_hi": hi},
     )
-    return False
 
 
 def _round_result(
@@ -250,11 +259,6 @@ def _round_result(
         p_value=p_value,
         verdict_reason=selection.verdict_reason,
         stamps_theta=stamps_theta,
-        # Over the whole electable field, not the winner's own interval: the question is whether
-        # THIS ROUND told the arms apart, and one arm's bracket cannot answer that.
-        separable=_separability(
-            ctx.round_num, [cs_by_id[ind.lineage.id] for ind in measured.electable]
-        ),
         prompt_fields=best_opt_sp.prompt_field_dict(),
         # Stripped, because the round's incoming params carry the PREVIOUS winner's render and
         # nothing re-renders at this write; every reader rebuilds the render from `prompt_fields`.
@@ -525,6 +529,8 @@ async def execute_round(
         overlap.cancel()
         raise
     await overlap
+    round_result.separable = _separability(round_result)
+    _warn_not_separable(round_result)
     winner_opt_sp = round_result.opt_sp
     assert winner_opt_sp is not None
     if obs:
@@ -721,6 +727,7 @@ async def post_round(
         log=logger.info,
     )
     await grade_round_selection(cycle, session, round_result, cb=cb)
+    reserve_selection_pass(cycle, session, budget_gate.book)
 
     if boundary is None:
         return

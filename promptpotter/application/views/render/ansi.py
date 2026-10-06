@@ -24,6 +24,7 @@ from promptpotter.application.views.view_models import (
     AnyView,
     BenchEnterView,
     BenchGradedView,
+    BenchScoredView,
     CandidatesGeneratedView,
     InitEnterView,
     InitExitView,
@@ -231,6 +232,8 @@ def to_text(view: AnyView) -> str:
             return _render_bench_enter(view)
         case BenchGradedView():
             return _render_bench_graded(view)
+        case BenchScoredView():
+            return _render_bench_scored(view)
         case RunSpendView():
             return _render_run_spend(view)
         case _:
@@ -268,6 +271,27 @@ def _render_bench_graded(v: BenchGradedView) -> str:
     return (
         f"  {DIM}bench R{reading['round']}: {column} {value} on "
         f"{reading['n_scored']} held-out rows{RESET}"
+    )
+
+
+def _render_bench_scored(v: BenchScoredView) -> str:
+    bench = v.bench
+    column = bench["headline"]
+    origin, selected = bench["origin"], bench["selected"]
+    if origin is None or selected is None:
+        return f"  {YELLOW}bench: no headline — {bench['missing_reason']}{RESET}"
+    levels = " → ".join(
+        "—" if (level := reading[column]) is None else f"{level['value']:.3f}"
+        for reading in (origin, selected)
+    )
+    band = ""
+    if (lift := bench["lift"][column]) is not None:
+        band = f", lift {lift['value']:+.3f}"
+        if lift["ci_lo"] is not None and lift["ci_hi"] is not None:
+            band += f" [{lift['ci_lo']:+.3f}, {lift['ci_hi']:+.3f}]"
+    return (
+        f"  bench: {column} {levels} (origin → R{selected['round']} selection, "
+        f"{selected['n_scored']} held-out rows{band})"
     )
 
 

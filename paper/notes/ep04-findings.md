@@ -223,9 +223,9 @@ came back all-no-op once; the parse guard caught it and the repair rung fired, a
   send, so one socket killed the campaign. `spend_book.connection_broke` (reset / TLS / protocol,
   never a timeout) now retries like a 5xx; the broken send stays held. Test rides the burst test in
   test_security. A resumed.
-- **L2 layout shape mismatch, fixed at the schema text.** CURRENT L1 LAYOUT lists slot → panels;
-  the `l1_layout` edit is panel → slot. 2 of 7 L2 fires first emitted slot → list and paid a full
-  repair call. `LAYOUT_SCHEMA_INSTRUCTION` now names the key and shows two panels moved into one slot.
+- **L2 layout shape mismatch, fixed at the listing.** CURRENT L1 LAYOUT listed slot → panels while
+  the `l1_layout` edit is panel → slot; the schema-text fix did not hold for gpt-oss, which answered
+  with slot names as keys and was refused. The listing now renders panel → slot, the edit's own shape.
 - Every L2 fire so far picked `axis=thinking_style` and reported `l1_layout_voids_prefix` (still open,
   the name collision above).
 - Log→campaign: A=`9943b8`, B=`fbd663`, C=`464548`. B elected r3-r5 (r4 C4.1 θ +0.037 vs parent -0.586,

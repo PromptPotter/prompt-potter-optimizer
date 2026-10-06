@@ -5,11 +5,12 @@
 from __future__ import annotations
 
 from functools import partial
+from statistics import fmean
 from typing import TYPE_CHECKING, NamedTuple, cast
 
 from promptpotter.application.runner.termination import RUN_STOPS, run_stop_reason
 from promptpotter.application.scoring.classification import scoreable_rows
-from promptpotter.application.scoring.formula import rescore_results
+from promptpotter.application.scoring.formula import cell_channels_of, rescore_results
 from promptpotter.application.scoring.metrics import fold_cells
 from promptpotter.application.scoring.search_point_scorer import (
     SCORING_ERROR_ABORT,
@@ -41,6 +42,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.scoring import CellScorer, QueryMeasurement
     from promptpotter.domain.search_point import JobSearchPoint
+    from promptpotter.infrastructure.llm.spend_book import SpendBook
     from promptpotter.infrastructure.store.stores import Stores
 
 __all__ = [
@@ -53,6 +55,7 @@ __all__ = [
     "nothing_held_out",
     "read_bench",
     "read_pass",
+    "reserve_selection_pass",
     "score_on_bench",
     "unheld_bench",
 ]
@@ -313,6 +316,25 @@ async def grade_round_selection(
         ),
         label=label,
     )
+
+
+def reserve_selection_pass(cycle: Cycle, session: Session, book: SpendBook) -> None:
+    """Restate what *book* sets aside for the bench at the SELECTION's price. It opens at the
+    origin's, and an individual that makes the solver write more ends its pass short under that.
+    Nothing set aside means nothing to restate: no line, or a ceiling the bench is metered beside."""
+    if not book.set_aside_usd:
+        return
+    costs = [
+        cost
+        for row in cycle.selection.results
+        if (cost := cell_channels_of(row).get("cost")) is not None
+    ]
+    if not costs:
+        return
+    # One cell on top of the mean: the last row is admitted at the dearest bill, never the average.
+    usd = len(session.scoring.require_partition().bench) * fmean(costs) + max(costs)
+    if usd > book.set_aside_usd:
+        book.set_aside(usd, round(book.set_aside_tokens * usd / book.set_aside_usd))
 
 
 async def bench_selection(

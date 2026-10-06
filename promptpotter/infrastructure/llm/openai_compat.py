@@ -141,11 +141,11 @@ defines, ``none`` included, which means reasoning genuinely OFF rather than abse
 the sender because it is a wire fact: stated anywhere else, it goes out as a literal string."""
 
 
-def _validation_summary(err: ValidationError, content: str) -> str:
-    """Which schema rules one attempt broke, and what it emitted — kept on the response so a
-    paid retry's cause is on disk, even when a later rung rescued the call."""
+def _validation_summary(err: ValidationError, content: str, finish_reason: str | None) -> str:
+    """Why one attempt stopped, which schema rules it broke, and what it emitted — kept on the
+    response so a paid retry's cause is on disk, even when a later rung rescued the call."""
     broke = "; ".join(f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in err.errors()[:5])
-    return f"{broke} || emitted: {truncate(content, 1500)}"
+    return f"finish={finish_reason} || {broke} || emitted: {truncate(content, 1500)}"
 
 
 class OpenAICompatibleClient(LLMClientBase):
@@ -378,7 +378,9 @@ class OpenAICompatibleClient(LLMClientBase):
                 ]
             )
             for attempt_no, (retry_kind, retry_params) in enumerate(ladder, start=1):
-                repair_errors.append(_validation_summary(validation_err, content))
+                repair_errors.append(
+                    _validation_summary(validation_err, content, _finish_reason(response))
+                )
                 logger.warning(
                     "%s: %s parse failed (%d errors, %d content chars, finish=%s) on %s — %s. "
                     "Retrying via %s (rung %d of %d; each is a full call). Errors: %s",
@@ -460,6 +462,7 @@ class OpenAICompatibleClient(LLMClientBase):
             usage=billed,
             cost_usd=_billed_cost(first_cost, reply_cost(response)),
             served_by=reply_served_by(response),
+            finish_reason=_finish_reason(response),
             parsed=parsed,
             schema_repair_errors=repair_errors,
         )

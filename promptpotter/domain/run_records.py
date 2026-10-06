@@ -386,9 +386,9 @@ RoundWarningKind = Literal[
     # failure, and the re-send at the next round's head failed too. The generator then rewrites a
     # prompt nothing told it how to fix, which is invisible on every other channel.
     "l1_critique_unavailable",
-    # The odd one out, deliberately: nothing failed. The round measured cleanly and still
-    # resolved nothing — no arm's blocked lift over the parent excluded 0 — which looks
-    # identical to a decisive round on every other channel. Emitted by `runner/round.py`.
+    # The odd one out, deliberately: nothing failed. The round selected an arm whose lead over C0
+    # on the origin panel still spans 0, which looks identical to a decisive round on every other
+    # channel. Emitted by `runner/round.py`.
     "round_not_separable",
 ]
 

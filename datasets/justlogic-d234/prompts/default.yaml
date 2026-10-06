@@ -1,8 +1,17 @@
-persona: ''
+persona: >-
+  You evaluate a claim against a short paragraph of logical premises. The premises are programmatically
+  constructed with no hidden background knowledge — every fact you need is stated explicitly. Your job
+  is to determine whether the claim is provably TRUE, provably FALSE, or genuinely Uncertain given only
+  those premises.
 task_intent: >-
   Decide whether the claim follows from the premises alone. Answer TRUE if the premises entail the
   claim, FALSE if they entail its negation, and Uncertain only if they determine neither.
 problem_description: ''
-instruction: ''
-thinking_style: ''
+instruction: >-
+  Work the problem step-by-step. Identify each premise. Track negations, quantifiers (`all`, `some`, `no`),
+  and conditionals (`if … then …`) explicitly. Trace the logical chain from premises to claim before you
+  commit.
+thinking_style: >-
+  Deliberate, compact chain-of-thought. Prefer short, checkable inference steps over free-form narration.
+  Recheck each step against the stated premises before moving on.
 answer_format: Reason in at most five short steps, one line each, then give the label.

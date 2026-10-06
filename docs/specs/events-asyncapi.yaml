@@ -558,12 +558,11 @@ components:
             # `message` is the refusal's own sentence — which ceiling, and the sums
             # behind it, or that no rate prices the route. `severity: error`.
             - send_refused
-            # The round measured cleanly and still resolved nothing: no arm's
-            # blocked lift over the parent excluded 0
-            # (`ScoredCandidate.reference_lift_ci_*`). The round's numbers
-            # are real and its winner is the best of what it saw — but the
-            # panel cannot tell that winner from the parent, so the point
-            # estimate must not be read as a result. Distinct from every kind
+            # The round selected an arm whose lead over C0 on the origin
+            # panel still spans 0 (`OverlapReading.lead_interval`). The round's
+            # numbers are real and its winner is the best of what it saw —
+            # but the point estimate must not be read as a result. Emitted
+            # at round close, after the overlap pass. Distinct from every kind
             # above: nothing failed, nothing was recovered from, and the round
             # looks identical on every other channel. That silence is the
             # defect this kind exists to break.

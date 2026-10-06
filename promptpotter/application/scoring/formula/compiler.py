@@ -12,6 +12,7 @@ from typing import Any, Literal, NamedTuple, cast
 
 from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
 from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS
+from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.scoring import (
     DEFAULT_SCORER_ID,
     CellScorer,
@@ -20,7 +21,7 @@ from promptpotter.domain.scoring import (
     recorded_cost_s,
 )
 from promptpotter.domain.spend import TokenAccount
-from promptpotter.shared.errors import PayloadInvalidError, has_pipeline_warnings, is_error_result
+from promptpotter.shared.errors import PayloadInvalidError, is_error_result
 
 # The L4 recursion's measurand, in logits: one inner campaign's mean-over-rounds lift over its OWN
 # origin. Absent on an ordinary campaign, where a cell is a sample and has no origin of its own.
@@ -268,7 +269,7 @@ _CHANNEL_READERS: dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], flo
 # measurement, and the evidence side would score a cell it cannot read at a fabricated 0.
 _ROW_HEALTH: dict[str, Callable[[Mapping[str, Any]], float]] = {
     "errored": lambda row: float(is_error_result(row)),
-    "degraded": lambda row: float(has_pipeline_warnings(row)),
+    "degraded": lambda row: float(is_degraded(row)),
     "cached": lambda row: float(bool(row.get("cached", False))),
 }
 
@@ -297,7 +298,7 @@ CELL_TERMS: dict[str, CellTerm] = {
     "tokens": CellTerm("low", "Input plus output tokens the cell spent."),
     "target_prompt_chars": CellTerm("low", "Characters of the candidate's prompt template."),
     "errored": CellTerm("low", "1 where the cell errored, else 0."),
-    "degraded": CellTerm("low", "1 where the pipeline reported degradation, else 0."),
+    "degraded": CellTerm("low", "1 where a pipeline node did not finish cleanly, else 0."),
     "cached": CellTerm("high", "1 where the cell was replayed from the archive, else 0."),
 }
 assert set(CELL_TERMS) == {*_CHANNEL_READERS, *_ROW_HEALTH}, "a per-cell term went untaught"

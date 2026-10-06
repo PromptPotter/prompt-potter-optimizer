@@ -1532,6 +1532,8 @@ def test_a_round_that_measured_nothing_usable_names_which_way_it_broke():
     abstains rather than fabricating a verdict, and a wrong-but-extractable round IS a
     measurement — real labels, just wrong — which must stay gradable on accuracy."""
     from promptpotter.application.runner.termination import origin_gate_tripped
+    from promptpotter.application.scoring.evaluators import compute_degraded_rate
+    from promptpotter.application.scoring.row_diagnostics import count_degraded_samples
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.results_health import compute_round_health
 
@@ -1616,22 +1618,25 @@ def test_a_round_that_measured_nothing_usable_names_which_way_it_broke():
     # A retry that RECOVERED is not a starved node: re-asked, answered and scored, its cell is
     # measured, and a round graded `evidence_starved` on it tells L2 the backend is down.
     retried = {"step": "llm_only", "code": "llm_retry", "kind": "transient"}
-    recovered = compute_round_health(
-        results=[_health_row({"llm_only": "success"}, retried, predicted="TRUE") for _ in range(11)]
-        + answered("TRUE")[:9],
-        prior_healths=[],
-    )
+    recovered_rows = [
+        _health_row({"llm_only": "success"}, retried, predicted="TRUE") for _ in range(11)
+    ] + answered("TRUE")[:9]
+    recovered = compute_round_health(results=recovered_rows, prior_healths=[])
     assert recovered is not None
     assert recovered.node_failure_rates == {} and recovered.cause != "evidence_starved"
     assert (recovered.grade, recovered.transient_count) == ("healthy", 0)
     # …while the same warning on a node that did NOT finish is the starvation it always was.
-    starved = compute_round_health(
-        results=[_health_row({"llm_only": "failed"}, retried) for _ in range(11)]
-        + answered("TRUE")[:9],
-        prior_healths=[],
-    )
+    starved_rows = [_health_row({"llm_only": "failed"}, retried) for _ in range(11)] + answered(
+        "TRUE"
+    )[:9]
+    starved = compute_round_health(results=starved_rows, prior_healths=[])
     assert starved is not None
     assert (starved.cause, starved.node_failure_rates) == ("evidence_starved", {"llm_only": 0.55})
+    # The formula's `degraded_rate` and the round's `degraded_samples` read the grade's own rows:
+    # counted off the warning alone they said 11 of 20 under a `healthy` verdict.
+    for rows, n in ((recovered_rows, 0), (starved_rows, 11)):
+        assert count_degraded_samples(rows) == n
+        assert compute_degraded_rate(results=rows) == n / 20
 
 
 def _peer_cycle(
@@ -4513,16 +4518,12 @@ def test_a_reproposed_idea_is_rejected_even_when_rewritten_into_another_field():
 
 def test_parse_population_flags_dropped_optimizer_prompt_port():
     """An L4 candidate whose merged `l1_generate` prose drops an INLINE port
-    (`{{citable_fields}}` in `problem_description`, `{{n_variants}}` in `task_intent`+`instruction`)
-    is invalid (synthetic-0) — a severed channel once ran 4 inner campaigns as normal
-    measurements, silently. The capability directives now ride the layout (guarded by
-    `validate_l1_layout`'s mandatory set); the inline format ports guarded here can never
-    move there, so this is the guard's permanent scope. Checked on MERGED params, so a
-    child inheriting the broken prose from its parent (no override of its own) flags too.
-
-    The citable menu sits in `problem_description` rather than `answer_format` because it is the
-    one per-ROUND value in an otherwise static template, and `problem_description` renders last —
-    holding it ahead of that voided the provider prefix cache for everything behind it."""
+    (`{{n_variants}}` in `task_intent`+`instruction`) is invalid (synthetic-0) — a severed
+    channel once ran 4 inner campaigns as normal measurements, silently. The capability
+    directives now ride the layout (guarded by `validate_l1_layout`'s mandatory set); the inline
+    format ports guarded here can never move there, so this is the guard's permanent scope.
+    Checked on MERGED params, so a child inheriting the broken prose from its parent (no override
+    of its own) flags too."""
     from promptpotter.application.optimizer_manifest import resolve_optimizer
     from promptpotter.application.optimizers.potter.dispatch.prompts import (
         base_optimizer_template,
@@ -4532,21 +4533,22 @@ def test_parse_population_flags_dropped_optimizer_prompt_port():
     schema = PipelineSchema(
         name="promptpotter-self",
         nodes=[
-            PipelineNode(name="l1_generate", param_keys={"problem_description"}, tunes_llm=False)
+            PipelineNode(
+                name="l1_generate", param_keys={"task_intent", "instruction"}, tunes_llm=False
+            )
         ],
     )
     parent = _parent()
     potter = resolve_optimizer("potter", {})
-    base_problem_description = base_optimizer_template(potter, "l1_generate").problem_description
+    base = base_optimizer_template(potter, "l1_generate")
+    severed = {"task_intent": "Propose candidates.", "instruction": "Read the panels."}
     dropped = CandidateProposal(
         opt_sp=OptSearchPoint.derive([parent], source="potter:l1_generate"),
-        pipeline_overlay={"l1_generate": {"problem_description": "Read the panels."}},
+        pipeline_overlay={"l1_generate": severed},
     )
     intact = CandidateProposal(
         opt_sp=OptSearchPoint.derive([parent], source="potter:l1_generate"),
-        pipeline_overlay={
-            "l1_generate": {"problem_description": base_problem_description + " Be terse."}
-        },
+        pipeline_overlay={"l1_generate": {"instruction": base.instruction + " Be terse."}},
     )
     inherits_broken = CandidateProposal(
         opt_sp=OptSearchPoint.derive([parent], source="potter:l1_generate", persona="Strict")
@@ -4565,7 +4567,7 @@ def test_parse_population_flags_dropped_optimizer_prompt_port():
     parse_population(
         [inherits_broken],
         parent,
-        pipeline_params={"l1_generate": {"problem_description": "Panels without ports."}},
+        pipeline_params={"l1_generate": severed},
         schema=schema,
         runtime_failures=[],
         demo_ids=frozenset(),
@@ -4578,7 +4580,7 @@ def test_parse_population_flags_dropped_optimizer_prompt_port():
     # replacement can carry a gutting reason alongside it.
     (port,) = [vf for vf in dropped_failures if vf.reason == "dropped_mandatory_placeholder"]
     assert port.axis == "l1_generate.prompt"
-    assert "citable_fields" in port.value
+    assert "n_variants" in port.value
     assert intact.validation_failures == []
     assert [vf.reason for vf in inherits_broken.validation_failures] == [
         "dropped_mandatory_placeholder"

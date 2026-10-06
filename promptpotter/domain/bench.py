@@ -145,7 +145,8 @@ class BenchPasses(StrictModel):
     tolerance: int
     origin: BenchPass
     # What the origin's pass incurred, replays priced: set aside at every launch so the selection's
-    # pass still fits under the ceiling the search spends against.
+    # pass still fits under the ceiling the search spends against, and restated each round at the
+    # selection's own price (``runner/bench.py::reserve_selection_pass``).
     reserve_usd: float
     reserve_tokens: int
     # `None` until the selection is graded: the origin's pass is banked before any search.

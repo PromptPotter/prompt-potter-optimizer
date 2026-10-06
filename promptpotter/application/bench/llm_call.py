@@ -393,6 +393,8 @@ async def llm_call(
             "usage": response.usage.model_dump(),
             "model": response.model,
             "duration_s": duration_s,
+            # The final attempt's; `length` is the answer cut at `max_tokens`.
+            "finish_reason": response.finish_reason,
             # Non-zero ⇒ the JSON only landed after an extra round-trip — the audit trail's
             # read on prompt parse quality, rolled up per cycle in ``review.md``.
             "schema_repair_errors": response.schema_repair_errors,

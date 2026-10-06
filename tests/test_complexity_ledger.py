@@ -390,7 +390,11 @@ LEDGER_BASELINE = {
     # +7: the bench carries BOTH columns whole and names its headline. `BandedValue` (3) and
     # `BenchColumns` (2) replace the six flat lift fields and a reading's lone band, so accuracy
     # gets the interval it lacked, and `headline` rides the score and each reading.
-    "cycle_result_fields": 237,
+    # +1: `OverlapReading.lead_interval` — the newest pick's paired lift over C0 on the origin
+    # panel. `RoundResult.separable` reads it in place of one round's interval over its parent,
+    # which spanned 0 on almost every round and stalled them all alike; it needs the rows the
+    # overlap pass holds, so no reader can derive it from the member rates beside it.
+    "cycle_result_fields": 238,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
@@ -452,13 +456,19 @@ LEDGER_BASELINE = {
     # +1: `ArmBudget.determinism` — the determinism clamp a head-to-head declares per arm, as its
     # JSON dump: the typed clamp is `campaign_config.py`'s, whose `Knob` annotations `domain/` may
     # not import, and the record needs only equality over it.
-    "domain_any_maps": 88,
+    # +2: `row_failure` / `is_degraded` — the round grade's reading of one row, lifted out of its
+    # loop so the `degraded` count, rate and formula term read it too; `shared/errors.py`'s
+    # warning-only twin, which no domain row counted, is gone.
+    "domain_any_maps": 90,
     "models_lax": 3,
     "prompt_string_fields": 6,
     # +1: `demo_pool` — the value space of the `shot_ids` slot and the one carrier of the parent's
     # shots, which `rendered_prompt` leaves out. Folds into no catalogue: its rows are fenced
     # dataset text, and the slot withdraws on this panel's silence alone.
-    "injections": 33,
+    # +1: `skill_tiers` — the skill-body search order L2 and L3 carried as static prose on every
+    # target. A panel is the one shape that can be silent where the candidate is not a skill, and
+    # it replaces two copies of the text with one.
+    "injections": 34,
     # +1: `l1_only_ladder`. The L1 / L1+L2 / full ablation needs an arm where L2 PROVABLY never
     # fires, and a rule is the only place that can be true of: the router is the whole policy, so
     # a gate at the caller would leave the policy saying FIRE_L2 while the loop quietly did not.

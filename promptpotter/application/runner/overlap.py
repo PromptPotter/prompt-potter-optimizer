@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.scoring.metrics import _compute_accuracy
 from promptpotter.application.scoring.search_point_scorer import score_search_point
+from promptpotter.application.scoring.selection import paired_fitness
 from promptpotter.domain.results import (
     LineStep,
     OverlapMember,
@@ -18,6 +19,7 @@ from promptpotter.domain.results import (
     origin_panel,
 )
 from promptpotter.shared.instrument import MeasuredCandidate, MeasurementRole
+from promptpotter.shared.statistics import paired_reading
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
@@ -36,7 +38,7 @@ async def measure_overlap(
     """Put the whole best-so-far line back on the origin panel, buying only the cells each member
     is missing, and stamp the reading onto *round_result*.
 
-    Called after the election, the ruler extension and the panel gate, so every decision this
+    Called after the election, the ruler extension and the panel gate, so every pick this
     round makes is already made before the first of these cells is bought. That ordering IS the
     quarantine; the fields it writes are outside `results` / `all_candidate_results` so the NEXT
     round's acquisition, ruler and floor cannot see them either.
@@ -83,15 +85,30 @@ async def measure_overlap(
         rows_by_key[step.key] = merge_known_outcomes(step.rows, fresh)
 
     members = [_member(s, rows_by_key[s.key], keep) for s in ordered]
+    newest, first = paired_fitness(
+        _on_set(rows_by_key[ordered[-1].key], keep),
+        _on_set(rows_by_key[origin.key], keep),
+        grade="fitness",
+    )
+    _lead, lead_lo, lead_hi, _p, _n = paired_reading(newest, first)
     round_result.overlap_results = bought
     round_result.overlap = OverlapReading(
-        sample_ids=panel, members=members, measured=sum(len(r) for r in bought.values())
+        sample_ids=panel,
+        members=members,
+        measured=sum(len(r) for r in bought.values()),
+        lead_interval=(lead_lo, lead_hi) if lead_lo is not None and lead_hi is not None else None,
+    )
+
+
+def _on_set(rows: list[dict[str, Any]], keep: set[int]) -> list[QueryMeasurement]:
+    return cast(
+        "list[QueryMeasurement]",
+        [r for r in rows if (sid := r.get("sample_id")) is not None and int(sid) in keep],
     )
 
 
 def _member(step: LineStep, rows: list[dict[str, Any]], keep: set[int]) -> OverlapMember:
-    on_set = [r for r in rows if (sid := r.get("sample_id")) is not None and int(sid) in keep]
-    stats = _compute_accuracy(cast("list[QueryMeasurement]", on_set))
+    stats = _compute_accuracy(_on_set(rows, keep))
     return OverlapMember(
         round=step.round,
         candidate_id=step.candidate_id,

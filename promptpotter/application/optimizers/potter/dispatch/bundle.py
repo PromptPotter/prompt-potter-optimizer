@@ -18,6 +18,7 @@ from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.domain.value_tree import Delivery
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
@@ -34,7 +35,8 @@ shapes_optimizer_prompt(__name__)
 # is the inner optimizer prompts — so a whole-prompt ceiling can only guess at it, and guessing low
 # refuses the node its own subject. A runaway is `char_cap`'s job, at render.
 OPTIMIZER_DISCRETIONARY_CHARS: dict[str, int] = {
-    "l1_generate": 7_000,
+    # Room for two whole transcripts behind the frame: the generator writes a method from them.
+    "l1_generate": 11_000,
     # A whole sample transcript is indivisible, so this allowance alone decides how many the
     # distiller sees; set where two still fit beside the frame.
     "l1_critique": 7_500,
@@ -56,8 +58,8 @@ SCHEMA_DESCRIPTIONS_INSTRUCTION = (
     "`description` of that field on this node's OWN output schema. This prose sits "
     "adjacent to the slot it governs, inside the field-filling loop, so it steers the "
     "model harder per token than the instruction does. Paths are FIXED — you describe "
-    "a field, you never rename or add one. Describe only where the current prose "
-    "underspecifies what the field should hold."
+    "a field, you never rename or add one. Rewrite one your prompt edit contradicts, "
+    "or that underspecifies what the field should hold."
 )
 
 SCHEMA_RENAME_INSTRUCTION = (
@@ -72,9 +74,9 @@ SCHEMA_RENAME_INSTRUCTION = (
 LAYOUT_SCHEMA_INSTRUCTION = (
     "Which prompt slot each evidence panel fills. Name a panel to MOVE it to that "
     "slot; a panel you omit stays where it is, and a panel is only ever in one "
-    "place. Keyed by PANEL, one slot string each — the inverse of the CURRENT L1 "
-    'LAYOUT listing: {"critique": "thinking_style", "failing_samples": '
-    '"thinking_style"} moves two panels into one slot. Slot order within the prompt '
+    "place. Keyed by PANEL, one slot string each, as the CURRENT L1 LAYOUT listing "
+    'is: {"critique": "thinking_style", "failing_samples": "thinking_style"} moves '
+    "two panels into one slot. Slot order within the prompt "
     "is the floor's and does not move — what you choose is which slot a panel speaks from."
 )
 
@@ -301,6 +303,9 @@ class InjectionBundle:
     is_origin_round: bool = False
     # `Connector.measured_unit` — every panel counting rows renders through it.
     measured_unit: MeasuredUnit = "sample"
+    # `Connector.prompt_delivery` under this campaign's params — the channel the candidate reaches
+    # the model by, which is what makes it a skill body or a message.
+    prompt_delivery: Delivery = "request"
     # The campaign's demo pool and the most shots a variant may carry; either empty silences the
     # shot menu, which withdraws the `shot_ids` slot with it.
     demo_pool: tuple[Sample, ...] = ()

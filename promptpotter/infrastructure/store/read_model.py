@@ -21,7 +21,12 @@ from typing import Any, ClassVar, Protocol, cast
 from filelock import FileLock
 
 from promptpotter.config.settings import LOCK_TIMEOUT
-from promptpotter.infrastructure.store.io import append_line, ensure_parent_dir, write_jsonl
+from promptpotter.infrastructure.store.io import (
+    append_line,
+    ensure_parent_dir,
+    open_text_robust,
+    write_jsonl,
+)
 
 
 def iter_jsonl(path: Path, *, record_types: frozenset[str] | None = None) -> list[dict[str, Any]]:
@@ -30,7 +35,7 @@ def iter_jsonl(path: Path, *, record_types: frozenset[str] | None = None) -> lis
     probes = tuple(f'"{t}"' for t in record_types) if record_types else ()
     rows: list[dict[str, Any]] = []
     try:
-        with open(path, encoding="utf-8") as fh:
+        with open_text_robust(path) as fh:
             for raw in fh:
                 # Probe the raw line BEFORE stripping or parsing: on a ledger the skipped
                 # lines are the overwhelming majority, so anything spent per line before the

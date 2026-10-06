@@ -12,9 +12,10 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.pipeline_schema import NodeType
+from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.scoring import extract_item_label, is_verifier_graded
 from promptpotter.shared import text_list_items, text_list_rank
-from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
+from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 shapes_optimizer_prompt(__name__)
@@ -58,7 +59,7 @@ def find_rank(items: list[Any], ground_truth: str) -> int | None:
 
 
 def count_degraded_samples(results: Sequence[Mapping[str, Any]]) -> int:
-    return sum(1 for r in results if has_pipeline_warnings(r))
+    return sum(1 for r in results if is_degraded(r))
 
 
 def judge_readings(row: Mapping[str, Any]) -> list[tuple[str, str, str]]:

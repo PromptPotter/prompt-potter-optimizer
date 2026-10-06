@@ -154,7 +154,7 @@ which 10 of 10 popular agent benchmarks failed, gets filled in for this bench an
 appendix.
 
 Beside it, two of the round counts a cycle banks in `index.json::final`, which say how *fast* rather
-than how *high*: **`rounds_to_separable`**, the first round whose arms could be told apart at all,
+than how *high*: **`rounds_to_separable`**, the first round whose pick separates from the origin on the shared panel,
 and **`rounds_to_improved`**, the first round that crowned a winner. Quote the first. The second is
 a promotion verdict on `lift > 0.0` with no interval and no multiplicity correction
 ([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § The crowning bar), so the

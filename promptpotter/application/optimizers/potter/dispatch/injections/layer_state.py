@@ -32,6 +32,7 @@ from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.connector import unit_plural
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM
 from promptpotter.domain.results_health import evidence_starved_node
+from promptpotter.domain.value_tree import visibility_of
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,8 @@ def _r_l3_to_l2_note(b: InjectionBundle) -> list[Item]:
 _TARGET_PROMPT_HEADER = (
     "CURRENT PROMPT — the text an override REPLACES, field by field. These sections "
     "concatenate VERBATIM in this order to form the prompt, with the operator's upstream and "
-    "downstream framing spliced around problem_description; a field you do not name is carried "
+    "downstream framing spliced around problem_description and the output schema's field "
+    "descriptions sent beside it; a field you do not name is carried "
     "forward unchanged, so restating one field's text — or that framing — inside another ships "
     "it twice."
 )
@@ -159,14 +161,28 @@ def _r_l1_overrides(b: InjectionBundle) -> list[Item]:
 def _r_l1_layout(b: InjectionBundle) -> list[Item]:
     """The OTHER lever's current value, the sibling ``l1_overrides`` has. An edit MOVES one panel, so
     what L2 needs to read is where each already sits — including the ones sitting nowhere, which are
-    the only ones a move can gain the prompt."""
+    the only ones a move can gain the prompt. Listed panel → slot, the direction an edit is keyed:
+    shown slot → panels, an optimizer answers with slot names as keys and the edit is refused.
+
+    A panel that renders nothing is listed in NEITHER half, as `l1_layout`'s own enum leaves it
+    out: placed or not, it is nothing L1 reads today."""
     layout = b.memory.l1_layout
-    lines = [f"  {slot}: {', '.join(layout.slot(slot)) or '(empty)'}" for slot in L1_LAYOUT_SLOTS]
-    # Less what the campaign cannot fill, which `l1_layout`'s own enum leaves out too.
-    offered = NODE_LAYOUTS["l1_generate"].possible - withheld_l1_panels(b)
+    withheld = withheld_l1_panels(b)
+    lines = [
+        f'  "{panel}": "{slot}"'
+        for slot in L1_LAYOUT_SLOTS
+        for panel in layout.slot(slot)
+        if panel not in withheld
+    ]
+    offered = NODE_LAYOUTS["l1_generate"].possible - withheld
     if unplaced := sorted(offered - set(layout.all_placeholders())):
-        lines.append(f"  available, not shown: {', '.join(unplaced)}")
-    return [Item("CURRENT L1 LAYOUT — what l1_generate reads today:\n" + "\n".join(lines))]
+        lines.append(f"  in no slot, available to place: {', '.join(unplaced)}")
+    return [
+        Item(
+            "CURRENT L1 LAYOUT — each panel l1_generate reads today, and the slot it fills:\n"
+            + "\n".join(lines)
+        )
+    ]
 
 
 @signal(
@@ -204,6 +220,31 @@ def _r_critique(b: InjectionBundle) -> list[Item]:
     schema = b.pipeline_schema
     axes = None if schema is None else critique_axes(schema, offers_shots=b.offers_shots)
     return [Item(format_l1_critique_for_prompt(b.digest.critique, axes))]
+
+
+_SKILL_TIERS_TEXT = (
+    "SKILL TARGET — the candidate is the body of an agent skill (a SKILL.md). Work on the first "
+    "tier the data shows failing:\n"
+    "  1 VALID — under 500 lines, and no instruction to leak secrets, disable checks or run "
+    "unvetted downloads.\n"
+    "  2 NO REPEATS — merge or delete guidance it restates, never append another version.\n"
+    "  3 LIFT — delete a line whose removal would not lower the score, rather than reword it."
+)
+
+
+@signal(
+    "skill_tiers",
+    kind=InjectionKind.DIRECTIVE,
+    char_cap=None,
+    citable=False,
+)
+def _r_skill_tiers(b: InjectionBundle) -> list[Item]:
+    """The search order for a skill body, rendered only where the candidate IS one — the prompt
+    reaches the model as an artifact it must open. On every other target the tiers describe
+    nothing the layer can act on."""
+    if visibility_of(b.prompt_delivery) != "on_demand":
+        return []
+    return [Item(_SKILL_TIERS_TEXT)]
 
 
 _REBASE_CAPABILITY_TEXT = (

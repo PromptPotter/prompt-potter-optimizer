@@ -31,6 +31,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -336,9 +337,13 @@ def _npm_audit(_: Sel) -> Outcome:
     ``--package-lock-only`` reads the lock rather than an install, so this answers before
     ``npm ci`` and judges the file that is actually frozen into the release. ``--audit-level``
     sets the EXIT CODE only — the report still lists every severity, so a moderate is seen
-    here and blocks nothing, while ``_advisories`` is the exhaustive half.
+    here and blocks nothing, while ``_advisories`` is the exhaustive half. ``--omit=dev``
+    because the question is what the wheel carries: lint and test tooling is never in the
+    bundle, and an unpatched advisory there (``braces``, under the ESLint preset) would hold
+    every release for a package no user receives.
     """
-    return _run(_node("npm", "audit", "--package-lock-only", "--audit-level=high"), _WEBAPP)
+    audit = ("audit", "--package-lock-only", "--omit=dev", "--audit-level=high")
+    return _run(_node("npm", *audit), _WEBAPP)
 
 
 # No release to move to, so there is nothing to bump: each names what keeps it out of reach, and
@@ -444,12 +449,51 @@ def _mypy(_sel: Sel) -> Outcome:
     ``opt_sp``. None of them raised until someone ran them, and ruff cannot see an attribute
     that is not there. ``shared_config`` is followed but not a target: it stays import-safe
     for Colab, so it imports nothing of ours.
+
+    Once per platform we run on, because mypy checks only the ``sys.platform`` branch it is
+    told it is on: Windows-only ``subprocess`` flags read clean at the desk and red on CI. The
+    foreign pass keeps its own cache, or the two would evict each other on every run.
     """
-    return _run(
-        _py("mypy", "promptpotter/", "scripts/", f"{_BBEH_DIR}/bbeh_potter_runner.py"),
-        _REPO,
-        MYPYPATH=str(_REPO / _BBEH_DIR),
-    )
+    targets = ("promptpotter/", "scripts/", f"{_BBEH_DIR}/bbeh_potter_runner.py")
+    for platform in _PLATFORMS:
+        foreign = () if platform == sys.platform else ("--cache-dir", f".mypy_cache/{platform}")
+        rc, out = _run(
+            _py("mypy", "--platform", platform, *foreign, *targets),
+            _REPO,
+            MYPYPATH=str(_REPO / _BBEH_DIR),
+        )
+        if rc:
+            return rc, f"as {platform}:\n{out}"
+    return 0, ""
+
+
+_PLATFORMS = ("linux", "win32")
+_EXTRA_ARG = re.compile(r"--extra[ =]([\w-]+)")
+
+
+def _extras(_: Sel) -> Outcome:
+    """Every extra a workflow, a deploy script or this gate syncs is one ``pyproject.toml`` has.
+
+    ``uv sync --extra NAME`` fails at install on a name that is gone, and each caller spells
+    its own list — so an extra deleted at the desk, where only ``_PINNED_EXTRAS`` is synced,
+    turned every CI job red before a single check ran.
+    """
+    declared = tomllib.loads((_REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    known = set(declared["project"]["optional-dependencies"])
+    callers = [
+        *(_REPO / ".github" / "workflows").glob("*.yml"),
+        *(_REPO / "deploy-linux").glob("*.sh"),
+    ]
+    asked = {
+        (path.name, name)
+        for path in callers
+        for name in _EXTRA_ARG.findall(path.read_text(encoding="utf-8"))
+    }
+    asked |= {("gate.py", name) for name in _PINNED_EXTRAS}
+    gone = sorted(f"  {caller}: --extra {name}" for caller, name in asked if name not in known)
+    if gone:
+        return 1, "not an extra in pyproject.toml:\n" + "\n".join(gone)
+    return 0, ""
 
 
 CHECKS: tuple[Check, ...] = (
@@ -457,6 +501,7 @@ CHECKS: tuple[Check, ...] = (
     Check("ruff-check", "py", _ruff("check"), staged=True),
     Check("deptry", "py", lambda _: _run(_py("deptry", "."), _REPO)),
     Check("mypy", "py", _mypy),
+    Check("extras", "py", _extras, staged=True),
     Check("layering", "py", _layering, staged=True),
     Check("claude-md-size", "py", _claude_md_size, staged=True),
     # "py" so it runs without `webapp/node_modules`, which is routinely absent — a guard that

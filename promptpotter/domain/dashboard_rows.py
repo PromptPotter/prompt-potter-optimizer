@@ -335,12 +335,11 @@ class RoundSummary(StrictModel):
     # came closest or how far short, which is the question a browser reader actually has; this is
     # that answer's only route out of the engine. Round 0 holds no election ⇒ unset.
     verdict_reason: str | None = None
-    # Did this round resolve anything — mirrors ``RoundResult.separable``, decided over the WHOLE
-    # electable field (`runner/round.py::_separability`). THREE-state: ``None`` is "no arm
-    # carries a lift interval", which is not inconclusive but nothing to be conclusive about, and a
-    # reader collapsing it onto ``False`` reports an unasked question as a negative answer. One
-    # arm's own bracket cannot answer this, so no surface may stand in for it with the leading
-    # arm's.
+    # Did this round advance the best-so-far line — mirrors ``RoundResult.separable``
+    # (`runner/round.py::_separability`). THREE-state: ``None`` is "the line carries no
+    # interval", which is not inconclusive but nothing to be conclusive about, and a reader
+    # collapsing it onto ``False`` reports an unasked question as a negative answer. An arm's own
+    # bracket over its parent cannot answer this, so no surface may stand in for it with one.
     separable: bool | None = None
     # Mirrors `RoundResult.stamps_theta`.
     stamps_theta: bool = False

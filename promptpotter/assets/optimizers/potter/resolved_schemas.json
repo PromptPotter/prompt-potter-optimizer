@@ -32,7 +32,7 @@
                   "additionalProperties": true,
                   "type": "object"
                 },
-                "description": "Per-node tunables, shape {node_name: {param: value}}. Inner per-node properties are grafted from the active PipelineSchema at runtime.",
+                "description": "Nested {node: {param: value}} — scalar backend tunables, and \"output_schema_descriptions.<path>\": prose, which rewrites the `description` of that field of the node's output schema. Each is a param under ITS NODE like any other, NEVER a top-level key beside the nodes. Paths are FIXED: you describe a field, never rename or invent one. Scalar params (temperature, tokens, effort) are a last resort: at most one, and only where a panel or a runtime failure points there.",
                 "title": "Pipeline Overlay",
                 "type": "object"
               },
@@ -81,7 +81,7 @@
                 "type": "string"
               },
               "citation": {
-                "maxLength": 320,
+                "maxLength": 120,
                 "title": "Citation",
                 "type": "string"
               }
@@ -125,7 +125,7 @@
         "additionalProperties": false,
         "properties": {
           "failure_highlights": {
-            "description": "≤3 failure diagnoses quoting the decisive transcript evidence — claim, broken reasoning step, predicted vs GT. Each item ≤320 chars (downstream truncates).",
+            "description": "One diagnosis per DISTINCT failure cluster, ≤3 — claim, broken reasoning step, predicted vs GT. Each item ≤320 chars (downstream truncates).",
             "items": {
               "type": "string"
             },
@@ -223,7 +223,7 @@
               ],
               "type": "string"
             },
-            "description": "Which prompt slot each evidence panel fills. Name a panel to MOVE it to that slot; a panel you omit stays where it is, and a panel is only ever in one place. Keyed by PANEL, one slot string each — the inverse of the CURRENT L1 LAYOUT listing: {\"critique\": \"thinking_style\", \"failing_samples\": \"thinking_style\"} moves two panels into one slot. Slot order within the prompt is the floor's and does not move — what you choose is which slot a panel speaks from.",
+            "description": "Which prompt slot each evidence panel fills. Name a panel to MOVE it to that slot; a panel you omit stays where it is, and a panel is only ever in one place. Keyed by PANEL, one slot string each, as the CURRENT L1 LAYOUT listing is: {\"critique\": \"thinking_style\", \"failing_samples\": \"thinking_style\"} moves two panels into one slot. Slot order within the prompt is the floor's and does not move — what you choose is which slot a panel speaks from.",
             "propertyNames": {
               "enum": [
                 "answer_distribution",

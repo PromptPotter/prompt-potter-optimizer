@@ -399,13 +399,6 @@ def is_error_result(result: Mapping[str, Any]) -> bool:
     return result.get("error_category") is not None
 
 
-@shapes_optimizer_prompt
-def has_pipeline_warnings(result: Mapping[str, Any]) -> bool:
-    """A sample carries pipeline warnings iff ``pipeline_data.diagnostics.warnings`` is non-empty —
-    the sibling of :func:`is_error_result`, where the backend failed outright."""
-    return bool((result.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings"))
-
-
 @contextmanager
 def graceful(msg: str) -> Iterator[None]:
     """Suppress non-interrupt exceptions with a log message. ``KeyboardInterrupt``,
@@ -493,7 +486,6 @@ __all__ = [
     "UnauthorizedError",
     "error_category",
     "graceful",
-    "has_pipeline_warnings",
     "is_charged_error",
     "is_error_result",
     "is_provider_credit_refusal",

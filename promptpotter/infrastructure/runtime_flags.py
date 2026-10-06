@@ -58,8 +58,11 @@ def spend_sample_lookahead(cycle_dir: Path) -> None:
     """The round that scored under the arming spends it — a press, never an ``auto`` one. The walk
     wastes at most one call per cut at any depth (``StopRule.earliest_stop``), which is what makes
     an arming that never ends safe to leave on."""
+    path = CycleLayout(cycle_dir).sample_lookahead
+    # Read past the held answer: an `auto` press another process wrote inside the poll window
+    # would be unlinked as a plain one.
+    _POLLS.pop(path, None)
     if not sample_lookahead_auto(cycle_dir):
-        path = CycleLayout(cycle_dir).sample_lookahead
         _POLLS.pop(path, None)
         path.unlink(missing_ok=True)
 

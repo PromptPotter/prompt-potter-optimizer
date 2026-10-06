@@ -312,7 +312,10 @@ class AbilityReading(StrictModel):
     def comparable_to(self, other: AbilityReading) -> bool:
         return self.ruler_id is not None and self.ruler_id == other.ruler_id
 
-    def scale(self) -> str:
-        """The scale in words — the one rendering, so no surface reassembles it."""
+    def scale(self, *, named: bool = True) -> str:
+        """The scale in words — the one rendering, so no surface reassembles it. ``named=False``
+        leaves out the anchor id, which an operator differences scales by and an optimizer prompt
+        has nothing to compare against."""
         model = f", {self.calibration_model}" if self.calibration_model else ""
-        return f"ruler {self.ruler_id or 'unscaled'}, {self.ruler_n} cells{model}"
+        name = f"ruler {self.ruler_id or 'unscaled'}, " if named else ""
+        return f"{name}{self.ruler_n} cells{model}"

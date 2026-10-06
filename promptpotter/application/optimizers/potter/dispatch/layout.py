@@ -149,11 +149,10 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     # misses themselves ordered by difficulty — the evidence beside its own compression, so
     # the generator can check one against the other — then what it has ALREADY tried, without
     # which round 4 re-proposes round 1's measured failure and nothing objects.
-    # `sample_transcripts` stays OFF this floor: the same evidence at several times the bytes,
-    # duplicating a large payload every round. It stays in `L1_POSSIBLE` and on
-    # `l1_critique`'s floor, so L2 re-adds it on stall — when a reasoning-MECHANISM error
-    # needs the model's own trace — and L4 can search it back in. Raw `diagnostics` and the
-    # cross-run panels are off the floor for the same reason.
+    # `sample_transcripts` closes the floor, so it takes the allowance the rest left: a generator
+    # shown only ids and one quoted span cannot write the method a failing problem needs, and on
+    # justlogic-d234 it wrote single-sentence nudges for five rounds. Raw `diagnostics` and the
+    # cross-run panels stay off the floor: the same evidence at several times the bytes.
     "l1_generate": NodeLayoutSpec(
         editor="l2",
         possible=L1_POSSIBLE,
@@ -165,12 +164,14 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
             task_intent=["task_context"],
             problem_description=[
                 "rendered_prompt",
+                # Directly under the prompt: its schema-description block is text the solver
+                # reads with it, and an edit to one is checked against the other only side by side.
+                "pipeline_param_catalogue",
                 "measurand",
                 "precision",
                 "detectable_move",
                 "confounds",
                 "sample_provenance",
-                "pipeline_param_catalogue",
                 "prompt_block_catalogue",
                 "demo_pool",
                 "plan",
@@ -183,6 +184,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "escalation_panel",
                 "origin_strengths",
                 "budget_state",
+                "sample_transcripts",
             ],
         ),
     ),
@@ -259,6 +261,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "l1_layout",
                 "task_context",
                 "l1_signal_catalogue",
+                "skill_tiers",
                 "rebase_capability",
                 "terminate_capability",
                 "measurand",
@@ -297,6 +300,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "l1_overrides",
                 "l1_layout",
                 "l1_signal_catalogue",
+                "skill_tiers",
                 "rebase_capability",
                 "terminate_capability",
             ],
@@ -318,6 +322,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "critique",
                 "evidence_health",
                 "archive_top_runs",
+                "skill_tiers",
                 "rebase_capability",
                 "terminate_capability",
                 "measurand",
@@ -348,6 +353,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "axis_memory",
                 "guard_breaches",
                 "critique",
+                "skill_tiers",
                 "rebase_capability",
                 "terminate_capability",
             ],
