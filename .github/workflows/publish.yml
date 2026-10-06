@@ -54,8 +54,9 @@ jobs:
       - name: No known advisories in the Python lock
         run: python3 scripts/gate.py --only pip-audit
 
+      # `scripts/gate.py::_PINNED_EXTRAS`, as in ci.yml: the gate below is taken in this env.
       - name: Install dependencies
-        run: uv sync --extra dev --extra api --frozen
+        run: uv sync --extra dev --extra api --extra harbor --frozen
 
       # CI gates `main`; a release is cut from a COMMIT, and the two are the same thing
       # only by habit. Running the one check list here is what makes the gate a property
