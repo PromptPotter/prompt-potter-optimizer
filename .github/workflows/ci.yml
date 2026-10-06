@@ -23,7 +23,7 @@ jobs:
       # The extras are `scripts/gate.py::_PINNED_EXTRAS`, the env the verdict is taken in; one
       # missing here reads green at the desk and red on CI (litellm, reached through `harbor`).
       - name: Install dependencies
-        run: uv sync --extra stats --extra dev --extra api --extra harbor --frozen
+        run: uv sync --extra dev --extra api --extra harbor --frozen
 
       # One step, and deliberately: `scripts/gate.py` is the single declaration of
       # what this repo checks, so the desk and CI cannot drift apart. It also runs
@@ -53,7 +53,7 @@ jobs:
           save-cache: false
 
       - name: Install dependencies
-        run: uv sync --extra stats --extra dev --extra api --frozen
+        run: uv sync --extra dev --extra api --frozen
 
       # `--no-webapp` deliberately: the dashboard export is the `webapp` job's subject,
       # and building it again here would double this job's runtime to re-check it.
@@ -119,7 +119,7 @@ jobs:
           save-cache: false
 
       - name: Install the engine the walk serves
-        run: uv sync --extra stats --extra dev --extra api --frozen
+        run: uv sync --extra dev --extra api --frozen
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium

@@ -42,11 +42,11 @@ logger = logging.getLogger(__name__)
 
 # Out of the server's process group, so its Ctrl+C or a service stop signal is the server's alone.
 # The `pause` verb stays the one way to stop a run.
-_DETACHED: dict[str, Any] = (
-    {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
-    if sys.platform == "win32"
-    else {"start_new_session": True}
-)
+_DETACHED: dict[str, Any]
+if sys.platform == "win32":
+    _DETACHED = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
+else:
+    _DETACHED = {"start_new_session": True}
 _WATCH_POLL_S = 1.0
 
 

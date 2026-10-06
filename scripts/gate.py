@@ -29,6 +29,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -318,8 +319,8 @@ def _lockfile(_: Sel) -> Outcome:
 
 
 # A release is where the dependency posture stops being ours: the wheel carries the dashboard
-# bundle, and a published version can be neither recalled nor re-uploaded. Both checks below
-# reach the network, which is why they are their own kind — but neither may SKIP when it cannot
+# bundle, and a published version can be neither recalled nor re-uploaded. The checks below
+# reach the network, which is why they are their own kind — but none may SKIP when it cannot
 # answer. A guard that reports nothing instead of nothing-to-report is how v0.8.14 shipped a day
 # before six advisories surfaced against the lock it had already frozen.
 _SEVERITY_ORDER = ("critical", "high", "medium", "low")
@@ -340,14 +341,43 @@ def _npm_audit(_: Sel) -> Outcome:
     return _run(_node("npm", "audit", "--package-lock-only", "--audit-level=high"), _WEBAPP)
 
 
+# No release to move to, so there is nothing to bump: each names what keeps it out of reach, and
+# goes the day its fix ships. `diskcache` is dismissed on the Security tab for the same reason.
+_PIP_AUDIT_UNPATCHED = (
+    "PYSEC-2026-2447",  # diskcache — reached only through the `dspy` extra
+)
+_PIP_AUDIT = "pip-audit@2.10.1"
+
+
+def _pip_audit(_: Sel) -> Outcome:
+    """The Python lock against PyPI's advisory database — every extra, as a consumer may ask.
+
+    The scan that does not wait for GitHub to notice: Dependabot had raised no alert on
+    ``fsspec``, ``jupyter-server`` or ``multidict`` while this already named a fix for each.
+    It reads ``uv.lock`` through an export rather than an install, so it judges the frozen
+    file, and the scanner runs as a ``uv`` tool so it is never a dependency of the lock it
+    audits.
+    """
+    uv = shutil.which("uv")
+    if not uv:
+        return 1, "`uv` is not on PATH, so the Python lock cannot be exported to audit."
+    with tempfile.TemporaryDirectory() as tmp:
+        frozen = str(Path(tmp) / "requirements.txt")
+        export = [uv, "export", "--frozen", "--all-extras", "--no-emit-project", "--quiet"]
+        rc, out = _run([*export, "--output-file", frozen], _REPO)
+        if rc:
+            return rc, out
+        ignored = [arg for vuln in _PIP_AUDIT_UNPATCHED for arg in ("--ignore-vuln", vuln)]
+        audit = [uv, "tool", "run", "--quiet", _PIP_AUDIT, "--requirement", frozen]
+        return _run([*audit, "--no-deps", "--disable-pip", *ignored], _REPO)
+
+
 def _advisories(_: Sel) -> Outcome:
     """Every open Dependabot alert on the repository — both ecosystems, dismissals honoured.
 
-    Dismissal is why this reads GitHub rather than scanning: ``diskcache``
-    (GHSA-w8v5-vhqr-4h9v) is unpatched upstream and reachable only through the ``dspy`` extra,
-    so it is dismissed rather than fixed, and a local scanner would need an allowlist free to
-    drift from the one the Security tab already holds. ``publish.yml`` runs ``--only
-    npm-audit`` instead of this: a workflow's GITHUB_TOKEN is not documented to read Dependabot
+    The two scans above each read one advisory database; this reads what GitHub holds against
+    the repository, where a dismissal is recorded once and honoured here. ``publish.yml`` runs
+    the scans instead of this: a workflow's GITHUB_TOKEN is not documented to read Dependabot
     alerts, so enforcing it there is a PAT away — never a silent pass.
     """
     gh = shutil.which("gh")
@@ -501,6 +531,7 @@ CHECKS: tuple[Check, ...] = (
     # Neither is `staged`, and neither runs by default: the everyday gate stays offline and the
     # pre-commit hook pays for nothing it cannot use. `--release` is what asks for them.
     Check("npm-audit", "release", _npm_audit),
+    Check("pip-audit", "release", _pip_audit),
     Check("advisories", "release", _advisories),
 )
 

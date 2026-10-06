@@ -50,8 +50,12 @@ jobs:
         with:
           enable-cache: true
 
+      # The same question of `uv.lock`, asked of PyPI's advisory database rather than of GitHub.
+      - name: No known advisories in the Python lock
+        run: python3 scripts/gate.py --only pip-audit
+
       - name: Install dependencies
-        run: uv sync --extra stats --extra dev --extra api --frozen
+        run: uv sync --extra dev --extra api --frozen
 
       # CI gates `main`; a release is cut from a COMMIT, and the two are the same thing
       # only by habit. Running the one check list here is what makes the gate a property

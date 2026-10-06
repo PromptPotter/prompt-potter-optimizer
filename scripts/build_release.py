@@ -104,7 +104,10 @@ def stage_datasets() -> int:
         # repo-relative, so from `promptpotter/assets/benchmarks/` all ten resolve into
         # directories that do not exist. An installed user gains nothing; a reader gains a
         # duplicate of the one thing this repo most often gets wrong (one fact, many copies).
-        if src.name == "CLAUDE.md":
+        # A dataset's own build script (`screen-taste-v0/build_rows.py`) is how its rows were CUT,
+        # not something an install runs, and `assets/` is data: a `.py` there is uncounted surface
+        # the complexity ledger refuses.
+        if src.name == "CLAUDE.md" or src.suffix == ".py":
             continue
         dst = _DATASETS_DST / Path(rel).relative_to("datasets")
         dst.parent.mkdir(parents=True, exist_ok=True)
