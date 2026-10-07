@@ -20,18 +20,6 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.projections.live_dashboard.round_buffer import RoundBuffer
     from promptpotter.infrastructure.projections.live_state import LiveStateCore
 
-# Per-sample terminator badge for the compact in-flight rendering;
-# unmapped nodes render as the first two characters of the node name.
-_NODE_BADGES: dict[str, str] = {
-    "llm_only": "ai",
-    "llm_ranking": "ai",
-    "entity_profiling": "ai",
-    "cache_lookup": "cache",
-    "fuzzy_matching": "fz",
-    "token_matching": "tk",
-    "web_search": "ws",
-}
-
 
 def _trim(text: str, n: int) -> str:
     t = str(text or "").replace("\n", " ").strip()
@@ -70,39 +58,6 @@ def sample_row(s: dict[str, Any]) -> DashboardSample:
         output_tokens=s.get("output_tokens"),
         cache_read_tokens=s.get("cache_read_tokens"),
     )
-
-
-def fmt_sample_line(row: DashboardSample) -> str:
-    """One compact line per query, keeping `dashboard.json` scannable for the folder-UI reader.
-
-    A RENDERING of the row beside it, never a second source. It was the only form the live block
-    carried, so the browser regexed it back into the row — which made this column layout a wire
-    contract that no formatting change could touch."""
-    sid_seg = f" sid:{row.sample_id:03d}" if row.sample_id is not None else ""
-    badge = _NODE_BADGES.get(row.terminal_node, row.terminal_node[:2] or "?")
-    cache_icon = "📖" if row.cached else " "
-    in_tok, out_tok = row.input_tokens, row.output_tokens
-    tok_seg = ""
-    if in_tok is not None or out_tok is not None:
-        tok_seg = (
-            f" io={in_tok if in_tok is not None else '-'}/{out_tok if out_tok is not None else '-'}"
-        )
-    # The provider's prefix-cache share of the input, same column the CLI tape carries
-    # (`views/render/sample.py`) so the two renderings of one row stay one reading. The row DECIDES
-    # (`DashboardSample.cache_share` — null on a replay, on a missing breakdown, on no input);
-    # this only chooses to stay silent at a real 0.
-    if share := row.cache_share:
-        tok_seg += f" c{share:.0%}"
-    # Blank rather than `0.0s` where the row recorded no time — a row that never reached the
-    # pipeline must stay distinguishable from one that did. A replay shows what it cost when it
-    # was measured, never the 0.0 clock it occupied on replay (`DashboardSample.shown_s`).
-    shown = row.shown_s
-    time_col = f"{shown:4.1f}s" if shown is not None else "     "
-    head = f"  {time_col} #{row.qi:03d}{sid_seg} {row.status:<4} [{badge}]{cache_icon}{tok_seg}"
-    # Nothing to contrast on a verifier-graded row — the status IS the verdict there.
-    if is_verifier_graded(row.ground_truth):
-        return f"{head} q:'{row.query}'"
-    return f"{head} -> '{row.predicted}' gt:'{row.ground_truth}' q:'{row.query}'"
 
 
 def _served(cand: dict[str, Any]) -> dict[str, Any]:
@@ -176,7 +131,6 @@ def build_candidate_rows(
                 resolved_pipeline_params=cand.get("resolved_pipeline_params"),
                 pipeline_overlay=cand.get("pipeline_overlay"),
                 samples=tape,
-                sample_lines=[fmt_sample_line(row) for row in tape],
                 validation_failures=served.get("validation_failures") or [],
                 composite_fitness_formula_short=inline_short_formula_values(
                     short_formula_template, dict(served.get("evaluators") or {})
@@ -207,6 +161,5 @@ def build_racing_block(core: LiveStateCore, p_best_top: list[dict[str, Any]]) ->
 __all__ = [
     "build_candidate_rows",
     "build_racing_block",
-    "fmt_sample_line",
     "sample_row",
 ]

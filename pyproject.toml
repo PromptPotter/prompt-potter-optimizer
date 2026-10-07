@@ -30,7 +30,7 @@ requires-python = ">=3.13"
 dependencies = [
     "pydantic>=2.5.3",         # why kept: every domain frozen-model + ledger record
     "pydantic-settings>=2.1.0",  # why kept: env-driven settings for connectors + LLM
-    "openai>=1.10.0",          # why kept: OpenAI-compatible client (Groq, OpenRouter, OpenAI all route through)
+    "openai>=1.10.0,<3",       # why kept: OpenAI-compatible client (Groq, OpenRouter, OpenAI all route through)
     "python-dotenv>=1.2.2",    # why kept: nothing imports it — pydantic-settings does, to read
                                # `env_file`, and asks only for >=0.21.0. The direct pin is the
                                # floor past CVE-2026-28684 that the transitive one would not give.

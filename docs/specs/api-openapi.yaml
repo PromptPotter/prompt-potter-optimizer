@@ -1571,7 +1571,7 @@ paths:
         `current_round.candidates[]` (`LiveCandidate`) carries the round in flight
         whole: the closed-row numbers, the searchpoint in the `SearchpointCandidate`
         shape a round file's `candidate_scores[]` carries historically, the sample
-        tape (`samples[]`, `sample_lines[]`) and `validation_failures[]`;
+        tape (`samples[]`) and `validation_failures[]`;
         `current_round.nodes` holds optimizer LLM calls alone.
         `current_round.measurement_node` names the node the ledger recorded at
         `measure:enter`, and `active_node` names it while it measures.

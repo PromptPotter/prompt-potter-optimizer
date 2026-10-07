@@ -106,7 +106,7 @@ export interface DashboardSample {
   /** How many of `input_tokens` the PROVIDER served off its own prefix cache — a
    * SUBSET, never an addition, and distinct from `cached`, which says OUR
    * archive answered. Null where no breakdown was reported; 0 where one was
-   * and there was no hit. Read it as a share through `cache_share`. */
+   * and there was no hit. */
   cache_read_tokens: number | null;
 }
 
@@ -631,7 +631,6 @@ export interface LiveCandidate {
   resolved_pipeline_params: Record<string, unknown> | null;
   pipeline_overlay: Record<string, unknown> | null;
   samples: DashboardSample[];
-  sample_lines: string[];
   validation_failures: ValidationFailure[];
   composite_fitness_formula_short: string | null;
 }

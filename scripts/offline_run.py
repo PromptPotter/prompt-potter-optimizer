@@ -24,7 +24,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlsplit
 
 import httpx
@@ -50,7 +50,10 @@ from promptpotter.application.optimizer_manifest import (
     running_prompt,
     select_optimizer,
 )
-from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
+from promptpotter.application.pipeline_resolve import (
+    configure_and_apply_pipeline,
+    resolve_campaign_config,
+)
 from promptpotter.application.runner.entry import RunMode
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
 from promptpotter.config.settings import PROMPT_STRING_FIELDS, Settings
@@ -58,6 +61,7 @@ from promptpotter.connectors.promptpotter import measurement_modules
 from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import ArmRequest
 from promptpotter.domain.launch_limits import LaunchLimits
+from promptpotter.domain.phases import StopReason
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.infrastructure.store.archive_queries import list_runs, scope_memory_to_own_runs
@@ -69,11 +73,19 @@ from promptpotter.shared.errors import ConflictError
 from promptpotter.shared.hashing import module_source_digest
 from promptpotter.shared.identity import default_identity
 
+if TYPE_CHECKING:
+    from promptpotter.application.initialization.session import Session
+    from promptpotter.domain.cycle_paths import CycleHop
+    from promptpotter.infrastructure.store.stores import Stores
+
 DATASET = "justlogic-d234"
 BACKEND_URL = "http://127.0.0.1:8000"
 STAMP = "offline-run.json"
 # `--controlled`'s two workspaces: the arms beside a foreign campaign, and the arms alone.
 CONTROLLED = ("controlled", "controlled-bare")
+# The pause-and-resume workspace, inside its optimizer's.
+RESUMED = "resumed"
+RESUME_APPENDS = ("phases", "candidates_minted", "rulers")
 NOT_A_KEY = "offline-run-not-a-key"
 PROVIDER_KEYS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY")
 LABEL = "OFFLINE — fake optimizer LLM and fake backend; every number is synthetic"
@@ -569,6 +581,23 @@ def text_templates(config: CampaignConfig) -> dict[str, str]:
     }
 
 
+async def rebound_session(stores: Stores, hop: CycleHop) -> tuple[Session, CampaignConfig]:
+    """A fresh session bound to the cycle at *hop* off disk alone, as a launch of an existing cycle
+    binds one (`jobs/launcher/run_job.py::_bind_session`)."""
+    campaign = stores.campaigns.load_campaign(hop.campaign_id)
+    index = stores.campaigns.load(hop)
+    assert campaign is not None and index is not None
+    session = await open_session(
+        DATASET, backend_url=BACKEND_URL, backend_id=DATASET, stores=stores, on_status=print
+    )
+    config = resolve_campaign_config(stores, campaign, hop)
+    configure_and_apply_pipeline(session, config, log=print)
+    session.campaign_id = hop.campaign_id
+    session.state.cycle_id = hop.cycle_id
+    session.session_id = str(index["parent_session_id"])
+    return session, config
+
+
 async def run_one(
     optimizer: str,
     workspace: Path,
@@ -578,9 +607,11 @@ async def run_one(
     out: Path | None = None,
     arm: ArmRequest | None = None,
     framing: bool = True,
+    pause_after: int | None = None,
 ) -> tuple[Path, str]:
     """*out* holds its requests and decisions, the workspace itself by default; the archive is the
-    workspace's, so campaigns run in one process share it as a tenant's do."""
+    workspace's, so campaigns run in one process share it as a tenant's do. *pause_after* stops the
+    run at that round's boundary and ends it on a session rebuilt from disk."""
     out = workspace if out is None else out
     (out / "requests").mkdir(parents=True)
     config = campaign_config(optimizer, rounds, pinned=arm is not None)
@@ -604,10 +635,23 @@ async def run_one(
         config,
         readout_sink=print,
         limits=LaunchLimits(),
-        mode=RunMode(),
+        mode=RunMode(stop_after_rounds=pause_after),
         arm=arm,
     )
     await session.backend_client.aclose()
+    if pause_after is not None:
+        if result.stop_reason != StopReason.PAUSED:
+            raise SystemExit(f"offline run: {optimizer} ended {result.stop_reason}, never paused")
+        session, config = await rebound_session(stores, session.hop)
+        result = await run_campaign(
+            session,
+            list(session.samples),
+            config,
+            readout_sink=print,
+            limits=LaunchLimits(),
+            mode=RunMode(),
+        )
+        await session.backend_client.aclose()
     searched = {key for node in session.pipeline_schema.config_nodes for key in node.param_keys}
     if arm is not None and (beside := sorted(searched - set(PROMPT_STRING_FIELDS))):
         raise SystemExit(f"offline run: arm {arm.arm_key} searched {beside} beside its prompt")
@@ -960,6 +1004,13 @@ def child_env(home: Path) -> dict[str, str]:
     return env
 
 
+def decided(workspace: Path) -> dict[str, Any]:
+    """A run's decisions less the ledger streams a resume appends its own init records to."""
+    doc: dict[str, Any] = json.loads((workspace / "decisions.json").read_text(encoding="utf-8"))
+    kept = {k: v for k, v in doc["ledger"].items() if k not in RESUME_APPENDS}
+    return {**doc, "ledger": kept}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument(
@@ -976,6 +1027,7 @@ def main() -> int:
         help="run two arms of one head-to-head beside a foreign campaign, and without it",
     )
     ap.add_argument("--child", help=argparse.SUPPRESS)
+    ap.add_argument("--pause-after", type=int, help=argparse.SUPPRESS)
     args = ap.parse_args()
     if args.digests:
         print(json.dumps(digests(), indent=1))
@@ -995,7 +1047,10 @@ def main() -> int:
                 )
             )
             return 0
-        print(asyncio.run(run_one(args.child, workspace, rounds=args.rounds, rows=args.rows))[0])
+        one = run_one(
+            args.child, workspace, rounds=args.rounds, rows=args.rows, pause_after=args.pause_after
+        )
+        print(asyncio.run(one)[0])
         return 0
 
     home = claim_home()
@@ -1010,17 +1065,30 @@ def main() -> int:
     if args.controlled:
         child_args += [f"--optimizer={name}" for name in arm_names]
     t0 = time.monotonic()
-    children = {}
-    for name in names:
-        (home / name).mkdir()
-        with (home / name / "run.log").open("w", encoding="utf-8") as log:
-            children[name] = subprocess.Popen(
-                [sys.executable, __file__, "--child", name, *child_args],
-                cwd=home / name,
-                env=child_env(home / name),
+
+    def spawn(name: str, workspace: Path, *extra: str) -> subprocess.Popen[bytes]:
+        workspace.mkdir()
+        with (workspace / "run.log").open("w", encoding="utf-8") as log:
+            return subprocess.Popen(
+                [sys.executable, __file__, "--child", name, *child_args, *extra],
+                cwd=workspace,
+                env=child_env(workspace),
                 stdout=log,
                 stderr=subprocess.STDOUT,
             )
+
+    children = {name: spawn(name, home / name) for name in names}
+    # The same campaign in a workspace of its own, paused at a round boundary and ended on a
+    # session rebuilt from disk: it must decide what the uninterrupted one decided.
+    pause_after = min(1, args.rounds - 1)
+    resumed = (
+        {}
+        if args.controlled
+        else {
+            name: spawn(name, home / name / RESUMED, f"--pause-after={pause_after}")
+            for name in names
+        }
+    )
     failed = 0
     for name, child in children.items():
         workspace = home / name
@@ -1037,6 +1105,18 @@ def main() -> int:
         lift = None if bench is None else bench["lift"][bench["headline"]]
         headline = "NO BENCH HEADLINE" if lift is None else f"{lift['value']:+.3f}"
         print(f"{name}: {run['stop_reason']}, bench lift {headline} -- {cycle}")
+        if rc := resumed[name].wait():
+            failed += 1
+            print(f"{name}: RESUME FAILED (exit {rc}) -- {workspace / RESUMED / 'run.log'}")
+            continue
+        again = decided(workspace / RESUMED)
+        same = decided(workspace) == again
+        # A pause at the origin's boundary replays round 0 on resume, which re-records it.
+        failed += again["run"]["bench"] is None or (pause_after > 0 and not same)
+        print(
+            f"{name}: paused after round {pause_after} and resumed, decisions "
+            f"{'UNMOVED' if same else 'MOVED'}"
+        )
     if args.controlled and not failed:
         beside, bare = (home / name for name in CONTROLLED)
         for arm in (f"arm-{name}" for name in arm_names):

@@ -79,7 +79,7 @@ class RoundBuffer:
         pd = result.get("pipeline_data") or {}
         query_time = recorded_elapsed_s(cast("QueryMeasurement", result))
         # Both facts, never one picked here: a replay's elapsed is a true 0.0 and this is what the
-        # cell took when it was measured. Which one a column SHOWS is `DashboardSample.shown_s`.
+        # cell took when it was measured. Which one a column SHOWS is `scoring.py::shown_seconds`.
         work_time = recorded_cost_s(cast("QueryMeasurement", result))
         # The row's whole token account, from the one place that carries it.
         account = TokenAccount.from_step_tokens(pd)
@@ -103,13 +103,8 @@ class RoundBuffer:
                 "fitness": result.get("fitness"),
                 "cached": bool(result.get("cached", False)),
                 "query": result.get("query") or "",
-                # Scored result dicts carry the field as ``predicted`` (past
-                # tense, matching round_NNNN.json::results[]). Reading
-                # ``prediction`` here returned None on every sample → the live
-                # tape rendered every row as an empty prediction. The compact
-                # ``blocks.py::fmt_sample_line`` reader stays on ``prediction`` because
-                # that is the live-sample dict's outbound key — the mismatch was
-                # only on the inbound source name.
+                # A scored row spells it ``predicted`` (``round_NNNN.json::results[]``); the
+                # live-sample dict's outbound key is ``prediction``.
                 "prediction": result.get("predicted") or "",
                 "ground_truth": result.get("ground_truth") or "",
                 "time_s": None if query_time is None else round(query_time, 2),

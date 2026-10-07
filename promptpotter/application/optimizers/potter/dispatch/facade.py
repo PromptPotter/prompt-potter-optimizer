@@ -84,13 +84,14 @@ def _cap_runaway(name: str, items: list[Item], cap: int) -> list[Item]:
     overruns. Nothing reachable here is fenced: dataset content rides MEASUREMENT panels, and
     every one of those is divisible.
     """
-    total = sum(len(i.text) + len(SECTION_SEP) for i in items)
+    # A separator is rendered BETWEEN items, so the first carries none.
+    total = sum(len(i.text) for i in items) + len(SECTION_SEP) * (len(items) - 1)
     if total <= cap:
         return items
     kept: list[Item] = []
     used = 0
     for item in items:
-        step = len(item.text) + len(SECTION_SEP)
+        step = len(item.text) + (len(SECTION_SEP) if kept else 0)
         if used + step > cap:
             break
         kept.append(item)

@@ -125,7 +125,7 @@ def fmt_query_result(
     if err:
         # Asked FIRST: an errored row carries no ``fitness``, and the MISS ladder below would read
         # that absence as a grade. The tape marks the same row ``ERR``
-        # (`live_dashboard/blocks.py::fmt_sample_line`) — two readouts of one row may not disagree
+        # (`domain/dashboard_rows.py::sample_status`) — two readouts of one row may not disagree
         # about whether it was ever scored.
         tag = "ERR"
     elif classify_result(r).is_fatal:

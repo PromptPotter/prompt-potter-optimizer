@@ -470,8 +470,9 @@ def extend_ruler(
     a cycle passes its OWN closed rounds, never the workspace archive, so a run links exactly as a
     fresh run of itself would.
 
-    ONE pass, deliberately — not coordinate ascent. Folding the new δ back into the arms' θ reads as
-    "more accurate" and lets the anchor drift a little every round, which is this bug in slow motion.
+    Swept to a FIXPOINT — never coordinate ascent. A sweep reads each arm on the ruler as it
+    stands and links the cells those arms answered; the next reaches a cell whose only arms that
+    sweep put on the scale. A δ once written never moves: re-fitting it is how the anchor drifts.
 
     A cell no anchored arm answered STAYS OFF the ruler, and the ruler comes back unchanged where
     that is every new cell. A provisional δ would be a fabricated value written permanently into
@@ -480,46 +481,47 @@ def extend_ruler(
     links in the first later call whose history holds an anchored arm that answered it.
     """
     seen = dedup_observations(history, observations)
-    # `_INIT_SIGMA_THETA`, not `ruler.sigma_theta`, so this link is regularized exactly as the
-    # election's own θ read is. The ruler CARRIES the fit's converged σ_θ and nothing passes it
-    # yet: doing so moves every θ in the repo and belongs in its own commit with its own
-    # before/after, not smuggled in here where it would be indistinguishable from the extension.
-    theta = fit_theta_given_delta(seen, ruler.entries())
-
-    by_s: dict[int, list[tuple[float, float]]] = {}
-    for o in seen:
-        arm = theta.get(o.candidate_id)
-        if o.sample_id in ruler.delta or arm is None:
-            continue
-        by_s.setdefault(o.sample_id, []).append((arm[0], o.response))
-    if not by_s:
-        return ruler
-
     inv_var = 1.0 / (ruler.sigma_delta * ruler.sigma_delta)
-    delta = dict(ruler.delta)
-    delta_se = dict(ruler.delta_se)
-    for sid, rows in by_s.items():
-        t_arr = np.fromiter((t for t, _ in rows), dtype=np.float64)
-        y_arr = np.fromiter((y for _, y in rows), dtype=np.float64)
-        # Seeded at the ruler's own centre and pulled by N(μ_δ, σ_δ²) — the same prior the anchored
-        # cells were fit under, which is why `sigma_delta` had to be carried on the ruler at all.
-        d = ruler.mu_delta
-        for _ in range(max_iter):
-            p = 1.0 / (1.0 + np.exp(-np.clip(t_arr - d, -50, 50)))
-            grad = -float(np.sum(y_arr - p)) - inv_var * (d - ruler.mu_delta)
-            info = float(np.sum(p * (1.0 - p))) + inv_var
-            step = float(_newton_step(grad, info))
-            d += step
-            if abs(step) < tol:
-                break
-        p = 1.0 / (1.0 + np.exp(-np.clip(t_arr - d, -50, 50)))
-        info = float(np.sum(p * (1.0 - p))) + inv_var
-        delta[sid] = d
-        delta_se[sid] = float(1.0 / np.sqrt(max(info, 1e-9)))
+    while True:
+        # `_INIT_SIGMA_THETA`, not `ruler.sigma_theta`, so this link is regularized exactly as the
+        # election's own θ read is. The ruler CARRIES the fit's converged σ_θ and nothing passes it
+        # yet: doing so moves every θ in the repo and belongs in its own commit with its own
+        # before/after, not smuggled in here where it would be indistinguishable from the extension.
+        theta = fit_theta_given_delta(seen, ruler.entries())
 
-    # A new cell keeps a ≡ 1 even under 2PL: one round's three-to-six arms cannot identify a
-    # discrimination, and `_LOG_A_CLIP` would happily let a separable cell run to ±3.
-    return ruler.model_copy(update={"delta": delta, "delta_se": delta_se})
+        by_s: dict[int, list[tuple[float, float]]] = {}
+        for o in seen:
+            arm = theta.get(o.candidate_id)
+            if o.sample_id in ruler.delta or arm is None:
+                continue
+            by_s.setdefault(o.sample_id, []).append((arm[0], o.response))
+        if not by_s:
+            return ruler
+
+        delta = dict(ruler.delta)
+        delta_se = dict(ruler.delta_se)
+        for sid, rows in by_s.items():
+            t_arr = np.fromiter((t for t, _ in rows), dtype=np.float64)
+            y_arr = np.fromiter((y for _, y in rows), dtype=np.float64)
+            # Seeded at the ruler's own centre and pulled by N(μ_δ, σ_δ²) — the same prior the
+            # anchored cells were fit under, which is why `sigma_delta` rides the ruler at all.
+            d = ruler.mu_delta
+            for _ in range(max_iter):
+                p = 1.0 / (1.0 + np.exp(-np.clip(t_arr - d, -50, 50)))
+                grad = -float(np.sum(y_arr - p)) - inv_var * (d - ruler.mu_delta)
+                info = float(np.sum(p * (1.0 - p))) + inv_var
+                step = float(_newton_step(grad, info))
+                d += step
+                if abs(step) < tol:
+                    break
+            p = 1.0 / (1.0 + np.exp(-np.clip(t_arr - d, -50, 50)))
+            info = float(np.sum(p * (1.0 - p))) + inv_var
+            delta[sid] = d
+            delta_se[sid] = float(1.0 / np.sqrt(max(info, 1e-9)))
+
+        # A new cell keeps a ≡ 1 even under 2PL: one round's three-to-six arms cannot identify a
+        # discrimination, and `_LOG_A_CLIP` would happily let a separable cell run to ±3.
+        ruler = ruler.model_copy(update={"delta": delta, "delta_se": delta_se})
 
 
 # Prior on log-discrimination (2PL): log(aₛ) ~ N(0, σ_a²) shrinks aₛ → 1, so the

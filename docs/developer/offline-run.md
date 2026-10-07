@@ -55,6 +55,15 @@ decisions. The optimizers run in parallel, one child process each. In each works
 | `requests/NNNN_<node>_<k>.json` | Every optimizer LLM request as sent, in arrival order, beside the fake's answer. |
 | `decisions.json` | Every decision the run made, canonical: ids mapped to candidate labels; timestamps, paths and hashes dropped; floats rounded; concurrent records compared as sets. `harness` adds the stop reason, the unrouted URLs and the call counts. |
 | `run.log` | The child's stdout and stderr. |
+| `resumed/` | The same campaign in a workspace of its own, paused at a round boundary and ended on a session rebuilt from disk. |
+
+**The run fails unless the resumed campaign decides what the uninterrupted one decided** — every
+round, the run's result and the bench headline equal; only the ledger streams a resume appends its
+own init records to are left out of the comparison. At `--rounds 1` the only boundary is the
+origin's, where a resume replays round 0: there the run fails on a resume that ends without a bench
+headline, and prints `MOVED` without failing on it. Both halves run one tree, so the leg catches a
+resume that reads what its own writer does not persist, and says nothing about a ledger an earlier
+build wrote.
 
 ## Proving parity
 

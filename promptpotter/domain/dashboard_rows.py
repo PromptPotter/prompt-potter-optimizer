@@ -26,7 +26,6 @@ from promptpotter.domain.results import (
 )
 from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
 from promptpotter.domain.scoring import is_hit, is_unscored
-from promptpotter.domain.spend import TokenAccount
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.wounds import ValidationFailure
 
@@ -68,10 +67,7 @@ class DashboardSample(StrictModel):
     applied to samples: ONE shape whatever the round's state.
 
     Display-TRIMMED at the producer, because this rides a file polled every couple of seconds
-    and the untrimmed measurement already sits in `rounds/round_NNNN.json::results`. The tape
-    beside it (`sample_lines`) is a RENDERING of this row rather than a second source: the two
-    were branches of one key before, so the browser regexed the rendered half back into this
-    one and the column layout was a wire contract."""
+    and the untrimmed measurement already sits in `rounds/round_NNNN.json::results`."""
 
     qi: int = Field(description="Iteration position within the candidate's walk — the #000 column.")
     sample_id: int | None = Field(
@@ -125,27 +121,8 @@ class DashboardSample(StrictModel):
         default=None,
         description="How many of `input_tokens` the PROVIDER served off its own prefix cache — a "
         "SUBSET, never an addition, and distinct from `cached`, which says OUR archive answered. "
-        "Null where no breakdown was reported; 0 where one was and there was no hit. Read it as a "
-        "share through `cache_share`.",
+        "Null where no breakdown was reported; 0 where one was and there was no hit.",
     )
-
-    @property
-    def shown_s(self) -> float | None:
-        """This shape's mirror of `scoring.py::shown_seconds` — which of the two seconds above a
-        clock column shows. A property for the same reason `cache_share` is one."""
-        return self.cost_s if self.cached else self.time_s
-
-    @property
-    def cache_share(self) -> float | None:
-        """A plain property, not a `computed_field`: this model is `extra="forbid"`, so a derived
-        key would serialize into `dashboard.json` and then refuse to read back. The browser holds
-        the peer spelling (`lib/derivations/token-account.ts`) — one per runtime, not per
-        renderer."""
-        return TokenAccount(
-            input=self.input_tokens or 0,
-            output=self.output_tokens or 0,
-            cache_read=self.cache_read_tokens,
-        ).cache_share(replayed=self.cached)
 
 
 class DashboardCandidate(StrictModel):
@@ -240,9 +217,6 @@ class LiveCandidate(DashboardCandidate):
     resolved_pipeline_params: dict[str, Any] | None = None
     pipeline_overlay: dict[str, Any] | None = None
     samples: list[DashboardSample] = Field(default_factory=list)
-    # The tape BESIDE the rows, one producer for both: the browser reads `samples`, the operator
-    # reads this in the file.
-    sample_lines: list[str] = Field(default_factory=list)
     validation_failures: list[ValidationFailure] = Field(default_factory=list)
     # The composite's short formula with this candidate's own evaluator values inlined.
     composite_fitness_formula_short: str | None = None

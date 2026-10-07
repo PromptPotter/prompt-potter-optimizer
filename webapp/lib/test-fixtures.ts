@@ -79,7 +79,6 @@ export function liveRow(over: Partial<LiveCandidate> = {}): LiveCandidate {
     resolved_pipeline_params: null,
     pipeline_overlay: null,
     samples: [],
-    sample_lines: [],
     validation_failures: [],
     composite_fitness_formula_short: null,
     ...over,

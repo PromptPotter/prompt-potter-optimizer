@@ -1152,6 +1152,11 @@ def test_a_child_read_on_cells_its_parent_skipped_this_round_stays_off_the_ruler
     assert linked.delta[8] > linked.delta[7]
     assert linked.unlinked([7, 8, 9]) == 0
 
+    # One cell shared this round puts the child on the scale, and the child carries its others.
+    chained = extend_ruler(fitted, [*child, Observation("parent", 7, 1.0), *parent_now], history=[])
+    assert chained.unlinked([7, 8, 9]) == 0
+    assert all(chained.delta[sid] == fitted.delta[sid] for sid in fitted.delta)
+
 
 def test_an_instrument_reads_on_the_scale_its_spawner_fixed(tmp_path: Path) -> None:
     """The dominant error in the L4 loop was the ESTIMATOR, not the measurement: an inner cell's

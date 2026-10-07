@@ -388,9 +388,8 @@ def shown_seconds(result: QueryMeasurement, *, cached: bool) -> float | None:
 
     A replay occupied no clock, so its elapsed reading is a true ``0.0`` and the number the
     operator needs is what the cell took when it was MEASURED, which ``step_timings`` carries
-    through the cache stamp. ``DashboardSample.shown_s`` mirrors this on the served shape and
-    ``webapp/lib/derivations/sample-clock.ts`` holds the browser's peer spelling — one per
-    runtime, never one per renderer."""
+    through the cache stamp. ``webapp/lib/derivations/sample-clock.ts`` holds the browser's peer
+    spelling — one per runtime, never one per renderer."""
     return recorded_cost_s(result) if cached else recorded_elapsed_s(result)
 
 
