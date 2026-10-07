@@ -130,18 +130,21 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     key: "verify",
     legend: () => "verify",
     hint: () =>
-      "A `promptpotter verify` re-run of this candidate over the workspace set — did the verdict hold on more cells?",
-    ink: () => "--color-overlap",
+      "This candidate on search cells its rounds never bought, read on those fresh cells alone — the check on the level its bar claims. Picked hardest-first, they sit below that level by construction.",
+    // The ink that says WHICH cells: these are the new ones.
+    ink: () => "--color-new",
     hollow: true,
     kind: "bar",
     axis: "y",
     gap: "sparse",
-    valueOf: (v) => v.diag?.accuracy ?? null,
-    applies: (c) => c.views.some((v) => v.diag != null),
-    tip: (v) =>
-      v.diag == null
-        ? "verify: —"
-        : `verify: ${fmtNum(v.diag.accuracy)} (workspace acc on n=${v.diag.workspaceN}, +${v.diag.samplesAdded} fresh)`,
+    valueOf: (v) => v.verify?.fresh.accuracy?.value ?? null,
+    applies: (c) => c.views.some((v) => v.verify != null),
+    tip: (v, c) => {
+      const r = v.verify;
+      if (r == null) return "verify: —";
+      const picked = r.strategy === "hard" ? "hardest first" : "picked at random";
+      return `verify: ${fmtNum(r.fresh.accuracy?.value)} on ${unitCount(r.n_fresh, c.unit)} fresh, ${picked}`;
+    },
   },
   {
     key: "bench",
@@ -226,6 +229,13 @@ export function whiskerBands(ctx: SeriesCtx): WhiskerBand[] {
       anchor: "accuracy",
       lo: ctx.views.map((v) => v.meanFitnessCiLo),
       hi: ctx.views.map((v) => v.meanFitnessCiHi),
+    });
+  }
+  if (ctx.views.some((v) => v.verify != null)) {
+    bands.push({
+      anchor: "verify",
+      lo: ctx.views.map((v) => v.verify?.fresh.accuracy?.ci_lo ?? null),
+      hi: ctx.views.map((v) => v.verify?.fresh.accuracy?.ci_hi ?? null),
     });
   }
   if (ctx.views.some((v) => v.bench != null)) {

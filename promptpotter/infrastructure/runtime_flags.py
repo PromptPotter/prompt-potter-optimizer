@@ -280,6 +280,21 @@ def _detached_after(cycle_dir: Path, *, fresh_s: float) -> float | None:
     return None if beat is None else beat + fresh_s
 
 
+# A verify runs in whichever process fired it, so its only sign of life is its own ledger
+# appends: the bills of the cells it scores. Wide enough to span one slow cell, and it bounds
+# nothing but how long a KILLED pass goes on reading as in flight — a pass that ends writes its exit.
+VERIFY_FRESH_S = 300.0
+
+
+def verify_stale_after(cycle_dir: Path) -> float | None:
+    """The clock instant an open verify pass stops reading as in flight — the overlay that serves
+    it and the conditional-GET validator that has to expire it both ask here."""
+    try:
+        return CycleLayout(cycle_dir).ledger.stat().st_mtime + VERIFY_FRESH_S
+    except OSError:
+        return None
+
+
 def _producer_fresh(cycle_dir: Path, *, fresh_s: float) -> bool:
     edge = _detached_after(cycle_dir, fresh_s=fresh_s)
     return edge is not None and time.time() < edge
@@ -333,7 +348,9 @@ def run_phase_validator_epoch(cycle_dir: Path, *, fresh_s: float = RUN_FRESH_S) 
     producer at ``running`` for as long as the browser keeps polling. It is read from
     :func:`_detached_after`, the same expression the phase itself derives from — restating it here
     is what would let the 304 outlive the answer it stands for. The campaign's ``campaign.json``
-    rides too: a halted cycle serves the ceilings its frozen config declares."""
+    rides too: a halted cycle serves the ceilings its frozen config declares. So does the LEDGER,
+    which a verify writes from a process that moves no other path here, with its own clock edge
+    (:func:`verify_stale_after`)."""
     layout = CycleLayout(cycle_dir)
     campaign_manifest = cycle_dir.parent.parent / "campaign.json"
     stamps: list[float] = []
@@ -342,15 +359,16 @@ def run_phase_validator_epoch(cycle_dir: Path, *, fresh_s: float = RUN_FRESH_S) 
         layout.dashboard,
         layout.manifest,
         layout.runtime,
+        layout.ledger,
         campaign_manifest,
     ):
         try:
             stamps.append(path.stat().st_mtime)
         except OSError:
             continue
-    edge = _detached_after(cycle_dir, fresh_s=fresh_s)
-    if edge is not None and time.time() >= edge:
-        stamps.append(edge)
+    for edge in (_detached_after(cycle_dir, fresh_s=fresh_s), verify_stale_after(cycle_dir)):
+        if edge is not None and time.time() >= edge:
+            stamps.append(edge)
     return max(stamps) if stamps else None
 
 
@@ -367,6 +385,7 @@ __all__ = [
     "run_phase_validator_epoch",
     "sample_lookahead_auto",
     "spend_sample_lookahead",
+    "verify_stale_after",
     "write_run_limits_mirror",
     "write_sample_lookahead",
 ]

@@ -257,10 +257,10 @@ successor, the tenant tier. Remedy: resolution writes a persisted, typed, addres
 (per cycle: config after seed and overrides, dataset tier, validated panel; per measured point:
 opt_sp, resolved params, `sp_hash`), archive rows carry a required `error_category` behind
 predicates, and later readers accept nothing else.
-- `application/diagnostics/verify.py::verify_candidate` (and `noise_floor.py`) rebuild the config
-  from `campaign.json` plus the proposal's sparse delta, dropping every adopted ancestor's move and
-  a fork seed's overlay, then spend on cells of a config that never ran. Silent. `grep -n
-  "validate_campaign_config(campaign.config)" promptpotter/application/diagnostics/verify.py promptpotter/application/diagnostics/noise_floor.py`.
+- `application/diagnostics/noise_floor.py` rebuilds C0's config from the campaign's alone, so a
+  fork seed's overlay is dropped and it spends on cells of a config that never ran. Silent.
+  `verify.py::verify_candidate` is the shape to copy: the point's banked
+  `resolved_pipeline_params`, refused on an `sp_hash` mismatch before a cell is bought.
 - `resume_and_fork/ab_replay.py` and `diagnostics/noise_floor.py` rebuild C0 with
   `OptSearchPoint.from_prompt_fields(round0)` — a second origin recovery beside
   `origin.py::resolve_origin_opt_search_point`, without the framing; `ab` then splits the origin

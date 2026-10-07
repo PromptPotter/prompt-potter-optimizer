@@ -10,7 +10,9 @@ import type {
   CycleSeed,
   OriginGateDecisionPayload,
 } from "./types.generated";
-import type { ArchiveReport, CommandAcceptedBody } from "./types";
+import type { ArchiveReport, CommandAcceptedBody, VerifyReading } from "./types";
+
+export type VerifyStrategy = VerifyReading["strategy"];
 
 // Generic over `T`: the typed routes answer with a domain object instead of the 202 envelope.
 export async function postCommand<T = CommandAcceptedBody>(
@@ -131,17 +133,23 @@ export async function postSkipSearchpoint(
 ): Promise<CommandAcceptedBody> {
   return postCommand("skip-searchpoint", { campaign_id: campaignId, cycle_id: cycleId });
 }
-// No `samples` parameter by design: the server derives the count
-// (`verify.py::derive_verify_samples`), so one click cannot buy a million cells.
+// `samples` omitted is the server's own count (`verify.py::derive_verify_samples`), and a larger
+// one is refused — so one click cannot buy a million cells. Addressed by PATH: an inner candidate
+// is as reachable as a top-level one. Answers when the pass has finished, not when it starts.
 export async function postVerifyCandidate(
-  campaignId: string,
-  cycleId: string,
-  label: string,
+  path: CyclePath,
+  candidateId: string,
+  opts: { strategy: VerifyStrategy; samples: number | null },
 ): Promise<CommandAcceptedBody> {
+  const root = pathRoot(path);
+  const descend = encodeDescend(path);
   return postCommand("verify-candidate", {
-    campaign_id: campaignId,
-    cycle_id: cycleId,
-    label,
+    campaign_id: root.campaignId,
+    cycle_id: root.cycleId,
+    candidate_id: candidateId,
+    strategy: opts.strategy,
+    ...(opts.samples != null ? { samples: opts.samples } : {}),
+    ...(descend ? { descend } : {}),
   });
 }
 // `cells: 1` disarms; sent unclamped, the walk clamps it to `max_cells_in_flight`. The one command

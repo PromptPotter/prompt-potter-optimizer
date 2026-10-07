@@ -72,7 +72,7 @@ function live(over: Partial<DashboardCandidate> & Pick<DashboardCandidate, "labe
 const EMPTY = {
   inflightByLabel: new Map<string, DashboardCandidate>(),
   sampleSet: null,
-  diagByLabel: new Map(),
+  verifyByLabel: new Map(),
   benchByLabel: new Map(),
   overlapByCandidate: new Map(),
   overlapSize: null,

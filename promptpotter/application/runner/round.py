@@ -722,7 +722,14 @@ async def post_round(
         hop=CycleHop(campaign_id=session.campaign_id, cycle_id=session.state.cycle_id),
         round_num=round_num,
         accuracy=round_result.accuracy,
-        winner_label=next(iter(round_result.selected_labels), None),
+        winner_id=next(
+            (
+                c.candidate_id
+                for c in round_result.candidate_scores
+                if c.label in round_result.selected_labels[:1]
+            ),
+            None,
+        ),
         budget=budget_gate,
         log=logger.info,
     )

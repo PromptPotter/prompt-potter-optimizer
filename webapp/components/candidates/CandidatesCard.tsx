@@ -37,7 +37,6 @@ import {
   useScoringMask,
 } from "@/lib/scoring-mask";
 import { FitnessRankSummary } from "./FitnessRankSummary";
-import { useVerifyRuns } from "@/lib/hooks/useVerifyRuns";
 import type { LineageNode } from "@/lib/api";
 import {
   barsAreCourses,
@@ -49,6 +48,7 @@ import {
   nodeKeyOf,
   pathOf,
   sortedRounds,
+  verifyByLabel,
   type DisplayMetric,
 } from "@/lib/derivations";
 import { isSelectedCandidate } from "@/lib/types";
@@ -113,8 +113,7 @@ export function CandidatesCard() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const history: RoundSummary[] = useMemo(() => sortedRounds(dash), [dash?.rounds]);
 
-  // Never polled here: a fresh red bar lands when this card next mounts.
-  const diagByLabel = useVerifyRuns(campaignId, cycleId);
+  const verifyReadings = useMemo(() => verifyByLabel(history), [history]);
 
   const benchReadings = useMemo(
     () => benchByLabel(history, dash?.bench_pass),
@@ -190,7 +189,7 @@ export function CandidatesCard() {
         viewedNode,
         inflightByLabel,
         sampleSet,
-        diagByLabel,
+        verifyByLabel: verifyReadings,
         benchByLabel: benchReadings,
         overlapByCandidate,
         overlapSize: overlap?.sample_ids.length ?? null,
@@ -200,7 +199,7 @@ export function CandidatesCard() {
       viewedNode,
       inflightByLabel,
       sampleSet,
-      diagByLabel,
+      verifyReadings,
       benchReadings,
       overlapByCandidate,
       overlap,

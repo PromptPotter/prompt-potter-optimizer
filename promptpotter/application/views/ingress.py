@@ -24,6 +24,8 @@ from promptpotter.application.views.view_models import (
     RunSpendView,
     ScoreEntry,
     SpDiffView,
+    VerifyEnterView,
+    VerifyGradedView,
     ViewContext,
     WarningEntry,
 )
@@ -210,6 +212,22 @@ def _bench_graded(d: dict[str, Any], ctx: ViewContext) -> BenchGradedView:
     )
 
 
+def _verify_enter(d: dict[str, Any], ctx: ViewContext) -> VerifyEnterView:
+    return VerifyEnterView(
+        label=str(d["label"]),
+        round=int(d["candidate_round"]),
+        rows=int(d["rows"]),
+        strategy=d["strategy"],
+    )
+
+
+def _verify_graded(d: dict[str, Any], ctx: ViewContext) -> VerifyGradedView:
+    return VerifyGradedView(
+        verify_pass=d["verify_pass"].model_dump(mode="json"),
+        reading=d["reading"].model_dump(mode="json"),
+    )
+
+
 def run_spend_view(
     spent: MeteredSpend, *, usd_cap: float | None, token_cap: int | None
 ) -> RunSpendView:
@@ -305,6 +323,8 @@ _BUILDERS: dict[str, Any] = {
     f"{CampaignPhase.BENCH}:enter": _bench_enter,
     f"{CampaignPhase.BENCH}:scored": _bench_scored,
     f"{CampaignPhase.BENCH}:graded": _bench_graded,
+    f"{CampaignPhase.VERIFY}:enter": _verify_enter,
+    f"{CampaignPhase.VERIFY}:graded": _verify_graded,
 }
 
 

@@ -52,7 +52,9 @@ __all__ = [
     "grade_round_selection",
     "graded",
     "headline",
+    "level_columns",
     "nothing_held_out",
+    "paired_lift",
     "read_bench",
     "read_pass",
     "reserve_selection_pass",
@@ -91,6 +93,21 @@ def read_pass(
             f"formula cannot grade — past the split's tolerance of {tolerance}"
         )
         return PassReading(None, missing, [])
+    level = level_columns(rows)
+    reading = BenchReading(
+        round=bench_pass.round,
+        sp_hash=bench_pass.sp_hash,
+        headline=BENCH_HEADLINE,
+        n_scored=len(graded_rows),
+        accuracy=level.accuracy,
+        composite=level.composite,
+    )
+    return PassReading(reading, None, graded_rows)
+
+
+def level_columns(rows: list[QueryMeasurement]) -> BenchColumns:
+    """One population's level in both columns, each with its band — for the bench's pass and a
+    verify's alike, so the two cannot bracket a level differently."""
     folded = fold_cells(rows)
     accuracy = folded["accuracy"]
     # The composite floors at 0.0 over no scoreable row; a column over none has no value.
@@ -105,17 +122,19 @@ def read_pass(
         level = levels[name]
         if level is None:
             return None
-        return _banded(level, *mean_fitness_ci(graded_rows, grade=COLUMN_GRADE[name]))
+        return _banded(level, *mean_fitness_ci(rows, grade=COLUMN_GRADE[name]))
 
-    reading = BenchReading(
-        round=bench_pass.round,
-        sp_hash=bench_pass.sp_hash,
-        headline=BENCH_HEADLINE,
-        n_scored=len(graded_rows),
-        accuracy=column("accuracy"),
-        composite=column("composite"),
-    )
-    return PassReading(reading, None, graded_rows)
+    return BenchColumns(accuracy=column("accuracy"), composite=column("composite"))
+
+
+def paired_lift(rows: list[QueryMeasurement], reference: list[QueryMeasurement]) -> BenchColumns:
+    """*rows* over *reference* in both columns, paired per cell both scored."""
+
+    def column(name: BenchColumn) -> BandedValue | None:
+        paired = matched_parent_lift(rows, reference, grade=COLUMN_GRADE[name])
+        return None if paired is None else _banded(*paired)
+
+    return BenchColumns(accuracy=column("accuracy"), composite=column("composite"))
 
 
 def _banded(value: float, ci_lo: float | None, ci_hi: float | None) -> BandedValue:
@@ -161,14 +180,11 @@ def _graded_bench(
 
 
 def _lift(origin: PassReading, selected: PassReading, *, same_pass: bool) -> BenchColumns:
-    def column(name: BenchColumn) -> BandedValue | None:
-        if same_pass:
-            # One pass read twice is no comparison: 0.0 by identity, and no interval to draw.
-            return None if origin.reading is None else _banded(0.0, None, None)
-        paired = matched_parent_lift(selected.rows, origin.rows, grade=COLUMN_GRADE[name])
-        return None if paired is None else _banded(*paired)
-
-    return BenchColumns(accuracy=column("accuracy"), composite=column("composite"))
+    if not same_pass:
+        return paired_lift(selected.rows, origin.rows)
+    # One pass read twice is no comparison: 0.0 by identity, and no interval to draw.
+    zero = None if origin.reading is None else _banded(0.0, None, None)
+    return BenchColumns(accuracy=zero, composite=zero)
 
 
 def _grade_bench(

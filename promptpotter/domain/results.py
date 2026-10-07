@@ -7,7 +7,7 @@ from typing import Any, Literal, NamedTuple, NotRequired, TypedDict, overload
 
 from pydantic import ConfigDict, Field, computed_field
 
-from promptpotter.domain.bench import BenchScore
+from promptpotter.domain.bench import BenchColumns, BenchScore
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.phases import StopReason
@@ -48,6 +48,9 @@ __all__ = [
     "ScoreboardRankKey",
     "ScoreboardRow",
     "ScoredCandidate",
+    "VerifyPass",
+    "VerifyReading",
+    "VerifyStrategy",
     "WarningDict",
     "best_line",
     "best_round_on_shared_cells",
@@ -1029,18 +1032,71 @@ class CycleResult(StrictModel):
     bench: BenchScore | None = None
 
 
-class DiagnosticRunRecord(StrictModel):
-    """One on-demand workspace-scope diagnostic run — the ``verify`` and ``noise-floor``
-    CLI verbs' shared sidecar shape.
+VerifyStrategy = Literal["random", "hard"]
 
-    Per-sample data lands in `measurements/`; this record carries the workspace-scope
-    verdict. ``verify`` populates the base fields (did the source-campaign composite
-    hold on more samples); ``noise-floor`` additionally populates the ``noise_floor_*``
-    fields (the run-to-run spread of ``--k`` ``force_fresh`` re-scores of the SAME
-    config) and leaves ``samples_added``/``source_campaign_*`` at the origin round's
-    recorded values (there is nothing new to "add" — every re-score targets the same
-    already-measured set).
-    """
+
+class VerifyPass(StrictModel):
+    """One candidate re-scored on search cells it had never met, as the facts it banked — never a
+    grade of them. ``application/diagnostics/verify.py::read_verify`` is the one reading."""
+
+    model_config = ConfigDict(frozen=True)
+
+    label: str
+    candidate_id: str
+    round: int
+    sp_hash: str
+    run_id: str
+    sample_ids: list[int]
+    strategy: VerifyStrategy
+    seed: int | None
+    # The grader it ran under, which stamped its live reading — a reader re-grades under its own.
+    scorer_id: str
+
+
+class VerifyReading(StrictModel):
+    """A :class:`VerifyPass` read under a named scorer: the candidate on its fresh cells, beside
+    the same candidate on the cells its round bought."""
+
+    model_config = ConfigDict(frozen=True)
+
+    label: str
+    scorer_id: str = Field(
+        description="The grader every number here was read under. A stored copy is a cache of "
+        "that reading: a reader under another grader reads the pass again, never this."
+    )
+    strategy: VerifyStrategy = Field(
+        description="How the fresh cells were picked: `random` from the unmeasured search pool, "
+        "or `hard` — its highest-δ cells first, which read BELOW the level by construction."
+    )
+    n_fresh: int = Field(description="Fresh cells carrying a verdict.")
+    fresh: BenchColumns = Field(description="The level on the fresh cells alone, with its band.")
+    n_recorded: int = Field(description="The round's own cells carrying a verdict.")
+    recorded: BenchColumns = Field(
+        description="The level on the cells the candidate's round bought, re-read under this "
+        "scorer — the number the fresh cells are a check on."
+    )
+    accuracy_increment: float | None = Field(
+        description="`fresh` minus `recorded`, hit rate. Unpaired — the two are different cells."
+    )
+    composite_increment: float | None
+    n_shared: int = Field(description="Cells both this candidate and the origin scored.")
+    lift: BenchColumns = Field(
+        description="This candidate over the campaign origin, paired per cell both scored — the "
+        "round's and the fresh ones alike. A column is `None` below two shared cells, and on the "
+        "origin itself."
+    )
+    held: bool | None = Field(
+        description="Whether the fresh cells leave the recorded hit rate standing: its level sits "
+        "at or below the fresh band's upper bound. `None` under `hard` picks, which sit below "
+        "the level whatever the candidate is worth, and below two fresh cells, which have no "
+        "band. Read `lift` there."
+    )
+
+
+class DiagnosticRunRecord(StrictModel):
+    """One ``noise-floor`` run's workspace-scope sidecar. Per-sample data lands in
+    `measurements/`; this carries the run-to-run spread of ``--k`` ``force_fresh`` re-scores of the
+    SAME config, beside the origin round's recorded values."""
 
     model_config = ConfigDict(frozen=True)
 

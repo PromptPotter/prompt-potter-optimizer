@@ -82,7 +82,6 @@ from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.launch_limits import LaunchLimits, RoundsCap
 from promptpotter.domain.pipeline_overlay import steers_disallowed_model
-from promptpotter.domain.results import parse_candidate_label
 from promptpotter.domain.run_records import CommandAckRecord, CommandRecord, CycleSeed
 from promptpotter.domain.spend import BudgetChange
 from promptpotter.domain.strict_model import StrictModel
@@ -576,18 +575,16 @@ class CommandDispatcher:
             async def _apply_verify() -> None:
                 # The one application function the CLI also calls, so both raise the same record.
                 # It spends on the host's key outside any run, so the account's headroom is its book.
-                cand_round, cand_idx = parse_candidate_label(payload.label)
                 book = await asyncio.to_thread(admit_spend, stores=self._stores, bucket="verify")
                 with spending_under(book):
                     await verify_candidate(
                         stores=self._stores,
                         identity=self._stores.identity,
                         hop=hop,
-                        round_num=cand_round,
-                        cand_idx=cand_idx,
-                        label=payload.label,
+                        candidate_id=payload.candidate_id,
                         samples=payload.samples,
-                        seed=None,
+                        strategy=payload.strategy,
+                        seed=payload.seed,
                     )
 
             return Applier(_apply_verify)

@@ -125,6 +125,7 @@ from promptpotter.domain.results import (
     RoundResult,
     ScoreboardRow,
     ScoredCandidate,
+    VerifyReading,
 )
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
@@ -140,6 +141,7 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     LoopWarning,
     RacingBlock,
     RunLimits,
+    VerifyPassProgress,
 )
 from promptpotter.infrastructure.store.family_ray_queries import RayItem, RayResponse
 from promptpotter.infrastructure.store.lineage_queries import (
@@ -240,6 +242,8 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     LiveCandidate,
     CurrentRound,
     BenchPassProgress,
+    VerifyReading,  # nested in DashboardCandidate
+    VerifyPassProgress,
     LiveDashboardState,
     # --- datasets router ---
     DatasetItem,

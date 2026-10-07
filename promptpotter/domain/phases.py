@@ -44,6 +44,9 @@ class CampaignPhase(enum.StrEnum):
     # The held-out pass grading the selection, bracketed once per pass with no round;
     # `bench:scored` carries its `BenchScore`.
     BENCH = "bench"
+    # One candidate re-scored on cells it never met, bracketed like the bench pass and on whichever
+    # process ran it; `verify:graded` carries its `VerifyPass` and the reading of it.
+    VERIFY = "verify"
 
 
 class StopReason(enum.StrEnum):

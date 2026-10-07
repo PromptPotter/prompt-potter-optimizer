@@ -13,6 +13,7 @@ from promptpotter.config.settings import (
     settings,
 )
 from promptpotter.domain.launch_limits import RoundsCap
+from promptpotter.domain.results import VerifyStrategy
 from promptpotter.infrastructure.store.layout import SHARED_CACHE_DIRS
 
 
@@ -247,21 +248,19 @@ def _add_resume_args(p_resume: argparse.ArgumentParser) -> None:
 
 def _add_verify_args(p_verify: argparse.ArgumentParser) -> None:
     p_verify.add_argument(
-        "campaign",
-        help="Campaign id, 6-hex suffix, or unambiguous prefix "
-        "(e.g. 'justlogic__ca6d4d' or 'ca6d4d').",
+        "subject",
+        help="The searchpoint, as `evidence` addresses one: "
+        "'candidate:<campaign>/<cycle>/<candidate_id>', with ';in=<c::y~…>' for an L4 inner "
+        "cycle. The id is `candidate_id` on the round file's `candidate_scores` row.",
     )
     p_verify.add_argument(
-        "label",
-        help="Candidate label as persisted on the round file: 'C{round}.{n}' "
-        "(1-indexed within the round, e.g. 'C4.1').",
-    )
-    p_verify.add_argument(
-        "--cycle",
-        dest="cycle",
-        default=None,
-        help="Cycle id (full or prefix) when the campaign has more than one cycle. "
-        "Omit when the campaign has exactly one cycle.",
+        "--strategy",
+        dest="strategy",
+        choices=get_args(VerifyStrategy),
+        default="random",
+        help="Which unseen cells to buy: 'random', or 'hard' — the highest-δ cells on the "
+        "cycle's ruler first, which read BELOW the candidate's level by construction, so the "
+        "paired lift is the number to read there.",
     )
     p_verify.add_argument(
         "--samples",
@@ -440,10 +439,10 @@ def build_parser() -> argparse.ArgumentParser:
     _add_verify_args(
         sub.add_parser(
             "verify",
-            help="Re-score one campaign candidate on more samples and persist a "
-            "workspace-scope diagnostic-run record. Use to doublecheck whether "
-            "a confidence-locked candidate's verdict generalises beyond the round's "
-            "leader-locked sample budget. Does not mutate the source cycle.",
+            help="Re-score one campaign candidate on search cells it has never met and bank "
+            "the pass on its cycle's ledger. Use to doublecheck whether a confidence-locked "
+            "candidate's verdict generalises beyond the round's leader-locked sample budget. "
+            "Moves no round and no election.",
         )
     )
 

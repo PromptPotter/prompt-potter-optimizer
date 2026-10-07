@@ -19,13 +19,13 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, NamedTuple
 
 from pydantic import ValidationError
 
 from promptpotter.domain.dashboard_rows import RunStanding
 from promptpotter.domain.phases import CONTROL_PHASE, CampaignPhase, RunPhase
-from promptpotter.domain.results import ArmOutcome
+from promptpotter.domain.results import ArmOutcome, VerifyPass, VerifyReading
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler
 from promptpotter.domain.run_records import (
     CandidateMintedRecord,
@@ -250,6 +250,40 @@ class _ControlPhase:
         return self._declared
 
 
+class VerifyLedger(NamedTuple):
+    # label -> its LAST graded pass, and the reading that pass was stamped with.
+    graded: dict[str, tuple[VerifyPass, VerifyReading]]
+    # The `verify:enter` view of a pass no `verify:exit` has closed; `None` outside one.
+    open: dict[str, Any] | None
+
+
+class _Verify:
+    probes: ClassVar[frozenset[str]] = frozenset({"phase"})
+
+    def __init__(self) -> None:
+        self._graded: dict[str, tuple[VerifyPass, VerifyReading]] = {}
+        self._open: dict[str, Any] | None = None
+
+    def feed(self, offset: int, rec: dict[str, Any]) -> None:
+        if rec.get("record_type") != "phase" or rec.get("phase") != CampaignPhase.VERIFY:
+            return
+        view = (rec.get("payload") or {}).get("view")
+        event = rec.get("event")
+        if event == "exit":
+            self._open = None
+        elif not isinstance(view, dict):
+            return
+        elif event == "enter":
+            self._open = view
+        elif event == "graded":
+            with suppress(ValidationError, KeyError):
+                banked = VerifyPass.model_validate(view["verify_pass"])
+                self._graded[banked.label] = banked, VerifyReading.model_validate(view["reading"])
+
+    def value(self) -> VerifyLedger:
+        return VerifyLedger(dict(self._graded), self._open)
+
+
 class _Spend:
     probes: ClassVar[frozenset[str]] = frozenset({"token_usage"})
 
@@ -280,6 +314,7 @@ LEDGER_FOLDS = (
     _RoundCloses,
     _RunStanding,
     _ControlPhase,
+    _Verify,
     _Spend,
 )
 """What a polled read asks of a cycle's ledger: ONE pass feeds them all, then only the appended
@@ -365,6 +400,12 @@ def scan_ledger_declared_phase(ledger_path: Path) -> str:
 
 _Span = tuple[float, float]
 _CallSpan = tuple[str, str, float, float]
+
+
+def scan_ledger_verify(ledger_path: Path) -> VerifyLedger:
+    """The cycle's OWN verify passes, last per candidate label. A fork's inherited prefix is not
+    read: it inherits its parent's measurements and not its assurance."""
+    return _view(ledger_path, _Verify)
 
 
 def _phase_spans(
@@ -618,6 +659,7 @@ def scan_ledger_wall_clock(
 
 
 __all__ = [
+    "VerifyLedger",
     "scan_ledger_candidates",
     "scan_ledger_cycle_seed",
     "scan_ledger_decisions",
@@ -626,5 +668,6 @@ __all__ = [
     "scan_ledger_round_closes",
     "scan_ledger_run_standing",
     "scan_ledger_spend",
+    "scan_ledger_verify",
     "scan_ledger_wall_clock",
 ]

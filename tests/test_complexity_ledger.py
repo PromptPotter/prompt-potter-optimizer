@@ -785,7 +785,9 @@ LEDGER_BASELINE = {
     # +1: an LLM-authored slot value echoed into the unfenced breach panel (test_security).
     # +1: a dial on an unbounded term summed raw, so the clamp floors every candidate at 0.000 and
     # the election falls to its tie-break (test_numerics § 1).
-    "test_functions": 248,
+    # +1: a verify pooling its fresh cells into the round's reads as the old level with a wider n,
+    # and a lift left unpaired differences two exams (test_numerics § 1).
+    "test_functions": 249,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

@@ -439,9 +439,17 @@ paths:
       description: |
         The question a round's own panel cannot answer: a rate is read on the cells the
         acquisition bought that round, so a headline — 100% most of all — is a claim about a
-        panel, not about the dataset. This re-scores one candidate on cells it has never seen
-        and writes the verdict to `diagnostics/runs/`. Not a cycle or a fork: no ledger
-        event on the cycle's own round series, no round id.
+        panel, not about the dataset. This re-scores one candidate on search cells it has never
+        seen and banks the pass on that cycle's own ledger (`verify:enter` / `graded` / `exit`),
+        whichever process runs it. Not a cycle or a fork: no round id, no election moved. The
+        dashboard read serves the result — `verify` on the candidate's row, `verify_pass` while
+        one is in flight.
+
+        **The reading keeps the fresh cells apart.** `fresh` is the level on the new cells alone,
+        `recorded` the round's own cells re-read under the same scorer, and `lift` the candidate
+        over the campaign origin paired per cell both scored. `strategy: hard` buys the cycle
+        ruler's highest-δ unseen cells, which sit below the level by construction, so `held` is
+        null there and `lift` is the number to read.
 
         **`samples` omitted is the answer, not an absence.** The count derives from the
         per-candidate round budget lifted by the rounds run since this cycle's last
@@ -3544,16 +3552,33 @@ components:
         - $ref: '#/components/schemas/CycleRef'
         - type: object
           additionalProperties: false
-          required: [label]
+          required: [candidate_id]
           properties:
-            label:
+            candidate_id:
               type: string
-              pattern: '^C(0|\d+\.[1-9]\d*)$'
-              minLength: 2
-              maxLength: 32
+              minLength: 1
+              maxLength: 128
               description: >-
-                Candidate label as persisted on the round file — `C0` for the origin,
-                `C{round}.{n}` (1-indexed within the round) otherwise.
+                The searchpoint, as `GET /evidence` addresses one: `candidate_id` on its round
+                file's `candidate_scores` row. The origin is addressed the same way.
+            descend:
+              type: string
+              maxLength: 512
+              nullable: true
+              description: >-
+                The sandbox chain below the addressed cycle, in the read side's `?descend=`
+                grammar — so an L4 inner candidate is verified like a top-level one.
+            strategy:
+              type: string
+              enum: [random, hard]
+              default: random
+              description: >-
+                Which unseen cells to buy: `random` from the unmeasured search pool, or `hard`
+                — the highest-δ cells on the cycle's ruler first.
+            seed:
+              type: integer
+              nullable: true
+              description: Seeds the pick. Omit for an unseeded draw.
             samples:
               type: integer
               minimum: 1

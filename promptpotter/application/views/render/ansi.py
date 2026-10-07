@@ -35,6 +35,8 @@ from promptpotter.application.views.view_models import (
     RoundStartView,
     RunSpendView,
     SpDiffView,
+    VerifyEnterView,
+    VerifyGradedView,
 )
 from promptpotter.domain.candidate_diff import group_diff_keys
 from promptpotter.domain.spend import CeilingMeter
@@ -234,6 +236,10 @@ def to_text(view: AnyView) -> str:
             return _render_bench_graded(view)
         case BenchScoredView():
             return _render_bench_scored(view)
+        case VerifyEnterView():
+            return f"  {DIM}verify {view.label}: {view.rows} unseen cells, {view.strategy}{RESET}"
+        case VerifyGradedView():
+            return _render_verify_graded(view)
         case RunSpendView():
             return _render_run_spend(view)
         case _:
@@ -271,6 +277,25 @@ def _render_bench_graded(v: BenchGradedView) -> str:
     return (
         f"  {DIM}bench R{reading['round']}: {column} {value} on "
         f"{reading['n_scored']} held-out rows{RESET}"
+    )
+
+
+def _render_verify_graded(v: VerifyGradedView) -> str:
+    r = v.reading
+    levels = " → ".join(
+        "—" if (level := r[side]["accuracy"]) is None else f"{level['value']:.3f}"
+        for side in ("recorded", "fresh")
+    )
+    verdict = {True: " — held", False: f" — {YELLOW}dropped{RESET}{DIM}", None: ""}[r["held"]]
+    lift = ""
+    if (paired := r["lift"]["accuracy"]) is not None:
+        lift = (
+            f", lift over C0 {paired['value']:+.3f} "
+            f"[{paired['ci_lo']:+.3f}, {paired['ci_hi']:+.3f}] on {r['n_shared']} shared"
+        )
+    return (
+        f"  {DIM}verify {r['label']}: accuracy {levels} on {r['n_fresh']} unseen cells"
+        f"{lift}{verdict}{RESET}"
     )
 
 

@@ -5,12 +5,19 @@
 import { useState } from "react";
 import type { SelectedCandidate } from "@/lib/types";
 import type { CyclePath } from "@/lib/ids";
-import { postVerifyCandidate } from "@/lib/api/commands";
+import { postVerifyCandidate, type VerifyStrategy } from "@/lib/api/commands";
 import { useCommand } from "@/lib/hooks/useCommand";
-import { useVerifyRuns } from "@/lib/hooks/useVerifyRuns";
+import { useVerify } from "@/lib/hooks/useVerify";
+import { unitCount } from "@/lib/format";
+import { Chip, CommitInput, IconMore, Menu, MenuRadioGroup, MenuSep } from "@/components/ui";
 import { VerifyReading } from "./VerifyReading";
 
-const AWAIT_POLL_MS = 5000;
+const PASS_POLL_MS = 5000;
+
+const STRATEGIES: readonly { value: VerifyStrategy; label: string }[] = [
+  { value: "random", label: "at random — reads the level" },
+  { value: "hard", label: "hardest first — a stress read" },
+];
 
 export function VerifyAction({
   candidate,
@@ -20,57 +27,94 @@ export function VerifyAction({
   path: CyclePath | null;
 }) {
   const cmd = useCommand<"verify-candidate">("verify-candidate");
-  // Top level only: `VerifyCandidatePayload` carries no `descend`, so an L4 inner label would
-  // match a coincidental id in the OUTER cycle.
-  const hop = path && path.length === 1 ? (path[0] ?? null) : null;
+  const [strategy, setStrategy] = useState<VerifyStrategy>("random");
+  // Blank is the server's own count, never a number this browser picked.
+  const [samples, setSamples] = useState("");
+  const sending = cmd.pending !== null;
+  const { readings, pass, unit } = useVerify(path, sending ? PASS_POLL_MS : undefined);
 
-  // The record a send was issued OVER, by subject — a newer one for that label retires the wait.
-  // Stamps are compared with each other, never with this browser's clock.
-  const [sent, setSent] = useState<{ label: string; over: string } | null>(null);
-  const awaitingLabel = sent?.label === candidate.label ? sent : null;
-  const runs = useVerifyRuns(
-    hop?.campaignId,
-    hop?.cycleId,
-    awaitingLabel ? AWAIT_POLL_MS : undefined,
-  );
-  const reading = runs.get(candidate.label) ?? null;
-  const awaiting = awaitingLabel !== null && (reading?.ts ?? "") === awaitingLabel.over;
+  if (!path || !candidate.label) return null;
 
-  if (!hop || !candidate.label) return null;
+  const reading = readings.get(candidate.label) ?? null;
+  // SERVED, so a pass another tab or a terminal started holds this button too.
+  const flying = pass !== null && pass.label === candidate.label ? pass : null;
+  const busy = sending || flying !== null;
 
   function run() {
-    if (!hop) return;
-    const over = reading?.ts ?? "";
-    void cmd.run(
-      "verify-candidate",
-      () => postVerifyCandidate(hop.campaignId, hop.cycleId, candidate.label),
-      () => setSent({ label: candidate.label, over }),
+    if (!path) return;
+    void cmd.run("verify-candidate", () =>
+      postVerifyCandidate(path, candidate.candidate_id, {
+        strategy,
+        samples: samples === "" ? null : Number(samples),
+      }),
     );
   }
 
   return (
     <div className="verify-action">
-      <button
-        type="button"
-        className="btn"
-        onClick={run}
-        disabled={cmd.pending !== null || awaiting}
-        title={
-          "Re-score this candidate on cells it has never been measured on. The count is derived " +
-          "from the round budget and how long this cycle has gone unverified, so it stays on the " +
-          "scale the campaign already set."
-        }
-      >
-        {cmd.pending !== null || awaiting ? "Verifying…" : `Verify ${candidate.label}`}
-      </button>
-      {awaiting && (
+      <div className="verify-action-row">
+        <button
+          type="button"
+          className="btn"
+          onClick={run}
+          disabled={busy}
+          title="Re-score this candidate on search cells it has never been measured on."
+        >
+          {busy ? "Verifying…" : `Verify ${candidate.label}`}
+        </button>
+        <Menu
+          align="left"
+          renderTrigger={({ open, toggle }) => (
+            <Chip
+              icon
+              on={open || strategy !== "random" || samples !== ""}
+              ariaLabel="Verify options"
+              title="Which cells a verify picks, and how many"
+              onClick={toggle}
+            >
+              <IconMore />
+            </Chip>
+          )}
+        >
+          {() => (
+            <>
+              <MenuRadioGroup
+                label="Fresh cells picked"
+                value={strategy}
+                options={STRATEGIES}
+                onChange={setStrategy}
+              />
+              <MenuSep />
+              <label className="verify-samples">
+                <span>cells</span>
+                <CommitInput
+                  type="text"
+                  inputMode="numeric"
+                  value={samples}
+                  placeholder="derived"
+                  aria-label="Fresh cells to measure; blank lets the round budget decide"
+                  validate={(d) => d === "" || /^[1-9]\d{0,3}$/.test(d)}
+                  onCommit={setSamples}
+                />
+              </label>
+              <p className="verify-samples-note">
+                Blank takes the count from the round budget and how long this cycle has gone
+                unverified. A larger one is refused.
+              </p>
+            </>
+          )}
+        </Menu>
+      </div>
+      {busy && (
         <p className="verify-action-note">
-          Measuring {candidate.label} on cells it has never seen. This mints no round, so the
-          cycle&rsquo;s own series does not move.
+          {flying
+            ? `Measuring ${flying.label} on ${unitCount(flying.rows, unit)} it has never seen, ${flying.strategy === "hard" ? "hardest first" : "picked at random"}.`
+            : `Measuring ${candidate.label} on cells it has never seen.`}{" "}
+          This mints no round, so the cycle&rsquo;s own series does not move.
         </p>
       )}
       {cmd.failure ? <p className="verify-action-note error">{cmd.failure.message}</p> : null}
-      {reading && <VerifyReading run={reading} />}
+      {reading && <VerifyReading reading={reading} unit={unit} />}
     </div>
   );
 }

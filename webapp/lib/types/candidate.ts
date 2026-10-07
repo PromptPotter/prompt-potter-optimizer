@@ -1,7 +1,7 @@
 // The one per-candidate row behind every surface that lists, plots or selects candidates. Only
 // `lib/derivations/round-candidates.ts` merges origin, closed and in-flight rows into it.
 
-import type { AbilityReading, ArmOutcome } from "@/lib/api/types";
+import type { AbilityReading, ArmOutcome, VerifyReading } from "@/lib/api/types";
 
 export type CandidateSource = "history" | "inflight";
 
@@ -66,7 +66,8 @@ export interface CandidateView extends CandidateRow {
   // Never inferred from the round closing: the election decides the adapters' whole pass
   // earlier, so only this may explain an absent crown.
   electionPending: boolean;
-  diag?: { accuracy: number; workspaceN: number; samplesAdded: number };
+  // This candidate's last `verify`, as served: the level on cells its rounds never bought.
+  verify?: VerifyReading;
   // This candidate read on the held-out bench set. `rows` is set only while its pass is still
   // in flight, when `accuracy` is the running one over `scored` rows and there is no band yet.
   bench?: {

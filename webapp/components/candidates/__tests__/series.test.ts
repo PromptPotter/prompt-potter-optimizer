@@ -6,6 +6,7 @@ import {
   whiskerBands,
   type SeriesCtx,
 } from "../series";
+import type { VerifyReading } from "@/lib/api/types";
 import type { CandidateView } from "@/lib/types";
 
 // Every one of these fails silently on screen: a plausible bar, no whisker, a `transparent` ink.
@@ -132,5 +133,27 @@ describe("the confidence band", () => {
     expect(anchors(both)).toEqual(["accuracy"]);
     expect(anchors({ electedMetric: "composite", metrics: new Set(["composite"]) })).toEqual([]);
     expect(anchors({ metrics: new Set(["ability"]) })).toEqual(["ability"]);
+  });
+
+  it("puts a verify on its fresh cells alone, under the band those cells produced", () => {
+    const col = { accuracy: null, composite: null };
+    const verify: VerifyReading = {
+      label: "C1.1",
+      scorer_id: "s",
+      strategy: "random",
+      n_fresh: 6,
+      fresh: { accuracy: { value: 0.5, ci_lo: 0.2, ci_hi: 0.8 }, composite: null },
+      n_recorded: 12,
+      recorded: { accuracy: { value: 0.75, ci_lo: 0.5, ci_hi: 1 }, composite: null },
+      accuracy_increment: -0.25,
+      composite_increment: null,
+      n_shared: 18,
+      lift: col,
+      held: true,
+    };
+    const views = [view({ accuracy: 0.75, verify }), view({ accuracy: 0.6 })];
+    expect(seriesColumn(spec("verify"), views)).toEqual([0.5, null]);
+    const band = whiskerBands(ctx({ metrics: new Set(), views })).find((b) => b.anchor === "verify");
+    expect(band).toEqual({ anchor: "verify", lo: [0.2, null], hi: [0.8, null] });
   });
 });

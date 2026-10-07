@@ -19,7 +19,6 @@ import type {
   Cell,
   CellsResponse,
   DatasetStorageResponse,
-  DiagnosticRunListResponse,
   FileContentResponse,
   FilesResponse,
   ForkPreviewResponse,
@@ -492,13 +491,4 @@ export function fetchTimeRay(
   if (before) params.set("before", before);
   const q = params.toString();
   return jgetIfNoneMatch<RayResponse>(cyclePathUrl(path, `/ray${q ? `?${q}` : ""}`), etag, signal);
-}
-
-// The sidecars the `verify` verb writes.
-export function fetchDiagnosticRuns(
-  dataset?: string | null,
-  signal?: AbortSignal,
-): Promise<DiagnosticRunListResponse> {
-  const qs = dataset ? `?dataset=${encodeURIComponent(dataset)}` : "";
-  return jget<DiagnosticRunListResponse>(`${API}/diagnostic-runs${qs}`, signal);
 }

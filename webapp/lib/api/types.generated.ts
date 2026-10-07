@@ -52,6 +52,7 @@ export interface DashboardCandidate {
   theta: number | null;
   theta_se: number | null;
   bench: BenchReading | null;
+  verify: VerifyReading | null;
   theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
   mean_fitness_ci_lo: number | null;
   mean_fitness_ci_hi: number | null;
@@ -129,6 +130,7 @@ export interface RoundSummaryCandidate {
   theta: number | null;
   theta_se: number | null;
   bench: BenchReading | null;
+  verify: VerifyReading | null;
   theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
   mean_fitness_ci_lo: number | null;
   mean_fitness_ci_hi: number | null;
@@ -218,7 +220,7 @@ export interface RoundSummary {
   optimizer_facts: OptimizerFact[];
 }
 
-/** One on-demand workspace-scope diagnostic run — the ``verify`` and ``noise-floor`` */
+/** One ``noise-floor`` run's workspace-scope sidecar. Per-sample data lands in */
 export interface DiagnosticRunRecord {
   ts: string;
   dataset: string;
@@ -618,6 +620,7 @@ export interface LiveCandidate {
   theta: number | null;
   theta_se: number | null;
   bench: BenchReading | null;
+  verify: VerifyReading | null;
   theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
   mean_fitness_ci_lo: number | null;
   mean_fitness_ci_hi: number | null;
@@ -663,6 +666,52 @@ export interface BenchPassProgress {
   accuracy: number | null;
 }
 
+/** A :class:`VerifyPass` read under a named scorer: the candidate on its fresh cells, beside */
+export interface VerifyReading {
+  label: string;
+  /** The grader every number here was read under. A stored copy is a cache of that
+   * reading: a reader under another grader reads the pass again, never this. */
+  scorer_id: string;
+  /** How the fresh cells were picked: `random` from the unmeasured search pool, or
+   * `hard` — its highest-δ cells first, which read BELOW the level by
+   * construction. */
+  strategy: 'random' | 'hard';
+  /** Fresh cells carrying a verdict. */
+  n_fresh: number;
+  /** The level on the fresh cells alone, with its band. */
+  fresh: BenchColumns;
+  /** The round's own cells carrying a verdict. */
+  n_recorded: number;
+  /** The level on the cells the candidate's round bought, re-read under this scorer
+   * — the number the fresh cells are a check on. */
+  recorded: BenchColumns;
+  /** `fresh` minus `recorded`, hit rate. Unpaired — the two are different cells. */
+  accuracy_increment: number | null;
+  composite_increment: number | null;
+  /** Cells both this candidate and the origin scored. */
+  n_shared: number;
+  /** This candidate over the campaign origin, paired per cell both scored — the
+   * round's and the fresh ones alike. A column is `None` below two shared
+   * cells, and on the origin itself. */
+  lift: BenchColumns;
+  /** Whether the fresh cells leave the recorded hit rate standing: its level sits
+   * at or below the fresh band's upper bound. `None` under `hard` picks,
+   * which sit below the level whatever the candidate is worth, and below two
+   * fresh cells, which have no band. Read `lift` there. */
+  held: boolean | null;
+}
+
+/** ``verify_pass`` on a served dashboard — one candidate being re-scored on unseen cells. */
+export interface VerifyPassProgress {
+  /** The candidate the pass re-scores, as its row is labelled. */
+  label: string;
+  /** That candidate's own round; 0 is the origin. */
+  round: number;
+  /** Unseen search cells the pass sends. */
+  rows: number;
+  strategy: 'random' | 'hard';
+}
+
 /** ``dashboard.json`` — operator-facing snapshot, polled by the webapp. */
 export interface LiveDashboardState {
   campaign_id: string;
@@ -684,6 +733,7 @@ export interface LiveDashboardState {
   current_acc: number | null;
   bench_score: BenchScore | null;
   bench_pass: BenchPassProgress | null;
+  verify_pass: VerifyPassProgress | null;
   bench_lift_per_incurred_usd: number | null;
   composite_fitness_formula: string | null;
   composite_fitness_weights: Record<string, number> | null;

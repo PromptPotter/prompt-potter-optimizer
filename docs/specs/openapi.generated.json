@@ -2816,7 +2816,7 @@
       },
       "DiagnosticRunRecord": {
         "additionalProperties": false,
-        "description": "One on-demand workspace-scope diagnostic run — the ``verify`` and ``noise-floor``\nCLI verbs' shared sidecar shape.\n\nPer-sample data lands in `measurements/`; this record carries the workspace-scope\nverdict. ``verify`` populates the base fields (did the source-campaign composite\nhold on more samples); ``noise-floor`` additionally populates the ``noise_floor_*``\nfields (the run-to-run spread of ``--k`` ``force_fresh`` re-scores of the SAME\nconfig) and leaves ``samples_added``/``source_campaign_*`` at the origin round's\nrecorded values (there is nothing new to \"add\" — every re-score targets the same\nalready-measured set).",
+        "description": "One ``noise-floor`` run's workspace-scope sidecar. Per-sample data lands in\n`measurements/`; this carries the run-to-run spread of ``--k`` ``force_fresh`` re-scores of the\nSAME config, beside the origin round's recorded values.",
         "properties": {
           "config_hash": {
             "title": "Config Hash",

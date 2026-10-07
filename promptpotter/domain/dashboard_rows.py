@@ -23,6 +23,7 @@ from promptpotter.domain.results import (
     DegradationHealth,
     OptimizerFact,
     OverlapReading,
+    VerifyReading,
 )
 from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
 from promptpotter.domain.scoring import is_hit, is_unscored
@@ -171,6 +172,11 @@ class DashboardCandidate(StrictModel):
     # This candidate read on the held-out bench set, a second reading beside the search cells
     # above. `None` unless a bench pass graded it: the origin, and each selection the bench read.
     bench: BenchReading | None = None
+    # This candidate's last `verify` pass — re-scored on search cells it had never met — as that
+    # pass read under the scorer it ran with. WIRE-ONLY: whichever process ran the pass banked it
+    # on the cycle's ledger, so the serving seam places it (`overlay_verify`) and the runner's
+    # file never holds a copy to go stale.
+    verify: VerifyReading | None = Field(default=None, exclude=True)
     # Why the θ above is NOT this arm's ability (`ScoredCandidate.theta_caveat`) — `FLOOR_PINNED`
     # or `UNMEASURED_DELTA`, since the rest are facts about the round's scale and ride
     # `RoundResult.ability` once instead of being copied onto every row. Served rather than

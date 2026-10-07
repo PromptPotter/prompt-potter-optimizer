@@ -1,4 +1,4 @@
-"""Workspace-scope diagnostic-run records — the sole feed for the Verify tab. Cross-cycle and cross-campaign: the records
+"""Workspace-scope diagnostic-run records — ``noise-floor``'s sidecars. Cross-cycle and cross-campaign: the records
 live on the tenant archive root, not on any single campaign."""
 
 from __future__ import annotations

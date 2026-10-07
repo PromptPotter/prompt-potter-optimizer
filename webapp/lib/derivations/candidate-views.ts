@@ -4,9 +4,9 @@
 import type {
   BenchPassProgress,
   DashboardCandidate,
-  DiagnosticRunRecord,
   LineageNode,
   OverlapMember,
+  VerifyReading,
 } from "@/lib/api/types";
 import type { CandidateView } from "@/lib/types";
 import { panelCellLabel } from "./inner-panel";
@@ -39,10 +39,18 @@ export function partialPanels(views: readonly CandidateView[]): (number | null)[
   });
 }
 
-function diagView(d: DiagnosticRunRecord | undefined): CandidateView["diag"] {
-  return d
-    ? { accuracy: d.workspace_accuracy, workspaceN: d.workspace_n, samplesAdded: d.samples_added }
-    : undefined;
+// Each candidate's last `verify`, keyed by label, off its closed round row. A dashboard an older
+// build wrote, or one replayed at a past moment, carries none.
+export function verifyByLabel(
+  rounds: readonly { candidates: readonly DashboardCandidate[] }[],
+): Map<string, VerifyReading> {
+  const m = new Map<string, VerifyReading>();
+  for (const r of rounds) {
+    for (const c of r.candidates) {
+      if (c.verify != null) m.set(c.label, c.verify);
+    }
+  }
+  return m;
 }
 
 // Each candidate's held-out reading, keyed by label: closed off its round row, and the pass in
@@ -83,7 +91,7 @@ export interface CandidateViewsInput {
   inflightByLabel: ReadonlyMap<string, DashboardCandidate>;
   // null ⇒ the served reading.
   sampleSet: number[] | null;
-  diagByLabel: ReadonlyMap<string, DiagnosticRunRecord>;
+  verifyByLabel: ReadonlyMap<string, VerifyReading>;
   benchByLabel: ReadonlyMap<string, NonNullable<CandidateView["bench"]>>;
   overlapByCandidate: ReadonlyMap<string, OverlapMember>;
   // The denominator a member must match to be readable.
@@ -96,7 +104,7 @@ export function candidateViews({
   viewedNode,
   inflightByLabel,
   sampleSet,
-  diagByLabel,
+  verifyByLabel,
   benchByLabel,
   overlapByCandidate,
   overlapSize,
@@ -155,7 +163,7 @@ export function candidateViews({
       // SERVED, never inferred from whether the round has closed: a round that HELD crowned
       // nobody and reads exactly like one still scoring.
       electionPending: !isCourse && !n.election_held,
-      diag: diagView(diagByLabel.get(label)),
+      verify: isCourse ? undefined : verifyByLabel.get(n.label),
       bench: isCourse ? undefined : benchByLabel.get(n.label),
       overlapAccuracy: whole
         ? pickedSet

@@ -3,6 +3,8 @@ through this model at every ``_persist()``, so writer/schema drift raises at wri
 
 from __future__ import annotations
 
+import time
+from pathlib import Path
 from typing import Any, ClassVar
 
 from pydantic import ConfigDict, Field, ValidationError
@@ -18,10 +20,13 @@ from promptpotter.domain.dashboard_rows import (
     RunStanding,
 )
 from promptpotter.domain.phases import DashboardState, RunPhase, StopReason
-from promptpotter.domain.results import DisplayMetric, OverlapReading
+from promptpotter.domain.results import DisplayMetric, OverlapReading, VerifyStrategy
 from promptpotter.domain.scoring import anchored_criterion_dials
 from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.runtime_flags import verify_stale_after
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_verify
+from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.clock import utcnow_iso
 
 __all__ = [
@@ -34,8 +39,10 @@ __all__ = [
     "LoopWarning",
     "RacingBlock",
     "RunLimits",
+    "VerifyPassProgress",
     "overlay_criterion_dials",
     "overlay_spend_metered",
+    "overlay_verify",
     "warming_payload",
 ]
 
@@ -182,6 +189,38 @@ class BenchPassProgress(StrictModel):
     )
 
 
+class VerifyPassProgress(StrictModel):
+    """``verify_pass`` on a served dashboard — one candidate being re-scored on unseen cells."""
+
+    label: str = Field(description="The candidate the pass re-scores, as its row is labelled.")
+    round: int = Field(description="That candidate's own round; 0 is the origin.")
+    rows: int = Field(description="Unseen search cells the pass sends.")
+    strategy: VerifyStrategy
+
+
+def overlay_verify(body: dict[str, Any], cycle_dir: Path) -> None:
+    """Each candidate's last verify reading, and the pass in flight, onto a served
+    ``dashboard.json`` body — read off the cycle's LEDGER, where the process that ran the pass
+    banked it. That process is the runner only for a saturation check, so the runner's file can
+    hold neither for an operator's verify, least of all on a halted cycle. Mutates in place.
+
+    **A REPLAY must not call this**: the readings are the ones standing now."""
+    verify = scan_ledger_verify(CycleLayout(cycle_dir).ledger)
+    readings = {
+        label: reading.model_dump(mode="json") for label, (_, reading) in verify.graded.items()
+    }
+    for closed in body.get("rounds") or []:
+        for row in closed.get("candidates") or []:
+            row["verify"] = readings.get(row.get("label"))
+    stale_after = verify_stale_after(cycle_dir)
+    in_flight = verify.open is not None and stale_after is not None and time.time() < stale_after
+    body["verify_pass"] = (
+        VerifyPassProgress.model_validate(verify.open).model_dump(mode="json")
+        if in_flight
+        else None
+    )
+
+
 class CurrentRound(StrictModel):
     """``dashboard.json::current_round`` — the round in flight, rebuilt whole on every persist.
     The four rules it serves under (no ``live`` flag, ``round`` is ``state.round``, this-round-only
@@ -269,6 +308,9 @@ class LiveDashboardState(StrictModel):
     # The bench pass in flight, null outside one: while it is set, the cells being scored are
     # held-out rows of `subject`'s pass and no round's.
     bench_pass: BenchPassProgress | None = None
+    # A verify pass in flight on one of this cycle's candidates, null outside one. Wire-only,
+    # set by ``overlay_verify`` beside each candidate row's ``verify`` reading.
+    verify_pass: VerifyPassProgress | None = Field(default=None, exclude=True)
     # That lift per dollar the SEARCH incurred (`BenchScore.lift_per_usd`, `evidence`'s rule too),
     # settled in ``compose``: spend moves on every call, and a browser dividing the two divides
     # two polls.

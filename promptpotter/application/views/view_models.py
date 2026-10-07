@@ -15,6 +15,7 @@ from promptpotter.domain.results import (
     HardSampleOrder,
     OptimizerFact,
     OverlapReading,
+    VerifyStrategy,
 )
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.spend import CeilingMeter, SpendRollup
@@ -41,6 +42,8 @@ __all__ = [
     "RunSpendView",
     "ScoreEntry",
     "SpDiffView",
+    "VerifyEnterView",
+    "VerifyGradedView",
     "ViewContext",
     "WarningEntry",
 ]
@@ -196,6 +199,23 @@ class BenchGradedView:
     reading: dict[str, Any] | None
     missing: str | None
     label: str
+
+
+@dataclass(frozen=True)
+class VerifyEnterView:
+    # The served `verify_pass` is read off it; `round` is the candidate's own, 0 for the origin.
+    label: str
+    round: int
+    rows: int
+    strategy: VerifyStrategy
+
+
+@dataclass(frozen=True)
+class VerifyGradedView:
+    # `VerifyPass` and the `VerifyReading` of it under the scorer that ran, both
+    # `model_dump(mode="json")` — the pass is the fact, the reading a cache of one grading.
+    verify_pass: dict[str, Any]
+    reading: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -426,6 +446,8 @@ AnyView = (
     | BenchEnterView
     | BenchScoredView
     | BenchGradedView
+    | VerifyEnterView
+    | VerifyGradedView
     | RunSpendView
     | RoundCompleteView
     | OptimizerStepEnterView

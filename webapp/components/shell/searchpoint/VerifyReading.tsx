@@ -1,56 +1,73 @@
 "use client";
-// One candidate's latest `verify` — its round's verdict re-read over every measurement the
-// cross-cycle archive holds for the same config. Every number is the stored record's.
+// One candidate's last `verify`: the level on cells its rounds never bought, beside the level
+// those rounds recorded. Every number is the served reading's.
 
-import type { DiagnosticRunRecord } from "@/lib/api";
+import type { BandedValue, MeasuredUnit, VerifyReading as Reading } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
-import { ageText, fmtFitness, fmtPct0 } from "@/lib/format";
+import { fmtFitness, fmtPct0, fmtSigned, unitCount } from "@/lib/format";
 import { Term } from "@/components/ui";
 
-export function VerifyReading({ run }: { run: DiagnosticRunRecord }) {
+function band(v: BandedValue | null, fmt: (n: number) => string): string {
+  return v?.ci_lo == null || v.ci_hi == null ? "" : ` [${fmt(v.ci_lo)}, ${fmt(v.ci_hi)}]`;
+}
+
+export function VerifyReading({ reading, unit }: { reading: Reading; unit: MeasuredUnit }) {
+  const { fresh, recorded, lift } = reading;
   return (
     <div className="verify-reading">
       {/* `held` is SERVED: the producer owns when two measured rates count as equal. */}
-      {run.held !== null && (
-        <span className={cx("verify-verdict", run.held ? "held" : "dropped")}>
-          {run.held ? "held" : "dropped"}
+      {reading.held !== null && (
+        <span className={cx("verify-verdict", reading.held ? "held" : "dropped")}>
+          {reading.held ? "held" : "dropped"}
         </span>
       )}
       <dl className="verify-facts">
         <div>
           <dt>
-            <Term content="The source campaign's accuracy for this candidate, then the mean hit rate over every measurement the dataset's archive holds for its config.">
+            <Term content="The hit rate on the cells this candidate's round bought, then on the fresh cells alone with their 95% band. Different cells, so the step between them is not a paired difference.">
               accuracy
             </Term>
           </dt>
           <dd>
-            {fmtPct0(run.source_campaign_accuracy)} → <strong>{fmtPct0(run.workspace_accuracy)}</strong>
+            {fmtPct0(recorded.accuracy?.value)} → <strong>{fmtPct0(fresh.accuracy?.value)}</strong>
+            {band(fresh.accuracy, fmtPct0)} ({fmtSigned(reading.accuracy_increment, 2)})
           </dd>
         </div>
         <div>
           <dt>
-            <Term content="The source campaign's composite for this candidate, then the same scorer over every archived measurement of its config.">
+            <Term content="The same two sets of cells under the cycle's scoring formula, which charges cost and length — so it is never the change in the hit rate.">
               composite
             </Term>
           </dt>
           <dd>
-            {fmtFitness(run.source_campaign_composite)} →{" "}
-            <strong>{fmtFitness(run.workspace_composite)}</strong>
+            {fmtFitness(recorded.composite?.value ?? null)} →{" "}
+            <strong>{fmtFitness(fresh.composite?.value ?? null)}</strong> (
+            {fmtSigned(reading.composite_increment, 2)})
           </dd>
         </div>
+        {lift.accuracy && (
+          <div>
+            <dt>
+              <Term content="This candidate over the campaign origin, paired cell by cell on every cell both scored — the round's and the fresh ones alike. A band spanning zero has not separated the two.">
+                lift over origin
+              </Term>
+            </dt>
+            <dd>
+              <strong>{fmtSigned(lift.accuracy.value, 2)}</strong>
+              {band(lift.accuracy, (n) => fmtSigned(n, 2))} on {reading.n_shared} shared
+            </dd>
+          </div>
+        )}
         <div>
           <dt>
-            <Term content="Samples this candidate now has measurements for across the dataset's archive, and how many this verify newly measured.">
-              samples
+            <Term content="Fresh cells that returned a verdict, and how they were picked. Hardest-first cells sit below the candidate's level by construction, so that read carries no held / dropped call — read the lift.">
+              fresh
             </Term>
           </dt>
           <dd>
-            <strong>{run.workspace_n}</strong> (+{run.samples_added} new)
+            <strong>{unitCount(reading.n_fresh, unit)}</strong>,{" "}
+            {reading.strategy === "hard" ? "hardest first" : "at random"}
           </dd>
-        </div>
-        <div>
-          <dt>verified</dt>
-          <dd>{ageText(run.ts)}</dd>
         </div>
       </dl>
     </div>

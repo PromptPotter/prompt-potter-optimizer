@@ -3561,6 +3561,58 @@ def test_matched_parent_stats_refuses_a_prefix_it_cannot_measure():
     assert matched_parent_stats(origin_results, disjoint_candidate, schema) is None
 
 
+def test_a_verify_reads_its_fresh_cells_alone_and_pairs_its_lift_over_the_origin() -> None:
+    """A verify buys a candidate cells it never met, and the reading POOLED them with the round's
+    own — so the verdict moved with how many cells each side held. Ten fresh cells at 50% under
+    twenty recorded at 100% pool to 83%: a candidate whose every other unseen cell missed, served
+    as a small dip. Silent, since a pooled rate is a plausible number, and it is the one a winner
+    is kept or dropped on."""
+    from promptpotter.application.diagnostics.verify import verify_reading
+    from promptpotter.domain.results import VerifyPass, VerifyStrategy
+
+    def banked(strategy: VerifyStrategy = "random", round_num: int = 3) -> VerifyPass:
+        return VerifyPass(
+            label="C3.1",
+            candidate_id="c",
+            round=round_num,
+            sp_hash="h",
+            run_id="r",
+            sample_ids=list(range(100, 110)),
+            strategy=strategy,
+            seed=1,
+            scorer_id="s",
+        )
+
+    recorded = measurements([1.0] * 20)
+    fresh = measurements([1.0, 0.0] * 5, range(100, 110))
+    # The origin: half the round's cells, none of the fresh ones.
+    origin = [*measurements([0.0, 1.0] * 10), *measurements([0.0] * 10, range(100, 110))]
+
+    def read(pass_: VerifyPass, fresh_rows: list[dict[str, Any]] = fresh) -> Any:
+        return verify_reading(
+            pass_, scorer_id="s", fresh=fresh_rows, recorded=recorded, origin=origin
+        )
+
+    reading = read(banked())
+    assert reading.fresh.accuracy is not None and reading.recorded.accuracy is not None
+    assert reading.fresh.accuracy.value == pytest.approx(0.5), "the fresh cells, never the pool"
+    assert reading.recorded.accuracy.value == pytest.approx(1.0)
+    assert reading.accuracy_increment == pytest.approx(-0.5)
+    assert (reading.n_fresh, reading.n_recorded, reading.n_shared) == (10, 20, 30)
+    # Paired per cell both scored: +1 on the ten round cells the origin missed, 0 on the ten it
+    # hit, +1 on the five fresh hits — never the difference of two rates over different cells.
+    assert reading.lift.accuracy is not None
+    assert reading.lift.accuracy.value == pytest.approx(0.5)
+    # The recorded level sits above the fresh band, so the round's claim did not survive.
+    assert reading.held is False
+    assert read(banked(), measurements([1.0] * 10, range(100, 110))).held is True
+    # Hard picks sit below the level whatever the candidate is worth: no verdict from the level.
+    assert read(banked("hard")).held is None
+    # The origin has nothing to be lifted over, and 0.0 there would read as "no better than C0".
+    at_origin = read(banked(round_num=0))
+    assert at_origin.lift.accuracy is None and at_origin.n_shared == 0
+
+
 def test_matched_parent_lift_drops_the_cell_that_measured_nothing() -> None:
     # An ERRORED cell measured nothing, and here "nothing" is not a low score: outer fitness
     # transforms `mean_round_delta`, so a floored 0.0 asserts the optimizer prompt drove the inner
@@ -4943,8 +4995,6 @@ def test_a_verify_is_bounded_by_the_budget_the_campaign_already_set() -> None:
 
     The failure this pins is silent and expensive: `--samples` defaulted to 20, so one click bought
     whatever was typed, and an AUTOMATIC verify with no cap would buy it every perfect round."""
-    from types import SimpleNamespace
-
     from promptpotter.application.diagnostics.verify import (
         derive_verify_samples,
         rounds_since_verified,
@@ -4968,17 +5018,11 @@ def test_a_verify_is_bounded_by_the_budget_the_campaign_already_set() -> None:
     # verify of NO cells from being run and reported as a verdict.
     assert n(0) == 20
 
-    def rec(cycle: str, label: str) -> Any:
-        return SimpleNamespace(source_cycle=cycle, source_label=label)
-
     # Never verified: the WHOLE campaign has run unchecked, the state that earns the most.
-    assert rounds_since_verified([], cycle_id="c1", round_num=9) == 9
-    assert rounds_since_verified([rec("c1", "C3.2")], cycle_id="c1", round_num=9) == 6
-    # A fork inherits its parent's measurements but not its assurance — the branch is a different
-    # search from the point it left, so a sibling's verification is not this cycle's.
-    assert rounds_since_verified([rec("other", "C8.1")], cycle_id="c1", round_num=9) == 9
+    assert rounds_since_verified([], round_num=9) == 9
+    assert rounds_since_verified([1, 3], round_num=9) == 6
     # The origin is round 0, so a cycle verified only at C0 is unchecked for every round since.
-    assert rounds_since_verified([rec("c1", "C0")], cycle_id="c1", round_num=4) == 4
+    assert rounds_since_verified([0], round_num=4) == 4
 
 
 def test_cached_calls_are_metered_but_not_billed(tmp_path: Path) -> None:

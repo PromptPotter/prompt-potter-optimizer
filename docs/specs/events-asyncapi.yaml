@@ -410,6 +410,34 @@ components:
         reading: { type: [object, 'null'], additionalProperties: true }
         missing: { type: [string, 'null'] }
 
+    VerifyEnterPayload:
+      type: object
+      description: |
+        `PhaseRecord.payload.view` of `phase: verify`, `event: enter` — one
+        candidate's pass over search cells it has never met begins, on the
+        ledger of the cycle that scored it and from whichever process runs it.
+        The matching `exit` always follows; the dashboard read serves an open
+        pass as `verify_pass`.
+      required: [label, round, rows, strategy]
+      properties:
+        label: { type: string }
+        round: { type: integer, minimum: 0 }
+        rows: { type: integer, minimum: 0 }
+        strategy: { type: string, enum: [random, hard] }
+
+    VerifyGradedPayload:
+      type: object
+      description: |
+        `PhaseRecord.payload.view` of `phase: verify`, `event: graded` — the
+        pass banked. `verify_pass` is the `VerifyPass` the OpenAPI file declares
+        (the facts: which candidate, the archive run, the cells sent, the
+        scorer); `reading` is the `VerifyReading` of it under that scorer, which
+        the dashboard read serves as `verify` on the candidate's row.
+      required: [verify_pass, reading]
+      properties:
+        verify_pass: { type: object, additionalProperties: true }
+        reading: { type: object, additionalProperties: true }
+
     RaceStandingPayload:
       type: object
       description: |

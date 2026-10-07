@@ -27,6 +27,7 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     LiveDashboardState,
     overlay_criterion_dials,
     overlay_spend_metered,
+    overlay_verify,
     warming_payload,
 )
 from promptpotter.infrastructure.runtime_flags import (
@@ -160,6 +161,7 @@ def serve_dashboard_response(
             limits.update(next_launch())
         overlay_armed_controls(body, cycle_path)
         overlay_criterion_dials(body)
+        overlay_verify(body, cycle_path)
         if meter is not None:
             overlay_spend_metered(body, meter)
     return JSONResponse(body, headers=headers)

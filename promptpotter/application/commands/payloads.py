@@ -10,6 +10,7 @@ from promptpotter.application.runner.origin_gate import GateDecision
 from promptpotter.domain.campaign import ArmRequest
 from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
 from promptpotter.domain.launch_limits import LaunchLimits, RoundsCap
+from promptpotter.domain.results import VerifyStrategy
 from promptpotter.domain.strict_model import StrictModel, WireFloat, WireInt
 from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.shared.errors import PayloadInvalidError
@@ -133,15 +134,20 @@ class StepCyclePayload(CyclePayload):
     rounds: WireInt = Field(default=1, ge=1, le=100)
 
 
-class VerifyCandidatePayload(CyclePayload):
+class VerifyCandidatePayload(DescendableCyclePayload):
     """``samples`` omitted is the ANSWER, not an absence: the count is derived from the
     per-candidate round budget and the rounds run since this cycle's last verification
     (``application/diagnostics/verify.py::derive_verify_samples``). A larger explicit count is
     refused, naming the budget — which is what keeps one click on a million-row dataset from being
-    a million-cell bill."""
+    a million-cell bill.
 
-    label: str = Field(min_length=2, max_length=32, pattern=r"^C(0|\d+\.[1-9]\d*)$")
+    Addressed as the ``evidence`` read addresses a searchpoint — cycle, descent, ``candidate_id``
+    — so an L4 inner candidate is as reachable as a top-level one."""
+
+    candidate_id: str = Field(min_length=1, max_length=128)
     samples: WireInt | None = Field(default=None, ge=1, le=10_000)
+    strategy: VerifyStrategy = "random"
+    seed: WireInt | None = None
 
 
 class _LifecyclePayload(CampaignPayload):
