@@ -772,7 +772,16 @@ LEDGER_BASELINE = {
     # it ends, and the origin's reading lands before the round row it belongs on (test_integrity).
     # +1: a block's provenance moves nothing potter's treatment hashes, while its text, its source
     # and its place each do (test_integrity § 1).
-    "test_functions": 242,
+    # +1: a fire zeroing the stall depth `exploration_budget` widens on tells L1 `tight` on every
+    # stalled round (test_numerics § 10).
+    # +1: a heal fire setting L3's patience reading, so the first real L3 gate stops the cycle
+    # `converged` with the origin selected (§ 10).
+    # +1: a stall comparison re-based at every fire never sees a climb made of steps each under
+    # its own error, and L3 fires on a metronome (§ 10).
+    # +1: a fire's layout, overrides and plan lost to a pause before the next round closes, while
+    # the ladder's counters are restored (test_resume).
+    # +1: an LLM-authored slot value echoed into the unfenced breach panel (test_security).
+    "test_functions": 247,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

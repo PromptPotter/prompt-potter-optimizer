@@ -186,12 +186,14 @@ class CycleSlice:
     # the round being rendered, so a panel carrying them holds a second, staler copy of the
     # EVOLUTION column. The series is `RoundDiagnostics.evolution_rows`, which carries `elected`.
     round_num: int
-    l1_stall_count: int
+    # Closed rounds since the last advance (`escalation/state.py::l1_stall_depth`), which no fire
+    # resets — never the FSM's pacing counter.
+    l1_stall_depth: int
     l2_round: int
     l2_stall_count: int
     l3_round: int
     l3_stall_count: int
-    # `tight`/`normal`/`wide`, widening with `l1_stall_count` — the value the escalation_panel
+    # `tight`/`normal`/`wide`, widening with `l1_stall_depth` — the value the escalation_panel
     # renders and l1_generate's rules cite, computed once in `build_bundle`.
     exploration_budget: str
     pipeline_params: dict[str, dict[str, Any]] = field(default_factory=dict)

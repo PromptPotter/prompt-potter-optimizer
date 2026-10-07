@@ -4811,7 +4811,7 @@ def test_a_theta_stall_verdict_must_clear_its_own_error() -> None:
     def ladder(*, with_se: bool) -> list[str]:
         fsm, actions = EscalationFSM(), []
         for comp, theta, se in live:
-            event = fsm.observe_l2_escalation(
+            ask = fsm.ask_l2_escalation(
                 current_composite_fitness=comp,
                 current_theta=theta,
                 current_theta_se=se if with_se else None,
@@ -4819,10 +4819,10 @@ def test_a_theta_stall_verdict_must_clear_its_own_error() -> None:
                 l2_patience=2,
                 l3_patience=1,
             )
-            actions.append(str(event.next_action))
-            if event.next_action != NextAction.FIRE_L2:
+            actions.append(str(ask.next_action))
+            if ask.next_action != NextAction.FIRE_L2:
                 break
-            fsm.record_l2_fired(best_composite_fitness=comp, best_theta=theta)
+            fsm.record_l2_fired(ask.l2, best_composite_fitness=comp, best_theta=theta)
         return actions
 
     # The real +0.467 move at round 2 still counts — the bar rejects noise, not signal.
@@ -5172,6 +5172,131 @@ def test_the_l1_only_arm_can_reach_no_layer_above_it() -> None:
     # Not vacuous: the same states fire L2 on the full ladder, so this passes because the rule
     # preempts and not because the grid missed every firing shape.
     assert NextAction.FIRE_L2 in actions(EscalationLadder.FULL)
+
+
+def test_a_fire_restarts_pacing_and_leaves_the_stall_depth_standing() -> None:
+    """Two facts rode one counter: how long until the next L2 ask, and how long the run has gone
+    without an advance. A fire rightly restarts the first, and it zeroed the second before the
+    next `l1_generate` read it, so `exploration_budget` could never leave `tight` on the round
+    that most needed it to. Silent: the panel renders a well-formed budget every round, and L1
+    obeys it by refusing to explore."""
+    from promptpotter.application.optimizers.potter.escalation.state import (
+        EscalationFSM,
+        ExplorationBudget,
+        NextAction,
+        exploration_budget,
+        l1_stall_depth,
+    )
+    from promptpotter.application.optimizers.potter.knobs import EscalationLadder
+    from promptpotter.application.optimizers.potter.state import PotterState
+    from tests.factories import round_result
+
+    # A resolved win, then three rounds that advanced nothing — one of them crowned, inseparable.
+    verdicts = [(True, True), (False, None), (True, False), (False, None)]
+    fsm, rounds = EscalationFSM(), [round_result(0)]
+    for rnd, (improved, separable) in enumerate(verdicts, start=1):
+        rounds.append(round_result(rnd, improved=improved, separable=separable))
+        event = fsm.observe_round(
+            improved=improved,
+            compared=True,
+            separable=separable,
+            current_objective=0.5,
+            l1_patience=3,
+            escalation_ladder=EscalationLadder.FULL,
+        )
+    assert event.next_action is NextAction.FIRE_L2
+    ask = fsm.ask_l2_escalation(
+        current_composite_fitness=0.5,
+        escalation_ladder=EscalationLadder.FULL,
+        l2_patience=3,
+        l3_patience=None,
+    )
+    fsm.record_l2_fired(ask.l2, best_composite_fitness=0.5)
+
+    # Pacing restarts: L1 gets a fresh stretch before the next ask.
+    assert fsm.l1_stall_count == 0
+    # The depth does not, and it is what the budget widens on.
+    assert l1_stall_depth(rounds) == 3
+    assert exploration_budget(l1_stall_depth(rounds), 3) is ExplorationBudget.WIDE
+    # The served standing is that depth too, or every surface undercounts after a fire.
+    assert PotterState(escalation=fsm).standing(rounds) == (3, None)
+    # Only an advance clears it.
+    assert l1_stall_depth([*rounds, round_result(5, improved=True, separable=True)]) == 0
+
+
+def test_a_heal_fire_spends_no_l3_patience() -> None:
+    """A refused `l1_layout` edit fires L3 to heal it, and that fire set the reading L3's patience
+    compares against. Under `l3_patience: 1` the first patience-driven L3 gate then found no
+    advance over a reading taken moments into the run and stopped the cycle `converged`, origin
+    still selected. Silent: `converged` is a success outcome."""
+    from promptpotter.application.optimizers.potter.escalation.state import (
+        EscalationFSM,
+        LadderAsk,
+        NextAction,
+    )
+    from promptpotter.application.optimizers.potter.knobs import EscalationLadder
+
+    fsm = EscalationFSM()
+
+    def stretch(theta: float, *, heal_first: bool) -> LadderAsk:
+        """Asks at one flat reading until something other than L2 answers."""
+        asks: list[LadderAsk] = []
+        while not asks or asks[-1].next_action is NextAction.FIRE_L2:
+            ask = fsm.ask_l2_escalation(
+                current_composite_fitness=0.5,
+                current_theta=theta,
+                current_theta_se=0.2,
+                escalation_ladder=EscalationLadder.FULL,
+                l2_patience=2,
+                l3_patience=1,
+            )
+            asks.append(ask)
+            if ask.next_action is NextAction.FIRE_L2:
+                fsm.record_l2_fired(ask.l2, best_composite_fitness=0.5, best_theta=theta)
+                if heal_first and len(asks) == 1:
+                    fsm.record_l3_fired(None, best_composite_fitness=0.5, best_theta=theta)
+        return asks[-1]
+
+    # The heal wipes L2's counters, so L2 takes its grace ask again; the gate it then reaches is
+    # L3's FIRST patience ask, with nothing to compare against.
+    gate = stretch(0.3, heal_first=True)
+    assert gate.next_action is NextAction.FIRE_L3
+    fsm.record_l3_fired(gate.l3, best_composite_fitness=0.5, best_theta=0.3)
+    # A later heal at a higher reading must not re-base the comparison either: the advance since
+    # the patience fire is still there to be seen.
+    gate = stretch(0.6, heal_first=True)
+    assert gate.next_action is NextAction.FIRE_L3
+    fsm.record_l3_fired(gate.l3, best_composite_fitness=0.5, best_theta=0.6)
+    # And the patience it did not spend still binds a flat run.
+    assert stretch(0.6, heal_first=False).next_action is NextAction.STOP_L3_PATIENCE
+
+
+def test_small_advances_accumulate_against_the_ladders_ratchet() -> None:
+    """Each fire re-based the reading a layer's stall compares against, so `_improved` only ever
+    saw the step since the previous fire. A run climbing in steps each smaller than its θ error
+    never cleared one ask while its cumulative rise passed two errors, and L3 fired on a
+    metronome. Silent: every counter renders and every fire looks earned."""
+    from promptpotter.application.optimizers.potter.escalation.state import EscalationFSM
+    from promptpotter.application.optimizers.potter.knobs import EscalationLadder
+
+    fsm = EscalationFSM()
+    stalls: list[int] = []
+    for theta in [0.00, 0.10, 0.20, 0.30, 0.35]:
+        ask = fsm.ask_l2_escalation(
+            current_composite_fitness=0.5,
+            current_theta=theta,
+            current_theta_se=0.25,
+            escalation_ladder=EscalationLadder.FULL,
+            l2_patience=9,
+            l3_patience=None,
+        )
+        stalls.append(ask.l2.stall_count)
+        fsm.record_l2_fired(ask.l2, best_composite_fitness=0.5, best_theta=theta)
+
+    # +0.30 over the first fire clears a 0.25 error where no single +0.10 does; the ratchet then
+    # sits at 0.30, so +0.05 over it is a stall again.
+    assert stalls == [0, 1, 2, 0, 1]
+    assert fsm.l2_best_theta_at_entry == 0.30
 
 
 def test_a_panel_holed_by_a_declared_bound_is_not_advised_to_resume() -> None:

@@ -174,9 +174,9 @@ class WorkingState(Protocol):
         """Fold a closed round in, and stamp its document with the state it closed on."""
         ...
 
-    def standing(self) -> tuple[int, int | None]:
-        """The two numbers the round readout carries beside the round: rounds without advance, and
-        the stalls the run may still absorb where the optimizer banks them (``RunStanding``)."""
+    def standing(self, rounds: Sequence[RoundResult]) -> tuple[int, int | None]:
+        """``RunStanding``'s two numbers: rounds without advance, which ``rounds`` — the cycle's
+        closed ones — answer where the optimizer derives it, and the stalls it may still absorb."""
         ...
 
 
@@ -221,7 +221,7 @@ def standing_opening(ctx: RoundContext) -> RoundOpening:
     """The opening of an optimizer that keeps no words of its own beyond its standing."""
     selected = ctx.cycle.optimizer
     return RoundOpening(
-        standing=f"no advance {ctx.state.standing()[0]}",
+        standing=f"no advance {ctx.state.standing(ctx.cycle.rounds)[0]}",
         note="",
         arms=selected.pacing.arms_per_round,
         proposer=selected.proposer,

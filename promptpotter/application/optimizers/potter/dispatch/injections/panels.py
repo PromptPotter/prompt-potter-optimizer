@@ -86,7 +86,8 @@ def _r_escalation_panel(b: InjectionBundle) -> list[Item]:
     }[ExplorationBudget(budget)]
     return [
         Item(
-            f"ESCALATION: exploration_budget={budget} (L1 stall: {cs.l1_stall_count} rounds) — {guidance}"
+            f"ESCALATION: exploration_budget={budget} "
+            f"(L1 stall: {cs.l1_stall_depth} rounds) — {guidance}"
         )
     ]
 
@@ -138,8 +139,8 @@ def _r_diagnostics(b: InjectionBundle) -> list[Item]:
     # Round and stalls only. An accuracy pair here reads cycle tracking rather than this round, so
     # it is a second copy of the EVOLUTION column and drifts from it inside one prompt.
     status: list[str] = [f"STATUS: round {cs.round_num}"]
-    if cs.l1_stall_count > 0:
-        status.append(f"  L1 stall: {cs.l1_stall_count} rounds")
+    if cs.l1_stall_depth > 0:
+        status.append(f"  L1 stall: {cs.l1_stall_depth} rounds")
     if cs.l2_round > 0:
         status.append(f"  L2 fired: {cs.l2_round}x (stall: {cs.l2_stall_count})")
     if cs.l3_round > 0:

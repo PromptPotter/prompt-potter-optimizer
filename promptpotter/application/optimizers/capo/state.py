@@ -10,6 +10,8 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.optimizer_state import OptimizerState, RoundPayload
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import WorkingState
     from promptpotter.domain.results import RoundResult
@@ -77,7 +79,7 @@ class CapoState:
     def absorb(self, round_result: RoundResult) -> None:
         self._take_up(round_result.optimizer_state.payload_as(CapoRoundState))
 
-    def standing(self) -> tuple[int, int | None]:
+    def standing(self, rounds: Sequence[RoundResult]) -> tuple[int, int | None]:
         return self.rounds_without_advance, None
 
     def _take_up(self, payload: CapoRoundState) -> None:

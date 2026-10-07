@@ -92,7 +92,7 @@ class ExampleState:
         payload = round_result.optimizer_state.payload_as(ExampleRoundState)
         self.rounds_without_advance = payload.rounds_without_advance
 
-    def standing(self) -> tuple[int, int | None]:
+    def standing(self, rounds: Sequence[RoundResult]) -> tuple[int, int | None]:
         return self.rounds_without_advance, None
 
 

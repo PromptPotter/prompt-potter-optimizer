@@ -45,14 +45,8 @@ POTTER_CHECKPOINT_GATING: dict[CheckpointKind, GatingMode] = {
     PotterCheckpointKind.ROUND_WINNER: GatingMode.REPLAYED,
     PotterCheckpointKind.ELIMINATION_CUT: GatingMode.REPLAYED,
     PotterCheckpointKind.LEADER_LOCK_IN: GatingMode.REPLAYED,
-    # A layer trigger is a FOLD over the cycle's escalation history, not a function of
-    # one round's measurements — the counter bumps once per escalation *request*, resets
-    # on every fire, and compares against the best-at-entry snapshot taken at the last
-    # fire (`EscalationFSM.observe_l2_escalation`). A replayer is pure over
-    # `ReplayContext` (one round + the origin), so that fold is not expressible there.
-    # Their scorer-dependence is entirely mediated by `improved`, hence by the round
-    # measurements — which ARE replayed above, so a scorer change that would move a
-    # trigger already shows up as a winner/cut divergence in the same round.
+    # A trigger is a fold over the cycle's escalation history, which no replayer holds:
+    # `docs/developer/dispatch-hub.md` § Trigger.
     PotterCheckpointKind.L2_ESCALATION_TRIGGER: GatingMode.ARCHIVAL,
     PotterCheckpointKind.L3_ESCALATION_TRIGGER: GatingMode.ARCHIVAL,
 }

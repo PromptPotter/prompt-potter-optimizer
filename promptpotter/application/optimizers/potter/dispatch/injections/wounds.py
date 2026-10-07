@@ -18,13 +18,14 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     L1_LAYOUT_SLOTS,
     L1_POSSIBLE,
 )
+from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.search_point import WHO_ANSWERS_KEYS
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.domain.wounds import RuntimeFailure
 
-# Evidence values safe to render into an UNFENCED panel: a signal name or a slot name, both closed
-# vocabularies. An LLM-authored placeholder or plan is neither, and reports its size instead.
-_PLAIN_EVIDENCE_VALUES = L1_POSSIBLE | frozenset(L1_LAYOUT_SLOTS)
+# Evidence values safe to render into an UNFENCED panel: a signal, slot or target-prompt-field
+# name, all closed vocabularies. Any other LLM-authored value reports its size instead.
+_PLAIN_EVIDENCE_VALUES = L1_POSSIBLE | frozenset(L1_LAYOUT_SLOTS) | frozenset(PROMPT_STRING_FIELDS)
 
 
 def _rf_matches_current_config(

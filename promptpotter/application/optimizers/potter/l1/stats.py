@@ -7,7 +7,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.application.optimizers.nodes import CheckResult, ReviewReading, ReviewStat
-from promptpotter.application.optimizers.potter.escalation.state import exploration_budget
+from promptpotter.application.optimizers.potter.escalation.state import (
+    exploration_budget,
+    l1_stall_depth,
+)
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
 from promptpotter.application.optimizers.potter.records import PotterRoundState
 from promptpotter.application.optimizers.potter.validators.behavior_base import ValidatorContext
@@ -158,17 +161,15 @@ def _behavior_per_round(
     l1_out: list[list[CheckResult]] = []
     l2_out: list[list[CheckResult]] = []
     prior_audits: list[dict[str, Any]] = []
-    # Stall depth entering each round, reconstructed from the persisted ``improved``
-    # flags (the round file doesn't carry the live l1_stall_count). Same recurrence as
-    # ``EscalationFSM.observe_round``: reset to 0 on improvement, else +1. Read BEFORE
-    # the update so each round's exploration_budget matches what its L1 generation saw.
-    stall = 0
     for i, round_data in enumerate(rounds):
         round_num = round_data.round
-        budget = exploration_budget(stall, l1_patience).value if round_num >= 1 else None
+        # The depth ENTERING the round, which is what its L1 generation was shown.
+        budget = (
+            exploration_budget(l1_stall_depth(rounds[:i]), l1_patience).value
+            if round_num >= 1
+            else None
+        )
         audit = audits[i] if i < len(audits) else None
-        if round_num >= 1:
-            stall = 0 if round_data.improved else stall + 1
         if audit is None:
             l1_out.append([])
             l2_out.append([])

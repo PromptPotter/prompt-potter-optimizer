@@ -1,7 +1,7 @@
 """The escalation POLICY, whole: what a round is judged on, the rules that judge it, and the
 first-match router over them — (predicate, action, priority); higher wins, ties by list order. A
 predicate is False when its signal is unavailable, so early cycles fall through rather than firing
-blind. State mutation lives in ``EscalationFSM.observe_l1_round``, which is this module's only
+blind. State mutation lives in ``EscalationFSM.observe_round``, which is this module's only
 caller."""
 
 from __future__ import annotations
@@ -136,7 +136,7 @@ def decide_escalation(inputs: EscalationInputs) -> EscalationEvent:
     """Post-round router: priority-sort, first match wins, pure."""
     for rule in sorted(DEFAULT_ESCALATION_RULES, key=lambda r: -r.priority):
         if rule.when(inputs):
-            return EscalationEvent(next_action=rule.fire)
+            return EscalationEvent(next_action=rule.fire, rule=rule.name)
     raise RuntimeError(
         "No escalation rule matched observe_round inputs "
         f"(rules={[r.name for r in DEFAULT_ESCALATION_RULES]}); "

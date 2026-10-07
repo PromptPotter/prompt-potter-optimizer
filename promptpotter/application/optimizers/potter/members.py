@@ -24,7 +24,12 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
     OPTIMIZER_RESPONSE_MODELS,
 )
 from promptpotter.application.optimizers.potter.election import elect_on_theta
-from promptpotter.application.optimizers.potter.escalation.firing import L2, L3, escalate_l2
+from promptpotter.application.optimizers.potter.escalation.firing import (
+    FORCED_BY_DIAG,
+    L2,
+    L3,
+    escalate_l2,
+)
 from promptpotter.application.optimizers.potter.escalation.rules import DEFAULT_ESCALATION_RULES
 from promptpotter.application.optimizers.potter.escalation.state import NextAction
 from promptpotter.application.optimizers.potter.generation_only import run_generation_only_round
@@ -354,6 +359,9 @@ class Escalation:
         return nodes.Boundary(stop=event.stop_reason, act=event.next_action == NextAction.FIRE_L2)
 
     async def act(self, ctx: RoundContext) -> None:
+        await self._fire(ctx, cause=potter_state(ctx.state).escalation.matched_rule)
+
+    async def _fire(self, ctx: RoundContext, *, cause: str) -> None:
         session = ctx.cycle.session
         stop = await escalate_l2(
             ctx.cycle,
@@ -363,6 +371,7 @@ class Escalation:
             obs=session.state.obs,
             tracing_campaign_id=session.state.tracing_campaign_id,
             node=self.name,
+            cause=cause,
         )
         if stop:
             raise StopLoop(stop)
@@ -370,7 +379,7 @@ class Escalation:
     async def diagnose(self, ctx: RoundContext) -> None:
         # Force L2 (bypass the stall counter) on this round's evidence, then peek the next
         # round's proposals under its overrides.
-        await self.act(ctx)
+        await self._fire(ctx, cause=FORCED_BY_DIAG)
         await run_generation_only_round(
             ctx.cycle, potter_state(ctx.state), ctx.cycle.session, ctx.callbacks, ctx.round_num + 1
         )

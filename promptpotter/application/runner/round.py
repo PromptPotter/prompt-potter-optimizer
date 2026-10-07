@@ -675,7 +675,7 @@ async def close_round(
     round_result.optimizer_facts = cycle.optimizer.runtime.round_facts(
         cycle.optimizer, round_result
     )
-    stall, stalls_left = cycle.working_state.standing()
+    stall, stalls_left = cycle.working_state.standing(cycle.rounds)
     bank = cycle.optimizer.pacing.stalls_left
     standing = RunStanding(
         rounds_without_advance=stall,

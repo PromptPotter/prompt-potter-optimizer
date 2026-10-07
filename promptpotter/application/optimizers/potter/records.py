@@ -3,6 +3,7 @@ author and the readouts only potter reads — and the decision kinds its members
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Literal, cast
 
 from pydantic import Field
@@ -111,6 +112,24 @@ class L2L3Memory(StrictModel):
             "fires for the first time."
         ),
     )
+
+    def fire_writes(self) -> dict[str, Any]:
+        """A fire's exit record banks this: the fire runs after its round's document is written,
+        so no round holds it until the next one closes."""
+        return self.model_dump(
+            mode="json",
+            include={
+                "l1_layout": True,
+                "l1_overrides": True,
+                "plan": True,
+                "wounds": {"l3_note", "l2_guard_breaches", "l3_guard_breaches"},
+            },
+        )
+
+    def with_fire_writes(self, writes: Mapping[str, Any]) -> L2L3Memory:
+        kept = self.model_dump(mode="json")
+        wounds = {**kept["wounds"], **writes["wounds"]}
+        return L2L3Memory.model_validate({**kept, **writes, "wounds": wounds})
 
 
 class PotterRoundState(RoundPayload, manifest=POTTER_MANIFEST):

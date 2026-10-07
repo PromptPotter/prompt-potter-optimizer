@@ -3,9 +3,11 @@ access is property-only, so "signals from measurement, not calendar" is structur
 
 from __future__ import annotations
 
+import copy
 import enum
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.run_records import CycleRecord, PhaseRecord, view_fields
@@ -13,6 +15,7 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizers.potter.knobs import EscalationLadder, LivesConfig
+    from promptpotter.domain.results import RoundResult
     from promptpotter.infrastructure.ledger import CycleEventLog
 
 
@@ -44,6 +47,25 @@ def exploration_budget(stall_count: int, l1_patience: int) -> ExplorationBudget:
     return ExplorationBudget.NORMAL
 
 
+@shapes_optimizer_prompt
+def round_advanced(improved: bool, separable: bool | None) -> bool:
+    """``separable is None`` is a round whose arms carried no interval: unreadable, so it banks
+    as ``improved`` alone decides."""
+    return improved and separable is not False
+
+
+@shapes_optimizer_prompt
+def l1_stall_depth(rounds: Sequence[RoundResult]) -> int:
+    """Closed rounds since the last advance, read off the round documents. No fire resets it,
+    which is what sets it apart from ``EscalationFSM.l1_stall_count``, the pacing counter."""
+    depth = 0
+    for rr in reversed(rounds):
+        if rr.round == 0 or round_advanced(rr.improved, rr.separable):
+            break
+        depth += 1
+    return depth
+
+
 class NextAction(enum.StrEnum):
     """Round-loop's next action. STOP variants carry a `StopReason` via `EscalationEvent.stop_reason`."""
 
@@ -65,6 +87,32 @@ _NEXT_ACTION_TO_STOP: dict[NextAction, StopReason] = {
 @dataclass(frozen=True)
 class EscalationEvent:
     next_action: NextAction
+    # The `DEFAULT_ESCALATION_RULES` member that matched; ``None`` where the FSM decided alone.
+    rule: str | None = None
+
+    @property
+    def stop_reason(self) -> StopReason | None:
+        return _NEXT_ACTION_TO_STOP.get(self.next_action)
+
+
+@dataclass(frozen=True)
+class LayerReading:
+    """One layer's stall verdict at an ask: what the layer's counters become if its fire lands."""
+
+    stall_count: int
+    best_composite_fitness_at_entry: float | None
+    best_theta_at_entry: float | None
+    # Which scale `_improved` read; ``None`` where the layer has no entry reading to compare.
+    comparator: str | None
+
+
+@dataclass(frozen=True, kw_only=True)
+class LadderAsk:
+    """An L2 ask's verdict. L3's gate is read on every ask and binds only past L2's patience."""
+
+    next_action: NextAction
+    l2: LayerReading
+    l3: LayerReading
 
     @property
     def stop_reason(self) -> StopReason | None:
@@ -76,15 +124,14 @@ class EscalationFSM:
         "_l1_stall_count",
         "_l2_best_composite_fitness_at_entry",
         "_l2_best_theta_at_entry",
-        "_l2_comparator",
         "_l2_round",
         "_l2_stall_count",
         "_l3_best_composite_fitness_at_entry",
         "_l3_best_theta_at_entry",
-        "_l3_comparator",
         "_l3_round",
         "_l3_stall_count",
         "_lives",
+        "_matched_rule",
     )
 
     def __init__(self) -> None:
@@ -96,25 +143,29 @@ class EscalationFSM:
         self._lives: int | None = None
         self._l2_round = 0
         self._l2_stall_count = 0
-        # ``None`` until the layer fires: an entry reading exists only once there was an entry.
+        # The ratchet `_improved` differences against: seeded at the layer's first patience fire
+        # and moved only by an advance that cleared it. ``None`` until that fire.
         self._l2_best_composite_fitness_at_entry: float | None = None
         self._l2_best_theta_at_entry: float | None = None
         self._l3_round = 0
         self._l3_stall_count = 0
         self._l3_best_composite_fitness_at_entry: float | None = None
         self._l3_best_theta_at_entry: float | None = None
-        # WHICH scale the last stall verdict was read on. `_improved` picks between two, and the
-        # four numbers behind that choice were already recorded while the choice itself was not —
-        # so a reader had to re-derive it from where the Nones fell. Named, it is a state; unnamed,
-        # it was the silent one. Not persisted: it describes the last comparison, not the cycle.
-        self._l2_comparator: str | None = None
-        self._l3_comparator: str | None = None
+        # Which rule decided the last observed round. Not persisted: a resume observes a round
+        # before anything reads it.
+        self._matched_rule: str | None = None
 
     # ---- Read-only access (telemetry, decision payloads, prompt vars) ----
 
     @property
     def l1_stall_count(self) -> int:
         return self._l1_stall_count
+
+    @property
+    def matched_rule(self) -> str:
+        if self._matched_rule is None:
+            raise RuntimeError("no round has been observed, so no rule has matched one")
+        return self._matched_rule
 
     @property
     def lives(self) -> int | None:
@@ -140,9 +191,8 @@ class EscalationFSM:
         Only an ADVANCE clears the stall. A round crowns a winner whenever one arm out-ranks the
         parent on θ, which is a point estimate — so a pick that has not separated from C0 on the
         origin panel sets ``improved`` and advanced nothing, and resetting patience on it spends
-        the budget on coin flips. ``separable is None`` means the line carried no interval, and an
-        unreadable round is not evidence of a stall, so it banks as ``improved`` alone decides."""
-        advanced = improved and separable is not False
+        the budget on coin flips."""
+        advanced = round_advanced(improved, separable)
         self._l1_stall_count = 0 if advanced else self._l1_stall_count + 1
         # The life bank still reads `improved` alone: patience asks "does L1 need help", which a
         # round that resolved nothing answers yes to, while the bank asks "was this round worth
@@ -176,10 +226,6 @@ class EscalationFSM:
         return self._l2_best_theta_at_entry
 
     @property
-    def l2_comparator(self) -> str | None:
-        return self._l2_comparator
-
-    @property
     def l3_round(self) -> int:
         return self._l3_round
 
@@ -194,10 +240,6 @@ class EscalationFSM:
     @property
     def l3_best_theta_at_entry(self) -> float | None:
         return self._l3_best_theta_at_entry
-
-    @property
-    def l3_comparator(self) -> str | None:
-        return self._l3_comparator
 
     # ---- Improvement comparator: difficulty-adjusted θ when the ruler is live ----
 
@@ -228,7 +270,76 @@ class EscalationFSM:
         scale = "theta_appeared" if current_theta is not None else "composite"
         return current_comp > entry_comp, scale
 
-    # ---- Observations: the only mutation surface ----
+    def _read_layer(
+        self,
+        stall_count: int,
+        entry_comp: float | None,
+        entry_theta: float | None,
+        current_comp: float,
+        current_theta: float | None,
+        current_theta_se: float | None,
+    ) -> LayerReading:
+        """First-ask grace: a layer that has not fired has no entry reading and stalls on nothing.
+        A cleared advance moves the ratchet, so steps too small to clear it singly accumulate."""
+        if entry_comp is None:
+            return LayerReading(stall_count, None, entry_theta, None)
+        improved, comparator = self._improved(
+            current_comp, entry_comp, current_theta, entry_theta, current_theta_se
+        )
+        if improved:
+            return LayerReading(0, current_comp, current_theta, comparator)
+        return LayerReading(stall_count + 1, entry_comp, entry_theta, comparator)
+
+    def ask_l2_escalation(
+        self,
+        *,
+        current_composite_fitness: float,
+        current_theta: float | None = None,
+        current_theta_se: float | None = None,
+        escalation_ladder: EscalationLadder,
+        l2_patience: int,
+        l3_patience: int | None,
+    ) -> LadderAsk:
+        """Where an L2 ask routes. Mutates nothing: the layer that lands commits its reading, so a
+        fire that never parsed leaves the counters where the ledger has them."""
+        l2 = self._read_layer(
+            self._l2_stall_count,
+            self._l2_best_composite_fitness_at_entry,
+            self._l2_best_theta_at_entry,
+            current_composite_fitness,
+            current_theta,
+            current_theta_se,
+        )
+        l3 = self._read_layer(
+            self._l3_stall_count,
+            self._l3_best_composite_fitness_at_entry,
+            self._l3_best_theta_at_entry,
+            current_composite_fitness,
+            current_theta,
+            current_theta_se,
+        )
+        if not escalation_ladder.fires_l3 or l2.stall_count < l2_patience:
+            action = NextAction.FIRE_L2
+        elif l3_patience is None or l3.stall_count < l3_patience:
+            action = NextAction.FIRE_L3
+        else:
+            action = NextAction.STOP_L3_PATIENCE
+        return LadderAsk(next_action=action, l2=l2, l3=l3)
+
+    def as_read_by(self, ask: LadderAsk) -> EscalationFSM:
+        """A copy holding the verdict ``ask`` read, which the prompt its fire composes reports.
+        L3's half shows only where the ask reached L3's gate."""
+        seen = copy.copy(self)
+        seen._l2_stall_count = ask.l2.stall_count
+        seen._l2_best_composite_fitness_at_entry = ask.l2.best_composite_fitness_at_entry
+        seen._l2_best_theta_at_entry = ask.l2.best_theta_at_entry
+        if ask.next_action is not NextAction.FIRE_L2:
+            seen._l3_stall_count = ask.l3.stall_count
+            seen._l3_best_composite_fitness_at_entry = ask.l3.best_composite_fitness_at_entry
+            seen._l3_best_theta_at_entry = ask.l3.best_theta_at_entry
+        return seen
+
+    # ---- Mutation: a closed round, then a landed fire — each a record `fold` reads back ----
 
     def observe_round(
         self,
@@ -270,81 +381,64 @@ class EscalationFSM:
             evidence_starved=evidence_starved,
         )
         event = decide_escalation(inputs)
+        self._matched_rule = event.rule
         if event.stop_reason is None and lives is not None and self._lives == 0:
             return EscalationEvent(next_action=NextAction.STOP_LIVES)
         return event
 
-    def observe_l2_escalation(
-        self,
-        *,
-        current_composite_fitness: float,
-        current_theta: float | None = None,
-        current_theta_se: float | None = None,
-        escalation_ladder: EscalationLadder,
-        l2_patience: int,
-        l3_patience: int | None,
-    ) -> EscalationEvent:
-        """L2 escalation requested. First-invocation grace: stall only advances after a layer has fired at
-        least once, and the entry θ/composite is the comparator."""
-        if (l2_entry := self._l2_best_composite_fitness_at_entry) is not None:
-            l2_improved, self._l2_comparator = self._improved(
-                current_composite_fitness,
-                l2_entry,
-                current_theta,
-                self._l2_best_theta_at_entry,
-                current_theta_se,
-            )
-            self._l2_stall_count = 0 if l2_improved else self._l2_stall_count + 1
-
-        if not escalation_ladder.fires_l3 or self._l2_stall_count < l2_patience:
-            return EscalationEvent(next_action=NextAction.FIRE_L2)
-
-        if (l3_entry := self._l3_best_composite_fitness_at_entry) is not None:
-            l3_improved, self._l3_comparator = self._improved(
-                current_composite_fitness,
-                l3_entry,
-                current_theta,
-                self._l3_best_theta_at_entry,
-                current_theta_se,
-            )
-            self._l3_stall_count = 0 if l3_improved else self._l3_stall_count + 1
-
-        if l3_patience is None or self._l3_stall_count < l3_patience:
-            return EscalationEvent(next_action=NextAction.FIRE_L3)
-
-        return EscalationEvent(next_action=NextAction.STOP_L3_PATIENCE)
-
-    # ---- Post-fire bookkeepers ----
+    @staticmethod
+    def _landed(
+        reading: LayerReading, best_composite_fitness: float, best_theta: float | None
+    ) -> tuple[int, float, float | None]:
+        """Each scale's ratchet is seeded by the first reading it has, so a ruler that warms after
+        the layer's first fire still gives it a θ to compare against."""
+        comp = reading.best_composite_fitness_at_entry
+        theta = reading.best_theta_at_entry
+        return (
+            reading.stall_count,
+            best_composite_fitness if comp is None else comp,
+            best_theta if theta is None else theta,
+        )
 
     def record_l2_fired(
         self,
+        reading: LayerReading,
         *,
         best_composite_fitness: float,
         best_theta: float | None = None,
     ) -> None:
         self._l1_stall_count = 0
         self._l2_round += 1
-        self._l2_best_composite_fitness_at_entry = best_composite_fitness
-        self._l2_best_theta_at_entry = best_theta
+        (
+            self._l2_stall_count,
+            self._l2_best_composite_fitness_at_entry,
+            self._l2_best_theta_at_entry,
+        ) = self._landed(reading, best_composite_fitness, best_theta)
 
     def record_l3_fired(
         self,
+        reading: LayerReading | None,
         *,
         best_composite_fitness: float,
         best_theta: float | None = None,
     ) -> None:
-        """L3 fired. Bump L3, reset L1 stall + the L2 counter — a new plan invalidates L2's progress."""
+        """A new plan invalidates L2's progress, so L2's counters clear. ``None`` is a heal: it
+        answers a refused L2 edit, not a stall, and leaves L3's ratchet alone."""
         self._l1_stall_count = 0
         self._l3_round += 1
-        self._l3_best_composite_fitness_at_entry = best_composite_fitness
-        self._l3_best_theta_at_entry = best_theta
+        if reading is not None:
+            (
+                self._l3_stall_count,
+                self._l3_best_composite_fitness_at_entry,
+                self._l3_best_theta_at_entry,
+            ) = self._landed(reading, best_composite_fitness, best_theta)
         self._l2_round = 0
         self._l2_stall_count = 0
         self._l2_best_composite_fitness_at_entry = None
         self._l2_best_theta_at_entry = None
 
     # Reducer: round-complete → L1 stall; refine_strategy.exit → l2 state; modify_plan.exit → l3
-    # state + l2 reset. Live mutators above are the in-memory cache; from_ledger rebuilds on resume.
+    # state + l2 reset. The mutators above are the in-memory cache; from_ledger rebuilds on resume.
     # Match the CampaignPhase members, never their spellings — `phase` is a bare `str`, so only the
     # enum reference makes a wrong name an import-time AttributeError instead of an arm that
     # silently never matches. The L2/L3 node names are NOT their phase names.
@@ -376,11 +470,7 @@ class EscalationFSM:
                 compared=int(record.payload["electable_count"]) > 0,
                 separable=None if sep is None else bool(sep),
             )
-        elif (
-            record.event != "exit"
-            or record.phase not in set(PotterPhase)
-            or (escalation_state := view_fields(record)["state"]) is None
-        ):
+        elif (escalation_state := adopted_fire_state(record)) is None:
             return
         elif record.phase == PotterPhase.REFINE_STRATEGY:
             self._l1_stall_count = 0
@@ -392,14 +482,14 @@ class EscalationFSM:
             l2_theta = escalation_state["l2_best_theta_at_entry"]
             self._l2_best_theta_at_entry = None if l2_theta is None else float(l2_theta)
         elif record.phase == PotterPhase.MODIFY_PLAN:
-            best_comp = float(escalation_state["l3_best_composite_fitness_at_entry"])
+            # Both ``None`` where every L3 fire so far was a heal.
+            l3_comp = escalation_state["l3_best_composite_fitness_at_entry"]
             l3_theta = escalation_state["l3_best_theta_at_entry"]
-            best_theta = None if l3_theta is None else float(l3_theta)
             self._l1_stall_count = 0
             self._l3_round = int(escalation_state["l3_round"])
             self._l3_stall_count = int(escalation_state["l3_stall_count"])
-            self._l3_best_composite_fitness_at_entry = best_comp
-            self._l3_best_theta_at_entry = best_theta
+            self._l3_best_composite_fitness_at_entry = None if l3_comp is None else float(l3_comp)
+            self._l3_best_theta_at_entry = None if l3_theta is None else float(l3_theta)
             # New plan invalidates L2's progress — wipe.
             self._l2_round = 0
             self._l2_stall_count = 0
@@ -412,44 +502,61 @@ class EscalationFSM:
     ) -> EscalationFSM:
         """Rebuild by folding the rounds that SURVIVE; ``None`` ⇒ fresh state. ``lives`` is REQUIRED —
         defaulting it rebuilt the accumulator empty, handing a cycle one stall from ``LIVES_EXHAUSTED``
-        its bank back.
-
-        A rewind deletes round files and leaves the ledger whole, so the records of a discarded round
-        are still on it. Two cuts drop them, the same line ``resolve_resume_state`` draws for the
-        trajectory: rounds at or past ``before_round`` (this resume re-runs them), and everything from
-        a round's first close onward once that round closes AGAIN (an earlier rewind re-ran it). Round
-        0 is the one round that legitimately closes twice, and ``fold`` banks nothing from it."""
+        its bank back."""
         s = cls()
-        if ledger is None:
-            return s
-        live: list[PhaseRecord] = []
-        for _offset, rec in ledger.iter():
-            if not isinstance(rec, PhaseRecord) or (rec.round or 0) >= before_round:
-                continue
-            if rec.phase == "round" and rec.event == "complete" and rec.round:
-                reclosed = next(
-                    (
-                        i
-                        for i, kept in enumerate(live)
-                        if kept.phase == "round"
-                        and kept.event == "complete"
-                        and (kept.round or 0) >= rec.round
-                    ),
-                    None,
-                )
-                if reclosed is not None:
-                    del live[reclosed:]
-            live.append(rec)
-        for rec in live:
+        for rec in surviving_phase_records(ledger, before_round=before_round):
             s.fold(rec, lives=lives)
         return s
+
+
+def adopted_fire_state(record: PhaseRecord) -> dict[str, Any] | None:
+    """What an L2 or L3 fire's exit banked; ``None`` for any other record, and for a fire that
+    adopted nothing."""
+    if record.event != "exit" or record.phase not in set(PotterPhase):
+        return None
+    state: dict[str, Any] | None = view_fields(record)["state"]
+    return state
+
+
+def surviving_phase_records(
+    ledger: CycleEventLog | None, *, before_round: int
+) -> list[PhaseRecord]:
+    """The phase records a resume keeps, in ledger order. Two cuts: rounds at or past
+    ``before_round``, and everything from a round's first close on once that round closes again."""
+    live: list[PhaseRecord] = []
+    if ledger is None:
+        return live
+    for _offset, rec in ledger.iter():
+        if not isinstance(rec, PhaseRecord) or (rec.round or 0) >= before_round:
+            continue
+        if rec.phase == "round" and rec.event == "complete" and rec.round:
+            reclosed = next(
+                (
+                    i
+                    for i, kept in enumerate(live)
+                    if kept.phase == "round"
+                    and kept.event == "complete"
+                    and (kept.round or 0) >= rec.round
+                ),
+                None,
+            )
+            if reclosed is not None:
+                del live[reclosed:]
+        live.append(rec)
+    return live
 
 
 __all__ = [
     "EscalationEvent",
     "EscalationFSM",
     "ExplorationBudget",
+    "LadderAsk",
+    "LayerReading",
     "NextAction",
     "PotterPhase",
+    "adopted_fire_state",
     "exploration_budget",
+    "l1_stall_depth",
+    "round_advanced",
+    "surviving_phase_records",
 ]

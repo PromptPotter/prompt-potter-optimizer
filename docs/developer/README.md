@@ -86,7 +86,7 @@ round runs L1 → EscalationInputs(current_objective, l1_stall_count, l1_patienc
 
 **Which rules exist, and which of them preempt patience, is owned by [`dispatch-hub.md`](dispatch-hub.md) § Trigger** — read the membership there and in `escalation/rules.py`, never from a copy on this page.
 
-Counter state lives at `PotterState.escalation` (`l1_stall_count`, `l2_stall_count`, …) — the only mutation surface is observation methods. In-memory during a cycle and rebuilt on resume by `EscalationFSM.from_ledger` — a fold over the rounds the resume KEEPS (a rewind's discarded rounds stay on the ledger and are cut), not re-derived from one round. Every transition is checkpointed.
+Counter state lives at `PotterState.escalation` (`l1_stall_count`, `l2_stall_count`, …) — it moves at a closed round and at a fire that LANDED, each a ledger record; an L2 ask (`ask_l2_escalation`) reads a verdict and mutates nothing. In-memory during a cycle and rebuilt on resume by `EscalationFSM.from_ledger` — a fold over the rounds the resume KEEPS (a rewind's discarded rounds stay on the ledger and are cut), not re-derived from one round. Every transition is checkpointed.
 
 Self-healing fires through a different door, bypassing the escalation ladder. **Which layer heals which wound** — owned by [`self-healing-internals.md`](self-healing-internals.md) § The wounds, mapped to the two axes.
 

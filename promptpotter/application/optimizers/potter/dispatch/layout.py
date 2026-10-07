@@ -422,22 +422,26 @@ def unplaceable_edit(raw_layout: object) -> ValidatorOutcome | None:
     stray move refuses the whole edit: applied without it, the rest would land as a layout nobody
     asked for, with nothing reporting the move that was dropped.
 
-    The evidence names the panels whose slot was the stray beside the legal slots — the panel
-    names were the half of the edit that was right, and reporting them alone had L2 repeat the
-    same slot on its next fire. The slot asked for is LLM-authored, so it is not echoed."""
+    The evidence names the stray slot values first, then the panels they were asked for, then the
+    legal slots. A stray is LLM-authored, so ``_guard_evidence`` renders one only where it is a
+    name from a closed vocabulary."""
     if not raw_layout:
         return None
     asked = raw_layout if isinstance(raw_layout, dict) else {}
-    stray = sorted(
-        str(name)
+    stray = {
+        str(name): str(slot)[:40]
         for name, slot in asked.items()
         if not (isinstance(name, str) and isinstance(slot, str) and slot in L1_LAYOUT_SLOTS)
-    )
+    }
     if asked and not stray:
         return None
     return ValidatorOutcome(
         validator_id="l1_layout_unparseable",
-        evidence={"no_such_slot_for": stray, "slots": list(L1_LAYOUT_SLOTS)},
+        evidence={
+            "not_a_slot": sorted(set(stray.values())),
+            "asked_for_panel": sorted(stray),
+            "slots": list(L1_LAYOUT_SLOTS),
+        },
     )
 
 

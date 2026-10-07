@@ -569,16 +569,19 @@ def test_l2_l3_escalation_state_survives_resume() -> None:
     reader-against-writer rather than reader-against-itself: a fold keyed on the NODE names, which
     no PhaseRecord carries, or reading the in-memory-only ``payload["data"]``, rebuilds L2/L3 as
     never-fired and hands the resumed run a fresh escalation budget. A fire whose output never
-    parsed adopts nothing, so it must fold as nothing.
+    parsed adopts nothing and folds as nothing, so the ask before it must have moved nothing
+    either: counters committed at the ask split the live run from every resume of it.
     """
     from types import SimpleNamespace
 
     from promptpotter.application.optimizers.potter.escalation.firing import L2, L3
     from promptpotter.application.optimizers.potter.escalation.state import (
         EscalationFSM,
+        LadderAsk,
         PotterPhase,
     )
     from promptpotter.application.optimizers.potter.knobs import EscalationLadder
+    from promptpotter.application.optimizers.potter.state import PotterState
     from promptpotter.application.views.view_models import OptimizerStepExitView
     from promptpotter.domain.run_records import PhaseRecord
 
@@ -597,7 +600,7 @@ def test_l2_l3_escalation_state_survives_resume() -> None:
     live_trace = []
     # What each exit record carries on disk: the view the seam composes off the live state.
     banked: list[tuple[PotterPhase, OptimizerStepExitView]] = []
-    fired_state = SimpleNamespace(escalation=live, memory=SimpleNamespace(l1_overrides={}))
+    fired_state = PotterState(escalation=live)
     output = SimpleNamespace(
         l1_layout=None,
         axis_targeted="",
@@ -609,24 +612,34 @@ def test_l2_l3_escalation_state_survives_resume() -> None:
         live_trace.append(snapshot(live))
         banked.append((layer.phase, layer.exit_view(fired_state, output)))
 
-    live.record_l2_fired(best_composite_fitness=0.60)
+    def ask(fitness: float) -> LadderAsk:
+        return live.ask_l2_escalation(
+            current_composite_fitness=fitness,
+            escalation_ladder=EscalationLadder.FULL,
+            l2_patience=3,
+            l3_patience=2,
+        )
+
+    live.record_l2_fired(ask(0.60).l2, best_composite_fitness=0.60)
     fired(L2)
-    # A second request at an unimproved fitness bumps the L2 stall before the fire banks it.
-    live.observe_l2_escalation(
-        current_composite_fitness=0.60,
-        escalation_ladder=EscalationLadder.FULL,
-        l2_patience=3,
-        l3_patience=2,
-    )
-    live.record_l2_fired(best_composite_fitness=0.60)
+    # A second ask at an unimproved fitness reads a stall, which the fire that lands commits.
+    live.record_l2_fired(ask(0.60).l2, best_composite_fitness=0.60)
     fired(L2)
-    # An unparseable fire closes its bracket and adopts nothing.
+    # An unparseable fire closes its bracket and adopts nothing — the stall its ask read
+    # included, or the live counters run ahead of the only record a resume can fold.
+    unlanded = ask(0.60)
+    assert unlanded.l2.stall_count == 2
+    # The prompt that fire composed still reported the verdict that asked for it.
+    assert live.as_read_by(unlanded).l2_stall_count == 2
     live_trace.append(snapshot(live))
     discarded = OptimizerStepExitView(headline="", details=(), audit=None, state=None)
     banked.append((PotterPhase.REFINE_STRATEGY, discarded))
     # L3 firing wipes L2's progress — a new plan invalidates it. Checked BEFORE the wipe above,
     # or the L2 half of this test would assert zeros and pass against the bug it exists for.
-    live.record_l3_fired(best_composite_fitness=0.75)
+    # A heal first: it bumps L3 and leaves the patience ratchet unset, which must fold as unset.
+    live.record_l3_fired(None, best_composite_fitness=0.60)
+    fired(L3)
+    live.record_l3_fired(ask(0.75).l3, best_composite_fitness=0.75)
     fired(L3)
 
     replay = EscalationFSM()
@@ -646,8 +659,61 @@ def test_l2_l3_escalation_state_survives_resume() -> None:
         (1, 0, 0.60, 0, 0, None, 0),
         (2, 1, 0.60, 0, 0, None, 0),
         (2, 1, 0.60, 0, 0, None, 0),
-        (0, 0, None, 1, 0, 0.75, 0),
+        (0, 0, None, 1, 0, None, 0),
+        (0, 0, None, 2, 0, 0.75, 0),
     ]
+
+
+def test_a_fire_after_the_round_closed_survives_a_pause(tmp_path: Path) -> None:
+    """A layer fires AFTER the round it reads has been written, so what it authors is on no round
+    document until the next round closes. Paused in between, the cycle resumed with the ladder's
+    counters restored off the ledger and the layout, overrides and plan those fires wrote gone —
+    the next round ran under the framing of the one before. Silent: both layouts are valid."""
+    from types import SimpleNamespace
+
+    from promptpotter.application.optimizer_manifest import resolve_optimizer
+    from promptpotter.application.optimizers.potter.dispatch.layout import (
+        coerce_l1_layout,
+        default_l1_layout,
+    )
+    from promptpotter.application.optimizers.potter.escalation.firing import L2, L3
+    from promptpotter.application.optimizers.potter.escalation.state import LayerReading
+    from promptpotter.application.optimizers.potter.records import L2L3Memory
+    from promptpotter.application.optimizers.potter.state import PotterState
+    from promptpotter.domain.run_records import PhaseRecord
+    from promptpotter.infrastructure.ledger import CycleEventLog
+    from tests.factories import optimizer_state, round_result
+
+    selected = resolve_optimizer("potter", {})
+    live = PotterState()
+    closed = round_result(1, optimizer_state=optimizer_state(live.memory.model_copy(deep=True)))
+    ledger = CycleEventLog(tmp_path / "ledger.jsonl")
+
+    def fire(layer: Any) -> None:
+        output = SimpleNamespace(l1_layout=None, axis_targeted="", plan="", described="")
+        view = layer.exit_view(live, output)
+        ledger.append(PhaseRecord(phase=layer.phase, event="exit", round=1, payload={"view": view}))
+
+    moved = coerce_l1_layout({"critique": "persona"}, base=live.memory.l1_layout)
+    assert moved is not None and moved != live.memory.l1_layout
+    live.memory.l1_layout = moved
+    live.memory.l1_overrides = {"n_variants": 5}
+    live.escalation.record_l2_fired(LayerReading(0, None, None, None), best_composite_fitness=0.5)
+    fire(L2)
+    live.memory.plan = "attack the default label"
+    live.escalation.record_l3_fired(None, best_composite_fitness=0.5)
+    fire(L3)
+
+    def resumed(before_round: int) -> PotterState:
+        state = PotterState()
+        state.replay(closed)
+        state.resume(ledger, selected, before_round=before_round)
+        return state
+
+    # Paused inside round 2: both fires belong to the boundary the resume keeps.
+    assert resumed(2).memory == live.memory
+    # Rewound to re-run round 1: the fires are discarded with it.
+    assert resumed(1).memory == L2L3Memory(l1_layout=default_l1_layout())
 
 
 def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) -> None:

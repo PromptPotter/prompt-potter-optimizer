@@ -15,7 +15,12 @@ from promptpotter.application.intelligence.earned_blocks import (
 from promptpotter.application.intelligence.indexes.axis import AxisIndex
 from promptpotter.application.intelligence.sibling_wounds import gather_sibling_runtime_failures
 from promptpotter.application.optimizers.potter.dispatch.layout import default_l1_layout
-from promptpotter.application.optimizers.potter.escalation.state import EscalationFSM
+from promptpotter.application.optimizers.potter.escalation.state import (
+    EscalationFSM,
+    adopted_fire_state,
+    l1_stall_depth,
+    surviving_phase_records,
+)
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
 from promptpotter.application.optimizers.potter.records import (
     POTTER_MANIFEST,
@@ -27,6 +32,8 @@ from promptpotter.domain.wounds import rf_dedup_key
 from promptpotter.infrastructure.store.layout import root_cycle_id
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
@@ -47,7 +54,7 @@ def _origin_memory() -> L2L3Memory:
 @dataclass
 class PotterState:
     """``memory`` carries across every adoption and is snapshotted onto each round; the FSM's
-    counters are rebuilt from the ledger on resume, since no round document banks them."""
+    counters, and what a fire wrote since the last round closed, are rebuilt from the ledger."""
 
     memory: L2L3Memory = field(default_factory=_origin_memory)
     escalation: EscalationFSM = field(default_factory=EscalationFSM)
@@ -118,6 +125,11 @@ class PotterState:
         self.escalation = EscalationFSM.from_ledger(
             ledger, lives=potter_knobs(selected).escalation.lives, before_round=before_round
         )
+        # A fire runs after its round's document is written, so `replay` restored the memory
+        # from before the fires of the boundary this resume keeps.
+        for record in surviving_phase_records(ledger, before_round=before_round):
+            if (banked := adopted_fire_state(record)) is not None:
+                self.memory = self.memory.with_fire_writes(banked["memory"])
 
     def absorb(self, round_result: RoundResult) -> None:
         failures = self.memory.wounds.runtime_failures
@@ -131,8 +143,8 @@ class PotterState:
         payload = round_result.optimizer_state.payload_as(PotterRoundState)
         payload.memory = self.memory.model_copy(deep=True)
 
-    def standing(self) -> tuple[int, int | None]:
-        return self.escalation.l1_stall_count, self.escalation.lives
+    def standing(self, rounds: Sequence[RoundResult]) -> tuple[int, int | None]:
+        return l1_stall_depth(rounds), self.escalation.lives
 
 
 def potter_state(state: WorkingState) -> PotterState:

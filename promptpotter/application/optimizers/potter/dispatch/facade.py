@@ -45,7 +45,10 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import (
     load_optimizer_prompt,
     node_layout,
 )
-from promptpotter.application.optimizers.potter.escalation.state import exploration_budget
+from promptpotter.application.optimizers.potter.escalation.state import (
+    exploration_budget,
+    l1_stall_depth,
+)
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
 from promptpotter.application.optimizers.potter.records import PotterRoundState
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
@@ -327,16 +330,18 @@ def build_bundle(
     spend_used = cycle.session.spend_used
     knobs = potter_knobs(cycle.optimizer)
     esc = state.escalation
+    closed = list(cycle.rounds)
+    if latest_round is not None and (not closed or closed[-1].round != latest_round.round):
+        closed.append(latest_round)
+    stall_depth = l1_stall_depth(closed)
     cs = CycleSlice(
         round_num=round_num,
-        l1_stall_count=esc.l1_stall_count,
+        l1_stall_depth=stall_depth,
         l2_round=esc.l2_round,
         l2_stall_count=esc.l2_stall_count,
         l3_round=esc.l3_round,
         l3_stall_count=esc.l3_stall_count,
-        exploration_budget=exploration_budget(
-            esc.l1_stall_count, knobs.escalation.l1_patience
-        ).value,
+        exploration_budget=exploration_budget(stall_depth, knobs.escalation.l1_patience).value,
         pipeline_params=dict(current_pp) if current_pp else {},
         composite_formula=formula,
         composite_formula_short=formula_short,

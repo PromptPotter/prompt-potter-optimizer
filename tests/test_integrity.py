@@ -1860,7 +1860,7 @@ def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing() -> 
         pipeline_schema=None,
         cycle_slice=CycleSlice(
             round_num=1,
-            l1_stall_count=0,
+            l1_stall_depth=0,
             l2_round=0,
             l2_stall_count=0,
             l3_round=0,
@@ -3261,7 +3261,7 @@ def test_evidence_channel_clips_are_visible_and_tail_preserving(
         pipeline_schema=None,
         cycle_slice=CycleSlice(
             round_num=1,
-            l1_stall_count=0,
+            l1_stall_depth=0,
             l2_round=0,
             l2_stall_count=0,
             l3_round=0,
@@ -3437,7 +3437,7 @@ def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
         pipeline_schema=schema,
         cycle_slice=CycleSlice(
             round_num=1,
-            l1_stall_count=0,
+            l1_stall_depth=0,
             l2_round=0,
             l2_stall_count=0,
             l3_round=0,
@@ -3574,7 +3574,7 @@ def test_a_solved_cell_the_edits_keep_losing_reaches_the_critique_and_the_genera
         pipeline_schema=None,
         cycle_slice=CycleSlice(
             round_num=1,
-            l1_stall_count=0,
+            l1_stall_depth=0,
             l2_round=0,
             l2_stall_count=0,
             l3_round=0,
@@ -3649,7 +3649,7 @@ def test_a_verifier_graded_miss_reaches_the_generator_with_its_reason() -> None:
         pipeline_schema=None,
         cycle_slice=CycleSlice(
             round_num=1,
-            l1_stall_count=0,
+            l1_stall_depth=0,
             l2_round=0,
             l2_stall_count=0,
             l3_round=0,

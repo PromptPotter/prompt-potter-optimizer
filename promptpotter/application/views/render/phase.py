@@ -229,9 +229,15 @@ def render_round_stats(
 
 
 def render_patience_status(improved: bool, stall: int, patience: int) -> str:
-    if improved:
+    # `stall` is the depth since the last advance, which a fire does not reset, so it can pass the
+    # patience that paces the next ask — the two are shown apart, never as a fraction.
+    if stall == 0:
         return _node_line(f"{GREEN}✓ Improvement detected, auto-continuing...{RESET}")
-    return _node_line(f"{YELLOW}⚠ No improvement ({stall}/{patience} patience){RESET}")
+    cause = "Improved, not separable" if improved else "No improvement"
+    rounds = "round" if stall == 1 else "rounds"
+    return _node_line(
+        f"{YELLOW}⚠ {cause} — {stall} {rounds} without an advance (patience {patience}){RESET}"
+    )
 
 
 __all__ = [

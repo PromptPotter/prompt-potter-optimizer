@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.application.bench.llm_call import (
@@ -56,7 +56,12 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
     TerminateProposal,
     build_l2_response_model,
 )
-from promptpotter.application.optimizers.potter.escalation.state import NextAction, PotterPhase
+from promptpotter.application.optimizers.potter.escalation.state import (
+    LadderAsk,
+    LayerReading,
+    NextAction,
+    PotterPhase,
+)
 from promptpotter.application.optimizers.potter.knobs import potter_knobs
 from promptpotter.application.optimizers.potter.records import (
     L1Layout,
@@ -158,9 +163,25 @@ def _high_water(cycle: Cycle) -> _HighWater:
     )
 
 
+# What fires a layer where no `DEFAULT_ESCALATION_RULES` member did; each stands on the trigger
+# record where a rule's name would.
+FORCED_BY_DIAG = "diag"
+L2_PATIENCE_SPENT = "l2_patience_spent"
+L1_LAYOUT_REFUSED = "l1_layout_refused"
+
+
+@dataclass(frozen=True)
+class _Fire:
+    """Why a layer fires, and the ask whose reading its landing commits."""
+
+    cause: str
+    # ``None`` is a heal: L3 answering a refused L2 edit, adopted without spending `l3_patience`.
+    ask: LadderAsk | None
+
+
 ParseFn = Callable[[Any, L2L3Memory], TransitionResult]
-ApplyFn = Callable[["Cycle", "PotterState", TransitionResult], None]
-EnterFn = Callable[["Cycle", "PotterState"], OptimizerStepEnterView]
+ApplyFn = Callable[["Cycle", "PotterState", TransitionResult, _Fire], None]
+EnterFn = Callable[["Cycle", "PotterState", _Fire], OptimizerStepEnterView]
 ExitFn = Callable[["PotterState", TransitionResult], OptimizerStepExitView]
 
 
@@ -228,20 +249,21 @@ def _parse_l2(raw: L2ContextOutput, memory: L2L3Memory) -> TransitionResult:
     )
 
 
-def _apply_l2(cycle: Cycle, state: PotterState, result: TransitionResult) -> None:
+def _apply_l2(cycle: Cycle, state: PotterState, result: TransitionResult, fire: _Fire) -> None:
     memory = state.memory
     if result.l1_overrides is not None:
         memory.l1_overrides = result.l1_overrides
     if result.l1_layout is not None:
         memory.l1_layout = result.l1_layout
     memory.wounds.l2_guard_breaches = list(result.l2_guard_breaches)
+    assert fire.ask is not None, "only L3 heals"
     best = _high_water(cycle)
     state.escalation.record_l2_fired(
-        best_composite_fitness=best.composite_fitness, best_theta=best.theta
+        fire.ask.l2, best_composite_fitness=best.composite_fitness, best_theta=best.theta
     )
 
 
-def _l2_enter(cycle: Cycle, state: PotterState) -> OptimizerStepEnterView:
+def _l2_enter(cycle: Cycle, state: PotterState, fire: _Fire) -> OptimizerStepEnterView:
     items = [(k, str(v)) for k, v in state.memory.l1_overrides.items()]
     if items:
         shown = [f"{k}={s if len(s) <= 30 else s[:27] + '...'}" for k, s in items[:5]]
@@ -256,6 +278,7 @@ def _l2_enter(cycle: Cycle, state: PotterState) -> OptimizerStepEnterView:
         title="L2 REFINE CONTEXT",
         tag=f"L2 fire {esc.l2_round + 1}",
         lines=(
+            f"rule={fire.cause}  |  "
             f"L1 stalled {esc.l1_stall_count} rounds  |  "
             f"acc={cycle.tracking.current_accuracy:.1%}  best={_high_water(cycle).accuracy:.1%}",
             overrides,
@@ -279,6 +302,7 @@ def _l2_exit(state: PotterState, result: TransitionResult) -> OptimizerStepExitV
             "l2_stall_count": esc.l2_stall_count,
             "l2_best_composite_fitness_at_entry": esc.l2_best_composite_fitness_at_entry,
             "l2_best_theta_at_entry": esc.l2_best_theta_at_entry,
+            "memory": state.memory.fire_writes(),
         },
     )
 
@@ -316,18 +340,20 @@ def _parse_l3(raw: L3PlanOutput, memory: L2L3Memory) -> TransitionResult:
     )
 
 
-def _apply_l3(cycle: Cycle, state: PotterState, result: TransitionResult) -> None:
+def _apply_l3(cycle: Cycle, state: PotterState, result: TransitionResult, fire: _Fire) -> None:
     state.memory.plan = result.plan
     # The overwrite, possibly with ``""``, is the "cleared only when L3 fires again" contract.
     state.memory.wounds.l3_note = result.l3_note
     state.memory.wounds.l3_guard_breaches = list(result.l3_guard_breaches)
     best = _high_water(cycle)
     state.escalation.record_l3_fired(
-        best_composite_fitness=best.composite_fitness, best_theta=best.theta
+        None if fire.ask is None else fire.ask.l3,
+        best_composite_fitness=best.composite_fitness,
+        best_theta=best.theta,
     )
 
 
-def _l3_enter(cycle: Cycle, state: PotterState) -> OptimizerStepEnterView:
+def _l3_enter(cycle: Cycle, state: PotterState, fire: _Fire) -> OptimizerStepEnterView:
     esc = state.escalation
     return OptimizerStepEnterView(
         node=L3.template_name,
@@ -335,7 +361,9 @@ def _l3_enter(cycle: Cycle, state: PotterState) -> OptimizerStepEnterView:
         title="L3 MODIFY PLAN",
         tag=f"L3 fire {esc.l3_round + 1}",
         lines=(
-            f"L2 stalled {esc.l2_stall_count} rounds",
+            "Healing L2's refused l1_layout edit"
+            if fire.ask is None
+            else f"L2 stalled {fire.ask.l2.stall_count} rounds",
             f"Current plan: {truncate(state.memory.plan[:120], 55, '...')}",
             "LLM designing new strategy...",
         ),
@@ -354,6 +382,7 @@ def _l3_exit(state: PotterState, result: TransitionResult) -> OptimizerStepExitV
             "l3_stall_count": esc.l3_stall_count,
             "l3_best_composite_fitness_at_entry": esc.l3_best_composite_fitness_at_entry,
             "l3_best_theta_at_entry": esc.l3_best_theta_at_entry,
+            "memory": state.memory.fire_writes(),
         },
     )
 
@@ -377,6 +406,7 @@ async def _run_transition(
     state: PotterState,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
+    fire: _Fire,
     *,
     obs: ObservabilityBridge | None,
     tracing_campaign_id: str,
@@ -388,7 +418,7 @@ async def _run_transition(
         transition.phase,
         "enter",
         round=round_num,
-        step=transition.enter_view(cycle, state),
+        step=transition.enter_view(cycle, state, fire),
     )
     async with observed_node(
         f"{transition.template_name}_r{round_num}",
@@ -397,7 +427,13 @@ async def _run_transition(
         campaign_id=tracing_campaign_id,
         round_num=round_num,
     ):
-        bundle = build_bundle(cycle, state)
+        # The prompt reports the verdict that asked for it, which lands only if this fire does.
+        seen = (
+            state
+            if fire.ask is None
+            else replace(state, escalation=state.escalation.as_read_by(fire.ask))
+        )
+        bundle = build_bundle(cycle, seen)
         template, prompt_vars, rendered, coverage = DispatchHub.fill(
             load_optimizer_prompt(transition.template_name), bundle, node=transition.template_name
         )
@@ -451,7 +487,7 @@ async def _run_transition(
             )
             return None
 
-    transition.apply(cycle, state, result)
+    transition.apply(cycle, state, result, fire)
     emit_phase(
         on_phase,
         transition.phase,
@@ -573,33 +609,50 @@ def _rebase_request(
     return request
 
 
-def _trigger_payload(
+def _record_trigger(
     cycle: Cycle,
-    state: PotterState,
     round_num: int,
     patience: int | None,
+    reading: LayerReading,
     *,
-    layer: str,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    esc = state.escalation
+    kind: PotterCheckpointKind,
+    layer: Literal["l2", "l3"],
+    counter_round: int,
+    node: str,
+    fired: bool,
+    rule: str,
+    heal: bool | None = None,
+    l2_guard_breaches: list[str] | None = None,
+) -> None:
     best = _high_water(cycle)
-    counter_round = getattr(esc, f"{layer}_round")
-    inputs_ref = {
-        "round_num": round_num,
-        f"{layer}_patience": patience,
-        "entry_round": counter_round if counter_round > 0 else -1,
-    }
-    data: dict[str, Any] = {
-        f"{layer}_round": counter_round,
-        "stall_count": getattr(esc, f"{layer}_stall_count"),
-        "best_composite_fitness_at_entry": getattr(esc, f"{layer}_best_composite_fitness_at_entry"),
-        "best_composite_fitness_this_round": best.composite_fitness,
-        "best_theta_at_entry": getattr(esc, f"{layer}_best_theta_at_entry"),
-        "best_theta_this_round": best.theta,
-        # Which of the two pairs above the stall verdict actually read.
-        "comparator": getattr(esc, f"{layer}_comparator"),
-    }
-    return inputs_ref, data
+    asked: dict[str, Any] = {"rule": rule}
+    if heal is not None:
+        asked["heal"] = heal
+    if l2_guard_breaches is not None:
+        asked["l2_guard_breaches"] = l2_guard_breaches
+    record_decision(
+        cycle.pending_decisions,
+        kind,
+        {
+            "round_num": round_num,
+            f"{layer}_patience": patience,
+            "entry_round": counter_round if counter_round > 0 else -1,
+        },
+        fired,
+        node=node,
+        data={
+            f"{layer}_round": counter_round,
+            "stall_count": reading.stall_count,
+            "best_composite_fitness_at_entry": reading.best_composite_fitness_at_entry,
+            "best_composite_fitness_this_round": best.composite_fitness,
+            "best_theta_at_entry": reading.best_theta_at_entry,
+            "best_theta_this_round": best.theta,
+            # Which of the two pairs above the stall verdict actually read.
+            "comparator": reading.comparator,
+            **asked,
+        },
+        round=round_num,
+    )
 
 
 async def escalate_l2(
@@ -611,12 +664,14 @@ async def escalate_l2(
     tracing_campaign_id: str = "",
     *,
     node: str,
+    cause: str,
 ) -> StopReason | None:
+    """``cause`` is what asked: the rule that matched the round, or the force no rule made."""
     opt = potter_knobs(cycle.optimizer).escalation
     esc = state.escalation
     best = _high_water(cycle)
 
-    event = esc.observe_l2_escalation(
+    ask = esc.ask_l2_escalation(
         current_composite_fitness=best.composite_fitness,
         current_theta=best.theta,
         current_theta_se=best.theta_se,
@@ -625,36 +680,59 @@ async def escalate_l2(
         l3_patience=opt.l3_patience,
     )
 
-    # L2 trigger decision is replayed for divergence — record fired-or-not.
-    l2_inputs, l2_data = _trigger_payload(cycle, state, round_num, opt.l2_patience, layer="l2")
-    record_decision(
-        cycle.pending_decisions,
-        PotterCheckpointKind.L2_ESCALATION_TRIGGER,
-        l2_inputs,
-        event.next_action == NextAction.FIRE_L2,
+    # Archival, fired or not: the verdict is a fold over the cycle, which no replayer holds.
+    _record_trigger(
+        cycle,
+        round_num,
+        opt.l2_patience,
+        ask.l2,
+        kind=PotterCheckpointKind.L2_ESCALATION_TRIGGER,
+        layer="l2",
+        counter_round=esc.l2_round,
         node=node,
-        data=l2_data,
-        round=round_num,
+        fired=ask.next_action == NextAction.FIRE_L2,
+        rule=cause,
     )
 
-    if event.next_action == NextAction.FIRE_L2:
+    if ask.next_action == NextAction.FIRE_L2:
         result = await _run_transition(
             L2,
             cycle,
             state,
             round_num,
             on_phase,
+            _Fire(cause, ask),
             obs=obs,
             tracing_campaign_id=tracing_campaign_id,
         )
-        # Wound 4: L2's layout edit was REFUSED → L3 force-trigger, deterministic from L2 output
-        # so resume reproduces it without a decision record. It reads the refusal and not
-        # `wounds.l2_guard_breaches`: that stream is prompt EVIDENCE and two of its members are
+        # Wound 4: L2's layout edit was REFUSED → L3 heals it. The trigger reads the refusal and
+        # not `wounds.l2_guard_breaches`: that stream is prompt EVIDENCE and two of its members are
         # inert — `l1_layout_voids_prefix` is a cache-cost report and
         # `l1_layout_unchanged_from_prior` a no-op; neither may replan the cycle.
         if opt.escalation_ladder.fires_l3 and result is not None and result.l1_layout_refused:
             logger.warning(
                 "L3 force-triggered — L2's l1_layout edit was refused at round %d", round_num
+            )
+            # A heal reads no gate, so its record banks the counters the FSM holds.
+            held = LayerReading(
+                esc.l3_stall_count,
+                esc.l3_best_composite_fitness_at_entry,
+                esc.l3_best_theta_at_entry,
+                None,
+            )
+            _record_trigger(
+                cycle,
+                round_num,
+                opt.l3_patience,
+                held,
+                kind=PotterCheckpointKind.L3_ESCALATION_TRIGGER,
+                layer="l3",
+                counter_round=esc.l3_round,
+                node=node,
+                fired=True,
+                rule=L1_LAYOUT_REFUSED,
+                heal=True,
+                l2_guard_breaches=[o.validator_id for o in result.l2_guard_breaches],
             )
             await _run_transition(
                 L3,
@@ -662,30 +740,36 @@ async def escalate_l2(
                 state,
                 round_num,
                 on_phase,
+                _Fire(L1_LAYOUT_REFUSED, None),
                 obs=obs,
                 tracing_campaign_id=tracing_campaign_id,
             )
         return None
 
     # FIRE_L3 or STOP_L3_PATIENCE — record L3 trigger decision either way.
-    l3_inputs, l3_data = _trigger_payload(cycle, state, round_num, opt.l3_patience, layer="l3")
-    record_decision(
-        cycle.pending_decisions,
-        PotterCheckpointKind.L3_ESCALATION_TRIGGER,
-        l3_inputs,
-        event.next_action == NextAction.FIRE_L3,
+    _record_trigger(
+        cycle,
+        round_num,
+        opt.l3_patience,
+        ask.l3,
+        kind=PotterCheckpointKind.L3_ESCALATION_TRIGGER,
+        layer="l3",
+        counter_round=esc.l3_round,
         node=node,
-        data=l3_data,
-        round=round_num,
+        fired=ask.next_action == NextAction.FIRE_L3,
+        rule=L2_PATIENCE_SPENT,
+        heal=False,
+        l2_guard_breaches=[],
     )
 
-    if event.next_action == NextAction.FIRE_L3:
+    if ask.next_action == NextAction.FIRE_L3:
         await _run_transition(
             L3,
             cycle,
             state,
             round_num,
             on_phase,
+            _Fire(L2_PATIENCE_SPENT, ask),
             obs=obs,
             tracing_campaign_id=tracing_campaign_id,
         )
@@ -693,10 +777,11 @@ async def escalate_l2(
 
     # STOP_L3_PATIENCE — the reason rides the event (``_NEXT_ACTION_TO_STOP``), the one
     # NextAction→StopReason table; re-spelling it here is how the two drift apart.
-    return event.stop_reason
+    return ask.stop_reason
 
 
 __all__ = [
+    "FORCED_BY_DIAG",
     "L2",
     "L3",
     "escalate_l2",

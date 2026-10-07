@@ -11,6 +11,8 @@ from promptpotter.domain.optimizer_state import OptimizerState, RoundPayload
 from promptpotter.domain.strict_model import StrictModel
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import WorkingState
     from promptpotter.domain.results import RoundResult
@@ -112,7 +114,7 @@ class LeviState:
     def absorb(self, round_result: RoundResult) -> None:
         self._take_up(round_result.optimizer_state.payload_as(LeviRoundState))
 
-    def standing(self) -> tuple[int, int | None]:
+    def standing(self, rounds: Sequence[RoundResult]) -> tuple[int, int | None]:
         return self.rounds_without_advance, None
 
     def _take_up(self, payload: LeviRoundState) -> None:
