@@ -13,6 +13,12 @@
 .pipeline-zoom-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
 .pipeline-stack{flex:1 1 100%;padding:0 var(--space-16)}
 
+.wf-hero{position:relative;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:var(--space-6) var(--space-10);padding:var(--space-16) var(--space-16) var(--space-18);max-width:var(--reading-measure);margin:0 auto;width:100%}
+/* NodeDetail (560px) and the expanded heat table need the whole row: the table breaks out
+   full-bleed off its wrap's box, which a shrink-to-fit wrap resolves against nothing. */
+.wf-hero > .bnode{flex:1 1 100%}
+.wf-hero .hs-heat-wrap{flex:0 1 auto;width:auto;margin-top:0;padding:0}
+.wf-hero .hs-heat-wrap:has(.hs-expand-wrap){flex-basis:100%;width:100%}
 .wf-hero-flow{display:flex;align-items:center;justify-content:center;gap:0;padding:var(--space-10) 0}
 .wf-hero-node{background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:10px;padding:var(--space-14) var(--space-24);text-align:left;min-width:140px;display:flex;flex-direction:row;align-items:center;gap:var(--space-12);position:relative;z-index:2}
 .wf-hero-node .ico{color:var(--color-text-secondary);display:flex;align-items:center;justify-content:center;flex-shrink:0}
@@ -221,6 +227,7 @@
 }
 /* Gives way when an open node detail or sample table outgrows the tab, and scrolls only then:
    the connector's hover card counts as scrollable overflow even while hidden. */
+.chat-content > .wf-hero{flex:0 1 auto;min-height:0}
 .wf-hero:has(> .bnode),.wf-hero:has(.hs-expand-wrap){overflow-y:auto}
 .chat-grid{display:grid;grid-template-columns:minmax(0,var(--reading-measure));gap:var(--space-24);justify-content:center;flex:1 0 240px;min-height:0;padding:0 var(--space-18)}
 /* No height floor at any width: a floor pushes the input row below the fold. */

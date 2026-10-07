@@ -1,13 +1,20 @@
 "use client";
 // The disabled controls are INTENTIONAL placeholders for the chat-first front door (`docs/specs/chat-foundation.md`):
 // exempt from any "hide non-functional controls" sweep and from the no-M-milestone gate.
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useHardSamples } from "@/lib/hard-samples";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import { useIngest } from "@/lib/ingest-flow";
 import { IngestConversation } from "@/components/ingest/IngestConversation";
 import { hasLiveProducer } from "@/lib/run-phase";
-import { runSummary } from "@/lib/derivations";
+import { draftForCampaign, isSelfOptimization, runSummary } from "@/lib/derivations";
+import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHeatmap";
+import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
+import { PipelineStack } from "@/components/dashboard/pipeline/PipelineStack";
+import { RoundAxis } from "@/components/dashboard/pipeline/RoundAxis";
+import { useConnector } from "@/lib/hooks/useConnector";
+import { useSelection } from "@/lib/SelectionContext";
 import { useCycleEvents } from "@/lib/chat/useCycleEvents";
 import { benchPassActivity } from "@/lib/chat/activity";
 import { deriveDecision } from "@/lib/chat/decision";
@@ -20,14 +27,16 @@ interface Props {
   onOpenDashboard: () => void;
 }
 
-// The Chat surface: the shared `IngestConversation` thread and nothing above it. The pipeline, the
-// samples and a node's detail are the Dashboard's; the run card in the thread is the one snapshot
-// of them here, and it links over.
+// The Chat surface: a display-only pipeline hero over the shared `IngestConversation` thread. Everything
+// above the thread is deliberately MINIATURE — the Dashboard reads the same surfaces at size.
 export function ChatPane({ checkinCampaignId, onOpenDashboard }: Props) {
+  const { datasetName } = useHardSamples();
   const { dash } = useDashboard();
   // The feed and its gate decision follow the viewed LEAF hop (an L4 inner campaign tails its own cycle);
   // root identity (session, ingest compose) stays on the root exports.
   const { viewedPath, cycleId, leafCampaignId, leafCycleId } = useWorkspace();
+  const [samplesOpen, setSamplesOpen] = useState(false);
+  const toggleSamples = () => setSamplesOpen((v) => !v);
 
   // `composing` suppresses the bound cycle's live feed so a fresh thread is not drawn over the last run.
   const { flow: ingest, collection, composing } = useIngest();
@@ -67,8 +76,59 @@ export function ChatPane({ checkinCampaignId, onOpenDashboard }: Props) {
       />
     ) : null;
 
+  const cv = useConnector();
+  // An L4 unit has no cache.json roster — its samples ARE the inner campaigns.
+  const selfOpt = isSelfOptimization(cv.backendType);
+  const { node: selectedNode, setSelectionForNode } = useSelection();
+  // A campaign being set up previews the DRAFT's searchpoint, only for the campaign that draft is:
+  // the ingest thread outlives a sidebar selection.
+  const previewDraft = draftForCampaign(
+    ingest.phase.stage === "ready" || ingest.phase.stage === "awaiting-context"
+      ? ingest.phase.draft
+      : null,
+    leafCampaignId,
+  );
+  // The draft's documents, not the wire, so config is read only where the served resolution answered.
+  const authoring = useMemo(
+    () =>
+      previewDraft
+        ? {
+            overlay: previewDraft.pipeline_overlay,
+            promptFields: previewDraft.origin_prompt_fields,
+          }
+        : undefined,
+    [previewDraft],
+  );
+  // Auto-open once per mount; the ref keeps a manual close respected across cycle changes.
+  const samplesAutoOpened = useRef(false);
+  useEffect(() => {
+    if (cycleId && !samplesAutoOpened.current) {
+      samplesAutoOpened.current = true;
+      setSamplesOpen(true);
+    }
+  }, [cycleId]);
+
   return (
     <div className="content chat-content" id="content-chat">
+      <div className="wf-hero">
+        {/* The corner zoom buttons belong to the stack, the only thing that knows the level count. */}
+        <PipelineStack
+          datasetName={datasetName}
+          samplesOpen={samplesOpen}
+          onToggleSamples={toggleSamples}
+        />
+        {/* Its twin is on the Dashboard's optimizer card; both write the one `selection.round` axis. */}
+        <RoundAxis />
+        {selectedNode && (
+          <NodeDetail
+            node={selectedNode}
+            authoring={authoring}
+            onClose={() => setSelectionForNode(null)}
+          />
+        )}
+        {samplesOpen && !selfOpt && <HardSamplesHeatmap />}
+      </div>
+
       <div className="chat-grid">
         <div className="chat-panel">
           <IngestConversation
