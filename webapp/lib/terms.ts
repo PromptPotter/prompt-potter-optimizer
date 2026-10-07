@@ -12,10 +12,9 @@ export const TERMS: Record<string, string> = {
   status_nowall:      "Dashboard has no wallclock yet — optimizer probably has not started.",
   status_stamp_mismatch: "dashboard.json keeps reporting a different (campaign, cycle) than this view expects — the optimizer may be re-instantiating, or this unit's session never wrote a dashboard.",
 
-  composite: "composite_fitness — the per-candidate scalar the optimizer optimizes. Recipe in the formula row.",
+  composite: "composite_fitness — the per-candidate scalar the optimizer optimizes. Recipe in the criterion.",
 
-  mask_up:   "Higher value is better — counted positively in the masked mean.",
-  mask_down: "Lower value is better — direction-corrected (1 − x) before averaging.",
+  criterion_accuracy: "Whether the answer is right, as the matcher grades it. Every dial below scales this — a dial at 0 is off.",
 
   stub_inferred:      "Heuristic display — derived client-side, not authoritative. Real value lives in measurements/.",
   stub_score_freq:    "Inferred bucket counts. Real per-sample scores live in measurements/.",

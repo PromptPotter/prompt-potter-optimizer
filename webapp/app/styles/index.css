@@ -26,6 +26,7 @@
 @import "./domains/auth.css";
 @import "./domains/l4.css";
 @import "./domains/compare.css";
+@import "./domains/scoring.css";
 
 @import "./foundation/reduced-motion.css";
 @import "./foundation/responsive.css";

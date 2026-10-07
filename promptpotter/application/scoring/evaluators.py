@@ -351,15 +351,28 @@ def all_evaluators() -> list[Evaluator]:
     return list(_REGISTRY)
 
 
-def cell_terms_meta() -> list[dict[str, str]]:
+def cell_terms_meta() -> list[dict[str, Any]]:
     """What a ``per_cell`` formula — and so a ``score:`` lens — can name, for the webapp's
-    scoring-mask editor: the per-cell terms, then the per-sample evaluators banked beside them."""
-    terms = [
-        {"name": name, "direction": term.direction, "description": term.description}
+    scoring form: the per-cell terms, then the per-sample evaluators banked beside them. ``dial``
+    and ``primary`` say which of them the form offers a dial for, and which it shows unasked."""
+    terms: list[dict[str, Any]] = [
+        {
+            "name": name,
+            "direction": term.direction,
+            "description": term.description,
+            "dial": term.dial,
+            "primary": term.primary,
+        }
         for name, term in CELL_TERMS.items()
     ]
-    banked = [
-        {"name": ev.name, "direction": ev.direction, "description": ev.description}
+    banked: list[dict[str, Any]] = [
+        {
+            "name": ev.name,
+            "direction": ev.direction,
+            "description": ev.description,
+            "dial": None,
+            "primary": False,
+        }
         for ev in _REGISTRY
         if ev.scope == "per_sample"
     ]

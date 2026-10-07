@@ -2,6 +2,7 @@
 import { useMemo } from "react";
 import { Badge, CopyButton, Term, VendorLogo } from "@/components/ui";
 import { CampaignSwitcher } from "@/components/shell/masthead/CampaignSwitcher";
+import { CriterionLine } from "@/components/shell/scoring/Criterion";
 import { SpendBuckets } from "@/components/shell/SpendBuckets";
 import {
   METER_WORD,
@@ -17,6 +18,7 @@ import {
 } from "@/lib/derivations";
 import { fmtPct0, fmtUsdCents, shortModel } from "@/lib/format";
 import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { pathLeaf } from "@/lib/ids";
 import { isMeasuring } from "@/lib/poll";
 import { cx } from "@/lib/cx";
@@ -30,6 +32,7 @@ export function RunMasthead({ onFollowed }: { onFollowed: () => void }) {
   const { campaignId, leafCycleId, viewedPath, campaigns, cycles, following, followActive } =
     useWorkspace();
   const { dash, dashRound } = useDashboard();
+  const served = useServedCriterion();
 
   const origins = useMemo(() => buildForest(campaigns, cycles), [campaigns, cycles]);
   const run = useMemo(
@@ -114,6 +117,7 @@ export function RunMasthead({ onFollowed }: { onFollowed: () => void }) {
               ...campaignModels(run).map(shortModel),
               ...campaignLineParts(run),
             ].join(" · ")}
+            {served.formula ? <CriterionLine mask={served.mask} /> : null}
           </div>
         )}
         {/* Every chip reads `dash` for the VIEWED LEAF, the one per-cycle source. */}

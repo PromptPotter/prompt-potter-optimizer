@@ -19,7 +19,7 @@ from promptpotter.application.datasets.csv_ingest import (
 )
 from promptpotter.application.datasets.draft_campaign import (
     DEFAULT_MAX_ROUNDS,
-    DEFAULT_SCORING_COMPOSITE,
+    DEFAULT_SCORING_MATCHER,
     PREVIEW_ROWS,
     DraftCampaign,
     OptimizationOverrides,
@@ -33,6 +33,12 @@ from promptpotter.application.datasets.prompts import (
 )
 from promptpotter.application.jobs.launcher.checkin import create_checkin_campaign
 from promptpotter.application.jobs.launcher.draft_build import overlay_from_campaign_config
+from promptpotter.application.scoring.formula import (
+    DIALS_KEY,
+    parse_dials,
+    spell_dials,
+    split_scoring_block,
+)
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.connectors.protocol import PROBE_WORKLOAD
@@ -40,6 +46,7 @@ from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
+from promptpotter.domain.scoring import anchored_criterion_dials
 from promptpotter.infrastructure.backend import build_backend_client
 from promptpotter.infrastructure.llm.capabilities import refresh_model_capabilities
 from promptpotter.infrastructure.store.layout import validate_dataset_name
@@ -197,7 +204,15 @@ def draft_from_dataset(
     authored = read_authored_dataset(dataset_dir)
     cc = authored.campaign_config
     task = authored.task_description
-    scoring = str(cc.scoring or "").split("(", 1)[0].strip() or DEFAULT_SCORING_COMPOSITE
+    # The matcher is read off `per_sample`, never off the block's own text: a block that also
+    # declares a composite is a mapping, and its repr names no matcher.
+    spec = split_scoring_block(cc.scoring, judge_instrument=None)
+    matcher = (spec.per_sample or "").split("(", 1)[0].strip() or DEFAULT_SCORING_MATCHER
+    # A hand-pinned anchored `per_cell` arrives as the dials it spells: its pin stood in for the
+    # origin's level, which this campaign measures for itself.
+    declared = parse_dials(cc.scoring.get(DIALS_KEY, "")) if isinstance(cc.scoring, dict) else {}
+    pinned = anchored_criterion_dials(spec.per_cell) if spec.per_cell else None
+    dials = spell_dials(declared or {name: d.weight for name, d in (pinned or {}).items()})
     # `is not None`, never `or`: 0 is a MEANINGFUL value here — "measure the origin and stop" —
     # and `or` would silently promote it to the default, handing the operator unbounded rounds
     # when they asked for none. `None` (authored as unlimited) has no draft representation, so it
@@ -255,7 +270,8 @@ def draft_from_dataset(
         values={
             "raw_task_description": task,
             "connector": connector,
-            "scoring_composite": scoring,
+            "scoring_matcher": matcher,
+            "scoring_dials": dials,
             # The campaign-config knobs as one object. Preserve the dataset's round
             # ceiling, its optimizer and that optimizer's overlay, so reusing an Origin
             # carries its config instead of resetting to stock — an ablation arm reset to the

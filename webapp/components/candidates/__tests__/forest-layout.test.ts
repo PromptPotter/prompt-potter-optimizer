@@ -44,6 +44,7 @@ function node(
     lens_value: null,
     composite_rank: null,
     lens_rank: null,
+    lens_criterion: null,
     sample_set_accuracy: null,
     sample_set_n: null,
     divergence: null,

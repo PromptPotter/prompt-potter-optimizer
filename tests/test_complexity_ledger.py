@@ -783,7 +783,9 @@ LEDGER_BASELINE = {
     # +1: a fire's layout, overrides and plan lost to a pause before the next round closes, while
     # the ladder's counters are restored (test_resume).
     # +1: an LLM-authored slot value echoed into the unfenced breach panel (test_security).
-    "test_functions": 247,
+    # +1: a dial on an unbounded term summed raw, so the clamp floors every candidate at 0.000 and
+    # the election falls to its tie-break (test_numerics § 1).
+    "test_functions": 248,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -951,7 +953,9 @@ LEDGER_BASELINE = {
     # which carried it as a free string beside the candidate's own state.
     # +1: `SubjectReading.cell_means` — what one cell of a compared point cost, how long it took
     # and how long its prompt is, served so two searchpoints read side by side under any metric.
-    "served_fields": 781,
+    # +1: `LineageNode.lens_criterion` — the `per_cell` a lens was realized to, so the fork applying
+    # a `dials:` lens carries the server's formula and the browser assembles none.
+    "served_fields": 782,
 }
 
 

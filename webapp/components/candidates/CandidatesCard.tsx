@@ -29,10 +29,9 @@ import { subjectKey, withMask } from "@/lib/api/reads";
 import { useCompareSelection } from "@/lib/compare-selection";
 import { useSelection } from "@/lib/SelectionContext";
 import { useDashboard } from "@/lib/hooks/useDashboard";
-import { ScoringMaskEditor } from "@/components/shell/mask/ScoringMaskEditor";
+import { Criterion } from "@/components/shell/scoring/Criterion";
 import { ApplyScenarioPanel } from "@/components/candidates/ApplyScenarioPanel";
 import {
-  criterionOf,
   lensOf,
   setScoringMask,
   useScoringMask,
@@ -56,7 +55,7 @@ import { isSelectedCandidate } from "@/lib/types";
 import { encodeCyclePath } from "@/lib/ids";
 import { useWorkspace } from "@/lib/workspace";
 import { useLineage } from "@/lib/hooks/useLineage";
-import { useMaskTerms } from "@/lib/hooks/useMaskTerms";
+import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { SampleSetControl } from "./SampleSetControl";
 import { measuredUniverse } from "@/lib/sample-set";
 import { useViewedLineage, divergenceRoundsFor } from "@/lib/lineage";
@@ -123,7 +122,7 @@ export function CandidatesCard() {
   );
 
   const { open: maskOpen, mask } = useScoringMask();
-  const terms = useMaskTerms();
+  const served = useServedCriterion();
   const activeLens = maskOpen ? lensOf(mask) : null;
 
   // Carries the on-screen mask, so a scenario built here opens in Compare reading the same thing.
@@ -274,6 +273,10 @@ export function CandidatesCard() {
     for (const r of subtree) first = Math.min(first, r);
     return Number.isFinite(first) ? first : null;
   }, [overlay.maskActive, overlay.index, viewedPath, viewedCandidateId]);
+
+  // The realized `per_cell` the tree was read under — what a fork applying the mask carries.
+  const lensCriterion =
+    (viewedPath && overlay.index.get(encodeCyclePath(viewedPath))?.course?.lens_criterion) || null;
 
   const divergenceBoundary = useMemo(() => {
     if (divergentRound == null) return null;
@@ -584,12 +587,14 @@ export function CandidatesCard() {
           </div>
         </div>
         {maskOpen && !viewedCandidateId && (
-          <ScoringMaskEditor
-            rows={terms.rows}
-            inActive={terms.inActive}
+          <Criterion
+            className="fitness-mask"
+            startRung={1}
             mask={mask}
             onMask={(next) => setScoringMask({ mask: next })}
-            seeded={terms.seeded}
+            anchors={served.anchors}
+            formula={lensCriterion}
+            note="Read this branch under a criterion it was not scored on. Every cell the run recorded is re-graded and folded, as a run under it would — the elections are re-decided, never re-run."
             // No samples field: the chip strip owns that axis.
             summary={<FitnessRankSummary views={views} criterion={activeLens != null} />}
           />
@@ -599,7 +604,7 @@ export function CandidatesCard() {
             campaignId={campaignId}
             cycleId={cycleId}
             isLive={isLive}
-            criterion={criterionOf(mask)}
+            criterion={lensCriterion}
             divergentRound={divergentRound}
             nextRound={history.length}
           />

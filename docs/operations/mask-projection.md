@@ -44,13 +44,13 @@ Three verdicts ship, and each answers a different "what if".
 
 | Ask | How | Names an alternative? |
 |---|---|---|
-| **A different scoring formula** | `?lens=score:<formula>` on `GET /campaigns/{c}/cycles/{cy}/tree`, the formula a `per_cell` composite — each node also gets a `lens_value` | Yes — the candidate that formula ranks first |
+| **A different scoring formula** | `?lens=score:<formula>` on `GET /campaigns/{c}/cycles/{cy}/tree`, the formula a `per_cell` composite — each node also gets a `lens_value`. `?lens=dials:<term=weight,…>` says the same thing as weights: the server realizes them on the campaign's own anchors (the origin's levels, under whatever the active criterion already pins) and serves the formula it read under as the course's `lens_criterion` | Yes — the candidate that formula ranks first |
 | **A PoBB gate switched off** | `?lens=abort:<variant>`, variant = `<gate>_off` for any `EliminationGate` (`epsilon` \| `lock_in` \| `collapsed`), or `all_off` — the table is DERIVED from that enum, so a new gate is switchable without editing this row | No — the continuation was never measured |
 | **A changed engine or scorer** | `python -m promptpotter ab [--campaign <id>]` — replays one whole campaign, the active one by default | Where a `round_winner` decision flips, yes |
 
 **A lens is scored the way the run is.** `score:F` is the cycle's own scoring block with
 `per_cell` set to `F` — `mask/load.py::lens_overrides`, the `ConfigOverrides` a fork applying it
-carries — compiled to that cycle's `CellScorer`, run over each arm's rows in the round document by
+carries; a `dials:` lens becomes its `F` first, so the fork carries `lens_criterion` — compiled to that cycle's `CellScorer`, run over each arm's rows in the round document by
 `rescore_results` and folded by `fold_cells`. So a `lens_value` is the composite a fresh run under
 `F` reports for that arm, whatever `F`'s shape: `F` over a round's means is a different number the
 moment `F` is nonlinear, and it ranks arms differently. The round's evaluator map is a reading the

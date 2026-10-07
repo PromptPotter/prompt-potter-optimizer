@@ -687,6 +687,7 @@ export interface LiveDashboardState {
   bench_lift_per_incurred_usd: number | null;
   composite_fitness_formula: string | null;
   composite_fitness_weights: Record<string, number> | null;
+  composite_fitness_anchors: Record<string, number> | null;
   display_metric: 'accuracy' | 'composite' | 'ability';
   stamps_theta: boolean;
   degraded_count: number;
@@ -1771,6 +1772,11 @@ export interface LineageNode {
    * number a fresh run under it reports. Null without a lens, or where no row
    * carries a verdict under it. */
   lens_value: number | null;
+  /** On a course: the `per_cell` formula its record was read under for the
+   * request's lens — a `dials:` lens realized against this campaign's
+   * anchors, a `score:` one as given. What a fork applying the lens carries
+   * as `scoring.per_cell`. Null without one. */
+  lens_criterion: string | null;
   /** 1-based position by `composite_fitness` descending among THIS node's siblings
    * — the bars one chart draws. Null where the value is. An ordering is a
    * score, so it is served rather than sorted client-side; the rank-shift
@@ -2532,27 +2538,29 @@ export interface CellTermMeta {
   name: string;
   direction: "high" | "low";
   description: string;
+  dial: "anchored" | "unit" | null;
+  primary: boolean;
 }
 
 // What a per_cell formula can name, mirrored from application/scoring/evaluators.py.
 export const CELL_TERM_META: CellTermMeta[] = [
-  { name: 'fitness', direction: 'high', description: "The cell's correctness under the per-sample formula." },
-  { name: 'ground_truth_rank', direction: 'low', description: 'Where the truth landed in the ranking; 1 is the top.' },
-  { name: 'latency', direction: 'low', description: 'Seconds the cell took when measured; a replay keeps them.' },
-  { name: 'unworked', direction: 'low', description: 'Seconds the cell sat blocked (suspend, rate-limit queue).' },
-  { name: 'lift', direction: 'high', description: "L4: the inner campaign's mean lift over its own origin." },
-  { name: 'origin', direction: 'high', description: "L4: the inner campaign's origin level." },
-  { name: 'final_lift', direction: 'high', description: 'L4: the lift the inner campaign ended on.' },
-  { name: 'peak_lift', direction: 'high', description: 'L4: the best lift the inner campaign reached.' },
-  { name: 'rounds', direction: 'low', description: 'L4: rounds the inner campaign ran.' },
-  { name: 'round_budget', direction: 'high', description: 'L4: rounds the inner campaign was allowed.' },
-  { name: 'cost', direction: 'low', description: 'USD the cell cost.' },
-  { name: 'tokens', direction: 'low', description: 'Input plus output tokens the cell spent.' },
-  { name: 'target_prompt_chars', direction: 'low', description: "Characters of the candidate's prompt template." },
-  { name: 'errored', direction: 'low', description: '1 where the cell errored, else 0.' },
-  { name: 'degraded', direction: 'low', description: '1 where a pipeline node did not finish cleanly, else 0.' },
-  { name: 'cached', direction: 'high', description: '1 where the cell was replayed from the archive, else 0.' },
-  { name: 'retrieval_shortfall', direction: 'high', description: 'Per-sample min(observed/target, 1.0) across nodes with max_*/num_* limits on list-valued outputs. 1.0 = target met or exceeded.' },
+  { name: 'fitness', direction: 'high', description: "The cell's correctness under the per-sample formula.", dial: null, primary: true },
+  { name: 'ground_truth_rank', direction: 'low', description: 'Where the truth landed in the ranking; 1 is the top.', dial: null, primary: false },
+  { name: 'latency', direction: 'low', description: 'Seconds the cell took when measured; a replay keeps them.', dial: "anchored", primary: true },
+  { name: 'unworked', direction: 'low', description: 'Seconds the cell sat blocked (suspend, rate-limit queue).', dial: "anchored", primary: false },
+  { name: 'lift', direction: 'high', description: "L4: the inner campaign's mean lift over its own origin.", dial: null, primary: false },
+  { name: 'origin', direction: 'high', description: "L4: the inner campaign's origin level.", dial: null, primary: false },
+  { name: 'final_lift', direction: 'high', description: 'L4: the lift the inner campaign ended on.', dial: null, primary: false },
+  { name: 'peak_lift', direction: 'high', description: 'L4: the best lift the inner campaign reached.', dial: null, primary: false },
+  { name: 'rounds', direction: 'low', description: 'L4: rounds the inner campaign ran.', dial: "anchored", primary: false },
+  { name: 'round_budget', direction: 'high', description: 'L4: rounds the inner campaign was allowed.', dial: null, primary: false },
+  { name: 'cost', direction: 'low', description: 'USD the cell cost.', dial: "anchored", primary: true },
+  { name: 'tokens', direction: 'low', description: 'Input plus output tokens the cell spent.', dial: "anchored", primary: true },
+  { name: 'target_prompt_chars', direction: 'low', description: "Characters of the candidate's prompt template.", dial: "anchored", primary: true },
+  { name: 'errored', direction: 'low', description: '1 where the cell errored, else 0.', dial: "unit", primary: false },
+  { name: 'degraded', direction: 'low', description: '1 where a pipeline node did not finish cleanly, else 0.', dial: "unit", primary: false },
+  { name: 'cached', direction: 'high', description: '1 where the cell was replayed from the archive, else 0.', dial: "unit", primary: true },
+  { name: 'retrieval_shortfall', direction: 'high', description: 'Per-sample min(observed/target, 1.0) across nodes with max_*/num_* limits on list-valued outputs. 1.0 = target met or exceeded.', dial: null, primary: false },
 ];
 
 // Seconds of silence after which a cycle's producer is treated as vanished. Mirror of

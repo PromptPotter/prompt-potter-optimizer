@@ -2528,7 +2528,7 @@ def _draft(overlay: dict[str, Any]) -> Any:
         n_samples=1,
         sample_preview=(),
         connector=DEFAULT_CONNECTOR,
-        scoring_composite="label_match",
+        scoring_matcher="label_match",
         raw_task_description="",
         pipeline_overlay=overlay,
         created_at=now,

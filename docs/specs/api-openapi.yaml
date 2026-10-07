@@ -1718,8 +1718,10 @@ paths:
             every candidate's rows are re-graded under the campaign's per-sample formula and it,
             then folded — the number a fresh run under it reports — into `lens_value`, with a
             `divergence` on the spine node where that criterion would have elected someone
-            else. Reads every round document of each campaign the tree spans and grades each
-            row once per request. `abort:<variant>`,
+            else. `dials:<term=weight,…>` = the same, said as weights: realized against each
+            campaign's own anchors, and the formula it was read under is served on the course
+            as `lens_criterion`. Reads every round document of each campaign the tree spans and
+            grades each row once per request. `abort:<variant>`,
             variant ∈ {`epsilon_off`, `lock_in_off`, `all_off`} = switch off a PoBB abort
             contributor. Absent → the tree is the raw read. Unknown value → 400.
           schema: { type: string }
@@ -2180,7 +2182,7 @@ paths:
           description: |
             Draft created. Body is a `DraftCampaign` with `sample_preview`
             (first 10 rows), `n_samples`, smart-defaulted `connector` /
-            `scoring_composite` / `max_rounds`, and a server-minted `draft_id`.
+            `scoring_matcher` / `max_rounds`, and a server-minted `draft_id`.
           content:
             application/json:
               schema:
@@ -4489,7 +4491,9 @@ components:
         - sample_preview
         - n_samples
         - connector
-        - scoring_composite
+        - scoring_matcher
+        - scoring_matchers
+        - scoring_dials
         - optimization_overrides
         - raw_task_description
         - pipeline_overlay
@@ -4549,14 +4553,27 @@ components:
           description: |
             Smart-default `termnorm` (only registered connector today, per
             root CLAUDE.md). Operator-editable via panel or chat.
-        scoring_composite:
+        scoring_matcher:
           type: string
           minLength: 1
           maxLength: 64
           default: label_match
           description: |
-            Smart-default `label_match` (only universally-applicable scorer
-            for `(query, ground_truth)`). Operator-editable.
+            Which matcher decides a cell's correctness. Smart-default
+            `label_match` (the only universally-applicable one for
+            `(query, ground_truth)`). One of `scoring_matchers`.
+        scoring_matchers:
+          type: array
+          items:
+            type: string
+          description: The matchers a check-in may pick between.
+        scoring_dials:
+          type: string
+          description: |
+            What correctness is charged for, as `term=weight` dials joined by
+            commas (`tokens=0.08,latency=0.1`), each weight in 0..1. Empty
+            scores correctness alone. Anchored on the origin's own measured
+            cells once it is scored, and frozen into `scoring.per_cell`.
         optimization_overrides:
           allOf:
             - $ref: '#/components/schemas/OptimizationOverrides'
@@ -5020,10 +5037,14 @@ components:
               type: string
               minLength: 1
               maxLength: 64
-            scoring_composite:
+            scoring_matcher:
               type: string
               minLength: 1
               maxLength: 64
+            scoring_dials:
+              type: string
+              maxLength: 512
+              description: The empty string clears the dials.
             optimization_overrides:
               allOf:
                 - $ref: '#/components/schemas/OptimizationOverrides'

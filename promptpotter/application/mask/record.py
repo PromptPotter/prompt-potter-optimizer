@@ -93,6 +93,9 @@ class MaskRecord(StrictModel):
     model_config = ConfigDict(frozen=True)
 
     cycles: list[MaskCycle] = Field(default_factory=list)
+    # The `per_cell` formula every cycle here was read under, where the read asked for one — a
+    # `dials:` lens realized, a `score:` one as given. What a fork applying the lens carries.
+    criterion: str | None = None
 
 
 class SpineCycle(StrictModel):

@@ -6,6 +6,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import math
+import statistics
 from collections.abc import Callable, Mapping
 from types import SimpleNamespace
 from typing import Any, Literal, NamedTuple, cast
@@ -16,8 +17,11 @@ from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.scoring import (
     DEFAULT_SCORER_ID,
     CellScorer,
+    Dial,
+    DialKind,
     QueryMeasurement,
     ScoringSpec,
+    anchored_criterion,
     recorded_cost_s,
 )
 from promptpotter.domain.spend import TokenAccount
@@ -281,27 +285,46 @@ class CellTerm(NamedTuple):
 
     direction: Literal["high", "low"]
     description: str
+    # How a DIAL weights it (`domain/scoring.py::anchored_criterion`): `anchored` is an unbounded
+    # cost read against the origin's own level, `unit` a 0/1 flag. `None` reaches a criterion
+    # through a typed expression only.
+    dial: DialKind | None = None
+    # Whether the scoring form shows its dial before the operator asks for more.
+    primary: bool = False
 
 
 CELL_TERMS: dict[str, CellTerm] = {
-    "fitness": CellTerm("high", "The cell's correctness under the per-sample formula."),
+    "fitness": CellTerm(
+        "high", "The cell's correctness under the per-sample formula.", primary=True
+    ),
     "ground_truth_rank": CellTerm("low", "Where the truth landed in the ranking; 1 is the top."),
-    "latency": CellTerm("low", "Seconds the cell took when measured; a replay keeps them."),
-    "unworked": CellTerm("low", "Seconds the cell sat blocked (suspend, rate-limit queue)."),
+    "latency": CellTerm(
+        "low", "Seconds the cell took when measured; a replay keeps them.", "anchored", True
+    ),
+    "unworked": CellTerm(
+        "low", "Seconds the cell sat blocked (suspend, rate-limit queue).", "anchored"
+    ),
     "lift": CellTerm("high", "L4: the inner campaign's mean lift over its own origin."),
     "origin": CellTerm("high", "L4: the inner campaign's origin level."),
     "final_lift": CellTerm("high", "L4: the lift the inner campaign ended on."),
     "peak_lift": CellTerm("high", "L4: the best lift the inner campaign reached."),
-    "rounds": CellTerm("low", "L4: rounds the inner campaign ran."),
+    "rounds": CellTerm("low", "L4: rounds the inner campaign ran.", "anchored"),
     "round_budget": CellTerm("high", "L4: rounds the inner campaign was allowed."),
-    "cost": CellTerm("low", "USD the cell cost."),
-    "tokens": CellTerm("low", "Input plus output tokens the cell spent."),
-    "target_prompt_chars": CellTerm("low", "Characters of the candidate's prompt template."),
-    "errored": CellTerm("low", "1 where the cell errored, else 0."),
-    "degraded": CellTerm("low", "1 where a pipeline node did not finish cleanly, else 0."),
-    "cached": CellTerm("high", "1 where the cell was replayed from the archive, else 0."),
+    "cost": CellTerm("low", "USD the cell cost.", "anchored", True),
+    "tokens": CellTerm("low", "Input plus output tokens the cell spent.", "anchored", True),
+    "target_prompt_chars": CellTerm(
+        "low", "Characters of the candidate's prompt template.", "anchored", True
+    ),
+    "errored": CellTerm("low", "1 where the cell errored, else 0.", "unit"),
+    "degraded": CellTerm("low", "1 where a pipeline node did not finish cleanly, else 0.", "unit"),
+    "cached": CellTerm(
+        "high", "1 where the cell was replayed from the archive, else 0.", "unit", True
+    ),
 }
 assert set(CELL_TERMS) == {*_CHANNEL_READERS, *_ROW_HEALTH}, "a per-cell term went untaught"
+assert all(term.direction == "low" for term in CELL_TERMS.values() if term.dial == "anchored"), (
+    "an anchored dial reads a cost against its origin level, so it is lower-is-better"
+)
 
 
 def cell_channels_of(result: Mapping[str, Any]) -> dict[str, float]:
@@ -510,11 +533,93 @@ def auto_scorer_id(
     return f"auto_{h}"
 
 
+# A scoring block's DECLARED criterion: how much each term weighs, with no anchor yet. It becomes
+# ``per_cell`` once the origin is measured (`application/origin.py::lock_criterion`), and the same
+# text is a ``dials:`` lens's payload.
+DIALS_KEY = "dials"
+# A lens spelled as dials rather than as a formula: ``dials:tokens=0.08``. The reader realizes it
+# against the campaign's own anchors, so no caller has to know the criterion's shape.
+LENS_DIALS_PREFIX = f"{DIALS_KEY}:"
+
+
+def _refuse_dials(text: str, why: str) -> PayloadInvalidError:
+    dialable = sorted(name for name, term in CELL_TERMS.items() if term.dial is not None)
+    return PayloadInvalidError(
+        f"the dials {text!r} cannot be read: {why}. Dials are spelled 'term=weight' joined by "
+        f"commas, each weight between 0 and 1, over {dialable}.",
+        code="pipeline_config_invalid",
+        details={"dials": text},
+    )
+
+
+def parse_dials(text: str) -> dict[str, float]:
+    """``tokens=0.08,latency=0.1`` as ``{term: weight}``. Refuses a term no dial can weigh —
+    reading it as weight 0 would score a criterion the operator did not declare."""
+    weights: dict[str, float] = {}
+    for part in filter(None, (p.strip() for p in text.split(","))):
+        name, sep, raw = (piece.strip() for piece in part.partition("="))
+        term = CELL_TERMS.get(name)
+        if not sep or term is None or term.dial is None:
+            raise _refuse_dials(text, f"{name!r} is not a term a dial weighs")
+        if name in weights:
+            raise _refuse_dials(text, f"{name!r} is weighed twice")
+        try:
+            weight = float(raw)
+        except ValueError:
+            raise _refuse_dials(text, f"{raw!r} is not a number") from None
+        if not 0.0 <= weight <= 1.0:
+            raise _refuse_dials(text, f"the weight {weight} on {name!r} is outside 0..1")
+        weights[name] = weight
+    return weights
+
+
+def spell_dials(weights: Mapping[str, float]) -> str:
+    """*weights* in the one spelling :func:`parse_dials` reads back — vocabulary order, a dial at
+    zero dropped — so two declarations of one criterion are one string."""
+    return ",".join(f"{name}={weights[name]}" for name in CELL_TERMS if weights.get(name))
+
+
+def origin_anchors(rows: list[dict[str, Any]]) -> dict[str, float]:
+    """The level each anchored term is read against: its MEDIAN over the origin's cells that carry
+    it, so the origin's typical cell sits at the anchor and one runaway cell cannot lift it out of
+    reach of every other. A term no cell carries, or that the origin measured at zero, gets none."""
+    carried: dict[str, list[float]] = {}
+    for row in rows:
+        if is_error_result(row):
+            continue
+        for name, value in cell_channels_of(row).items():
+            if CELL_TERMS[name].dial == "anchored":
+                carried.setdefault(name, []).append(value)
+    levels = {name: statistics.median(values) for name, values in carried.items()}
+    return {name: round(level, 6) for name, level in levels.items() if level > 0.0}
+
+
+def realize_dials(weights: Mapping[str, float], anchors: Mapping[str, float]) -> str:
+    """The ``per_cell`` formula *weights* spell once each anchored term has its *anchors* level."""
+    dials: dict[str, Dial] = {}
+    for name, weight in weights.items():
+        if not weight:
+            continue
+        term = CELL_TERMS[name]
+        if term.dial != "anchored":
+            dials[name] = Dial(weight, rewards=term.direction == "high")
+            continue
+        if name not in anchors:
+            raise PayloadInvalidError(
+                f"the dial on {name!r} has nothing to be read against: the origin's cells "
+                f"measured no {name} above zero. Set it to 0, or score an origin that carries it.",
+                code="pipeline_config_invalid",
+                details={"term": name},
+            )
+        dials[name] = Dial(weight, anchors[name])
+    return anchored_criterion(dials)
+
+
 def split_scoring_block(
     block: str | dict[str, str] | None, *, judge_instrument: str | None
 ) -> ScoringSpec:
     if isinstance(block, dict):
-        unknown = set(block) - {"per_sample", "per_cell"}
+        unknown = set(block) - {"per_sample", "per_cell", DIALS_KEY}
         if unknown:
             raise ValueError(
                 f"campaign scoring block names {sorted(unknown)}. It carries 'per_sample' (the "
@@ -523,7 +628,14 @@ def split_scoring_block(
                 "onto one δ ruler. 'per_round' was the composite at ROUND scope and is gone — a "
                 "latency or reliability term meaned over a panel cannot say which prompt provoked it."
             )
+        if DIALS_KEY in block and "per_cell" in block:
+            raise ValueError(
+                f"campaign scoring block carries both '{DIALS_KEY}' and 'per_cell'. Dials DECLARE "
+                "the composite and the origin's measurement turns them into 'per_cell'; a block "
+                "naming both says two criteria."
+            )
         per_sample = block.get("per_sample")
+        # Dials not yet locked grade on correctness alone, which is all an unmeasured origin has.
         per_cell = block.get("per_cell")
         scorer_id = auto_scorer_id(per_sample, per_cell, judge_instrument=judge_instrument)
         return ScoringSpec(per_sample, per_cell, scorer_id)
@@ -537,6 +649,8 @@ def split_scoring_block(
 __all__ = [
     "CELL_CHANNELS",
     "CELL_TERMS",
+    "DIALS_KEY",
+    "LENS_DIALS_PREFIX",
     "SAFE_BUILTINS",
     "CellTerm",
     "CompiledExpression",
@@ -549,6 +663,10 @@ __all__ = [
     "compile_expression",
     "compile_scorer",
     "objective_namespace",
+    "origin_anchors",
+    "parse_dials",
+    "realize_dials",
+    "spell_dials",
     "split_scoring_block",
     "validate_ast",
 ]

@@ -5,6 +5,7 @@ from typing import Literal, NamedTuple
 from pydantic import Field
 
 from promptpotter.application.mask.record import parse_sample_ids
+from promptpotter.application.scoring.formula import LENS_DIALS_PREFIX
 from promptpotter.domain.cycle_paths import (
     CycleHop,
     CyclePath,
@@ -27,7 +28,8 @@ _OPERATOR_SOURCES = frozenset({"fork_seed", "campaign_origin"})
 # here without a resolver fails at the door rather than resolving to the wrong depth.
 _SUBJECT_ARITY: dict[SubjectKind, int] = {"campaign": 1, "course": 2, "candidate": 3}
 
-# The one lens a comparable LEVEL can be read under. `abort:` is deliberately absent: switching a
+# The one lens a comparable LEVEL can be read under, in its two spellings — a formula, or the
+# dials that realize into one (`LENS_DIALS_PREFIX`). `abort:` is deliberately absent: switching a
 # PoBB gate off changes which candidates ran to term, not what any of them scored, so it decorates
 # the lineage tree and has no per-cell value to plot here.
 LENS_SCORE_PREFIX = "score:"
@@ -74,7 +76,7 @@ class SubjectSpec(NamedTuple):
 
 
 def parse_subject(spec: str) -> SubjectSpec:
-    """``kind:<campaign>[/<cycle>[/<candidate>]][;in=<c::y~…>][;lens=score:…][;samples=1,2,3]``.
+    """``kind:<campaign>[/<cycle>[/<candidate>]][;in=<c::y~…>][;lens=score:…|dials:…][;samples=1,2,3]``.
 
     ``in=`` names the sandbox chain the address lives inside — the same ``campaign::cycle`` codec
     the read side's ``?descend=`` uses, because it is the same question. Without it every L4 inner
@@ -106,11 +108,11 @@ def parse_subject(spec: str) -> SubjectSpec:
         if name == "in":
             inside = decode_cycle_path(value)
         elif name == "lens":
-            if not value.startswith(LENS_SCORE_PREFIX):
+            if not value.startswith((LENS_SCORE_PREFIX, LENS_DIALS_PREFIX)):
                 raise ValueError(
                     f"Unknown lens {value!r} on {spec!r} (expected "
-                    f"'{LENS_SCORE_PREFIX}<formula>'; an abort lens is a lineage-tree question, "
-                    "not a comparable level)."
+                    f"'{LENS_SCORE_PREFIX}<formula>' or '{LENS_DIALS_PREFIX}<term=weight,…>'; an "
+                    "abort lens is a lineage-tree question, not a comparable level)."
                 )
             lens = value
         elif name == "samples":

@@ -378,6 +378,8 @@ async def _prepare_run(
         listener=cb,
     )
     observers.readout.set_origin(origin.report.accuracy)
+    if origin.locked_scoring is not None:
+        campaign_config = campaign_config.model_copy(update={"scoring": origin.locked_scoring})
 
     return _PreparedRun(
         origin=origin,

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from promptpotter.application.campaign_config import apply_config_overrides
+from promptpotter.application.campaign_config import CampaignConfig, apply_config_overrides
 from promptpotter.application.datasets.authored import config_cell_scorer
 from promptpotter.application.mask.record import (
     MaskCandidate,
@@ -21,7 +21,14 @@ from promptpotter.application.mask.record import (
     SpineCycle,
 )
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
-from promptpotter.application.scoring.formula import rescore_results
+from promptpotter.application.scoring.formula import (
+    LENS_DIALS_PREFIX,
+    origin_anchors,
+    parse_dials,
+    realize_dials,
+    rescore_results,
+    split_scoring_block,
+)
 from promptpotter.application.scoring.metrics import fold_cells
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import (
@@ -32,7 +39,7 @@ from promptpotter.domain.results import (
     merge_known_outcomes,
 )
 from promptpotter.domain.run_records import ConfigOverrides
-from promptpotter.domain.scoring import CellScorer, QueryMeasurement
+from promptpotter.domain.scoring import CellScorer, QueryMeasurement, anchored_criterion_dials
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_decisions,
     scan_ledger_elections,
@@ -41,6 +48,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.judges import judge_instrument
 from promptpotter.shared.errors import NotFoundError
 
 
@@ -48,6 +56,16 @@ def lens_overrides(formula: str | None) -> ConfigOverrides:
     """What a ``score:<formula>`` lens IS: the fork override applying it. ``None`` reads each cycle
     under its own scorer — a sample-set mask alone, or an ``abort:`` lens."""
     return ConfigOverrides(scoring={"per_cell": formula}) if formula else ConfigOverrides()
+
+
+def _dial_anchors(config: CampaignConfig, origin_rows: list[dict[str, Any]]) -> dict[str, float]:
+    """What a ``dials:`` lens is anchored on: the origin's own measured levels, under the anchors
+    the campaign's criterion already carries — so a lens left at the active weights reads the
+    record back exactly."""
+    spec = split_scoring_block(config.scoring, judge_instrument=judge_instrument(config.judges))
+    active = anchored_criterion_dials(spec.per_cell) if spec.per_cell else None
+    locked = {name: d.anchor for name, d in (active or {}).items() if d.anchor is not None}
+    return {**origin_anchors(origin_rows), **locked}
 
 
 def read_rows(rows: list[dict[str, Any]], scorer: CellScorer) -> MaskReading | None:
@@ -194,12 +212,12 @@ def load_mask_record(
     lens: str | None,
     with_replay: bool = False,
 ) -> MaskRecord:
-    """Every cycle, each arm graded under *lens* (a ``per_cell`` formula) or its cycle's own scorer.
+    """Every cycle, each arm graded under *lens* — a ``per_cell`` formula, or ``dials:`` weights
+    realized against this campaign's origin — or its cycle's own scorer.
     *with_replay* reads through the TYPED loader, which raises on a document the models reject."""
     campaign = stores.campaigns.load_campaign(campaign_id)
     if campaign is None:
         raise NotFoundError(f"Campaign '{campaign_id}' not found")
-    overrides = lens_overrides(lens)
     entries = [e for e in stores.campaigns.enumerate_cycles() if e["campaign_id"] == campaign_id]
 
     # Pass 1: each cycle's round files + tree edges + the crowns its LEDGER recorded. The rows
@@ -245,6 +263,21 @@ def load_mask_record(
 
     for cid in files:
         _order(cid)
+
+    if lens and lens.startswith(LENS_DIALS_PREFIX):
+        # The campaign's ONE origin: round 0 of the cycle nothing was forked from.
+        root = next((cid for cid in order if edges[cid][0] not in files), None)
+        origin_file = files[root].get(0, {}) if root is not None else {}
+        origin_rows = [
+            row
+            for rows in (origin_file.get("all_candidate_results") or {}).values()
+            for row in rows
+        ]
+        lens = realize_dials(
+            parse_dials(lens.removeprefix(LENS_DIALS_PREFIX)),
+            _dial_anchors(resolve_campaign_config(stores, campaign, None), origin_rows),
+        )
+    overrides = lens_overrides(lens)
 
     # Pass 2: thread the carried-forward winner's ROWS. A round's parent is the winner at the end
     # of the prior round; when it holds (no candidate winner) it carries unchanged. Rows rather
@@ -305,7 +338,7 @@ def load_mask_record(
                 cycle_id=cid, parent_cycle_id=parent, fork_from_round=from_round, rounds=rounds
             )
         )
-    return MaskRecord(cycles=cycles)
+    return MaskRecord(cycles=cycles, criterion=lens)
 
 
 __all__ = [

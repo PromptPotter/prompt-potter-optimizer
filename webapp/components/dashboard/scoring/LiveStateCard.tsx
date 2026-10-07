@@ -4,6 +4,8 @@ import { headlineStats } from "@/lib/derivations";
 import { fmtNum, fmtClock } from "@/lib/format";
 import { cx } from "@/lib/cx";
 import { CardFrame } from "@/components/ui";
+import { Criterion } from "@/components/shell/scoring/Criterion";
+import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { FreqChart } from "@/components/dashboard/scoring/FreqChart";
 import { TrendChart } from "@/components/dashboard/scoring/TrendChart";
 import { CostStrip } from "@/components/dashboard/scoring/CostStrip";
@@ -13,6 +15,8 @@ const SHOWN_ELSEWHERE = new Set([
   "cycle_id", "wallclock_serialized_at",
   "best", "total_queries_scored", "last_query_elapsed_s",
   "composite_fitness_formula",
+  "composite_fitness_weights",
+  "composite_fitness_anchors",
   "current_round",
   "current_query_payload",
   "state", "round", "candidate",
@@ -36,7 +40,7 @@ const FORMATTERS: Record<string, (v: unknown) => string> = {
 
 export function LiveStateCard() {
   const { dash } = useDashboard();
-  const formula = dash?.composite_fitness_formula || "—";
+  const served = useServedCriterion();
 
   const items: [string, unknown][] = [];
   const seen = new Set(SHOWN_ELSEWHERE);
@@ -80,7 +84,7 @@ export function LiveStateCard() {
       title="Live state"
       actions={<span className="lsc-source">all dashboard.json fields</span>}
     >
-      <div className="formula-row" title="composite_fitness_formula">{formula}</div>
+      <Criterion mask={served.mask} anchors={served.anchors} formula={served.formula} />
       <div className="kv-grid">
         {items.map(([k, v]) => {
           const fmt = FORMATTERS[k] ?? ((x: unknown) => (x == null ? "—" : String(x)));

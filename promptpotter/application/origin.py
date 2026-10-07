@@ -32,7 +32,15 @@ from promptpotter.application.scoring.candidate_report import (
     is_transient_scoring_abort,
     walk_outcome,
 )
-from promptpotter.application.scoring.formula import split_scoring_block
+from promptpotter.application.scoring.formula import (
+    DIALS_KEY,
+    origin_anchors,
+    parse_dials,
+    realize_dials,
+    rescore_results,
+    split_scoring_block,
+)
+from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.cycle_paths import CycleHop
@@ -154,6 +162,33 @@ class CampaignOrigin(NamedTuple):
     report: ScoredCandidate
     origin_results: list[Any] | None
     framing: TaskDecomposition
+    # The scoring block this measurement LOCKED, where the campaign declared dials: the run
+    # continues under it. ``None`` where there was nothing to lock.
+    locked_scoring: dict[str, str] | None = None
+
+
+def lock_criterion(
+    session: Session, campaign_config: CampaignConfig, origin_rows: list[dict[str, Any]]
+) -> dict[str, str] | None:
+    """Turn a scoring block's DECLARED dials into the ``per_cell`` formula they spell, anchored on
+    what the origin just measured, and freeze it into the campaign manifest.
+
+    Once, and it never moves: every later cycle of the campaign reads a plain ``per_cell`` off the
+    manifest, so a fork or a resume is graded on the same anchors as the rounds before it. ``None``
+    where the block declares no dials — a hand-written ``per_cell`` is already locked."""
+    block = campaign_config.scoring
+    if not isinstance(block, dict) or DIALS_KEY not in block:
+        return None
+    formula = realize_dials(parse_dials(block[DIALS_KEY]), origin_anchors(origin_rows))
+    locked = {k: v for k, v in block.items() if k != DIALS_KEY} | {"per_cell": formula}
+    campaign = session.store.campaigns.load_campaign(session.hop.campaign_id)
+    # A fork's seed can declare dials over a campaign already locked: those belong to that
+    # cycle's seed, and writing them here would re-grade every sibling.
+    if campaign is not None and campaign.config.get("scoring") == block:
+        session.store.campaigns.update_campaign(
+            campaign.campaign_id, {"config": {**campaign.config, "scoring": locked}}
+        )
+    return locked
 
 
 def try_inherit_fork_origin(
@@ -317,6 +352,12 @@ async def establish_campaign_origin(
     # and the skip that guess produced is indistinguishable downstream from a crash. An
     # unscoreable origin is caught LOUD by the round-0 origin gate, never hidden here.
     if not dataset:
+        if isinstance(campaign_config.scoring, dict) and DIALS_KEY in campaign_config.scoring:
+            raise PayloadInvalidError(
+                "the campaign declares scoring dials, and dials are anchored on the origin's "
+                "measured cells — this origin measures none. Declare 'per_cell' instead.",
+                code="pipeline_config_invalid",
+            )
         # The resolved origin still travels — dropping it hands back a blank
         # OptSearchPoint(instruction="").
         return CampaignOrigin(
@@ -422,6 +463,29 @@ async def establish_campaign_origin(
             logger.warning(
                 "Origin scoring hit a transient transport abort — re-scoring once fresh."
             )
+        locked_scoring = lock_criterion(
+            session, campaign_config, cast("list[dict[str, Any]]", scored.results)
+        )
+        if locked_scoring is not None:
+            # The rows were graded on correctness alone, the only criterion an unmeasured origin
+            # has. Re-grade them under the one they just anchored — nothing is re-measured.
+            spec = split_scoring_block(
+                locked_scoring, judge_instrument=judge_instrument(campaign_config.judges)
+            )
+            populate_session_scoring(
+                session,
+                obs=None,
+                scoring_formula=spec.per_sample,
+                scoring_cell_formula=spec.per_cell,
+                scorer_id=spec.scorer_id,
+                display_metric=campaign_config.display_metric,
+                judge_specs=campaign_config.judges,
+                source=RunSource.ORIGIN,
+            )
+            rescore_results(
+                cast("list[dict[str, Any]]", scored.results), session.scoring.require_scorer()
+            )
+            scored.scores.update(compute_composite_fitness(scored.results, pipeline_schema))
         # Candidate 0 of round 0, measured ONCE. This object is both what the ledger receives
         # and what round 0's row is built from — never re-derive either from these rows.
         report = build_score_report(
@@ -446,6 +510,7 @@ async def establish_campaign_origin(
         report=report,
         origin_results=scored.results,
         framing=framing,
+        locked_scoring=locked_scoring,
     )
 
 

@@ -19,6 +19,7 @@ from promptpotter.domain.dashboard_rows import (
 )
 from promptpotter.domain.phases import DashboardState, RunPhase, StopReason
 from promptpotter.domain.results import DisplayMetric, OverlapReading
+from promptpotter.domain.scoring import anchored_criterion_dials
 from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
@@ -33,6 +34,7 @@ __all__ = [
     "LoopWarning",
     "RacingBlock",
     "RunLimits",
+    "overlay_criterion_dials",
     "overlay_spend_metered",
     "warming_payload",
 ]
@@ -62,6 +64,22 @@ def overlay_spend_metered(body: dict[str, Any], meter: CeilingMeter) -> None:
     except ValidationError:
         return
     body["spend_metered"] = MeteredSpend.of(spend, meter).model_dump()
+
+
+def overlay_criterion_dials(body: dict[str, Any]) -> None:
+    """The served formula as its dials and their anchors, where it spells an anchored criterion.
+    Derived on the way out: both are pure functions of the string beside them, so a stored copy
+    is one more thing a finished cycle's file holds stale."""
+    formula = body.get("composite_fitness_formula")
+    dials = anchored_criterion_dials(formula) if isinstance(formula, str) else None
+    body["composite_fitness_weights"] = (
+        None if dials is None else {name: d.weight for name, d in dials.items()}
+    )
+    body["composite_fitness_anchors"] = (
+        None
+        if dials is None
+        else {name: d.anchor for name, d in dials.items() if d.anchor is not None}
+    )
 
 
 class CatchUpLogEntry(StrictModel):
@@ -256,11 +274,14 @@ class LiveDashboardState(StrictModel):
     # two polls.
     bench_lift_per_incurred_usd: float | None = None
     composite_fitness_formula: str | None = None
-    # The same formula as ``{evaluator: coefficient}``, where it IS a weighted sum — what the mask
-    # editor's per-evaluator weights seed from. ``None`` says the formula cannot carry them and the
-    # control disables rather than guessing, which is the whole point of serving it: a browser
+    # The same formula as ``{term: weight}``, where it IS an anchored criterion — what the scoring
+    # form's dials seed from. ``None`` says the formula cannot carry them and the form opens on
+    # its expression rather than guessing, which is the whole point of serving it: a browser
     # parsing coefficients out of the string substitutes a default for whatever its regex missed.
-    composite_fitness_weights: dict[str, float] | None = None
+    # WIRE-ONLY like ``run_phase``, set by ``overlay_criterion_dials``.
+    composite_fitness_weights: dict[str, float] | None = Field(default=None, exclude=True)
+    # The level each anchored dial in it is read against, by term. Wire-only beside it.
+    composite_fitness_anchors: dict[str, float] | None = Field(default=None, exclude=True)
     # DISPLAY config — the selector decides on its own objective; this seeds the webapp's
     # client-overridable metric toggle. Stamped at construction (``for_run``), so a fork carries its own.
     display_metric: DisplayMetric = "accuracy"

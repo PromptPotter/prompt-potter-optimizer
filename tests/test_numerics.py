@@ -291,6 +291,56 @@ def test_scorer_rejects_non_finite_instead_of_scoring_it_perfect() -> None:
         compile_scorer("after_N_rounds_delta", verifier_graded=False).fitness(result)
 
 
+def test_a_dial_reads_its_term_against_the_origin_and_never_sums_a_raw_unit() -> None:
+    """A dial on an unbounded term — tokens, seconds, dollars — has to be read against a level.
+    Summed raw, `0.9 * fitness + 0.1 * (1 - tokens)`, the term swamps correctness, the clamp floors
+    every candidate at 0.000 and the election falls to its tie-break. Silent: every bar renders.
+
+    Also pins the inverse the dashboard reads the dials back through: a criterion that does not
+    round-trip opens the form on weights the run was never scored under."""
+    from promptpotter.application.scoring.formula import origin_anchors, parse_dials, realize_dials
+    from promptpotter.domain.scoring import anchored_criterion_dials
+
+    def cell(said: str, tokens: int) -> dict[str, Any]:
+        return measurement(
+            0,
+            None,
+            query="q",
+            predicted=said,
+            ground_truth="a",
+            error=None,
+            pipeline_data={"step_tokens": {"solve": {"input": tokens, "output": 0}}},
+        )
+
+    anchors = origin_anchors([cell("a", 600), cell("b", 784)])
+    assert anchors["tokens"] == pytest.approx(692.0)
+
+    formula = realize_dials(parse_dials("tokens=0.08, latency=0"), anchors)
+    scorer = compile_scorer("label_match(predicted, ground_truth)", formula, verifier_graded=False)
+
+    def scored(said: str, tokens: int) -> float:
+        rows = rescore_results([cell(said, tokens)], scorer)
+        return compute_composite_fitness(rows, _single_node_schema())["composite_fitness"]
+
+    # At the origin's own length the dial charges nothing; ten times it costs the dial's share of
+    # nine tenths, and a hit is never floored. Shorter than the origin earns no bonus.
+    assert scored("a", 692) == pytest.approx(1.0)
+    assert scored("a", 6920) == pytest.approx(0.92 + 0.08 * 0.1)
+    assert scored("a", 100) == pytest.approx(1.0)
+
+    spelled = realize_dials(parse_dials("tokens=0.08,cached=0.1,errored=0.2"), anchors)
+    read_back = anchored_criterion_dials(spelled)
+    assert read_back is not None
+    assert {name: dial.weight for name, dial in read_back.items()} == {
+        "tokens": 0.08,
+        "cached": 0.1,
+        "errored": 0.2,
+    }
+    assert read_back["tokens"].anchor == pytest.approx(692.0)
+    # A flat sum is not this shape, so it is served as a formula and never as dials.
+    assert anchored_criterion_dials("0.9 * fitness + 0.1 * (1 - tokens)") is None
+
+
 def test_a_miss_is_charged_its_cost_and_a_solved_cell_scores_its_composite(monkeypatch) -> None:
     """A ``per_cell`` composite scales correctness by a cost factor, so on its own every miss
     scores 0.0 whatever it spent. A miss keeps ``MISS_COST_SHARE`` of what the same cell would
@@ -3817,6 +3867,13 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench_under_one_grader(
     stores = built_stores
     bank = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(12)]
     formula = "env_reward"
+    # A `dials:` lens is realized on the origin's own level — c0 ran 692 tokens a cell — so it IS
+    # the formula above: the same criterion served for the fork, and the same walk.
+    dialed = load_mask_record(stores, hop.campaign_id, lens="dials:tokens=0.08")
+    assert dialed.criterion == lens
+    walk = [(s.round, s.candidate_id, s.recorded_id) for s in scenario_spine(dialed.cycles[0])]
+    assert walk == [(0, "c0", "c0"), (1, "spiky", "steady")]
+
 
     def campaign(
         cid: str,

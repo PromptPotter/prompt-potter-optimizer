@@ -34,7 +34,10 @@ export interface DraftCampaignWire {
   sample_preview: Array<Record<string, string>>;
   n_samples: number;
   connector: string;
-  scoring_composite: string;
+  scoring_matcher: string;
+  scoring_matchers: string[];
+  // `term=weight` dials joined by commas; "" scores correctness alone.
+  scoring_dials: string;
   optimization_overrides: OptimizationOverridesWire;
   raw_task_description: string;
   pipeline_overlay: Record<string, unknown>;
@@ -80,7 +83,9 @@ export interface ReplaceDatasetResponse {
 export interface DraftPatch {
   slug?: string;
   connector?: string;
-  scoring_composite?: string;
+  scoring_matcher?: string;
+  // "" clears the dials.
+  scoring_dials?: string;
   raw_task_description?: string;
   pipeline_overlay?: Record<string, unknown>;
   pipeline_steps?: string[];

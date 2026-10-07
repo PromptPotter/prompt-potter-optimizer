@@ -7,6 +7,8 @@ import { cx } from "@/lib/cx";
 import { NumberField } from "@/components/ingest/NumberField";
 import { SlugField } from "@/components/ingest/SlugField";
 import { RunSummaryItem } from "@/components/chat/RunCard";
+import { Criterion } from "@/components/shell/scoring/Criterion";
+import { dialsOf, dialsText } from "@/lib/scoring-mask";
 import { ColumnMappingPicker } from "./ColumnMappingPicker";
 import { DatasetPreview } from "./DatasetPreview";
 import { ComposerTools } from "./ComposerTools";
@@ -377,6 +379,22 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
       <DatasetPreview draft={draft} />
 
       <ColumnMappingPicker draft={draft} onApply={flow.applyPatch} />
+
+      {/* A check-in's channel is the draft's dials alone, so the mask narrows before it is spelled. */}
+      <Criterion
+        startRung={1}
+        dialsOnly
+        mask={{ kind: "dials", weights: dialsOf(draft.scoring_dials) }}
+        onMask={(mask) => {
+          if (mask.kind === "dials") flow.applyPatch({ scoring_dials: dialsText(mask.weights) });
+        }}
+        matcher={{
+          value: draft.scoring_matcher,
+          options: draft.scoring_matchers,
+          onPick: (scoring_matcher) => flow.applyPatch({ scoring_matcher }),
+        }}
+        note="What this campaign optimizes for. Accuracy always counts; pull a dial up to also reward a faster, shorter or cheaper prompt. Each anchor is measured on the origin and locked there."
+      />
 
       <SlugField slug={draft.slug} onApply={(slug) => flow.applyPatch({ slug })} />
 

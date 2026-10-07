@@ -5,63 +5,55 @@
 import { useSyncExternalStore } from "react";
 import { CELL_TERM_META, type CellTermMeta } from "@/lib/api/types.generated";
 
-// Weight for a selected term the served decomposition carries no coefficient for.
-export const DEFAULT_MASK_WEIGHT = 0.1;
-
+// A dial at weight 0 is off, so the weights ARE the selection.
 export type ScoringMask =
-  | { kind: "weights"; selected: ReadonlySet<string>; weights: Readonly<Record<string, number>> }
+  | { kind: "dials"; weights: Readonly<Record<string, number>> }
   | { kind: "expression"; lens: string };
 
-// A function, not a shared constant: the arm carries a mutable Set.
-export function emptyMask(): ScoringMask {
-  return { kind: "weights", selected: new Set(), weights: {} };
+export const NO_DIALS: ScoringMask = { kind: "dials", weights: {} };
+
+// The terms a dial can sit on; `fitness` is the base every dial multiplies, never a dial itself.
+export const DIAL_TERMS: readonly CellTermMeta[] = CELL_TERM_META.filter((m) => m.dial !== null);
+
+// The `term=weight,…` spelling the scoring block, the draft and the `dials:` lens all share
+// (`compiler.py::parse_dials`). Served vocabulary order, so one set of dials is one string.
+export function dialsText(weights: Readonly<Record<string, number>>): string {
+  return DIAL_TERMS.flatMap((m) => {
+    const w = weights[m.name];
+    return w !== undefined && w > 0 ? [`${m.name}=${w}`] : [];
+  }).join(",");
 }
 
-// A menu highlight only, never a scoring read: slider coefficients are served
-// (`composite_fitness_weights`).
-export function identifiersInFormula(formula: string | undefined | null): Set<string> {
-  if (!formula) return new Set();
-  return new Set(formula.match(/[a-zA-Z_][a-zA-Z0-9_]*/g) || []);
-}
-
-// One tile per term a `per_cell` formula can name, plus any the realized formula names beyond
-// the served vocabulary (a judge's term) — so a seeded weight always has a tile to sit on.
-export function termRows(extra: Iterable<string> = []): CellTermMeta[] {
-  const known = new Set(CELL_TERM_META.map((m) => m.name));
-  const unknown = [...extra].filter((name) => !known.has(name));
-  return [
-    ...CELL_TERM_META,
-    ...unknown.map((name) => ({ name, direction: "high" as const, description: "" })),
-  ];
-}
-
-// A "low" term flips to `(1 - name)`, matching the server composite's shape so seeded weights
-// reproduce the realized criterion.
-function formulaFromWeights(mask: Extract<ScoringMask, { kind: "weights" }>): string | null {
-  const terms: string[] = [];
-  for (const sel of mask.selected) {
-    const w = mask.weights[sel] ?? DEFAULT_MASK_WEIGHT;
-    if (w === 0) continue;
-    const low = CELL_TERM_META.find((m) => m.name === sel)?.direction === "low";
-    terms.push(`${w} * ${low ? `(1 - ${sel})` : sel}`);
+// Reads back a string the SERVER canonicalized; a malformed pair is skipped, never guessed at.
+export function dialsOf(text: string): Record<string, number> {
+  const weights: Record<string, number> = {};
+  for (const pair of text.split(",")) {
+    const [name, raw] = pair.split("=").map((part) => part.trim());
+    const weight = Number(raw);
+    if (name && raw && Number.isFinite(weight)) weights[name] = weight;
   }
-  return terms.length > 0 ? terms.join(" + ") : null;
+  return weights;
+}
+
+// The criterion a cycle RUNS under, as the mask that says it: its served dials where the formula
+// is the anchored shape, the formula verbatim where it is not.
+export function servedMask(
+  formula: string | null | undefined,
+  weights: Readonly<Record<string, number>> | null | undefined,
+): ScoringMask {
+  if (weights) return { kind: "dials", weights };
+  return formula ? { kind: "expression", lens: SCORE + formula } : NO_DIALS;
 }
 
 const SCORE = "score:";
+const DIALS = "dials:";
 
+// The server realizes a `dials:` lens against the campaign's own anchors; nothing here builds a formula.
 export function lensOf(mask: ScoringMask | null): string | null {
   if (mask == null) return null;
   if (mask.kind === "expression") return mask.lens.trim() || null;
-  const formula = formulaFromWeights(mask);
-  return formula ? SCORE + formula : null;
-}
-
-// The bare `per_cell` formula a `score:` lens names — what a fork applying it carries as
-// `scoring.per_cell`; `null` for an `abort:` lens.
-export function criterionOf(mask: ScoringMask | null): string | null {
-  const lens = lensOf(mask);
-  return lens?.startsWith(SCORE) ? lens.slice(SCORE.length) : null;
+  const text = dialsText(mask.weights);
+  return text ? DIALS + text : null;
 }
 
 // Module state, not a context: the candidates card and `lib/lineage.tsx` share no ancestor.
@@ -74,7 +66,7 @@ interface MaskState {
   seededForCycle: string | null;
 }
 
-let state: MaskState = { open: false, mask: emptyMask(), seededForCycle: null };
+let state: MaskState = { open: false, mask: NO_DIALS, seededForCycle: null };
 const listeners = new Set<() => void>();
 
 export function setScoringMask(patch: Partial<MaskState>): void {

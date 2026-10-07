@@ -10,7 +10,10 @@ from typing import Any, cast, get_args
 
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.projection_envelope import ProjectionEnvelope, ProjectionKind
-from promptpotter.infrastructure.projections.live_dashboard.state import warming_payload
+from promptpotter.infrastructure.projections.live_dashboard.state import (
+    overlay_criterion_dials,
+    warming_payload,
+)
 from promptpotter.infrastructure.runtime_flags import derive_run_phase, overlay_armed_controls
 from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.layout import CycleLayout
@@ -97,6 +100,7 @@ class CycleLedgerTail:
         if isinstance(body, dict):
             body["run_phase"] = run_phase
             overlay_armed_controls(body, self._layout.cycle_dir)
+            overlay_criterion_dials(body)
             return body
         warming = warming_payload(self._hop, run_phase=run_phase)
         if reason:

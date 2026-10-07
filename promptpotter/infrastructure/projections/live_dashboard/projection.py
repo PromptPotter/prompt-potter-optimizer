@@ -45,7 +45,6 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.scoring import (
     QueryMeasurement,
     recorded_elapsed_s,
-    weighted_sum_weights,
 )
 from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup
 from promptpotter.infrastructure.ledger import CycleEventLog, open_with_history
@@ -710,16 +709,13 @@ class LiveDashboardProjection(Projection):
             elif activity is not None:
                 self._step_node = str(node)
 
-        if event.phase == CampaignPhase.INIT and event.event == "enter" and view:
-            # Everything INIT declares is stamped at ENTER, because origin scoring runs before
-            # the exit fires: the mask editor needs the formula by then and the run strip its ceilings.
+        if event.phase == CampaignPhase.INIT and view:
+            # Stamped at ENTER, because origin scoring runs before the exit fires and the scoring
+            # form needs the formula by then — and again at EXIT, because dials are locked into
+            # a formula only once that origin is measured.
             formula = view.get("composite_fitness_formula")
             if formula is not None:
                 s.composite_fitness_formula = formula
-                # Derived here rather than carried beside the string through every view that
-                # declares one: it is a pure function of the formula, so a second channel for it
-                # is a second thing that can be stale.
-                s.composite_fitness_weights = weighted_sum_weights(formula)
             short = view.get("composite_fitness_formula_short")
             if short is not None:
                 self.short_formula_template = short

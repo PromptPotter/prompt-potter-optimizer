@@ -177,7 +177,7 @@ def origin_projection(draft: DraftCampaign) -> dict[str, Any]:
     projection: dict[str, Any] = {
         "slug": draft.slug,
         "connector": draft.connector,
-        "scoring_composite": draft.scoring_composite,
+        "scoring_matcher": draft.scoring_matcher,
         "pipeline_steps": list(draft.pipeline_steps),
         "pipeline_overlay": draft.pipeline_overlay,
         "optimization_overrides": draft.optimization_overrides,

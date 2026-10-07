@@ -15,6 +15,7 @@ from promptpotter.application.campaign_config import (
     OptimizationConfig,
     load_campaign_config,
 )
+from promptpotter.application.scoring.formula import DIALS_KEY, SCORING_FUNCTIONS
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
@@ -27,8 +28,8 @@ from promptpotter.shared.identity import TenantId, safe_name
 if TYPE_CHECKING:
     from promptpotter.connectors.protocol import Connector
 
-DEFAULT_SCORING_COMPOSITE = "label_match"
-"""Only universally-applicable scorer for ``(query, ground_truth)`` shape."""
+DEFAULT_SCORING_MATCHER = "label_match"
+"""Only universally-applicable matcher for ``(query, ground_truth)`` shape."""
 
 DEFAULT_MAX_ROUNDS = 5
 """Matches the M10 prompt-iteration framework default."""
@@ -80,7 +81,8 @@ class DraftCampaign:
     n_samples: int
     sample_preview: tuple[dict[str, str], ...]
     connector: str
-    scoring_composite: str
+    # Which matcher decides a cell's correctness — a name in ``SCORING_FUNCTIONS``.
+    scoring_matcher: str
     raw_task_description: str
     pipeline_overlay: dict[str, Any]
     created_at: str
@@ -134,6 +136,9 @@ class DraftCampaign:
     # ``prepare_checkin_run`` through the ``origin_override`` seed, so C0 resolves via the
     # ``seed`` branch and stamps the ``campaign_origin`` lineage.
     reused_origin_id: str = ""
+    # What correctness is charged for, as ``term=weight`` dials (``parse_dials``). Empty scores
+    # correctness alone. Anchored on the origin's own cells once it is measured.
+    scoring_dials: str = ""
 
     def to_wire(self) -> dict[str, Any]:
         """``tenant_id`` is omitted on purpose — clients learn it from the session cookie
@@ -148,7 +153,11 @@ class DraftCampaign:
             "sample_preview": [dict(row) for row in self.sample_preview],
             "n_samples": self.n_samples,
             "connector": self.connector,
-            "scoring_composite": self.scoring_composite,
+            "scoring_matcher": self.scoring_matcher,
+            # The matchers a check-in may pick between, served so the picker cannot offer one the
+            # compiler does not know.
+            "scoring_matchers": sorted(SCORING_FUNCTIONS),
+            "scoring_dials": self.scoring_dials,
             "optimization_overrides": dict(self.optimization_overrides),
             "raw_task_description": self.raw_task_description,
             "pipeline_overlay": dict(self.pipeline_overlay),
@@ -175,7 +184,8 @@ class DraftCampaign:
             "n_samples": self.n_samples,
             "sample_preview": [dict(row) for row in self.sample_preview],
             "connector": self.connector,
-            "scoring_composite": self.scoring_composite,
+            "scoring_matcher": self.scoring_matcher,
+            "scoring_dials": self.scoring_dials,
             "raw_task_description": self.raw_task_description,
             "pipeline_overlay": dict(self.pipeline_overlay),
             "created_at": self.created_at,
@@ -206,7 +216,8 @@ class DraftCampaign:
             n_samples=data["n_samples"],
             sample_preview=tuple(dict(row) for row in data.get("sample_preview", [])),
             connector=data["connector"],
-            scoring_composite=data["scoring_composite"],
+            scoring_matcher=data["scoring_matcher"],
+            scoring_dials=data["scoring_dials"],
             raw_task_description=data.get("raw_task_description", ""),
             pipeline_overlay=dict(data.get("pipeline_overlay", {})),
             created_at=data["created_at"],
@@ -388,6 +399,15 @@ def declared_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
     )
 
 
+def draft_scoring_block(draft: DraftCampaign) -> str | dict[str, str]:
+    """The ``scoring`` block a draft mints: its matcher over the two confirmed columns, and its
+    dials where it declares any."""
+    per_sample = f"{draft.scoring_matcher}(predicted, ground_truth)"
+    if not draft.scoring_dials:
+        return per_sample
+    return {"per_sample": per_sample, DIALS_KEY: draft.scoring_dials}
+
+
 def default_campaign_config(draft: DraftCampaign) -> CampaignConfig:
     """The campaign config a draft mints WITHOUT its node overlay — the floor the split below
     layers onto, and the same one ``build_cycle_config`` starts from at Start."""
@@ -400,7 +420,7 @@ def default_campaign_config(draft: DraftCampaign) -> CampaignConfig:
     return load_campaign_config(
         {
             "dataset_name": draft.slug,
-            "scoring": f"{draft.scoring_composite}(predicted, ground_truth)",
+            "scoring": draft_scoring_block(draft),
             "exclude_nodes": list(connector.default_exclude_nodes),
             "optimization": optimization,
         }
@@ -472,7 +492,7 @@ def new_draft(
         n_samples=n_samples,
         sample_preview=tuple(dict(row) for row in sample_preview[:PREVIEW_ROWS]),
         connector=DEFAULT_CONNECTOR,
-        scoring_composite=DEFAULT_SCORING_COMPOSITE,
+        scoring_matcher=DEFAULT_SCORING_MATCHER,
         raw_task_description="",
         pipeline_overlay={},
         headers=tuple(headers),
@@ -540,7 +560,7 @@ def default_slug_from_filename(filename: str) -> str:
 
 __all__ = [
     "DEFAULT_MAX_ROUNDS",
-    "DEFAULT_SCORING_COMPOSITE",
+    "DEFAULT_SCORING_MATCHER",
     "PREVIEW_ROWS",
     "DraftCampaign",
     "OptimizationOverrides",

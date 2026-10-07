@@ -1,22 +1,12 @@
 "use client";
-// Compare's binding of the shared scoring-mask editor (`components/shell/mask/`) to one channel's address.
+// Compare's binding of the shared criterion (`components/shell/scoring/`) to one channel's address.
 // Applying REPLACES that channel in place; the grammar is `lib/api/reads.ts::maskedSubject`'s — never split here.
 
 import { useState } from "react";
 import { maskedSubject } from "@/lib/api/reads";
 import type { SubjectReading } from "@/lib/api/types";
-import { ScoringMaskEditor } from "@/components/shell/mask/ScoringMaskEditor";
-import {
-  emptyMask,
-  lensOf,
-  termRows,
-  type ScoringMask,
-} from "@/lib/scoring-mask";
-
-// The whole vocabulary: a board can span pipelines, and the server reports a term a channel cannot answer.
-const ALL_ROWS = termRows();
-// No campaign-wide formula on a multi-campaign board, so no tile is marked "in the actual formula".
-const NONE: ReadonlySet<string> = new Set();
+import { Criterion } from "@/components/shell/scoring/Criterion";
+import { NO_DIALS, lensOf, type ScoringMask } from "@/lib/scoring-mask";
 
 export function ChannelMask({
   subject,
@@ -34,7 +24,7 @@ export function ChannelMask({
   // not do. So it opens in Expression mode, verbatim.
   const served = subject.mask?.lens ?? "";
   const [mask, setMask] = useState<ScoringMask>(() =>
-    served ? { kind: "expression", lens: served } : emptyMask(),
+    served ? { kind: "expression", lens: served } : NO_DIALS,
   );
   const [samples, setSamples] = useState((subject.mask?.samples ?? []).join(","));
 
@@ -51,15 +41,13 @@ export function ChannelMask({
       <p className="cmp-expr-label">
         What if <code>{subject.label}</code> had been scored differently?
       </p>
-      <ScoringMaskEditor
-        rows={ALL_ROWS}
-        inActive={NONE}
+      <Criterion
+        startRung={1}
         mask={mask}
         onMask={(next) => {
           setMask(next);
           commit(next, samples);
         }}
-        seeded="none"
         samples={samples}
         onSamples={(raw) => {
           setSamples(raw);

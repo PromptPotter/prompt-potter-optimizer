@@ -39,7 +39,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .fail{display:inline-block;background:var(--color-danger-bg);color:var(--color-danger);border:0.5px solid var(--color-danger-border);border-radius:4px;padding:1px var(--space-6);font-size:var(--text-xs);font-weight:500;margin-bottom:3px}
 
 .live-state-card{margin-bottom:14px}
-.formula-row{font-family:var(--font-mono);font-size:var(--text-sm);color:var(--color-text-secondary);background:var(--color-background-secondary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-md);padding:var(--space-8) var(--space-12);margin-bottom:14px;overflow-x:auto;white-space:nowrap}
+.live-state-card > .criterion{margin-bottom:var(--space-14)}
 .kv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:var(--space-12) var(--space-18)}
 .kv{display:flex;flex-direction:column;gap:2px;min-width:0}
 .kv-label{font-size:var(--text-xs);letter-spacing:.06em;color:var(--color-text-secondary);text-transform:uppercase;font-weight:500}

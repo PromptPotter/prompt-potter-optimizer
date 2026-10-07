@@ -10,7 +10,7 @@ export const ORIGIN_KEY = {
   columnGroundTruth: "column.ground_truth",
   taskDescription: "task_description",
   connector: "connector",
-  scoringComposite: "scoring_composite",
+  scoringMatcher: "scoring_matcher",
   maxRounds: "max_rounds",
   backendNodeConfig: "backend.node_config",
 } as const;
@@ -27,8 +27,8 @@ export function questionPatch(field: string, answer: string): DraftPatch | null 
       return { raw_task_description: value };
     case ORIGIN_KEY.connector:
       return { connector: value };
-    case ORIGIN_KEY.scoringComposite:
-      return { scoring_composite: value };
+    case ORIGIN_KEY.scoringMatcher:
+      return { scoring_matcher: value };
     case ORIGIN_KEY.maxRounds: {
       // 0 is legal — "measure the origin and stop" (server `ge=0`); never guard `>= 1`.
       const n = Number(value);
@@ -65,7 +65,7 @@ function shortTaskTitle(task: string): string | null {
 export function plainLanguageRecap(draft: DraftCampaignWire): string {
   const input = draft.column_query || "your input";
   const target = draft.column_ground_truth || "the target";
-  const scorer = SCORER_LABELS[draft.scoring_composite] ?? draft.scoring_composite;
+  const scorer = SCORER_LABELS[draft.scoring_matcher] ?? draft.scoring_matcher;
   const connector = CONNECTOR_LABELS[draft.connector] ?? draft.connector;
   const maxRounds = draft.optimization_overrides.max_rounds;
   const rounds = maxRounds === 1 ? "1 round" : `up to ${maxRounds} rounds`;

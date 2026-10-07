@@ -199,6 +199,13 @@ class LineageNode(StrictModel):
         "rows re-graded per cell under that `per_cell` formula and folded, the number a fresh "
         "run under it reports. Null without a lens, or where no row carries a verdict under it.",
     )
+    lens_criterion: str | None = Field(
+        default=None,
+        description="On a course: the `per_cell` formula its record was read under for the "
+        "request's lens — a `dials:` lens realized against this campaign's anchors, a `score:` "
+        "one as given. What a fork applying the lens carries as `scoring.per_cell`. Null without "
+        "one.",
+    )
     composite_rank: int | None = Field(
         default=None,
         description="1-based position by `composite_fitness` descending among THIS node's "

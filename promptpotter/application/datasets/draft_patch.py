@@ -21,6 +21,7 @@ from promptpotter.application.datasets.draft_campaign import (
     rendered_pipeline_json,
 )
 from promptpotter.application.optimizer_manifest import resolve_optimizer
+from promptpotter.application.scoring.formula import SCORING_FUNCTIONS, parse_dials, spell_dials
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import description_key, description_path
@@ -48,7 +49,9 @@ class EditDraftPatch(StrictModel):
         default=None, min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_-]*$"
     )
     connector: str | None = Field(default=None, min_length=1, max_length=64)
-    scoring_composite: str | None = Field(default=None, min_length=1, max_length=64)
+    scoring_matcher: str | None = Field(default=None, min_length=1, max_length=64)
+    # ``term=weight`` dials; the empty string clears them back to correctness alone.
+    scoring_dials: str | None = Field(default=None, max_length=512)
     raw_task_description: str | None = Field(default=None, min_length=1, max_length=16384)
     pipeline_overlay: dict[str, Any] | None = None
     # Written by the setup-panel mode toggle; read by commit's `committed_pipeline_json`
@@ -102,10 +105,20 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
             )
         changes["slug"] = patch.slug
 
+    if patch.scoring_matcher is not None and patch.scoring_matcher not in SCORING_FUNCTIONS:
+        raise PayloadInvalidError(
+            f"patch.scoring_matcher {patch.scoring_matcher!r} is not one of the matchers "
+            f"{sorted(SCORING_FUNCTIONS)}."
+        )
+    if patch.scoring_dials is not None:
+        # Stored in the one canonical spelling, so two drafts declaring the same criterion mint
+        # the same block.
+        changes["scoring_dials"] = spell_dials(parse_dials(patch.scoring_dials))
+
     # Config + the authored prompt are not gated — just set the value.
     for patch_val, draft_attr in (
         (patch.connector, "connector"),
-        (patch.scoring_composite, "scoring_composite"),
+        (patch.scoring_matcher, "scoring_matcher"),
         (patch.origin_prompt_fields, "origin_prompt_fields"),
         (patch.pipeline_steps, "pipeline_steps"),
         (patch.candidate_library, "candidate_library"),

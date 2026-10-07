@@ -604,7 +604,8 @@ def _emit_cell_term_meta() -> str:
 
     rows = "\n".join(
         f"  {{ name: {m['name']!r}, direction: {m['direction']!r},"
-        f" description: {m['description']!r} }},"
+        f" description: {m['description']!r}, dial: {json.dumps(m['dial'])},"
+        f" primary: {json.dumps(m['primary'])} }},"
         for m in cell_terms_meta()
     )
     return (
@@ -612,6 +613,8 @@ def _emit_cell_term_meta() -> str:
         "  name: string;\n"
         '  direction: "high" | "low";\n'
         "  description: string;\n"
+        '  dial: "anchored" | "unit" | null;\n'
+        "  primary: boolean;\n"
         "}\n\n"
         "// What a per_cell formula can name, mirrored from application/scoring/evaluators.py.\n"
         "export const CELL_TERM_META: CellTermMeta[] = [\n"

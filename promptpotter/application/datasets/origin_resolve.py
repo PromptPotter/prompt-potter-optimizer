@@ -109,7 +109,7 @@ def build_origin_consultation(draft: DraftCampaign, message: str | None = None) 
     # raw answer through. The resolver folds it into `answer_format`, fixing the root
     # (the resolver never knew the requirement) instead of overwriting downstream.
     # Empty for a compare-raw scorer → the resolver authors a plain format.
-    extraction_note = extraction_note_for_scoring(draft.scoring_composite)
+    extraction_note = extraction_note_for_scoring(draft.scoring_matcher)
     if extraction_note:
         state["answer_extraction_requirement"] = extraction_note
     user_content = (

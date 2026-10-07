@@ -16,7 +16,7 @@ from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.record import MaskReading, MaskRecord, parse_sample_ids
 from promptpotter.application.mask.verdicts import make_abort_verdict, make_scoring_verdict
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
-from promptpotter.application.scoring.formula import ScoringFormulaError
+from promptpotter.application.scoring.formula import LENS_DIALS_PREFIX, ScoringFormulaError
 from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop, CyclePath, WorkspaceDir
 from promptpotter.domain.phases import RunPhase
@@ -25,6 +25,7 @@ from promptpotter.domain.spend import CeilingMeter
 from promptpotter.infrastructure.projections.live_dashboard.projection import fold_at
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     LiveDashboardState,
+    overlay_criterion_dials,
     overlay_spend_metered,
     warming_payload,
 )
@@ -137,6 +138,7 @@ def serve_dashboard_response(
             mode="json"
         )
         replay["run_phase"] = run_phase
+        overlay_criterion_dials(replay)
         if isinstance(body, dict):
             for field in LiveDashboardState.WIRING_FIELDS:
                 if field in body:
@@ -157,6 +159,7 @@ def serve_dashboard_response(
         if next_launch is not None and run_phase != RunPhase.RUNNING and isinstance(limits, dict):
             limits.update(next_launch())
         overlay_armed_controls(body, cycle_path)
+        overlay_criterion_dials(body)
         if meter is not None:
             overlay_spend_metered(body, meter)
     return JSONResponse(body, headers=headers)
@@ -215,7 +218,8 @@ def get_cycle_dashboard(
 
 class _Lens(NamedTuple):
     verdict: Verdict
-    # The `per_cell` formula every record is read under; `None` reads each cycle's own scorer.
+    # The `per_cell` formula (or `dials:` weights) every record is read under; `None` reads each
+    # cycle's own scorer.
     formula: str | None
 
 
@@ -230,10 +234,12 @@ def _resolve_lens(lens: str | None) -> _Lens:
                 f"Unknown abort lens: {variant!r} (expected one of {sorted(lenses)})"
             )
         return _Lens(make_abort_verdict(suppress), None)
-    if lens and not lens.startswith(LENS_SCORE_PREFIX):
+    if lens and not lens.startswith((LENS_SCORE_PREFIX, LENS_DIALS_PREFIX)):
         raise BadRequestError(
-            f"Unknown lens: {lens!r} (expected '{LENS_SCORE_PREFIX}<formula>' or 'abort:<variant>')"
+            f"Unknown lens: {lens!r} (expected '{LENS_SCORE_PREFIX}<formula>', "
+            f"'{LENS_DIALS_PREFIX}<term=weight,…>' or 'abort:<variant>')"
         )
+    # A `dials:` lens keeps its prefix: the record read realizes it, against its own campaign.
     return _Lens(make_scoring_verdict(), lens.removeprefix(LENS_SCORE_PREFIX) if lens else None)
 
 
@@ -284,6 +290,7 @@ class _Overlay:
         self.readings: dict[tuple[CyclePath, str], MaskReading | None] = {}
         self.serves_value = serves_value
         self.serves_subset = serves_subset
+        self.criteria = {path: record.criterion for path, record in records.items()}
         dimmed: set[tuple[CyclePath, int]] = set()
         for path, record in records.items():
             sandbox, campaign_id = path[:-1], path[-1].campaign_id
@@ -322,6 +329,9 @@ class _Overlay:
 
     def apply(self, node: LineageNode) -> LineageNode:
         kids = self._rank_by_lens([self.apply(k) for k in node.children])
+        if node.kind == "course" and node.path:
+            criterion = self.criteria.get(tuple(node.path)) if self.serves_value else None
+            return node.model_copy(update={"children": kids, "lens_criterion": criterion})
         if node.kind != "candidate" or node.round is None or not node.path:
             return node.model_copy(update={"children": kids})
         course = tuple(node.path)
@@ -371,7 +381,9 @@ def get_lineage_tree(
     An optional **lens** decorates the nodes with a counterfactual. ``lens=score:<formula>``
     = an alternative ``per_cell`` composite, each candidate's rows re-graded under it and folded
     (its ``lens_value``, plus a ``divergence`` marker where that criterion would have elected
-    someone else) — the number a fresh run under that formula reports; ``lens=abort:<variant>``,
+    someone else) — the number a fresh run under that formula reports; ``lens=dials:<term=weight,…>``
+    = the same said as weights, realized on each campaign's anchors and served back as the
+    course's ``lens_criterion``; ``lens=abort:<variant>``,
     variant ∈ the registered eliminators' abort lenses (one ``<gate>_off`` per gate, plus
     ``all_off``) = switch off an elimination gate's abort contribution. ``samples`` = a comma-separated sample-id list (the **sample-set mask**):
     re-score over only those samples. No lens + no samples ⇒ the tree is the raw read.

@@ -422,67 +422,127 @@ class ScoringSpec(NamedTuple):
     scorer_id: str
 
 
-def _summands(node: ast.expr) -> list[ast.expr]:
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        return [*_summands(node.left), node.right]
+DialKind = Literal["anchored", "unit"]
+
+# The term every dial discounts: a criterion is correctness, charged for what it cost.
+CRITERION_BASE = "fitness"
+
+
+class Dial(NamedTuple):
+    """How much ONE term weighs in an anchored criterion — the share of a solved cell's score that
+    term can take away.
+
+    ``anchor`` is the level the term is read against, and what makes an unbounded cost weighable at
+    all: at the anchor or below the cell keeps its whole score, at twice the anchor it loses half
+    of ``weight``. ``None`` is a 0/1 flag, which needs none, and ``rewards`` says whether that flag
+    being set is the good outcome."""
+
+    weight: float
+    anchor: float | None = None
+    rewards: bool = False
+
+
+def _dial_factor(name: str, dial: Dial) -> str:
+    keep = round(1.0 - dial.weight, 9)
+    if dial.anchor is None:
+        if dial.rewards:
+            return f"({keep} + {dial.weight} * {name})"
+        return f"(1.0 - {dial.weight} * {name})"
+    if dial.anchor <= 0.0:
+        raise ValueError(
+            f"the dial on {name!r} has anchor {dial.anchor}: a cost nobody measured above zero "
+            "cannot be weighed against."
+        )
+    return f"({keep} + {dial.weight} * {dial.anchor} / max({dial.anchor}, {name}))"
+
+
+def anchored_criterion(dials: Mapping[str, Dial]) -> str:
+    """The ``per_cell`` formula *dials* spell: correctness, times one discount per weighted term.
+
+    The one spelling of that shape. A dial at weight 0 contributes no factor, so no dials at all is
+    the bare base — the same float ``per_cell`` absent grades."""
+    factors = [_dial_factor(name, dial) for name, dial in dials.items() if dial.weight]
+    return " * ".join([CRITERION_BASE, *factors])
+
+
+def _number(node: ast.expr) -> float | None:
+    if not isinstance(node, ast.Constant) or isinstance(node.value, bool):
+        return None
+    return float(node.value) if isinstance(node.value, int | float) else None
+
+
+def _product(node: ast.expr) -> list[ast.expr]:
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        return [*_product(node.left), node.right]
     return [node]
 
 
-def _weighted_name(node: ast.expr) -> tuple[str, float] | None:
-    """One ``w * name`` / ``name * w`` / ``w * (1 - name)`` term, or a bare name at weight 1.0 —
-    which the default formula (`accuracy`) is, and rejecting it would leave the common case
-    unseeded."""
-    if isinstance(node, ast.Name):
-        return (node.id, 1.0)
-    if not isinstance(node, ast.BinOp) or not isinstance(node.op, ast.Mult):
+def _weighted_term(node: ast.expr) -> tuple[str, float, float | None] | None:
+    """``w * name`` as ``(name, w, None)``, or ``w * a / max(a, name)`` as ``(name, w, a)``."""
+    if not isinstance(node, ast.BinOp):
         return None
-    coef, term = (node.left, node.right)
-    if not isinstance(coef, ast.Constant):
-        coef, term = (node.right, node.left)
-    if not isinstance(coef, ast.Constant) or isinstance(coef.value, bool):
+    if isinstance(node.op, ast.Mult) and isinstance(node.right, ast.Name):
+        weight = _number(node.left)
+        return None if weight is None else (node.right.id, weight, None)
+    if not isinstance(node.op, ast.Div):
         return None
-    if not isinstance(coef.value, int | float):
+    scaled, floor = node.left, node.right
+    if not (isinstance(scaled, ast.BinOp) and isinstance(scaled.op, ast.Mult)):
         return None
-    # `(1 - name)` is how a lower-is-better evaluator enters a sum; the weight is the operator's
-    # either way, so the two shapes report the same number.
+    weight, anchor = _number(scaled.left), _number(scaled.right)
     if (
-        isinstance(term, ast.BinOp)
-        and isinstance(term.op, ast.Sub)
-        and isinstance(term.left, ast.Constant)
-        and term.left.value == 1
-        and isinstance(term.right, ast.Name)
+        weight is None
+        or anchor is None
+        or not isinstance(floor, ast.Call)
+        or not isinstance(floor.func, ast.Name)
+        or floor.func.id != "max"
+        or floor.keywords
+        or len(floor.args) != 2
+        or _number(floor.args[0]) != anchor
+        or not isinstance(floor.args[1], ast.Name)
     ):
-        return (term.right.id, float(coef.value))
-    return (term.id, float(coef.value)) if isinstance(term, ast.Name) else None
+        return None
+    return (floor.args[1].id, weight, anchor)
 
 
-def weighted_sum_weights(formula: str | None) -> dict[str, float] | None:
-    """*formula*'s per-evaluator coefficient where it IS a weighted sum — the shape every default
-    and operator formula takes.
+def _dial_of(node: ast.expr) -> tuple[str, Dial] | None:
+    if not isinstance(node, ast.BinOp):
+        return None
+    term = _weighted_term(node.right)
+    keep = _number(node.left)
+    if term is None or keep is None:
+        return None
+    name, weight, anchor = term
+    if isinstance(node.op, ast.Sub) and keep == 1.0 and anchor is None:
+        return (name, Dial(weight))
+    # A factor that does not reach 1.0 at its best is not a discount, and no dial describes it.
+    if isinstance(node.op, ast.Add) and abs(keep + weight - 1.0) < 1e-9:
+        return (name, Dial(weight, anchor, rewards=anchor is None))
+    return None
+
+
+def anchored_criterion_dials(formula: str) -> dict[str, Dial] | None:
+    """The dials *formula* spells, where it IS an anchored criterion — ``anchored_criterion``'s
+    inverse.
 
     ``None`` where it is not one, and that is the load-bearing answer rather than a failure: a
-    control offering one weight per evaluator can only describe a weighted sum, so inventing
-    entries for a formula that is not one hands the operator sliders that do not add up to what is
-    being scored. The browser did exactly that with a regex, silently substituting a fixed default
-    for every name it could not parse. A name appearing twice is refused for the same reason —
-    one slider cannot stand for two terms.
-
-    Whether a term is INVERTED is deliberately not returned: the evaluator registry already says
-    which are lower-is-better, and a second answer here is one that can disagree with it.
-    """
-    if not formula:
-        return None
+    control offering one dial per term can only describe this shape, so inventing dials for a
+    formula of another hands the operator thermometers that do not add up to what is being scored.
+    A term appearing twice is refused for the same reason — one dial cannot stand for two factors."""
     try:
         tree = ast.parse(formula, "<scoring formula>", "eval")
     except SyntaxError:
         return None
-    weights: dict[str, float] = {}
-    for summand in _summands(tree.body):
-        term = _weighted_name(summand)
-        if term is None or term[0] in weights:
+    base, *factors = _product(tree.body)
+    if not isinstance(base, ast.Name) or base.id != CRITERION_BASE:
+        return None
+    dials: dict[str, Dial] = {}
+    for factor in factors:
+        dial = _dial_of(factor)
+        if dial is None or dial[0] in dials:
             return None
-        weights[term[0]] = term[1]
-    return weights or None
+        dials[dial[0]] = dial[1]
+    return dials
 
 
 @shapes_optimizer_prompt
@@ -579,11 +639,15 @@ __all__ = [
     "UNREAD_PIPELINE_KEYS",
     "CellGrade",
     "CellScorer",
+    "Dial",
+    "DialKind",
     "PipelineData",
     "QueryMeasurement",
     "ScoringSpec",
     "TurnRecord",
     "all_verifier_graded",
+    "anchored_criterion",
+    "anchored_criterion_dials",
     "enumerable_truth_labels",
     "is_answer_collapsed",
     "is_graded",
