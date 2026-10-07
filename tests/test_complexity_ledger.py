@@ -191,7 +191,9 @@ LEDGER_BASELINE = {
     # launcher held as a task on the server's event loop.
     # +1: `connectors/dbllmbench.py` — a fifth backend kind: one benchmark question run by
     # TypeDB's own `db-llm-bench` harness in a container, graded by executing the query.
-    "modules": 390,
+    # +1: `domain/prompt_block.py` — the block library's typed entry. It sits outside the hashed
+    # `config/prompt_blocks.py` so a provenance field added to it re-keys no banked cell.
+    "modules": 391,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     # +2: `application/optimizers/__init__.py` (the member registry) and its `potter/`, empty.
@@ -768,7 +770,9 @@ LEDGER_BASELINE = {
     # are three, and a run the harness never finished scores as a miss (test_numerics § 2).
     # +1: a bench pass served with no candidate on it is anonymous while it runs and absent once
     # it ends, and the origin's reading lands before the round row it belongs on (test_integrity).
-    "test_functions": 241,
+    # +1: a block's provenance moves nothing potter's treatment hashes, while its text, its source
+    # and its place each do (test_integrity § 1).
+    "test_functions": 242,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

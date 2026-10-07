@@ -432,6 +432,28 @@ def test_a_knob_edit_is_a_new_treatment_that_resume_continues() -> None:
     assert classify_config_diff(swapped, frozen)[0] is DiffScope.TREATMENT
 
 
+def test_a_blocks_provenance_is_free_and_its_material_is_not() -> None:
+    """Only a block's text, its source and its place move what potter's treatment hashes.
+
+    Provenance in the key voids every banked origin on a citation fix. Material out of it pools
+    cells whose optimizer was handed a different catalogue."""
+    from promptpotter.config.prompt_blocks import block_library, library_identity
+
+    library = block_library()
+    field, blocks = next((f, b) for f, b in library.items() if len(b) > 1)
+
+    def key(*entries: Any) -> Any:
+        return library_identity({**library, field: entries})
+
+    head, *rest = blocks
+    cited = head.model_copy(update={"id": "x", "year": 1999, "notes": "n", "reported_lift": 0.1})
+    assert key(cited, *rest) == key(*blocks)
+    assert key(head.model_copy(update={"text": "another"}), *rest) != key(*blocks)
+    assert key(head.model_copy(update={"source": "another"}), *rest) != key(*blocks)
+    assert key(*rest, head) != key(*blocks)
+    assert key(*blocks, cited) != key(*blocks)
+
+
 def test_judge_identity_moves_the_searchpoint_hash() -> None:
     """Swapping a judge, its models, its rubric, or the TERM it is read under re-cuts the key.
 

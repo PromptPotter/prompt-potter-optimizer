@@ -60,7 +60,7 @@ from promptpotter.application.optimizers.potter.validators.l1_strict import (
 )
 from promptpotter.application.scoring.candidate_report import fatal_validation_failures
 from promptpotter.config.paths import optimizers_root
-from promptpotter.config.prompt_blocks import block_library
+from promptpotter.config.prompt_blocks import block_library, library_identity
 from promptpotter.domain.dashboard_rows import OptimizerLimit
 from promptpotter.domain.phases import StopLoop
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM, NodeKind, stable_hash
@@ -402,7 +402,8 @@ class PotterRuntime:
 
     def source_digest(self, *covered: ModuleType) -> str:
         # The block library is prompt MATERIAL stored as data, which no module digest reads.
-        return stable_hash([injection_source_digest(*covered), block_library()])[:12]
+        library = library_identity(block_library())
+        return stable_hash([injection_source_digest(*covered), library])[:12]
 
     def override_param_types(self, node: str) -> dict[str, str]:
         spec = NODE_LAYOUTS.get(node)
