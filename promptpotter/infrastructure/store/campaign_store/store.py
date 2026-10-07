@@ -1095,18 +1095,6 @@ class CampaignStore:
             return None
         return list(raw["candidates"]), str(raw["consumed"])
 
-    def delete_round_candidates(
-        self,
-        hop: CycleHop,
-        round_num: int,
-    ) -> None:
-        path = self._layout(hop).candidate_file(round_num)
-        if path.exists():
-            unlink_robust(path)
-            logger.debug(
-                "Deleted cached candidates for round %d (escalation invalidation)", round_num
-            )
-
     # ------------------------------------------------------------------
     # Cycle-seed I/O — the read-once ``CycleSeedRecord`` on the ledger
     # ------------------------------------------------------------------

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, Request
@@ -10,10 +9,9 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import settings
 from promptpotter.domain.backend import BackendConnection
-from promptpotter.domain.cycle_paths import CycleHop, CyclePath, decode_cycle_path
+from promptpotter.domain.cycle_paths import CyclePath, decode_cycle_path
 from promptpotter.infrastructure.identity.bundle import IdentityBundle
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
-from promptpotter.infrastructure.store.layout import cycle_dir_for
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.errors import (
     BadRequestError,
@@ -72,13 +70,6 @@ def get_backend_or_404(backend_id: str, stores: Stores) -> BackendConnection:
     return backend
 
 
-def get_cycle_dir_or_404(campaign_id: str, cycle_id: str, stores: Stores) -> Path:
-    cycle_dir = cycle_dir_for(stores.base_dir, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id))
-    if not cycle_dir.exists():
-        raise NotFoundError(f"Cycle '{campaign_id}/{cycle_id}' not found")
-    return cycle_dir
-
-
 def decode_descend(descend: str | None) -> CyclePath:
     """A ``?descend=`` tail as a :data:`CyclePath` — this route's refusal over the ONE codec
     (:func:`decode_cycle_path`), which the evidence read's ``;in=`` segment shares."""
@@ -108,6 +99,5 @@ __all__ = [
     "build_stores_from_identity",
     "decode_descend",
     "get_backend_or_404",
-    "get_cycle_dir_or_404",
     "resolve_identity",
 ]

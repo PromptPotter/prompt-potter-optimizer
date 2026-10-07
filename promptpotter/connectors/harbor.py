@@ -12,22 +12,18 @@ comparison is against their object rather than against something merely analogou
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import functools
 import json
 import logging
-import os
 import re
-import shutil
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast, get_args
-from uuid import uuid4
 
 import httpx
-from filelock import FileLock, Timeout
 
 from promptpotter.config.settings import non_utf8_encoding
 from promptpotter.connectors.protocol import Connector, InProcessWorkload, NoopSession
@@ -35,6 +31,16 @@ from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import LLMSpendBound, stable_hash
 from promptpotter.domain.spend import StepTokenUsage, TokenAccount
+from promptpotter.infrastructure.docker_host import (
+    CONTAINER_PRODUCER,
+    PACKAGE_CACHE_PROXY,
+    claim_machine,
+    docker,
+    docker_server_version,
+    ensure_package_cache,
+    forget_package_cache,
+    machine_step,
+)
 from promptpotter.infrastructure.llm.litellm_sends import litellm_route, litellm_sends_billed_as
 from promptpotter.infrastructure.llm.spend_book import (
     Billed,
@@ -53,11 +59,12 @@ from promptpotter.shared.errors import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Mapping
     from types import ModuleType
 
     from harbor.environments.docker.docker import DockerEnvironment
     from harbor.models.trial.result import TrialResult
+    from harbor.trial.trial import Trial
 
     from promptpotter.domain.value_tree import Delivery
     from promptpotter.infrastructure.store.stores import Stores
@@ -126,44 +133,19 @@ AGENT_KWARG_KEYS = frozenset(
 # Nothing durable lives here; reward, digest and token counts land in the measurement archive.
 _TRIALS_HOME = Path(tempfile.gettempdir()) / "promptpotter-harbor"
 
-# What one process leaves on this machine under one token: its scratch directory, and the label
-# every container it starts carries. Harbor stops an environment in a `finally` (`trial/trial.py::
-# run`), so a HARD KILL is the only way either outlives its run — and the token's lock is how the
-# next run tells that from a live sibling, the kernel dropping it with its holder exactly as
-# machine slots rely on (`infrastructure/backend.py::MachineSlots`).
-_PRODUCER = f"{os.getpid():x}{uuid4().hex[:4]}"
-_PRODUCER_LABEL = "com.promptpotter.producer"
-# Compose's own record of the files a container was built from, which names our overlay — the one
-# marker on a container started before the producer label existed.
-_COMPOSE_FILES_LABEL = "com.docker.compose.project.config_files"
-# Read by the compose overlay, which interpolates it into that label.
+# This process's scratch. Harbor stops an environment in a `finally` (`trial/trial.py::run`), so
+# only a HARD KILL leaves one behind, for `docker_host.reap_dead_producers` to sweep.
+_TRIALS_ROOT = _TRIALS_HOME / CONTAINER_PRODUCER
+# Read by the compose overlay, which interpolates it into the producer label.
 _PRODUCER_ENV = "PROMPTPOTTER_HARBOR_PRODUCER"
-_PRODUCER_LOCK = ".producer.lock"
-_TRIALS_ROOT = _TRIALS_HOME / _PRODUCER
-_MACHINE_CLAIMED: list[FileLock] = []
 
 # Keeps a task's image across cells and stops the container without a grace period. It reads
 # Harbor's compose infra variables, which task-authored compose files reference too.
 _DOCKER_OVERLAY = Path(__file__).parent / "resources" / "harbor-docker-compose.yaml"
 
-# The machine's package-download cache — one container, image and volume of this name
-# (`docs/operations/package-cache.md`). `apt-cacher-ng` from Debian's own archive, not a
-# third-party image.
-PACKAGE_CACHE = "promptpotter-package-cache"
-_PACKAGE_CACHE_PORT = 3142
-_PACKAGE_CACHE_PROXY = f"http://host.docker.internal:{_PACKAGE_CACHE_PORT}"
-_PACKAGE_CACHE_DOCKERFILE = (
-    "FROM debian:bookworm-slim\n"
-    "RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y "
-    "--no-install-recommends apt-cacher-ng && rm -rf /var/lib/apt/lists/*\n"
-    f"EXPOSE {_PACKAGE_CACHE_PORT}\n"
-    'CMD ["/usr/sbin/apt-cacher-ng", "-c", "/etc/apt-cacher-ng", "ForeGround=1"]\n'
-)
-# Where a dataset may route downloads through it. Only the verifier: a proxy in the agent's
-# environment is something the agent can observe, which changes what the cell measures.
+# Where a dataset may route downloads through the machine's package cache. Only the verifier: a
+# proxy in the agent's environment is something the agent can observe, which changes the cell.
 PACKAGE_CACHE_SCOPES = frozenset({"verifier"})
-# Process-scoped like `_LAYOUT_WARNED`: the container is a fact about the machine, not a run.
-_PACKAGE_CACHE_RUNNING: set[str] = set()
 
 # What an agent's setup installs into a container that lacks it, as `(tool, probe)`. Harbor's
 # installed agents declare `SYSTEM_PACKAGES`; terminus-2 declares nothing, so its pair is copied
@@ -614,146 +596,8 @@ async def _preflight(backend_url: str) -> None:
             "  or per-run:  python -X utf8 -m promptpotter ...",
         )
 
-    try:
-        code, out = await _docker("version", "--format", "{{.Server.Version}}")
-    except (OSError, TimeoutError) as exc:
-        raise BackendUnreachableError("harbor", backend_url, f"docker not callable: {exc}") from exc
-    if code != 0:
-        raise BackendUnreachableError(
-            "harbor", backend_url, f"docker daemon not responding: {out[:200]}"
-        )
-    logger.debug("harbor preflight: docker server %s", out)
-
-
-async def _docker(*args: str, stdin: bytes | None = None, timeout: float = 30) -> tuple[int, str]:
-    proc = await asyncio.create_subprocess_exec(
-        "docker",
-        *args,
-        stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-    )
-    try:
-        out, _ = await asyncio.wait_for(proc.communicate(stdin), timeout=timeout)
-    except TimeoutError:
-        proc.kill()
-        await proc.wait()
-        raise TimeoutError(
-            f"`docker {' '.join(args[:2])}` did not answer in {timeout:.0f}s"
-        ) from None
-    return proc.returncode or 0, (out or b"").decode(errors="replace").strip()
-
-
-@contextlib.contextmanager
-def _machine_step() -> Iterator[None]:
-    """A docker CLI unreachable or silent at CELL time is the machine — a box too loaded to answer
-    `inspect` inside its bound — so the cell it ends measured nothing: retried as an attempt
-    (`_INFRA_ATTEMPTS`), never banked as the candidate's."""
-    try:
-        yield
-    except (OSError, TimeoutError) as exc:
-        raise CellInfrastructureError(str(exc), spent={}, step_timings={}) from exc
-
-
-async def _ensure_package_cache() -> None:
-    """The machine's package cache, running. Idempotent, and safe against a sibling cell racing it:
-    a second ``run`` loses on the name and the re-inspect finds the winner's container."""
-    if PACKAGE_CACHE in _PACKAGE_CACHE_RUNNING:
-        return
-    running = ("container", "inspect", "--format", "{{.State.Running}}", PACKAGE_CACHE)
-    code, state = await _docker(*running)
-    if code != 0:
-        if (await _docker("image", "inspect", PACKAGE_CACHE))[0] != 0:
-            code, out = await _docker(
-                "build", "-t", PACKAGE_CACHE, "-",
-                stdin=_PACKAGE_CACHE_DOCKERFILE.encode(),
-                timeout=600,
-            )  # fmt: skip
-            if code != 0:
-                raise CellInfrastructureError(
-                    f"building {PACKAGE_CACHE} failed: {out[-300:]}", spent={}, step_timings={}
-                )
-        await _docker(
-            "run", "--detach", "--name", PACKAGE_CACHE, "--restart", "unless-stopped",
-            "--publish", f"{_PACKAGE_CACHE_PORT}:{_PACKAGE_CACHE_PORT}",
-            "--volume", f"{PACKAGE_CACHE}:/var/cache/apt-cacher-ng",
-            PACKAGE_CACHE,
-        )  # fmt: skip
-    elif state != "true":
-        await _docker("start", PACKAGE_CACHE)
-    code, state = await _docker(*running)
-    if state != "true":
-        raise CellInfrastructureError(
-            f"{PACKAGE_CACHE} is not running: {state[-300:]}", spent={}, step_timings={}
-        )
-    _PACKAGE_CACHE_RUNNING.add(PACKAGE_CACHE)
-
-
-def _producer_is_dead(token: str) -> bool:
-    """Whether the process behind *token* is gone. Asked of the lock it holds for its own life,
-    never of an mtime: a cell runs for minutes writing nothing, and a sibling's live containers are
-    not this run's to remove."""
-    home = _TRIALS_HOME / token
-    if not home.is_dir():
-        return True
-    lock = FileLock(str(home / _PRODUCER_LOCK), timeout=0)
-    try:
-        lock.acquire()
-    except Timeout:
-        return False
-    lock.release()
-    return True
-
-
-async def _reap_dead_producers() -> None:
-    """Remove the containers and scratch of every producer that is no longer running.
-
-    Two ways a container is nobody's: a token whose lock is free, or NO token while naming our
-    overlay — which a container this code started never is, so nothing alive can claim it. The
-    second is the only route to what a kill left before the label existed."""
-    code, out = await _docker(
-        "ps", "-a", "--format",
-        f'{{{{.ID}}}}|{{{{.Label "{_PRODUCER_LABEL}"}}}}|{{{{.Label "{_COMPOSE_FILES_LABEL}"}}}}',
-    )  # fmt: skip
-    ours = str(_DOCKER_OVERLAY).lower()
-    by_token: dict[str, list[str]] = {}
-    gone: list[str] = []
-    for line in out.splitlines() if code == 0 else []:
-        cid, _, rest = line.partition("|")
-        token, _, compose_files = rest.partition("|")
-        if not cid:
-            continue
-        if token.strip():
-            by_token.setdefault(token.strip(), []).append(cid)
-        elif ours in compose_files.lower():
-            gone.append(cid)
-    for token in by_token.keys() | {d.name for d in _TRIALS_HOME.iterdir() if d.is_dir()}:
-        if token == _PRODUCER or not await asyncio.to_thread(_producer_is_dead, token):
-            continue
-        gone += by_token.get(token, [])
-        await asyncio.to_thread(shutil.rmtree, _TRIALS_HOME / token, ignore_errors=True)
-    if gone:
-        await _docker("rm", "--force", *gone, timeout=120)
-        logger.info("harbor: removed %d container(s) left by a run that is gone", len(gone))
-
-
-async def _claim_machine() -> None:
-    """This process's scratch directory and the lock naming it live, then one sweep of what dead
-    producers left. At the FIRST CELL rather than in ``Connector.preflight``, for the same reason
-    the package cache starts there: the diagnostics and the embedded launch measure cells without
-    ever running preflight."""
-    if _MACHINE_CLAIMED:
-        return
-    os.environ[_PRODUCER_ENV] = _PRODUCER
-    _TRIALS_ROOT.mkdir(parents=True, exist_ok=True)
-    lock = FileLock(str(_TRIALS_ROOT / _PRODUCER_LOCK), timeout=0)
-    lock.acquire()
-    _MACHINE_CLAIMED.append(lock)
-    try:
-        await _reap_dead_producers()
-    except (OSError, TimeoutError) as exc:
-        # Not re-raised into `_machine_step`: a failed sweep leaves junk, never a failed cell.
-        logger.debug("harbor: could not reap what earlier runs left: %s", exc)
+    version = await docker_server_version("harbor", backend_url)
+    logger.debug("harbor preflight: docker server %s", version)
 
 
 def _agent_install_script(tools: tuple[tuple[str, str], ...]) -> str:
@@ -788,19 +632,19 @@ async def _reuse_task_image(
     if environment.task_env_config.docker_image is not None:
         return
     image = environment._env_vars.main_image_name
-    if (await _docker("image", "inspect", "--format", "{{.Id}}", image))[0] != 0:
+    if (await docker("image", "inspect", "--format", "{{.Id}}", image))[0] != 0:
         return
     if tools:
         script = _agent_install_script(tools)
         ready = f"{image}:agent-{stable_hash(script)[:12]}"
-        if (await _docker("image", "inspect", "--format", "{{.Id}}", ready))[0] != 0:
-            user = (await _docker("image", "inspect", "--format", "{{.Config.User}}", image))[1]
+        if (await docker("image", "inspect", "--format", "{{.Id}}", ready))[0] != 0:
+            user = (await docker("image", "inspect", "--format", "{{.Config.User}}", image))[1]
             dockerfile = (
                 f"FROM {image}\nUSER root\nRUN {json.dumps(['/bin/sh', '-c', script])}\n"
                 + (f"USER {user}\n" if user else "")
             )
-            proxy = ("--build-arg", f"http_proxy={_PACKAGE_CACHE_PROXY}") if proxied else ()
-            code, out = await _docker(
+            proxy = ("--build-arg", f"http_proxy={PACKAGE_CACHE_PROXY}") if proxied else ()
+            code, out = await docker(
                 "build", "--tag", ready, "--add-host", "host.docker.internal:host-gateway",
                 *proxy, "-",
                 stdin=dockerfile.encode(),
@@ -1377,111 +1221,185 @@ def _task_config(task: dict[str, Any], harbor_config: ModuleType) -> Any:
     )
 
 
-async def _in_process_run(
-    workload: InProcessWorkload, query: str, payload: dict[str, Any]
-) -> dict[str, Any]:
-    """Run one episode and project its verdict onto the ``{"data": {…}}`` shape ``measure_sample``
-    parses from an HTTP body — so the scorer reads a Harbor result identically to a remote one."""
-    from harbor.agents.installed.base import BaseInstalledAgent
-    from harbor.environments.docker.docker import DockerEnvironment
-    from harbor.models.trial import config as harbor_config
-    from harbor.trial.trial import Trial
+@dataclass(frozen=True)
+class _Episode:
+    query: str
+    task: dict[str, Any]
+    reward_key: str
+    agent_name: str
+    agent_kwargs: dict[str, Any]
+    model_name: str | None
+    environment: str
+    cached: bool
+    prompt: str | None
+    in_system_prompt: bool
+    tools: tuple[tuple[str, str], ...]
 
+
+def _episode(workload: InProcessWorkload, query: str, payload: dict[str, Any]) -> _Episode:
     task, reward_key, agent_cfg = _current_task(workload.experiment, query)
-
     agent_kwargs = dict(agent_cfg.get("kwargs") or {})
     agent_kwargs.update(payload.get("agent_kwargs") or {})
-    # The MODEL comes from the node config, never from the agent block — `datasets/CLAUDE.md`
-    # makes `nodes.{node}.config.model` the dataset's one statement of what it measures on, and a
-    # second spelling in `harbor_tasks.yaml` would be a second owner of the same fact.
-    model_name = payload.get("model_name")
-
-    environment = agent_cfg.get("environment") or "docker"
-    docker = environment == "docker"
-    cached = (workload.experiment or {}).get("package_cache") == "verifier"
-    prompt = payload.get("prompt")
-    in_system_prompt = payload[SKILL_DELIVERY_KEY] == "system_prompt"
     agent_name = agent_cfg.get("name") or "terminus-2"
-    # terminus-2 installs asciinema only while it records; baking it otherwise adds a tool.
-    tools = tuple(
-        (tool, probe)
-        for tool, probe in _AGENT_TOOLS.get(agent_name, ())
-        if tool != "asciinema" or agent_kwargs.get("record_terminal_session") is not False
+    return _Episode(
+        query=query,
+        task=task,
+        reward_key=reward_key,
+        agent_name=agent_name,
+        agent_kwargs=agent_kwargs,
+        # The MODEL comes from the node config, never from the agent block — `datasets/CLAUDE.md`
+        # makes `nodes.{node}.config.model` the dataset's one statement of what it measures on, and
+        # a second spelling in `harbor_tasks.yaml` would be a second owner of the same fact.
+        model_name=payload.get("model_name"),
+        environment=agent_cfg.get("environment") or "docker",
+        cached=(workload.experiment or {}).get("package_cache") == "verifier",
+        prompt=payload.get("prompt"),
+        in_system_prompt=payload[SKILL_DELIVERY_KEY] == "system_prompt",
+        # terminus-2 installs asciinema only while it records; baking it otherwise adds a tool.
+        tools=tuple(
+            (tool, probe)
+            for tool, probe in _AGENT_TOOLS.get(agent_name, ())
+            if tool != "asciinema" or agent_kwargs.get("record_terminal_session") is not False
+        ),
     )
 
-    async def attempt() -> tuple[TrialResult, float]:
-        if cached:
-            with _machine_step():
-                await _ensure_package_cache()
-        with tempfile.TemporaryDirectory(prefix="pp-skill-") as skill_root:
-            skills = (
-                [str(_write_skill(Path(skill_root), prompt))]
-                if prompt and not in_system_prompt
-                else []
-            )
-            # BEFORE `Trial.create`, not after it. Creation builds or pulls the environment image
-            # and is a real part of what a cell costs; timing only `run()` reported an agent
-            # episode as cheaper than it was, by exactly the amount the harness spent getting ready.
-            start = time.monotonic()
-            trial = await Trial.create(
-                harbor_config.TrialConfig(
-                    task=_task_config(task, harbor_config),
-                    trials_dir=_TRIALS_ROOT,
-                    agent=harbor_config.AgentConfig(
-                        name=agent_name,
-                        model_name=model_name,
-                        skills=skills,
-                        kwargs=agent_kwargs,
-                    ),
-                    environment=harbor_config.EnvironmentConfig(
-                        type=environment,
-                        extra_docker_compose=[_DOCKER_OVERLAY] if docker else [],
-                    ),
-                    verifier=harbor_config.VerifierConfig(
-                        env={"http_proxy": _PACKAGE_CACHE_PROXY} if cached else {}
-                    ),
-                )
-            )
-            if prompt and in_system_prompt:
-                # Private API: the template is read at construction, so it is replaced on the
-                # built agent. An agent without one cannot carry the mode, and says so here.
-                template = getattr(trial.agent, "_prompt_template", None)
-                if not isinstance(template, str):
-                    raise RuntimeError(
-                        f"harbor connector: agent {agent_name!r} has no prompt template, so "
-                        f"`{SKILL_DELIVERY_KEY}: system_prompt` cannot reach its model."
-                    )
-                trial.agent._prompt_template = _system_skill_template(template, prompt)
-            if isinstance(trial.agent_environment, DockerEnvironment):
-                with _machine_step():
-                    await _reuse_task_image(trial.agent_environment, tools, proxied=cached)
-            if not isinstance(trial.agent, BaseInstalledAgent):
-                # Every send it makes goes through litellm in this process, billed as it is made.
-                with litellm_sends_billed_as(_AGENT_SEND):
-                    result = await trial.run()
-                return result, time.monotonic() - start
-            # One in its container sends from there, past this process: the trial is one send from
-            # here, at whatever the cell has left, billed off Harbor's reading of its logs.
-            with admitted(
-                _AGENT_SEND, reservation_left(), model=model_name, provider=None
-            ) as admission:
-                result = await trial.run()
-                if (billed := _container_bill(result, model_name)) is not None:
-                    admission.settle(billed)
-            return result, time.monotonic() - start
 
-    with _machine_step():
-        await _claim_machine()
+def _trial_config(episode: _Episode, skills: list[str]) -> Any:
+    from harbor.models.trial import config as harbor_config
+
+    return harbor_config.TrialConfig(
+        task=_task_config(episode.task, harbor_config),
+        trials_dir=_TRIALS_ROOT,
+        agent=harbor_config.AgentConfig(
+            name=episode.agent_name,
+            model_name=episode.model_name,
+            skills=skills,
+            kwargs=episode.agent_kwargs,
+        ),
+        environment=harbor_config.EnvironmentConfig(
+            type=episode.environment,
+            extra_docker_compose=[_DOCKER_OVERLAY] if episode.environment == "docker" else [],
+        ),
+        verifier=harbor_config.VerifierConfig(
+            env={"http_proxy": PACKAGE_CACHE_PROXY} if episode.cached else {}
+        ),
+    )
+
+
+def _install_system_skill(trial: Trial, agent_name: str, prompt: str) -> None:
+    # Private API: the template is read at construction, so it is replaced on the
+    # built agent. An agent without one cannot carry the mode, and says so here.
+    template = getattr(trial.agent, "_prompt_template", None)
+    if not isinstance(template, str):
+        raise RuntimeError(
+            f"harbor connector: agent {agent_name!r} has no prompt template, so "
+            f"`{SKILL_DELIVERY_KEY}: system_prompt` cannot reach its model."
+        )
+    trial.agent._prompt_template = _system_skill_template(template, prompt)
+
+
+async def _billed_run(trial: Trial, model_name: str | None) -> TrialResult:
+    from harbor.agents.installed.base import BaseInstalledAgent
+
+    if not isinstance(trial.agent, BaseInstalledAgent):
+        # Every send it makes goes through litellm in this process, billed as it is made.
+        with litellm_sends_billed_as(_AGENT_SEND):
+            result = await trial.run()
+        return result
+    # One in its container sends from there, past this process: the trial is one send from
+    # here, at whatever the cell has left, billed off Harbor's reading of its logs.
+    with admitted(_AGENT_SEND, reservation_left(), model=model_name, provider=None) as admission:
+        result = await trial.run()
+        if (billed := _container_bill(result, model_name)) is not None:
+            admission.settle(billed)
+    return result
+
+
+async def _attempt(episode: _Episode) -> tuple[TrialResult, float]:
+    from harbor.environments.docker.docker import DockerEnvironment
+    from harbor.trial.trial import Trial
+
+    prompt, in_system_prompt = episode.prompt, episode.in_system_prompt
+    if episode.cached:
+        with machine_step():
+            await ensure_package_cache()
+    with tempfile.TemporaryDirectory(prefix="pp-skill-") as skill_root:
+        skills = (
+            [str(_write_skill(Path(skill_root), prompt))] if prompt and not in_system_prompt else []
+        )
+        # BEFORE `Trial.create`, not after it. Creation builds or pulls the environment image
+        # and is a real part of what a cell costs; timing only `run()` reported an agent
+        # episode as cheaper than it was, by exactly the amount the harness spent getting ready.
+        start = time.monotonic()
+        trial = await Trial.create(_trial_config(episode, skills))
+        if prompt and in_system_prompt:
+            _install_system_skill(trial, episode.agent_name, prompt)
+        if isinstance(trial.agent_environment, DockerEnvironment):
+            with machine_step():
+                await _reuse_task_image(
+                    trial.agent_environment, episode.tools, proxied=episode.cached
+                )
+        result = await _billed_run(trial, episode.model_name)
+        return result, time.monotonic() - start
+
+
+def _infrastructure_error(
+    query: str,
+    n: int,
+    cause: str,
+    category: ErrorCategory,
+    spent: dict[str, StepTokenUsage],
+    spent_s: float,
+) -> CellInfrastructureError:
+    message = (
+        f"harbor task {query!r} measured the infrastructure, not the agent, "
+        f"on attempt {n}/{_INFRA_ATTEMPTS}: {cause}"
+    )
+    timings = {AGENT_NODE: spent_s}
+    if category is ErrorCategory.CONNECTION:
+        return CellInfrastructureError(message, spent=spent, step_timings=timings)
+    return CellSendRefusedError(message, category=category, spent=spent, step_timings=timings)
+
+
+async def _back_off(query: str, n: int, cause: str, category: ErrorCategory) -> None:
+    logger.warning(
+        "harbor task %r attempt %d/%d measured the infrastructure (%s); retrying in %.0fs",
+        query,
+        n,
+        _INFRA_ATTEMPTS,
+        cause,
+        _INFRA_BACKOFF_S * n,
+    )
+    # And on the LEDGER, where every surface can read it. A run hosted by the API server writes
+    # no terminal mirror, so a warning that only reaches `logging` exists in one console — and
+    # this one carries the whole diagnosis, while the stop it ends in says only that a backend
+    # was unreachable.
+    emit_backend_warning(
+        kind="infrastructure",
+        attempt=n,
+        max_attempts=_INFRA_ATTEMPTS,
+        wait_s=_INFRA_BACKOFF_S * n,
+        query=query,
+        detail=cause,
+        error_class=category.value,
+    )
+    await asyncio.sleep(_INFRA_BACKOFF_S * n)
+
+
+async def _run_episode(
+    episode: _Episode,
+) -> tuple[TrialResult, float, dict[str, StepTokenUsage], float]:
+    query = episode.query
     # Every attempt's spend, discarded ones included: a retried episode still ran the agent.
     attempts: list[dict[str, StepTokenUsage]] = []
     spent_s = 0.0
     for n in range(1, _INFRA_ATTEMPTS + 1):
         try:
-            result, elapsed = await attempt()
+            result, elapsed = await _attempt(episode)
         except CellInfrastructureError as exc:
             cause, category = str(exc), exc.category
         else:
-            attempts.append(_step_tokens(result, model_name))
+            attempts.append(_step_tokens(result, episode.model_name))
             spent_s += elapsed
             if (throttle := _provider_throttle(result)) is not None:
                 # The provider's load, which the run answers for every cell at once.
@@ -1493,46 +1411,20 @@ async def _in_process_run(
             if (failure := _infrastructure_failure(result)) is None:
                 break
             cause, category = failure
-        _PACKAGE_CACHE_RUNNING.discard(PACKAGE_CACHE)
+        forget_package_cache()
         if n == _INFRA_ATTEMPTS or category is not ErrorCategory.CONNECTION:
-            message = (
-                f"harbor task {query!r} measured the infrastructure, not the agent, "
-                f"on attempt {n}/{_INFRA_ATTEMPTS}: {cause}"
-            )
-            spent = _sum_spend(attempts)
-            timings = {AGENT_NODE: spent_s}
-            if category is ErrorCategory.CONNECTION:
-                raise CellInfrastructureError(message, spent=spent, step_timings=timings)
-            raise CellSendRefusedError(
-                message, category=category, spent=spent, step_timings=timings
-            )
-        logger.warning(
-            "harbor task %r attempt %d/%d measured the infrastructure (%s); retrying in %.0fs",
-            query,
-            n,
-            _INFRA_ATTEMPTS,
-            cause,
-            _INFRA_BACKOFF_S * n,
-        )
-        # And on the LEDGER, where every surface can read it. A run hosted by the API server writes
-        # no terminal mirror, so a warning that only reaches `logging` exists in one console — and
-        # this one carries the whole diagnosis, while the stop it ends in says only that a backend
-        # was unreachable.
-        emit_backend_warning(
-            kind="infrastructure",
-            attempt=n,
-            max_attempts=_INFRA_ATTEMPTS,
-            wait_s=_INFRA_BACKOFF_S * n,
-            query=query,
-            detail=cause,
-            error_class=category.value,
-        )
-        await asyncio.sleep(_INFRA_BACKOFF_S * n)
+            raise _infrastructure_error(query, n, cause, category, _sum_spend(attempts), spent_s)
+        await _back_off(query, n, cause, category)
+    return result, elapsed, _sum_spend(attempts), spent_s
 
+
+def _reward(
+    result: TrialResult, episode: _Episode, bill: dict[str, StepTokenUsage], spent_s: float
+) -> float | int:
+    query = episode.query
     # BEFORE the reward is read: Harbor drops a step with no verifier result from its own
     # denominator, so the number below would describe fewer steps than the task declared, and
     # describe it as a success.
-    bill = _sum_spend(attempts)
     if unscoreable := _unscoreable_step(result):
         raise CellUnscoreableError(
             f"harbor task {query!r}: {unscoreable}.",
@@ -1541,17 +1433,54 @@ async def _in_process_run(
         )
 
     rewards = result.verifier_result.rewards if result.verifier_result else None
-    reward = (rewards or {}).get(reward_key)
+    reward = (rewards or {}).get(episode.reward_key)
     if reward is None:
         # Nothing to grade, and a 0.0 here would be indistinguishable from an episode that ran
         # and failed. The campaign excludes the cell instead.
         raise CellUnscoreableError(
-            f"harbor task {query!r} produced no reward under key {reward_key!r} "
+            f"harbor task {query!r} produced no reward under key {episode.reward_key!r} "
             f"(rewards={rewards}); the episode is unscoreable, not a zero.",
             spent=bill,
             step_timings={AGENT_NODE: spent_s},
         )
+    return cast("float | int", reward)
 
+
+def _skill_arrival(result: TrialResult, episode: _Episode) -> float | None:
+    prompt, in_system_prompt = episode.prompt, episode.in_system_prompt
+    # Only where a skill was actually injected. With no prompt there is no artifact to open, so
+    # `0.0` would report the arm declining to read a file that was never written.
+    opened = (
+        None
+        if not prompt
+        else _skill_in_first_request(result, prompt)
+        if in_system_prompt
+        else _skill_opened(result)
+    )
+    if opened is not None and not opened:
+        # A line per cell rather than a scoring discount: the term is constant on a healthy
+        # channel, so charging it moves nothing when things work and discounts every arm
+        # UNIFORMLY when they break — invisible arithmetically, and identical to a finding.
+        logger.warning(
+            "harbor connector: %r measured a NO-SKILL episode — the candidate's prompt "
+            "reached the model not at all, so a round of these cannot separate arms on it. %s",
+            episode.query,
+            "The first request did not carry it: `_system_skill_template` no longer reaches "
+            "terminus-2's template."
+            if in_system_prompt
+            else f"The agent never opened it: check the frontmatter parses (`_write_skill`) "
+            f"and that {SKILL_FILENAME} is present in the container.",
+        )
+    return opened
+
+
+def _episode_data(
+    result: TrialResult,
+    episode: _Episode,
+    reward: float | int,
+    elapsed: float,
+    bill: dict[str, StepTokenUsage],
+) -> dict[str, Any]:
     turns = _turns(result)
     data: dict[str, Any] = {
         REWARD_KEY: float(reward),
@@ -1559,7 +1488,7 @@ async def _in_process_run(
         "total_time": elapsed,
         "step_timings": {AGENT_NODE: elapsed},
         "step_tokens": bill,
-        "reasoning_trace": _digest(result, query, reward, turns),
+        "reasoning_trace": _digest(result, episode.query, reward, turns),
         ANSWER_KEY: _answer(result),
     }
     # Absent, never empty: `[]` would claim this episode had no turns and `{}` that its steps
@@ -1570,33 +1499,25 @@ async def _in_process_run(
         data["outcome_note"] = note
     if phases := _phase_timings(result, elapsed):
         data["step_phases"] = phases
-    # Only where a skill was actually injected. With no prompt there is no artifact to open, so
-    # `0.0` would report the arm declining to read a file that was never written.
-    opened = (
-        None
-        if not prompt
-        else _skill_in_first_request(result, prompt)
-        if in_system_prompt
-        else _skill_opened(result)
-    )
-    if opened is not None:
+    if (opened := _skill_arrival(result, episode)) is not None:
         data[SKILL_KEY] = opened
-        if not opened:
-            # A line per cell rather than a scoring discount: the term is constant on a healthy
-            # channel, so charging it moves nothing when things work and discounts every arm
-            # UNIFORMLY when they break — invisible arithmetically, and identical to a finding.
-            logger.warning(
-                "harbor connector: %r measured a NO-SKILL episode — the candidate's prompt "
-                "reached the model not at all, so a round of these cannot separate arms on it. %s",
-                query,
-                "The first request did not carry it: `_system_skill_template` no longer reaches "
-                "terminus-2's template."
-                if in_system_prompt
-                else f"The agent never opened it: check the frontmatter parses (`_write_skill`) "
-                f"and that {SKILL_FILENAME} is present in the container.",
-            )
     data.update(_step_rewards(result))
-    return {"data": data}
+    return data
+
+
+async def _in_process_run(
+    workload: InProcessWorkload, query: str, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Run one episode and project its verdict onto the ``{"data": {…}}`` shape ``measure_sample``
+    parses from an HTTP body — so the scorer reads a Harbor result identically to a remote one."""
+    episode = _episode(workload, query, payload)
+    with machine_step():
+        await claim_machine(
+            _TRIALS_HOME, compose_overlay=_DOCKER_OVERLAY, producer_env=_PRODUCER_ENV
+        )
+    result, elapsed, bill, spent_s = await _run_episode(episode)
+    reward = _reward(result, episode, bill, spent_s)
+    return {"data": _episode_data(result, episode, reward, elapsed, bill)}
 
 
 CONNECTOR = Connector(

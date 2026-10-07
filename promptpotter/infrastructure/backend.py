@@ -10,6 +10,7 @@ import logging
 import time
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -159,6 +160,46 @@ def _settle(admission: Admission, reported: list[Billed] | None) -> None:
         admission.unreported()
     else:
         admission.settle(*reported)
+
+
+def _settle_reply(admission: Admission, resp: httpx.Response, billed: CellBilling) -> None:
+    reported = billed(_reply_data(resp))
+    if reported is not None:
+        admission.settle(*reported)
+    elif resp.is_success or may_have_billed(resp.status_code):
+        admission.unreported()
+    else:
+        admission.release()
+
+
+@dataclass
+class _CellSends:
+    query: str
+    attempt: int = 0
+    recovered: bool = False
+    down_since: float | None = None
+
+    def warn(self, kind: str, *, wait_s: float, **extra: Any) -> None:
+        # Emits straight to the ledger: the in-process arm takes no callback to thread through.
+        emit_backend_warning(
+            kind=kind,
+            attempt=self.attempt + 1,
+            max_attempts=MAX_SEND_ATTEMPTS,
+            wait_s=float(wait_s),
+            query=self.query,
+            **extra,
+        )
+
+    def wait_after_break(self, exc: httpx.TransportError) -> float | None:
+        resend = connection_broke(exc) and self.attempt + 1 < MAX_SEND_ATTEMPTS
+        wait = float(2**self.attempt) if resend else None
+        self.warn(
+            "transport_error",
+            wait_s=wait or 0.0,
+            error_class=exc.__class__.__name__,
+            final=not resend,
+        )
+        return wait
 
 
 # How often a cell waiting on the machine looks for a free slot.
@@ -418,52 +459,58 @@ class BackendClient:
         payload = self._wire_adapter(query, pipeline_params)
 
         if self._execution != "remote_http":
-            # Declared-mode dispatch: a non-HTTP connector runs in this process via its own arm.
-            # The registry guarantees the arm whenever the mode is ``in_process``.
-            if self._in_process_run is None:
-                raise RuntimeError(f"execution={self._execution!r} but no in_process_run wired")
-            while True:
-                # The provider's admission first: a cell held by its cooldown holds no machine slot
-                # another run could use.
-                machine = (
-                    self._machine_slots.hold()
-                    if self._machine_slots is not None
-                    else contextlib.nullcontext()
-                )
-                async with self.backpressure.send() as ticket, machine:
-                    try:
-                        result = await self._in_process_cell(
-                            self._in_process_run, query, payload, bound=bound, billed=billed
-                        )
-                    except CellThrottledError as exc:
-                        self.backpressure.throttled(ticket, headers=None, body=str(exc))
-                        continue
-                    self.backpressure.eased(ticket)
-                    return result
-
+            return await self._in_process_until_admitted(query, payload, bound=bound, billed=billed)
         if bound is None:
             raise RuntimeError("a remote cell is held whole, so it needs the bound its nodes serve")
-        client = self._get_http()
+        resp = await self._post_until_answered(query, payload, bound=bound, billed=billed)
+        resp.raise_for_status()
+        match_result: dict[str, Any] = resp.json()
+        return match_result
 
-        def _warn(kind: str, *, attempt: int, wait_s: float, **extra: Any) -> None:
-            # Straight to the ledger's own emitter rather than back up through a callback the
-            # caller threads in: the in-process arm above could not be given one, so its retries —
-            # the ones that carry a whole diagnosis — reached no surface at all.
-            emit_backend_warning(
-                kind=kind,
-                attempt=attempt + 1,
-                max_attempts=MAX_SEND_ATTEMPTS,
-                wait_s=float(wait_s),
-                query=query,
-                **extra,
+    async def _in_process_until_admitted(
+        self,
+        query: str,
+        payload: dict[str, Any],
+        *,
+        bound: SendBound | None,
+        billed: CellBilling,
+    ) -> dict[str, Any]:
+        # Declared-mode dispatch: a non-HTTP connector runs in this process via its own arm.
+        # The registry guarantees the arm whenever the mode is ``in_process``.
+        if self._in_process_run is None:
+            raise RuntimeError(f"execution={self._execution!r} but no in_process_run wired")
+        while True:
+            # The provider's admission first: a cell held by its cooldown holds no machine slot
+            # another run could use.
+            machine = (
+                self._machine_slots.hold()
+                if self._machine_slots is not None
+                else contextlib.nullcontext()
             )
+            async with self.backpressure.send() as ticket, machine:
+                try:
+                    result = await self._in_process_cell(
+                        self._in_process_run, query, payload, bound=bound, billed=billed
+                    )
+                except CellThrottledError as exc:
+                    self.backpressure.throttled(ticket, headers=None, body=str(exc))
+                    continue
+                self.backpressure.eased(ticket)
+                return result
 
+    async def _post_until_answered(
+        self,
+        query: str,
+        payload: dict[str, Any],
+        *,
+        bound: SendBound,
+        billed: CellBilling,
+    ) -> httpx.Response:
+        client = self._get_http()
+        sends = _CellSends(query)
         # 429 → the run's backpressure; a connection never made → wait out the outage; a 5xx or a
         # connection broken before any reply → exp backoff (1, 2, 4, 8s); a lost session → one
         # recovery; everything else, a read timeout included, exits.
-        recovered = False
-        attempt = 0
-        down_since: float | None = None
         while True:
             wait: float | None = None
             unreachable: httpx.TransportError | None = None
@@ -479,92 +526,69 @@ class BackendClient:
                         if never_sent(exc):
                             admission.release()
                             unreachable = exc
-                        else:
-                            # Left open, so each broken send stays held at its bound.
-                            resend = connection_broke(exc) and attempt + 1 < MAX_SEND_ATTEMPTS
-                            wait = float(2**attempt) if resend else None
-                            _warn(
-                                "transport_error",
-                                attempt=attempt,
-                                wait_s=wait or 0.0,
-                                error_class=exc.__class__.__name__,
-                                final=not resend,
-                            )
-                            if not resend:
-                                raise
+                        # Left open, so each broken send stays held at its bound.
+                        elif (wait := sends.wait_after_break(exc)) is None:
+                            raise
                     else:
-                        down_since = None
-                        code = resp.status_code
-                        reported = billed(_reply_data(resp))
-                        if reported is not None:
-                            admission.settle(*reported)
-                        elif resp.is_success or may_have_billed(code):
-                            admission.unreported()
-                        else:
-                            admission.release()
-                        if code == 429:
+                        sends.down_since = None
+                        _settle_reply(admission, resp, billed)
+                        if resp.status_code == 429:
                             self.backpressure.throttled(
                                 ticket, headers=resp.headers, body=resp.text
                             )
                             continue
                         if resp.is_success:
                             self.backpressure.eased(ticket)
-                        if 500 <= code < 600 and (refused := _resend_refused(resp)) is not None:
-                            raise CellHaltedError(
-                                f"HTTP {code} {refused}", spent={}, step_timings={}
-                            )
-                        if 500 <= code < 600 and attempt + 1 < MAX_SEND_ATTEMPTS:
-                            wait = float(2**attempt)
-                            logger.warning(
-                                "Backend %d (attempt %d/%d); waiting %.1fs",
-                                code,
-                                attempt + 1,
-                                MAX_SEND_ATTEMPTS,
-                                wait,
-                            )
-                            _warn("server_error", attempt=attempt, wait_s=wait, status_code=code)
-                        elif (
-                            code == 400
-                            and not recovered
-                            and _is_session_error(resp)
-                            and await self._guard.recover(client, self.base_url)
-                        ):
-                            recovered = True
-                            wait = 0.0
+                        wait = await self._resend_wait(client, resp, sends)
             if unreachable is not None:
-                error_class = unreachable.__class__.__name__
-                if down_since is None:
-                    down_since = time.monotonic()
-                    logger.warning(
-                        "Backend unreachable (%s); waiting up to %.0fs for it to answer",
-                        error_class,
-                        BACKEND_OUTAGE_S,
-                    )
-                    _warn(
-                        "transport_error",
-                        attempt=attempt,
-                        wait_s=BACKEND_OUTAGE_S,
-                        error_class=error_class,
-                    )
-                if not await self._reachable_within(down_since):
-                    _warn(
-                        "transport_error",
-                        attempt=attempt,
-                        wait_s=0.0,
-                        error_class=error_class,
-                        final=True,
-                    )
-                    raise unreachable
+                await self._wait_out_outage(unreachable, sends)
                 continue
             if wait is None:
-                break
-            attempt += 1
+                return resp
+            sends.attempt += 1
             if wait:
                 await wait_with_countdown(wait, "backend")
 
-        resp.raise_for_status()
-        match_result: dict[str, Any] = resp.json()
-        return match_result
+    async def _resend_wait(
+        self, client: httpx.AsyncClient, resp: httpx.Response, sends: _CellSends
+    ) -> float | None:
+        wait: float | None = None
+        code = resp.status_code
+        if 500 <= code < 600 and (refused := _resend_refused(resp)) is not None:
+            raise CellHaltedError(f"HTTP {code} {refused}", spent={}, step_timings={})
+        if 500 <= code < 600 and sends.attempt + 1 < MAX_SEND_ATTEMPTS:
+            wait = float(2**sends.attempt)
+            logger.warning(
+                "Backend %d (attempt %d/%d); waiting %.1fs",
+                code,
+                sends.attempt + 1,
+                MAX_SEND_ATTEMPTS,
+                wait,
+            )
+            sends.warn("server_error", wait_s=wait, status_code=code)
+        elif (
+            code == 400
+            and not sends.recovered
+            and _is_session_error(resp)
+            and await self._guard.recover(client, self.base_url)
+        ):
+            sends.recovered = True
+            wait = 0.0
+        return wait
+
+    async def _wait_out_outage(self, unreachable: httpx.TransportError, sends: _CellSends) -> None:
+        error_class = unreachable.__class__.__name__
+        if sends.down_since is None:
+            sends.down_since = time.monotonic()
+            logger.warning(
+                "Backend unreachable (%s); waiting up to %.0fs for it to answer",
+                error_class,
+                BACKEND_OUTAGE_S,
+            )
+            sends.warn("transport_error", wait_s=BACKEND_OUTAGE_S, error_class=error_class)
+        if not await self._reachable_within(sends.down_since):
+            sends.warn("transport_error", wait_s=0.0, error_class=error_class, final=True)
+            raise unreachable
 
     async def _in_process_cell(
         self,

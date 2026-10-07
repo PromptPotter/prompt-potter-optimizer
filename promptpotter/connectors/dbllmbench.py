@@ -16,7 +16,6 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
 import shutil
 import tempfile
 import time
@@ -28,9 +27,9 @@ import yaml
 
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import Connector, InProcessWorkload, NoopSession
-from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import LLMSpendBound
+from promptpotter.infrastructure.docker_host import docker, docker_server_version
 from promptpotter.infrastructure.llm.registry import openai_compat_spec
 from promptpotter.shared.errors import (
     CellInfrastructureError,
@@ -411,41 +410,10 @@ def _outcome_note(first: list[dict[str, Any]]) -> str | None:
     return None
 
 
-async def _docker(
-    *args: str, env: Mapping[str, str] | None = None, timeout: float
-) -> tuple[int, str]:
-    proc = await asyncio.create_subprocess_exec(
-        "docker",
-        *args,
-        stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-        env={**os.environ, **env} if env else None,
-    )
-    try:
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except TimeoutError:
-        proc.kill()
-        await proc.wait()
-        raise TimeoutError(
-            f"`docker {' '.join(args[:2])}` did not answer in {timeout:.0f}s"
-        ) from None
-    return proc.returncode or 0, (out or b"").decode(errors="replace").strip()
-
-
 async def _preflight(backend_url: str) -> None:
-    """A container runtime must answer before a campaign starts spending. The image and the
-    database are checked by the first cell — the harness validates both before it calls a model."""
-    try:
-        code, out = await _docker("version", "--format", "{{.Server.Version}}", timeout=30)
-    except (OSError, TimeoutError) as exc:
-        raise BackendUnreachableError(
-            "dbllmbench", backend_url, f"docker not callable: {exc}"
-        ) from exc
-    if code != 0:
-        raise BackendUnreachableError(
-            "dbllmbench", backend_url, f"docker daemon not responding: {out[:200]}"
-        )
+    """The image and the database are checked by the first cell — the harness validates both
+    before it calls a model."""
+    await docker_server_version("dbllmbench", backend_url)
 
 
 async def _check_image(image: str) -> None:
@@ -455,7 +423,7 @@ async def _check_image(image: str) -> None:
     if image in _IMAGES_CHECKED:
         return
     try:
-        code, out = await _docker(
+        code, out = await docker(
             "image", "inspect", "--format", f'{{{{index .Config.Labels "{_COMMIT_LABEL}"}}}}',
             image, timeout=30,
         )  # fmt: skip
@@ -543,14 +511,14 @@ async def _in_process_run(
             args += ["-e", key]
         args += ["-v", f"{work}:{_WORK}", str(image), "sh", "-c", cut]
         try:
-            code, log = await _docker(*args, env=env, timeout=_CELL_TIMEOUT_S)
+            code, log = await docker(*args, env=env, timeout=_CELL_TIMEOUT_S)
         except asyncio.CancelledError:
             # The docker CLI was only attached: left alone, the container goes on calling the
             # provider for a cell nobody will read.
-            await asyncio.shield(_docker("kill", name, timeout=30))
+            await asyncio.shield(docker("kill", name, timeout=30))
             raise
         except TimeoutError as exc:
-            await _docker("kill", name, timeout=30)
+            await docker("kill", name, timeout=30)
             raise CellInfrastructureError(
                 f"dbllmbench question {query[:80]!r}: {exc}",
                 spent={},

@@ -84,6 +84,14 @@ def _budget_refusal(category: ErrorCategory | None) -> StopReason | None:
     return stop if stop in _BUDGET_STOPS else None
 
 
+def _budget_stop(stop: BaseException) -> StopReason | None:
+    if isinstance(stop, StopLoop) and stop.reason in _BUDGET_STOPS:
+        return stop.reason
+    if isinstance(stop, SendRefusedError):
+        return _budget_refusal(stop.category)
+    return None
+
+
 def _dearest(bounds: Sequence[SendBound | None]) -> SendBound | None:
     """The bound every cell of a phase is counted at: the largest any of its walks may send, and
     unbounded where any is. ``None`` where no cell is held whole (``Connector.holds_own_sends``)."""
@@ -736,64 +744,158 @@ async def run_walks(
     (``Connector.cancel_stops_billing``). Elsewhere the backend finishes it and the provider bills
     it whether or not anyone waits, so it is left to land, counted against the depth, before the
     phase ends — or stops, where what it returns is banked."""
-    gauge = session.flight
-    draining: set[asyncio.Future[Any]] = set()
-    announced: set[int] = set()
-    decided: set[int] = set()
-    turn = -1
-    block = 0
-    cancels = session.backend_client.cancel_stops_billing
-    book = bound_spend_book()
-    label = filed(CELL)
-    # A pass the book's ceilings do not meter — a bench pass on a controlled arm — is neither
-    # admitted against them nor stopped by them.
-    unbounded = book is not None and not book.binds(label.kind)
-    cell = _dearest(
+    phase = _ScoringPhase(walks, session, backfills, blocks, on_turn, on_decided)
+    phase.cell = _dearest(
         [
             await cell_bound(session, walk.ctx.search_point.pipeline_params or {})
             for walk in walks
             if walk is not None
         ]
     )
+    if phase.gauge is not None:
+        phase.gauge.open(phase.reading)
+    try:
+        walking_on = phase.first_turn()
+        while walking_on:
+            walking_on = await phase.step()
+        if not phase.cancels:
+            await phase.land()
+        return None
+    except BaseException as stop:
+        budget = _budget_stop(stop)
+        # A pause or a spent ceiling first waits out the calls already sent, which bill anyway; an
+        # unreachable backend or a provider's refusal lands nothing more, and a cancellation aimed
+        # at this phase is answered at once.
+        if not phase.cancels and (isinstance(stop, KeyboardInterrupt) or budget is not None):
+            await phase.land()
+        phase.bank()
+        if budget is None or not keep_cut:
+            raise
+        phase.keep_cut()
+        return budget
+    finally:
+        # Not awaited — an `await` here can swallow a CancelledError aimed at this coroutine, and
+        # answering a cancellation with a normal return tells the canceller it succeeded while the
+        # work runs on: the L4 cell wall clock is enforced only if the CancelledError comes back.
+        phase.discard()
 
-    def affordable() -> int:
+
+@dataclass(frozen=True)
+class _TurnState:
+    """Where the walk on turn stands at one step, and which stop is asked of it."""
+
+    head: asyncio.Task[_Acquired] | None
+    settle: Sample | None
+    settled: bool
+    cut: bool
+    skip: bool
+    pause: bool
+    tripped: StopReason | None
+    keeping: bool
+
+    @property
+    def stopping(self) -> bool:
+        return self.skip or self.pause or self.tripped is not None
+
+
+@dataclass
+class _ScoringPhase:
+    """What the steps of one :func:`run_walks` call share: whose turn it is and every call out."""
+
+    walks: Sequence[Walk | None]
+    session: Session
+    backfills: CatchUps | None
+    blocks: BlockRace | None
+    on_turn: Callable[[int, int | None], None] | None
+    on_decided: Callable[[int], None] | None
+    cell: SendBound | None = None
+    turn: int = -1
+    block: int = 0
+    draining: set[asyncio.Future[Any]] = field(default_factory=set)
+    announced: set[int] = field(default_factory=set)
+    decided: set[int] = field(default_factory=set)
+
+    def __post_init__(self) -> None:
+        self.gauge = self.session.flight
+        self.cancels = self.session.backend_client.cancel_stops_billing
+        self.book = bound_spend_book()
+        self.label = filed(CELL)
+        # A pass the book's ceilings do not meter — a bench pass on a controlled arm — is neither
+        # admitted against them nor stopped by them.
+        self.unbounded = self.book is not None and not self.book.binds(self.label.kind)
+
+    def affordable(self) -> int:
         # At the book's own price for a cell, and every call out counted at it here rather than
         # read back off the book: a cell launched this step has not placed its own hold yet.
-        if book is None or cell is None or unbounded:
+        book, cell, label = self.book, self.cell, self.label
+        if book is None or cell is None or self.unbounded:
             return sys.maxsize
-        return book.fits(book.held_at(label, cell), cell, beside=label.kind) - out()
+        return book.fits(book.held_at(label, cell), cell, beside=label.kind) - self.out()
 
-    def live() -> list[Walk]:
-        return [walk for walk in walks if walk is not None and walk.outcome is None]
+    def live(self) -> list[Walk]:
+        return [walk for walk in self.walks if walk is not None and walk.outcome is None]
 
-    def out() -> int:
-        cells = sum(len(walk.running) for walk in live())
-        catching = len(backfills.backfills_in_flight()) if backfills is not None else 0
-        return cells + len(draining) + catching
+    def out(self) -> int:
+        cells = sum(len(walk.running) for walk in self.live())
+        catching = len(self.backfills.backfills_in_flight()) if self.backfills is not None else 0
+        return cells + len(self.draining) + catching
 
-    def reach(walk: Walk) -> None:
-        if blocks is not None:
-            walk.boundary = min(walk.n, (block + 1) * blocks.block_size)
+    def outstanding(self) -> set[asyncio.Future[Any]]:
+        calls = {call for call in self.draining if not call.done()}
+        for walking in self.live():
+            calls.update(walking.running.values())
+        if self.backfills is not None:
+            calls.update(self.backfills.backfills_in_flight())
+        return calls
 
-    def announce(i: int) -> None:
-        announced.add(i)
-        if on_turn is not None:
-            on_turn(i, None if blocks is None else block)
+    def reach(self, walk: Walk) -> None:
+        if self.blocks is not None:
+            walk.boundary = min(walk.n, (self.block + 1) * self.blocks.block_size)
 
-    def conclude(i: int) -> None:
-        decided.add(i)
-        if on_decided is not None:
-            on_decided(i)
+    def announce(self, i: int) -> None:
+        self.announced.add(i)
+        if self.on_turn is not None:
+            self.on_turn(i, None if self.blocks is None else self.block)
 
-    def close() -> bool:
+    def conclude(self, i: int) -> None:
+        self.decided.add(i)
+        if self.on_decided is not None:
+            self.on_decided(i)
+
+    def first_turn(self) -> bool:
+        for opened in self.live():
+            self.reach(opened)
+        return self.advance()
+
+    def advance(self) -> bool:
+        while True:
+            self.turn += 1
+            if self.turn >= len(self.walks):
+                if self.blocks is None or not self.close_block():
+                    return False
+                self.turn = 0
+            walk = self.walks[self.turn]
+            # A block race turns every live walk once per block; a decided one had its last turn.
+            if (walk is None and self.block > 0) or (walk is not None and walk.outcome is not None):
+                continue
+            self.announce(self.turn)
+            if walk is not None:
+                walk.release()
+                if walk.dataset:
+                    return True
+                walk.end(QueryLoopResult([]), cancel=self.cancels)
+            self.conclude(self.turn)
+
+    def close_block(self) -> bool:
         """Every live walk took the block: the race decides them together, and a walk through its
         whole panel completes. False once no walk is left."""
-        nonlocal block
-        assert blocks is not None
+        assert self.blocks is not None
         racing = {
-            i: walk for i, walk in enumerate(walks) if walk is not None and walk.outcome is None
+            i: walk
+            for i, walk in enumerate(self.walks)
+            if walk is not None and walk.outcome is None
         }
-        stops = blocks.close({i: walk.results for i, walk in racing.items()}) if racing else {}
+        stops = self.blocks.close({i: walk.results for i, walk in racing.items()}) if racing else {}
         for i, walk in racing.items():
             if (signal := stops.get(i)) is not None:
                 verdict = QueryLoopResult(
@@ -803,49 +905,139 @@ async def run_walks(
                 verdict = QueryLoopResult(walk.results)
             else:
                 continue
-            draining.update(walk.end(verdict, cancel=cancels))
-            conclude(i)
-        block += 1
-        for walk in live():
-            reach(walk)
-        return bool(live())
+            self.draining.update(walk.end(verdict, cancel=self.cancels))
+            self.conclude(i)
+        self.block += 1
+        for walk in self.live():
+            self.reach(walk)
+        return bool(self.live())
 
-    def advance() -> bool:
-        nonlocal turn
-        while True:
-            turn += 1
-            if turn >= len(walks):
-                if blocks is None or not close():
-                    return False
-                turn = 0
-            walk = walks[turn]
-            # A block race turns every live walk once per block; a decided one had its last turn.
-            if (walk is None and block > 0) or (walk is not None and walk.outcome is not None):
-                continue
-            announce(turn)
-            if walk is not None:
-                walk.release()
-                if walk.dataset:
-                    return True
-                walk.end(QueryLoopResult([]), cancel=cancels)
-            conclude(turn)
+    async def step(self) -> bool:
+        """One step of the walk on turn: honour a stop, else take what is back, else launch and
+        wait. False once no walk is left."""
+        walk = self.walks[self.turn]
+        assert walk is not None
+        if self.gauge is not None:
+            self.gauge.touch()
+        armed = _armed_cells(self.session)
+        if walk.skip_at is not None and len(walk.results) >= walk.skip_at:
+            logger.info("Replaying an operator skip after query %d/%d.", walk.skip_at, walk.n)
+            return self.decide(walk, QueryLoopResult(walk.results, ended_on=WalkEnd.SKIP))
+        now = self.turn_state(walk)
+        if now.stopping and (now.cut or not now.keeping):
+            return self.honour_stop(walk, now)
+        if now.settled and now.settle is not None and self.backfills is not None:
+            walk.settling = None
+            self.backfills.commit_backfills(now.settle)
+            return self.judged(walk)
+        if now.head is not None:
+            return self.take_head(walk, now.head)
+        # Re-read every step, so a press landing mid-walk TOPS THE WINDOW UP rather than waiting
+        # for it to drain. Nothing is spent here: the round that scored under the depth spends
+        # it (`runner/measurement.py`).
+        if not now.stopping:
+            self.launch(walk, armed)
+        await self.wait(walk)
+        return True
 
-    def decide(walk: Walk, verdict: QueryLoopResult) -> bool:
-        draining.update(walk.end(verdict, cancel=cancels))
-        conclude(turn)
-        return advance()
+    def turn_state(self, walk: Walk) -> _TurnState:
+        session, backfills = self.session, self.backfills
+        head = walk.head()
+        settle = walk.settling
+        started: list[asyncio.Future[Any]] = []
+        unstarted = 0
+        if settle is not None and backfills is not None:
+            started = backfills.backfills_for(settle)
+            unstarted = backfills.owed_backfills(settle)
+        cut = (head is not None and head.cancelled()) or any(c.cancelled() for c in started)
+        # Answered only by the walk whose turn it is — the skip names the candidate on screen —
+        # so nothing measuring for it can spend the press. A cancelled call is the pause's own
+        # doing: the throttle wait polls the same flag.
+        skip = bool(session.skip_check and session.skip_check())
+        pause = cut or pause_requested(session)
+        # Same cadence as the pause, because the round-boundary gate cannot fire until the round
+        # closes — and for an L4 outer round every sample is an entire inner CAMPAIGN.
+        tripped = session.budget_tripped() if session.budget_tripped is not None else None
+        if self.unbounded or walk.rereads_ahead(len(walk.results)):
+            tripped = None
+        return _TurnState(
+            head=head,
+            settle=settle,
+            settled=settle is not None and unstarted == 0 and all(c.done() for c in started),
+            cut=cut,
+            skip=skip,
+            pause=pause,
+            tripped=tripped,
+            # A returned cell, or a catch-up already started, is paid for — kept before a stop is
+            # honoured, so the stop lands a row later, as if pressed a moment later. Keeping starts
+            # nothing: while a stop waits, only what is already out is waited on.
+            keeping=(settle is not None and unstarted == 0) or head is not None,
+        )
 
-    def judged(walk: Walk) -> bool:
+    def honour_stop(self, walk: Walk, now: _TurnState) -> bool:
+        if now.skip:
+            if self.session.skip_consume:
+                self.session.skip_consume()
+            logger.info(
+                "Operator skip after query %d/%d; accepting partial searchpoint.",
+                len(walk.results),
+                walk.n,
+            )
+            return self.decide(walk, QueryLoopResult(walk.results, ended_on=WalkEnd.SKIP))
+        if now.pause or now.tripped is None:
+            # Between samples, where every TAKEN result is already on disk, so this exits
+            # cleanly and `resume` continues into the remaining samples.
+            logger.debug("Pause after query %d/%d.", len(walk.results), walk.n)
+            raise KeyboardInterrupt("graceful")
+        logger.warning(
+            "Budget ceiling reached after query %d/%d (%s); halting mid-round.",
+            len(walk.results),
+            walk.n,
+            now.tripped.value,
+        )
+        raise StopLoop(now.tripped)
+
+    def take_head(self, walk: Walk, head: asyncio.Task[_Acquired]) -> bool:
+        backfills = self.backfills
+        sample = walk.dataset[len(walk.results)]
+        if (verdict := walk.take(head)) is not None:
+            return self.decide(walk, verdict)
+        if backfills is not None and (
+            backfills.owed_backfills(sample) or backfills.backfills_for(sample)
+        ):
+            walk.settling = sample
+            return True
+        return self.judged(walk)
+
+    def decide(self, walk: Walk, verdict: QueryLoopResult) -> bool:
+        self.draining.update(walk.end(verdict, cancel=self.cancels))
+        self.conclude(self.turn)
+        return self.advance()
+
+    def judged(self, walk: Walk) -> bool:
         """Decide the walk on turn where its rules say so, or hand the turn on at a block's end.
         False once no walk is left."""
         if (verdict := walk.judge()) is not None:
-            return decide(walk, verdict)
+            return self.decide(walk, verdict)
         if walk.boundary is not None and len(walk.results) == walk.boundary:
-            return advance()
+            return self.advance()
         return True
 
-    def fill(walk: Walk, cap: int, armed: int) -> None:
-        room = min(cap - out(), max(affordable(), walk.rereads_ahead(walk.submitted)))
+    def launch(self, walk: Walk, armed: int) -> None:
+        if self.backfills is not None:
+            room = min(armed - self.out(), self.affordable())
+            owing = [walk.settling] if walk.settling is not None else []
+            owing += [walk.dataset[idx] for idx in sorted(walk.finished)]
+            for sample in owing:
+                room -= len(self.backfills.start_backfill(sample, room))
+        self.fill(walk, armed, armed)
+        for ahead in self.live():
+            if ahead is not walk:
+                self.fill(ahead, armed - 1, armed)
+
+    def fill(self, walk: Walk, cap: int, armed: int) -> None:
+        backfills = self.backfills
+        room = min(cap - self.out(), max(self.affordable(), walk.rereads_ahead(walk.submitted)))
         last = min(walk.n if walk.skip_at is None else walk.skip_at, walk.submitted + room) - 1
         if walk.boundary is not None:
             # One cell past a pending close at most, whatever the rules allow.
@@ -859,12 +1051,77 @@ async def run_walks(
             sample, _cell = walk.launch(armed, horizon)
             room -= 1
             if backfills is not None:
-                room -= len(backfills.start_backfill(sample, min(room, affordable())))
+                room -= len(backfills.start_backfill(sample, min(room, self.affordable())))
 
-    def reading() -> Flight:
-        walking = live()
+    async def wait(self, walk: Walk) -> None:
+        book, cell, label = self.book, self.cell, self.label
+        calls = self.outstanding()
+        if not calls:
+            if book is not None and cell is not None and self.affordable() == 0:
+                logger.warning(
+                    "The spend book holds no further cell after query %d/%d; halting mid-round.",
+                    len(walk.results),
+                    walk.n,
+                )
+                # Refused with the ceiling that binds, and the sums that say why.
+                book.hold(book.held_at(label, cell), cell, label.kind, what="the next cell")
+            raise RuntimeError(
+                f"scoring phase stalled: nothing out and nothing to take at query "
+                f"{len(walk.results)}/{walk.n}"
+            )
+        await asyncio.wait(calls, return_when=asyncio.FIRST_COMPLETED)
+        for walking in self.live():
+            walking.collect()
+        self.draining.difference_update([call for call in self.draining if call.done()])
+
+    async def land(self) -> None:
+        """Wait out every call already sent, starting none, so each one's cost is on the record."""
+        for walking in self.live():
+            walking.drop_claim_waits()
+        if calls := self.outstanding():
+            if self.gauge is not None:
+                self.gauge.touch()
+            await asyncio.wait(calls)
+        for walking in self.live():
+            walking.collect()
+        self.draining.clear()
+
+    def bank(self) -> None:
+        # The phase stops rather than decides, so its walks resume later: keep what came back that
+        # each was sure to take, and the catch-ups paired with those cells or with one it took.
+        for walk in self.live():
+            with graceful("Could not bank a stopped walk's returned cells"):
+                sure = walk.bank()
+                if self.backfills is not None:
+                    self.backfills.bank_backfills(
+                        [*sure, walk.settling] if walk.settling is not None else sure
+                    )
+
+    def keep_cut(self) -> None:
+        for i, walk in enumerate(self.walks):
+            if i in self.decided:
+                continue
+            if i not in self.announced:
+                self.announce(i)
+            if walk is not None:
+                # The cell the ceiling refused was taken as a row before it stopped the phase.
+                kept = [row for row in walk.results if _budget_refusal(error_category(row)) is None]
+                walk.end(QueryLoopResult(kept, ended_on=WalkEnd.BUDGET), cancel=True)
+            self.conclude(i)
+
+    def discard(self) -> None:
+        for walk in self.live():
+            walk.end(None, cancel=True)
+        if self.backfills is not None:
+            self.backfills.discard_backfills()
+        if self.gauge is not None:
+            self.gauge.close()
+
+    def reading(self) -> Flight:
+        backfills, book, cell, label = self.backfills, self.book, self.cell, self.label
+        walking = self.live()
         parts = [walk.flight() for walk in walking]
-        winding = sum(1 for call in draining if not call.done())
+        winding = sum(1 for call in self.draining if not call.done())
         out_now = sum(p.out for p in parts) + winding
         allowed = sum(p.allowed for p in parts) + winding
         most = sum(p.most for p in parts) + winding
@@ -877,7 +1134,7 @@ async def run_walks(
             allowed += catching + sum(k for sid, k in owed.items() if sid in launched)
             most += catching + sum(owed.values())
         waiting = None
-        if 0 <= turn < len(walks) and (holder := walks[turn]) is not None:
+        if 0 <= self.turn < len(self.walks) and (holder := self.walks[self.turn]) is not None:
             if holder.settling is not None:
                 taken = len(holder.results) - 1
                 waiting = (holder.settling.id, holder.launched_at[taken])
@@ -888,204 +1145,15 @@ async def run_walks(
             allowed,
             most,
             waiting,
-            session.backend_client.backpressure.reading(),
-            affordable=None if book is None or cell is None or unbounded else max(0, affordable()),
+            self.session.backend_client.backpressure.reading(),
+            affordable=(
+                None
+                if book is None or cell is None or self.unbounded
+                else max(0, self.affordable())
+            ),
             cell_usd=(
                 None
                 if book is None or cell is None
                 else book.binding(book.held_at(label, cell), cell, beside=label.kind).usd
             ),
         )
-
-    def outstanding() -> set[asyncio.Future[Any]]:
-        calls = {call for call in draining if not call.done()}
-        for walking in live():
-            calls.update(walking.running.values())
-        if backfills is not None:
-            calls.update(backfills.backfills_in_flight())
-        return calls
-
-    async def land() -> None:
-        """Wait out every call already sent, starting none, so each one's cost is on the record."""
-        for walking in live():
-            walking.drop_claim_waits()
-        if calls := outstanding():
-            if gauge is not None:
-                gauge.touch()
-            await asyncio.wait(calls)
-        for walking in live():
-            walking.collect()
-        draining.clear()
-
-    if gauge is not None:
-        gauge.open(reading)
-    try:
-        for opened in live():
-            reach(opened)
-        walking_on = advance()
-        while walking_on:
-            walk = walks[turn]
-            assert walk is not None
-            if gauge is not None:
-                gauge.touch()
-            armed = _armed_cells(session)
-            if walk.skip_at is not None and len(walk.results) >= walk.skip_at:
-                logger.info("Replaying an operator skip after query %d/%d.", walk.skip_at, walk.n)
-                skipped = QueryLoopResult(walk.results, ended_on=WalkEnd.SKIP)
-                if not decide(walk, skipped):
-                    break
-                continue
-            head = walk.head()
-            settle = walk.settling
-            started: list[asyncio.Future[Any]] = []
-            unstarted = 0
-            if settle is not None and backfills is not None:
-                started = backfills.backfills_for(settle)
-                unstarted = backfills.owed_backfills(settle)
-            settled = settle is not None and unstarted == 0 and all(c.done() for c in started)
-            cut = (head is not None and head.cancelled()) or any(c.cancelled() for c in started)
-            # Answered only by the walk whose turn it is — the skip names the candidate on screen —
-            # so nothing measuring for it can spend the press. A cancelled call is the pause's own
-            # doing: the throttle wait polls the same flag.
-            skip = bool(session.skip_check and session.skip_check())
-            pause = cut or pause_requested(session)
-            # Same cadence as the pause, because the round-boundary gate cannot fire until the round
-            # closes — and for an L4 outer round every sample is an entire inner CAMPAIGN.
-            tripped = session.budget_tripped() if session.budget_tripped is not None else None
-            if unbounded or walk.rereads_ahead(len(walk.results)):
-                tripped = None
-            stopping = skip or pause or tripped is not None
-            # A returned cell, or a catch-up already started, is paid for — kept before a stop is
-            # honoured, so the stop lands a row later, as if pressed a moment later. Keeping starts
-            # nothing: while a stop waits, only what is already out is waited on.
-            keeping = (settle is not None and unstarted == 0) or head is not None
-            if stopping and (cut or not keeping):
-                if skip:
-                    if session.skip_consume:
-                        session.skip_consume()
-                    logger.info(
-                        "Operator skip after query %d/%d; accepting partial searchpoint.",
-                        len(walk.results),
-                        walk.n,
-                    )
-                    skipped = QueryLoopResult(walk.results, ended_on=WalkEnd.SKIP)
-                    if not decide(walk, skipped):
-                        break
-                    continue
-                if pause or tripped is None:
-                    # Between samples, where every TAKEN result is already on disk, so this exits
-                    # cleanly and `resume` continues into the remaining samples.
-                    logger.debug("Pause after query %d/%d.", len(walk.results), walk.n)
-                    raise KeyboardInterrupt("graceful")
-                logger.warning(
-                    "Budget ceiling reached after query %d/%d (%s); halting mid-round.",
-                    len(walk.results),
-                    walk.n,
-                    tripped.value,
-                )
-                raise StopLoop(tripped)
-            if settled and settle is not None and backfills is not None:
-                walk.settling = None
-                backfills.commit_backfills(settle)
-                if not judged(walk):
-                    break
-                continue
-            if head is not None:
-                sample = walk.dataset[len(walk.results)]
-                if (verdict := walk.take(head)) is not None:
-                    if not decide(walk, verdict):
-                        break
-                    continue
-                if backfills is not None and (
-                    backfills.owed_backfills(sample) or backfills.backfills_for(sample)
-                ):
-                    walk.settling = sample
-                    continue
-                if not judged(walk):
-                    break
-                continue
-
-            # Re-read every step, so a press landing mid-walk TOPS THE WINDOW UP rather than waiting
-            # for it to drain. Nothing is spent here: the round that scored under the depth spends
-            # it (`runner/measurement.py`).
-            if not stopping:
-                if backfills is not None:
-                    room = min(armed - out(), affordable())
-                    owing = [walk.settling] if walk.settling is not None else []
-                    owing += [walk.dataset[idx] for idx in sorted(walk.finished)]
-                    for sample in owing:
-                        room -= len(backfills.start_backfill(sample, room))
-                fill(walk, armed, armed)
-                for ahead in live():
-                    if ahead is not walk:
-                        fill(ahead, armed - 1, armed)
-
-            calls: set[asyncio.Future[Any]] = {*draining}
-            for walking in live():
-                calls.update(walking.running.values())
-            if backfills is not None:
-                calls.update(backfills.backfills_in_flight())
-            if not calls:
-                if book is not None and cell is not None and affordable() == 0:
-                    logger.warning(
-                        "The spend book holds no further cell after query %d/%d; halting "
-                        "mid-round.",
-                        len(walk.results),
-                        walk.n,
-                    )
-                    # Refused with the ceiling that binds, and the sums that say why.
-                    book.hold(book.held_at(label, cell), cell, label.kind, what="the next cell")
-                raise RuntimeError(
-                    f"scoring phase stalled: nothing out and nothing to take at query "
-                    f"{len(walk.results)}/{walk.n}"
-                )
-            await asyncio.wait(calls, return_when=asyncio.FIRST_COMPLETED)
-            for walking in live():
-                walking.collect()
-            draining.difference_update([call for call in draining if call.done()])
-        if not cancels:
-            await land()
-        return None
-    except BaseException as stop:
-        budget: StopReason | None = None
-        if isinstance(stop, StopLoop) and stop.reason in _BUDGET_STOPS:
-            budget = stop.reason
-        elif isinstance(stop, SendRefusedError):
-            budget = _budget_refusal(stop.category)
-        # A pause or a spent ceiling first waits out the calls already sent, which bill anyway; an
-        # unreachable backend or a provider's refusal lands nothing more, and a cancellation aimed
-        # at this phase is answered at once.
-        if not cancels and (isinstance(stop, KeyboardInterrupt) or budget is not None):
-            await land()
-        # The phase stops rather than decides, so its walks resume later: keep what came back that
-        # each was sure to take, and the catch-ups paired with those cells or with one it took.
-        for walk in live():
-            with graceful("Could not bank a stopped walk's returned cells"):
-                sure = walk.bank()
-                if backfills is not None:
-                    backfills.bank_backfills(
-                        [*sure, walk.settling] if walk.settling is not None else sure
-                    )
-        if budget is None or not keep_cut:
-            raise
-        for i, walk in enumerate(walks):
-            if i in decided:
-                continue
-            if i not in announced:
-                announce(i)
-            if walk is not None:
-                # The cell the ceiling refused was taken as a row before it stopped the phase.
-                kept = [row for row in walk.results if _budget_refusal(error_category(row)) is None]
-                walk.end(QueryLoopResult(kept, ended_on=WalkEnd.BUDGET), cancel=True)
-            conclude(i)
-        return budget
-    finally:
-        # Not awaited — an `await` here can swallow a CancelledError aimed at this coroutine, and
-        # answering a cancellation with a normal return tells the canceller it succeeded while the
-        # work runs on: the L4 cell wall clock is enforced only if the CancelledError comes back.
-        for walk in live():
-            walk.end(None, cancel=True)
-        if backfills is not None:
-            backfills.discard_backfills()
-        if gauge is not None:
-            gauge.close()

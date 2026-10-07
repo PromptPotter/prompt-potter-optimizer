@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
@@ -148,6 +149,41 @@ def _validation_summary(err: ValidationError, content: str, finish_reason: str |
     return f"finish={finish_reason} || {broke} || emitted: {truncate(content, 1500)}"
 
 
+@dataclass(frozen=True)
+class _ParsedReply:
+    response: ChatCompletion
+    content: str
+    parsed: Any
+    # The failed first attempt still burned tokens; carry them so the returned usage
+    # counts BOTH round-trips, as each one's own usage record already did. Zero unless a
+    # repair fires.
+    first: TokenAccount = field(default_factory=TokenAccount)
+    first_cost: float | None = None
+    repair_errors: list[str] = field(default_factory=list)
+
+
+def _llm_response(landed: _ParsedReply) -> LLMResponse:
+    response = landed.response
+    billed = reply_usage(response) + landed.first
+    # ``reasoning_tokens`` is a SUBSET of ``completion_tokens`` (thinking is billed as output),
+    # not a fourth total; it rides the success path too, where the share is worth reporting.
+    return LLMResponse(
+        content=landed.content,
+        reasoning=(
+            (getattr(response.choices[0].message, "reasoning", None) or "")
+            if response.choices
+            else ""
+        ),
+        model=response.model,
+        usage=billed,
+        cost_usd=_billed_cost(landed.first_cost, reply_cost(response)),
+        served_by=reply_served_by(response),
+        finish_reason=_finish_reason(response),
+        parsed=landed.parsed,
+        schema_repair_errors=landed.repair_errors,
+    )
+
+
 class OpenAICompatibleClient(LLMClientBase):
     def __init__(
         self,
@@ -205,7 +241,55 @@ class OpenAICompatibleClient(LLMClientBase):
         **kwargs: Any,
     ) -> LLMResponse:
         client = self._ensure_client()
+        request_params = await self._request_params(
+            messages,
+            model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_model=response_model,
+            response_schema=response_schema,
+            reasoning_effort=reasoning_effort,
+            top_p=top_p,
+            seed=seed,
+            route_order=route_order,
+            kwargs=kwargs,
+        )
+        result = await self._one_attempt(
+            client, request_params, response_model, response_schema, label
+        )
+        if isinstance(result, LLMResponse):
+            # Groq json_validate_failed salvage — already typed.
+            return result
+        response, content, validation_err, parsed = result
+        if validation_err is None:
+            return _llm_response(_ParsedReply(response, content, parsed))
+        landed = await self._climb_retry_ladder(
+            client,
+            request_params,
+            response_model,
+            response_schema,
+            label,
+            response,
+            content,
+            validation_err,
+        )
+        return landed if isinstance(landed, LLMResponse) else _llm_response(landed)
 
+    async def _request_params(
+        self,
+        messages: list[dict[str, str]],
+        model: str,
+        *,
+        temperature: float,
+        max_tokens: int | None,
+        response_model: type[BaseModel] | None,
+        response_schema: dict[str, Any] | None,
+        reasoning_effort: str | None,
+        top_p: float | None,
+        seed: int | None,
+        route_order: list[str] | None,
+        kwargs: dict[str, Any],
+    ) -> dict[str, Any]:
         request_params: dict[str, Any] = {
             "model": model,
             "messages": messages,
@@ -225,6 +309,35 @@ class OpenAICompatibleClient(LLMClientBase):
             request_params["seed"] = seed
         if top_p is not None:
             request_params["top_p"] = top_p
+        extra_body = await self._extra_body(model, route_order)
+        if extra_body:
+            request_params["extra_body"] = extra_body
+
+        wire_schema = response_schema or (
+            response_model.model_json_schema() if response_model else None
+        )
+        if wire_schema is not None:
+            # The schema is serialized into the INPUT, so every key is prompt text: Pydantic's
+            # auto-emitted `title`s are stripped here, the one seam every schema crosses.
+            wire_schema = cast("dict[str, Any]", _strip_titles(wire_schema))
+            request_params["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": (response_model.__name__ if response_model else "response_schema"),
+                    "schema": wire_schema,
+                    "strict": False,
+                },
+            }
+
+        # `extra_body` MERGES; everything else overrides: replacing it would drop `usage` (every
+        # ledger row's price) and `provider` (the route pin a prefix cache depends on).
+        if caller_extra := kwargs.pop("extra_body", None):
+            merged = {**extra_body, **caller_extra}
+            request_params["extra_body"] = merged
+        request_params.update(kwargs)
+        return request_params
+
+    async def _extra_body(self, model: str, route_order: list[str] | None) -> dict[str, Any]:
         # Ask for the cost + cache breakdown rather than hoping it rides along. Via `extra_body`
         # because `create()` takes named params only: a bare `usage=` is a TypeError in the SDK,
         # never a request the provider gets to answer.
@@ -255,217 +368,140 @@ class OpenAICompatibleClient(LLMClientBase):
             route |= {"order": list(route_order), "allow_fallbacks": True}
         if route:
             extra_body["provider"] = route
-        if extra_body:
-            request_params["extra_body"] = extra_body
+        return extra_body
 
-        wire_schema = response_schema or (
-            response_model.model_json_schema() if response_model else None
-        )
-        if wire_schema is not None:
-            # The JSON Schema is serialized into the INPUT, so every key in it is prompt text.
-            # Pydantic auto-emits a `title` per field and per model that no provider needs and
-            # no model learns from — `l1_wire_schema.py::_inline_refs` already strips them, but
-            # only `l1_generate` passes through it, so the other four nodes shipped them on
-            # every call. Stripped once here, at the one seam every schema crosses.
-            wire_schema = cast("dict[str, Any]", _strip_titles(wire_schema))
-            request_params["response_format"] = {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": (response_model.__name__ if response_model else "response_schema"),
-                    "schema": wire_schema,
-                    "strict": False,
-                },
-            }
-
-        # `extra_body` MERGES; everything else overrides. A blind update let a caller passing
-        # `extra_body=` replace the one built above wholesale, silently dropping `usage` (the cost
-        # and cache breakdown every ledger row is priced from) and `provider` (the route pin a
-        # prefix cache depends on) — two facts nothing downstream can tell were never asked for.
-        if caller_extra := kwargs.pop("extra_body", None):
-            merged = {**extra_body, **caller_extra}
-            request_params["extra_body"] = merged
-        request_params.update(kwargs)
-
-        result = await self._one_attempt(
-            client, request_params, response_model, response_schema, label
-        )
-        if isinstance(result, LLMResponse):
-            # Groq json_validate_failed salvage — already typed.
-            return result
-        response, content, validation_err, parsed = result
+    async def _climb_retry_ladder(
+        self,
+        client: AsyncOpenAI,
+        request_params: dict[str, Any],
+        response_model: type[BaseModel] | None,
+        response_schema: dict[str, Any] | None,
+        label: CallLabel,
+        response: ChatCompletion,
+        content: str,
+        rejected: ValidationError,
+    ) -> LLMResponse | _ParsedReply:
+        validation_err: ValidationError | None
+        validation_err = rejected
         repair_errors: list[str] = []
-        # The failed first attempt still burned tokens; carry them so the returned usage
-        # counts BOTH round-trips, as each one's own usage record already did. Zero unless a
-        # repair fires below.
-        first = TokenAccount()
-        first_cost: float | None = None
-        if validation_err is not None:
-            # The FAILING attempt's own account. Captured here because `response` is about
-            # to be rebound to the retry's, and the retry cannot answer why this one was
-            # rejected — `finish_reason="length"` here is the difference between "the
-            # optimizer prompt outgrew max_tokens" and "the provider degraded", which classify
-            # to opposite owners and opposite fixes (`OptimizerPromptParseError.is_empty`).
-            first = reply_usage(response)
-            first_cost = reply_cost(response)
-            first_finish_reason = _finish_reason(response)
-            schema_name = response_model.__name__ if response_model else "<schema>"
-            content_len = len(content.strip())
+        # The FAILING attempt's own account. Captured here because `response` is about
+        # to be rebound to the retry's, and the retry cannot answer why this one was
+        # rejected — `finish_reason="length"` here is the difference between "the
+        # optimizer prompt outgrew max_tokens" and "the provider degraded", which classify
+        # to opposite owners and opposite fixes (`OptimizerPromptParseError.is_empty`).
+        first = reply_usage(response)
+        first_cost = reply_cost(response)
+        first_finish_reason = _finish_reason(response)
+        schema_name = response_model.__name__ if response_model else "<schema>"
+        content_len = len(content.strip())
 
-            # RETRY STRATEGY — chosen from how the first attempt failed, because one
-            # strategy is actively harmful to the other failure mode.
-            #
-            # The schema-repair retry re-sends the original prompt PLUS the entire failed
-            # output PLUS the error text, then asks for the same answer again under an
-            # unchanged `max_tokens`. When the failure was that the answer did not FIT
-            # (truncated at the cap) or that nothing came back at all, that is the one
-            # thing guaranteed not to help: the request grows by the size of the failure
-            # while the budget stays put. Measured: three L1 zero-candidate rounds whose
-            # first attempts returned 27,939 / 32 / 28,778 chars had repairs come back at
-            # 18 / 0 / 0 — the retry was likelier to fail than the call it was repairing.
-            #
-            # So a size- or emptiness-driven failure gets a CLEAN RE-ASK: the same request
-            # with any pinned seed ADVANCED, so it stays a second independent sample at every
-            # temperature above 0 — which both stands a real chance of succeeding AND answers
-            # the question the classifier would otherwise have to guess at. Fails the same way
-            # twice ⇒ a property of the prompt. Fails differently, or succeeds ⇒ the moment,
-            # not the prompt (`.reproduced`).
-            #
-            # Genuine schema-noncompliance — substantial content that parsed but did not
-            # bind — keeps the repair: there, showing the model its own error is the
-            # informative move, and the output is small enough that re-sending it is cheap.
-            clean_reask = first_finish_reason == "length" or content_len < MIN_CONTENT_CHARS
-            cause = (
-                "truncated at max_tokens — the prompt asks for more than the budget carries"
-                if first_finish_reason == "length"
-                else "provider returned empty/truncated content"
-                if content_len < MIN_CONTENT_CHARS
-                else "response is schema-noncompliant"
+        # Ladder by failure kind. Truncated or empty: a clean re-ask alone, because a repair
+        # re-sends the whole failed output under the same `max_tokens` and cannot fit. Noncompliant
+        # but substantial: repair, then a clean re-ask. A repeat failure marks the prompt, a
+        # differing one the moment (`.reproduced`).
+        clean_reask = first_finish_reason == "length" or content_len < MIN_CONTENT_CHARS
+        cause = (
+            "truncated at max_tokens — the prompt asks for more than the budget carries"
+            if first_finish_reason == "length"
+            else "provider returned empty/truncated content"
+            if content_len < MIN_CONTENT_CHARS
+            else "response is schema-noncompliant"
+        )
+        repair_params = {
+            **request_params,
+            "messages": [
+                *request_params["messages"],
+                {"role": "assistant", "content": content},
+                {
+                    "role": "user",
+                    "content": (
+                        "Your previous response failed schema validation. Errors:\n"
+                        f"{truncate(str(validation_err), 600)}\n\n"
+                        "Return ONLY a JSON object that strictly matches the "
+                        "requested schema. No prose, no markdown fences, no "
+                        "extra fields."
+                    ),
+                },
+            ],
+        }
+        # The re-ask is a second independent sample: a pinned seed is ADVANCED, not dropped,
+        # because dropping it takes the rescue off the route the campaign declared.
+        reask_params = dict(request_params)
+        if (pinned_seed := reask_params.get("seed")) is not None:
+            reask_params["seed"] = pinned_seed + 1
+        ladder = (
+            [(RETRY_CLEAN_REASK, reask_params)]
+            if clean_reask
+            else [
+                (RETRY_SCHEMA_REPAIR, repair_params),
+                (RETRY_CLEAN_REASK, reask_params),
+            ]
+        )
+        for attempt_no, (retry_kind, retry_params) in enumerate(ladder, start=1):
+            repair_errors.append(
+                _validation_summary(validation_err, content, _finish_reason(response))
             )
-            repair_params = {
-                **request_params,
-                "messages": [
-                    *request_params["messages"],
-                    {"role": "assistant", "content": content},
-                    {
-                        "role": "user",
-                        "content": (
-                            "Your previous response failed schema validation. Errors:\n"
-                            f"{truncate(str(validation_err), 600)}\n\n"
-                            "Return ONLY a JSON object that strictly matches the "
-                            "requested schema. No prose, no markdown fences, no "
-                            "extra fields."
-                        ),
-                    },
-                ],
-            }
-            # Noncompliance gets the repair AND THEN a clean re-ask, because one failed repair
-            # is not evidence the PROMPT is at fault — and the re-ask is the rung that actually
-            # rescues a flaky provider, by the same independent-sample argument made above. It
-            # also gives this branch a `reproduced` reading, which is what separates a bad
-            # prompt from a bad moment. A size- or emptiness-driven failure still gets the clean
-            # re-ask alone: the repair is the move that cannot help there.
-            # The clamp's pin is ADVANCED rather than dropped: dropping it would take the rescue
-            # measurement off the route the campaign declared, which is the validity the pin buys.
-            reask_params = dict(request_params)
-            if (pinned_seed := reask_params.get("seed")) is not None:
-                reask_params["seed"] = pinned_seed + 1
-            ladder = (
-                [(RETRY_CLEAN_REASK, reask_params)]
-                if clean_reask
-                else [
-                    (RETRY_SCHEMA_REPAIR, repair_params),
-                    (RETRY_CLEAN_REASK, reask_params),
-                ]
+            logger.warning(
+                "%s: %s parse failed (%d errors, %d content chars, finish=%s) on %s — %s. "
+                "Retrying via %s (rung %d of %d; each is a full call). Errors: %s",
+                self._provider_name,
+                schema_name,
+                validation_err.error_count(),
+                content_len,
+                first_finish_reason,
+                request_params.get("model", "?"),
+                cause,
+                retry_kind,
+                attempt_no,
+                len(ladder),
+                truncate(repair_errors[-1], 900),
             )
-            for attempt_no, (retry_kind, retry_params) in enumerate(ladder, start=1):
-                repair_errors.append(
-                    _validation_summary(validation_err, content, _finish_reason(response))
+            result = await self._one_attempt(
+                client, retry_params, response_model, response_schema, label
+            )
+            if isinstance(result, LLMResponse):
+                result.schema_repair_errors = list(repair_errors)
+                # Fold every failed attempt's tokens onto the salvaged response; the account
+                # owns the summing rule, so no field can be forgotten here.
+                result.usage = result.usage + first
+                result.cost_usd = _billed_cost(first_cost, result.cost_usd)
+                return result
+            response, content, validation_err, parsed = result
+            if validation_err is None:
+                break
+            if attempt_no == len(ladder):
+                err = OptimizerPromptParseError(
+                    raw=content,
+                    error=validation_err,
+                    attempts=attempt_no + 1,
+                    first_finish_reason=first_finish_reason,
+                    first_content_chars=content_len,
+                    first=first,
+                    retry_kind=retry_kind,
+                    **_failure_diagnostics(response, first),
                 )
-                logger.warning(
-                    "%s: %s parse failed (%d errors, %d content chars, finish=%s) on %s — %s. "
-                    "Retrying via %s (rung %d of %d; each is a full call). Errors: %s",
+                # The cause names the FIRST attempt's failure — a later rung's own emptiness
+                # is downstream of it and is already in `diagnosis()`.
+                #
+                # This layer does NOT say what the caller will do about it — that is true
+                # only for `l1_generate`. An `l1_critique` failure is swallowed by
+                # `graceful(...)` and an L2/L3 one never touches candidates, so naming a
+                # consequence here misreports most of these lines as zero-candidate rounds.
+                logger.error(
+                    "%s: %s parse failed on every rung (%d errors, %d content chars on the "
+                    "last) — %s. Raising to the caller. [%s]",
                     self._provider_name,
                     schema_name,
                     validation_err.error_count(),
-                    content_len,
-                    first_finish_reason,
-                    request_params.get("model", "?"),
+                    len(content.strip()),
                     cause,
-                    retry_kind,
-                    attempt_no,
-                    len(ladder),
-                    truncate(repair_errors[-1], 900),
+                    err.diagnosis(),
                 )
-                result = await self._one_attempt(
-                    client, retry_params, response_model, response_schema, label
-                )
-                if isinstance(result, LLMResponse):
-                    result.schema_repair_errors = list(repair_errors)
-                    # Fold every failed attempt's tokens onto the salvaged response; the account
-                    # owns the summing rule, so no field can be forgotten here.
-                    result.usage = result.usage + first
-                    result.cost_usd = _billed_cost(first_cost, result.cost_usd)
-                    return result
-                response, content, validation_err, parsed = result
-                if validation_err is None:
-                    break
-                if attempt_no == len(ladder):
-                    err = OptimizerPromptParseError(
-                        raw=content,
-                        error=validation_err,
-                        attempts=attempt_no + 1,
-                        first_finish_reason=first_finish_reason,
-                        first_content_chars=content_len,
-                        first=first,
-                        retry_kind=retry_kind,
-                        **_failure_diagnostics(response, first),
-                    )
-                    # The cause names the FIRST attempt's failure — a later rung's own emptiness
-                    # is downstream of it and is already in `diagnosis()`.
-                    #
-                    # This layer does NOT say what the caller will do about it — that is true
-                    # only for `l1_generate`. An `l1_critique` failure is swallowed by
-                    # `graceful(...)` and an L2/L3 one never touches candidates, so naming a
-                    # consequence here misreports most of these lines as zero-candidate rounds.
-                    logger.error(
-                        "%s: %s parse failed on every rung (%d errors, %d content chars on the "
-                        "last) — %s. Raising to the caller. [%s]",
-                        self._provider_name,
-                        schema_name,
-                        validation_err.error_count(),
-                        len(content.strip()),
-                        cause,
-                        err.diagnosis(),
-                    )
-                    raise err from validation_err
-                # This rung is spent; carry its account so the next one's billing still sums.
-                first = first + reply_usage(response)
-                first_cost = _billed_cost(first_cost, reply_cost(response))
-
-        billed = reply_usage(response) + first
-        # ``reasoning_tokens`` is a SUBSET of ``completion_tokens``, not a fourth total — the
-        # provider bills the thinking as output. It rides the success path because that is the
-        # only path on which the share is worth anything: until now it survived only on
-        # ``OptimizerPromptParseError``, so the one call that could report it was the one that
-        # had already failed. Measured on the shipped optimizer route, an ``l1_critique`` call
-        # billed 4790 completion tokens for a 1044-character answer — ~94% of the call, and of
-        # its 108 s, spent thinking, at ``reasoning_effort: low``. That is the fact behind the
-        # optimizer owning a third of every L4 cell's wall-clock, and no surface could say it.
-        return LLMResponse(
-            content=content,
-            reasoning=(
-                (getattr(response.choices[0].message, "reasoning", None) or "")
-                if response.choices
-                else ""
-            ),
-            model=response.model,
-            usage=billed,
-            cost_usd=_billed_cost(first_cost, reply_cost(response)),
-            served_by=reply_served_by(response),
-            finish_reason=_finish_reason(response),
-            parsed=parsed,
-            schema_repair_errors=repair_errors,
-        )
+                raise err from validation_err
+            # This rung is spent; carry its account so the next one's billing still sums.
+            first = first + reply_usage(response)
+            first_cost = _billed_cost(first_cost, reply_cost(response))
+        return _ParsedReply(response, content, parsed, first, first_cost, repair_errors)
 
     async def _one_attempt(
         self,

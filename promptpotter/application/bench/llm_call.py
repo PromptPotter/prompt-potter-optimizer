@@ -169,22 +169,27 @@ def _ledger_response_payload(response: LLMResponse) -> Any:
     return response.parsed
 
 
-async def llm_call(
-    messages: list[dict[str, str]],
-    *,
-    node: str | None = None,
-    config: dict[str, Any] | None = None,
-    trace_meta: dict[str, Any] | None = None,
-    response_model: type[BaseModel] | None = None,
-    response_schema: dict[str, Any] | None = None,
-    context: LLMCallContext | None = None,
-    **overrides: Any,
-) -> LLMResponse:
-    """LLM call with config-driven defaults; precedence ``_LLM_DEFAULTS < config < overrides``, and
-    ``provider``/``model`` resolve from the node's config, so the client is built here, not passed."""
-    if context is None:
-        context = LLMCallContext()
-    label = node or "llm_call"
+@dataclass(frozen=True)
+class _Call:
+    label: str
+    merged: dict[str, Any]
+    client: LLMClientBase
+    messages: list[dict[str, str]]
+    response_model: type[BaseModel] | None
+    response_schema: dict[str, Any] | None
+    context: LLMCallContext
+    started: float
+    # Pairs the LLMCallStartRecord — appended BEFORE the SDK call, so `in_flight` is readable
+    # mid-call — with the eventual LLMCallRecord. Empty when no ledger is bound.
+    call_id: str
+
+    def elapsed_s(self) -> float:
+        return round(time.monotonic() - self.started, 2)
+
+
+def _merged_config(
+    node: str | None, config: dict[str, Any] | None, overrides: dict[str, Any]
+) -> dict[str, Any]:
     if config is None:
         config = llm_node_config(node) if node else {}
     merged = {**_LLM_DEFAULTS, **config, **overrides}
@@ -202,158 +207,240 @@ async def llm_call(
     # the wire AND key the reply it banks.
     if config_overrides := get_optimizer_config_overrides():
         merged = {**merged, **config_overrides}
-    llm_client = get_llm_client(merged["provider"])
+    return merged
+
+
+def _reuse_key(
+    merged: dict[str, Any],
+    messages: list[dict[str, str]],
+    response_model: type[BaseModel] | None,
+    response_schema: dict[str, Any] | None,
+) -> str:
+    return hash_call(
+        messages=messages,
+        model=merged.get("model"),
+        provider=merged["provider"],
+        temperature=merged["temperature"],
+        json_schema=response_schema,
+        response_model=response_model.__name__ if response_model else None,
+        seed=merged.get("seed"),
+        max_tokens=merged.get("max_tokens"),
+        reasoning_effort=merged.get("reasoning_effort"),
+        top_p=merged.get("top_p"),
+        route_order=merged.get("route_order"),
+    )
+
+
+def _announce(call: _Call) -> None:
+    context, label = call.context, call.label
+    prompt_chars = sum(len(m.get("content") or "") for m in call.messages)
+    start_record = LLMCallStartRecord(
+        call_id=call.call_id,
+        node=label,
+        round=context.round_num,
+        candidate_idx=context.candidate_idx,
+        model=call.merged.get("model"),
+        started_at_ms=int(time.time() * 1000),
+        prompt_chars=prompt_chars,
+        injection_chars=dict(context.injection_chars),
+        injection_dropped=dict(context.injection_dropped),
+        injection_silent=list(context.injection_silent),
+    )
+    if context.ledger is not None:
+        context.ledger.append(start_record)
+    # The alarm is a REFUSED panel, never the prompt's size: a node's mandatory floor is
+    # admitted whatever it costs (`dispatch/compose.py::select`), so size is a fact about the
+    # task while a refusal is a node reasoning as though it had nothing to report.
+    no_room = start_record.refused_panels
+    log = logger.warning if no_room else logger.info
+    # The heaviest three are printed only on the warning path, so a healthy call stays one line.
+    heaviest = (
+        " · heaviest: "
+        + ", ".join(
+            f"{name} {chars:,}c"
+            for name, chars in sorted(context.injection_chars.items(), key=lambda kv: -kv[1])[:3]
+        )
+        if no_room and context.injection_chars
+        else ""
+    )
+    # Never one line for both: a panel refused WHOLE is absent; a thinned one showed less and
+    # says so, which is the normal, healthy way a budget reports what it cost.
+    by_size = sorted(context.injection_dropped.items(), key=lambda kv: -kv[1])
+    thinned = [f"{n} -{c}" for n, c in by_size if n not in no_room][:3]
+    # `refused_panels` sorts by NAME, so truncating it reports the alphabet rather than the
+    # loss. Re-ranked here, and the remainder counted, so a cut list reads as cut.
+    worst = sorted(no_room, key=lambda n: -context.injection_dropped.get(n, 0))
+    more = f" (+{len(worst) - 4} more)" if len(worst) > 4 else ""
+    dropped = (" · NO ROOM: " + ", ".join(worst[:4]) + more if worst else "") + (
+        " · thinned: " + ", ".join(thinned) if thinned else ""
+    )
+    log(
+        "→ optimizer call: %s · %s · %d-char prompt%s%s",
+        label,
+        call.merged["model"],
+        prompt_chars,
+        heaviest,
+        dropped,
+    )
+
+
+async def _provider_reply(call: _Call) -> LLMResponse:
+    context, label, merged = call.context, call.label, call.merged
     # Passed ONLY when set. A client with no routing concept (Anthropic) takes an unknown named
     # arg into `**kwargs`, and a key it cannot use is a key it may forward to its own SDK — so the
     # absence has to be an absent argument, not a `None` one.
     route_kwargs: dict[str, Any] = {"route_order": ro} if (ro := merged.get("route_order")) else {}
+    # Created unconditionally: `on_suspend` guards a deadline, not telemetry, so a ledger-less
+    # call still needs it. Cancelled on every path by the `finally` below.
+    heartbeat_task: asyncio.Task[None] = asyncio.create_task(
+        heartbeat(
+            context.ledger,
+            call_id=call.call_id,
+            node=label,
+            round_num=context.round_num,
+            start_monotonic=call.started,
+            # WHO the wait belongs to. A bare tick proves the process is alive and says
+            # nothing about why it is quiet, so a slow provider read as a stalled loop on
+            # every surface — an operator called a healthy 4-minute call a hang, which is the
+            # whole reason this argument exists. The model is knowable only here.
+            detail_fn=lambda: waiting_on(call.client, merged.get("model"), role="provider"),
+        )
+    )
+    # Metered at the send, attempt by attempt (`LLMClientBase._admitted_send`) — a call that
+    # failed to parse was billed like one that parsed, and is already on the ledger.
+    try:
+        return await _chat_under_deadline(
+            call.client,
+            node_label=label,
+            messages=call.messages,
+            model=merged.get("model"),
+            label=CallLabel(label, "optimizer"),
+            temperature=merged["temperature"],
+            max_tokens=merged.get("max_tokens"),
+            response_model=call.response_model,
+            response_schema=call.response_schema,
+            reasoning_effort=merged.get("reasoning_effort"),
+            top_p=merged.get("top_p"),
+            seed=merged.get("seed"),
+            **route_kwargs,
+        )
+    except OptimizerPromptParseError as parse_err:
+        logger.error(
+            "%s: optimizer call failed to parse — %s",
+            label,
+            parse_err.diagnosis(),
+        )
+        raise
+    finally:
+        # Whether the call succeeded or raised — an in-flight task would otherwise survive
+        # the function exit and keep appending against a closed call.
+        heartbeat_task.cancel()
+        try:
+            await heartbeat_task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            # The cancel is expected; anything else is a real fault (a failed ledger
+            # append) that would otherwise vanish on this teardown path.
+            logger.warning(
+                "heartbeat task for %s raised on teardown",
+                label,
+                exc_info=True,
+            )
+
+
+def _call_record(
+    call: _Call,
+    response: LLMResponse,
+    duration_s: float,
+    *,
+    cached: bool,
+    trace_meta: dict[str, Any] | None,
+) -> LLMCallRecord:
+    payload: dict[str, Any] = {
+        "type": call.label,
+        "config": {
+            "model": call.merged.get("model"),
+            "temperature": call.merged["temperature"],
+            "max_tokens": call.merged.get("max_tokens"),
+        },
+        "response": _ledger_response_payload(response),
+        "usage": response.usage.model_dump(),
+        "model": response.model,
+        "duration_s": duration_s,
+        # The final attempt's; `length` is the answer cut at `max_tokens`.
+        "finish_reason": response.finish_reason,
+        # Non-zero ⇒ the JSON only landed after an extra round-trip — the audit trail's
+        # read on prompt parse quality, rolled up per cycle in ``review.md``.
+        "schema_repair_errors": response.schema_repair_errors,
+    }
+    # EVIDENCE FOR A HUMAN, never an input to the loop: nothing downstream reads this key
+    # and nothing may start. Omitted when empty so a non-reasoning model's block stays clean.
+    if response.reasoning:
+        payload["reasoning"] = _ledger_reasoning(response.reasoning)
+    if cached:
+        payload["cached"] = True
+    if trace_meta:
+        payload.update(trace_meta)
+    else:
+        payload["messages"] = call.messages
+    return LLMCallRecord(
+        node=call.label,
+        round=call.context.round_num,
+        candidate_idx=call.context.candidate_idx,
+        call_id=call.call_id,
+        payload=payload,
+    )
+
+
+async def llm_call(
+    messages: list[dict[str, str]],
+    *,
+    node: str | None = None,
+    config: dict[str, Any] | None = None,
+    trace_meta: dict[str, Any] | None = None,
+    response_model: type[BaseModel] | None = None,
+    response_schema: dict[str, Any] | None = None,
+    context: LLMCallContext | None = None,
+    **overrides: Any,
+) -> LLMResponse:
+    """LLM call with config-driven defaults; precedence ``_LLM_DEFAULTS < config < overrides``.
+    ``provider``/``model`` resolve from the node's config, so the client is built here."""
+    if context is None:
+        context = LLMCallContext()
+    label = node or "llm_call"
+    merged = _merged_config(node, config, overrides)
+    llm_client = get_llm_client(merged["provider"])
 
     cache_key: str | None = None
     replayed: LLMResponse | None = None
     if context.cache is not None:
-        cache_key = hash_call(
-            messages=messages,
-            model=merged.get("model"),
-            provider=merged["provider"],
-            temperature=merged["temperature"],
-            json_schema=response_schema,
-            response_model=response_model.__name__ if response_model else None,
-            seed=merged.get("seed"),
-            max_tokens=merged.get("max_tokens"),
-            reasoning_effort=merged.get("reasoning_effort"),
-            top_p=merged.get("top_p"),
-            route_order=merged.get("route_order"),
-        )
+        cache_key = _reuse_key(merged, messages, response_model, response_schema)
         replayed = _replay(context.cache, cache_key, label=label)
 
-    _t0 = time.monotonic()
-
-    # Pairs the LLMCallStartRecord — appended BEFORE the SDK call, so `in_flight` is readable
-    # mid-call — with the eventual LLMCallRecord. Empty when no ledger is bound.
-    call_id = uuid.uuid4().hex if context.ledger is not None else ""
-
+    call = _Call(
+        label=label,
+        merged=merged,
+        client=llm_client,
+        messages=messages,
+        response_model=response_model,
+        response_schema=response_schema,
+        context=context,
+        started=time.monotonic(),
+        call_id=uuid.uuid4().hex if context.ledger is not None else "",
+    )
     if replayed is not None:
         response = replayed
         # ``parsed`` is typed ``Any``, so `model_validate` leaves the saved dict a dict.
         # Re-validate against the known model so consumers keep attribute access.
         if response_model is not None and isinstance(response.parsed, dict):
             response.parsed = response_model.model_validate(response.parsed)
-        duration_s = round(time.monotonic() - _t0, 2)
+        duration_s = call.elapsed_s()
         logger.debug("optimizer_reuse hit for %s (%s)", label, cache_key)
     else:
-        prompt_chars = sum(len(m.get("content") or "") for m in messages)
-        start_record = LLMCallStartRecord(
-            call_id=call_id,
-            node=label,
-            round=context.round_num,
-            candidate_idx=context.candidate_idx,
-            model=merged.get("model"),
-            started_at_ms=int(time.time() * 1000),
-            prompt_chars=prompt_chars,
-            injection_chars=dict(context.injection_chars),
-            injection_dropped=dict(context.injection_dropped),
-            injection_silent=list(context.injection_silent),
-        )
-        if context.ledger is not None:
-            context.ledger.append(start_record)
-        # The alarm is a REFUSED panel, never the prompt's size: a node's mandatory floor is
-        # admitted whatever it costs (`dispatch/compose.py::select`), so size is a fact about the
-        # task while a refusal is a node reasoning as though it had nothing to report.
-        no_room = start_record.refused_panels
-        log = logger.warning if no_room else logger.info
-        # The heaviest three are printed only on the warning path, so a healthy call stays one line.
-        heaviest = (
-            " · heaviest: "
-            + ", ".join(
-                f"{name} {chars:,}c"
-                for name, chars in sorted(context.injection_chars.items(), key=lambda kv: -kv[1])[
-                    :3
-                ]
-            )
-            if no_room and context.injection_chars
-            else ""
-        )
-        # Never one line for both: a panel refused WHOLE is absent; a thinned one showed less and
-        # says so, which is the normal, healthy way a budget reports what it cost.
-        by_size = sorted(context.injection_dropped.items(), key=lambda kv: -kv[1])
-        thinned = [f"{n} -{c}" for n, c in by_size if n not in no_room][:3]
-        # `refused_panels` sorts by NAME, so truncating it reports the alphabet rather than the
-        # loss. Re-ranked here, and the remainder counted, so a cut list reads as cut.
-        worst = sorted(no_room, key=lambda n: -context.injection_dropped.get(n, 0))
-        more = f" (+{len(worst) - 4} more)" if len(worst) > 4 else ""
-        dropped = (" · NO ROOM: " + ", ".join(worst[:4]) + more if worst else "") + (
-            " · thinned: " + ", ".join(thinned) if thinned else ""
-        )
-        log(
-            "→ optimizer call: %s · %s · %d-char prompt%s%s",
-            label,
-            merged["model"],
-            prompt_chars,
-            heaviest,
-            dropped,
-        )
-        # Keeps a live elapsed counter on both surfaces while the SDK call blocks for minutes.
-        # Cancelled on every path by the `finally` below.
-        # Created unconditionally: the tick is optional, `on_suspend` and the wall it guards are
-        # not, and a ledger-less call can now be given time back without bound. A guard here is how
-        # a telemetry sink comes to disarm a deadline that has nothing to do with telemetry.
-        heartbeat_task: asyncio.Task[None] = asyncio.create_task(
-            heartbeat(
-                context.ledger,
-                call_id=call_id,
-                node=label,
-                round_num=context.round_num,
-                start_monotonic=_t0,
-                # WHO the wait belongs to. A bare tick proves the process is alive and says
-                # nothing about why it is quiet, so a slow provider read as a stalled loop on
-                # every surface — an operator called a healthy 4-minute call a hang, which is the
-                # whole reason this argument exists. The model is knowable only here.
-                detail_fn=lambda: waiting_on(llm_client, merged.get("model"), role="provider"),
-            )
-        )
-        # Metered at the send, attempt by attempt (`LLMClientBase._admitted_send`) — a call that
-        # failed to parse was billed like one that parsed, and is already on the ledger.
-        try:
-            response = await _chat_under_deadline(
-                llm_client,
-                node_label=label,
-                messages=messages,
-                model=merged.get("model"),
-                label=CallLabel(label, "optimizer"),
-                temperature=merged["temperature"],
-                max_tokens=merged.get("max_tokens"),
-                response_model=response_model,
-                response_schema=response_schema,
-                reasoning_effort=merged.get("reasoning_effort"),
-                top_p=merged.get("top_p"),
-                seed=merged.get("seed"),
-                **route_kwargs,
-            )
-        except OptimizerPromptParseError as parse_err:
-            logger.error(
-                "%s: optimizer call failed to parse — %s",
-                label,
-                parse_err.diagnosis(),
-            )
-            raise
-        finally:
-            # Whether the call succeeded or raised — an in-flight task would otherwise survive
-            # the function exit and keep appending against a closed call.
-            heartbeat_task.cancel()
-            try:
-                await heartbeat_task
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                # The cancel is expected; anything else is a real fault (a failed ledger
-                # append) that would otherwise vanish on this teardown path.
-                logger.warning(
-                    "heartbeat task for %s raised on teardown",
-                    label,
-                    exc_info=True,
-                )
-
-        duration_s = round(time.monotonic() - _t0, 2)
+        _announce(call)
+        response = await _provider_reply(call)
+        duration_s = call.elapsed_s()
 
     # A cache hit is metered too, flagged — it spends nothing, but the search still MADE the call,
     # so incurred cost stays invariant to our cache history and the always-warmest L4 origin arm
@@ -382,40 +469,9 @@ async def llm_call(
         context.cache.save(cache_key, response.model_dump())
 
     if context.ledger is not None:
-        payload: dict[str, Any] = {
-            "type": label,
-            "config": {
-                "model": merged.get("model"),
-                "temperature": merged["temperature"],
-                "max_tokens": merged.get("max_tokens"),
-            },
-            "response": _ledger_response_payload(response),
-            "usage": response.usage.model_dump(),
-            "model": response.model,
-            "duration_s": duration_s,
-            # The final attempt's; `length` is the answer cut at `max_tokens`.
-            "finish_reason": response.finish_reason,
-            # Non-zero ⇒ the JSON only landed after an extra round-trip — the audit trail's
-            # read on prompt parse quality, rolled up per cycle in ``review.md``.
-            "schema_repair_errors": response.schema_repair_errors,
-        }
-        # EVIDENCE FOR A HUMAN, never an input to the loop: nothing downstream reads this key
-        # and nothing may start. Omitted when empty so a non-reasoning model's block stays clean.
-        if response.reasoning:
-            payload["reasoning"] = _ledger_reasoning(response.reasoning)
-        if replayed is not None:
-            payload["cached"] = True
-        if trace_meta:
-            payload.update(trace_meta)
-        else:
-            payload["messages"] = messages
         context.ledger.append(
-            LLMCallRecord(
-                node=label,
-                round=context.round_num,
-                candidate_idx=context.candidate_idx,
-                call_id=call_id,
-                payload=payload,
+            _call_record(
+                call, response, duration_s, cached=replayed is not None, trace_meta=trace_meta
             )
         )
 

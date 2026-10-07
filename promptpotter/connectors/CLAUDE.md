@@ -125,7 +125,7 @@ and moves every round.
   system temp dir, never the workspace**, and nothing durable lives there — reward, digest and token
   counts belong in the measurement archive. **The one thing a cell leaves on the Docker host is its
   task image** (`hb__<content hash>`, one per distinct task environment, never one per cell); a hard
-  kill's leftover containers and scratch are swept by the next run (`harbor.py::_reap_dead_producers`).
+  kill's leftover containers and scratch are swept by the next run (`infrastructure/docker_host.py::reap_dead_producers`).
   **Never swept: the task images and the package cache**, which are what a resume is cheap on,
   **nor any container that does not name our compose overlay**, because this Docker host has other
   tenants. **A trial that measured the machine is never a cell**: `_infrastructure_failure` retries

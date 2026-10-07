@@ -47,7 +47,7 @@ from promptpotter.shared.errors import (
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
-    from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
 
 logger = logging.getLogger(__name__)
 
@@ -315,86 +315,91 @@ def _compute_step_tokens(
 ) -> dict[str, StepTokenUsage]:
     """Per-LLM-node token counts, seeded from the backend's own ``step_tokens`` and falling back to
     a chars/4 heuristic. Every entry carries the node's ``model`` — the overlay always pinned one."""
-    out: dict[str, StepTokenUsage] = {}
-
-    def _configured(node_name: str, key: str) -> str | None:
-        """A string the dataset overlay pinned for this node. Neither ``model`` nor ``provider`` is
-        guessable downstream: the provider is half of a price, so dropping it bills the wrong vendor."""
-        cfg = wire_params.get(node_name)
-        value = cfg.get(key) if isinstance(cfg, dict) else None
-        return value if isinstance(value, str) else None
-
     raw = resp_data.get("step_tokens")
-    if isinstance(raw, dict):
-        for node_name, entry in raw.items():
-            if isinstance(entry, dict):
-                # The connector's own entry is REBUILT here rather than carried, so a key absent
-                # from `_WIRE_SEEDED` is dropped however faithfully the connector reported it.
-                seeded: dict[str, Any] = {
-                    "input": int(entry.get("input", 0)),
-                    "output": int(entry.get("output", 0)),
-                    "estimated": False,
-                }
-                # What each key buys, and what omitting one costs: `backend-integration.md`
-                # § Optional `step_tokens` fields.
-                for key, kind in _WIRE_SEEDED.items():
-                    value = entry.get(key)
-                    if isinstance(value, bool) or value is None:
-                        continue
-                    if kind is str:
-                        if isinstance(value, str):
-                            seeded[key] = value
-                    elif isinstance(value, (int, float)):
-                        seeded[key] = kind(value)
-                if "model" not in seeded and (model := _configured(node_name, "model")):
-                    seeded["model"] = model
-                # `_SEAM_OWNED`, so never the wire's — TermNorm's `spend.backend.model` answers a
-                # provider slug here.
-                provider = _configured(node_name, "provider")
-                if provider is not None:
-                    seeded["provider"] = provider
-                out[node_name] = cast("StepTokenUsage", seeded)
-
+    reported = raw if isinstance(raw, dict) else {}
+    out = {
+        node_name: _reported_usage(entry, node_name, wire_params)
+        for node_name, entry in reported.items()
+        if isinstance(entry, dict)
+    }
     for node in pipeline_schema.nodes:
-        if not node.is_llm or node.name in out:
-            continue
-
-        node_cfg = wire_params.get(node.name) or {}
-        in_text = node_cfg.get("prompt", "") if isinstance(node_cfg, dict) else ""
-
-        out_text_parts: list[str] = []
-        for mapping in node.observation_mappings:
-            if not mapping.is_llm:
-                continue
-            pipeline_val = resp_data.get(mapping.pipeline_key)
-            if pipeline_val is None:
-                continue
-            field = mapping.output_field
-            if field and isinstance(pipeline_val, dict):
-                picked = pipeline_val.get(field, "")
-                out_text_parts.append(str(picked))
-            elif field and isinstance(pipeline_val, list):
-                for item in pipeline_val:
-                    if isinstance(item, dict) and field in item:
-                        out_text_parts.append(str(item[field]))
-            else:
-                out_text_parts.append(str(pipeline_val))
-        out_text = " ".join(out_text_parts)
-
-        estimated: StepTokenUsage = {
-            "input": len(in_text) // 4,
-            "output": len(out_text) // 4,
-            "estimated": True,
-        }
-        model = _configured(node.name, "model")
-        if model is not None:
-            estimated["model"] = model
-        provider = _configured(node.name, "provider")
-        if provider is not None:
-            estimated["provider"] = provider
-        out[node.name] = estimated
-
+        if node.is_llm and node.name not in out:
+            out[node.name] = _estimated_usage(node, resp_data, wire_params)
     return out
+
+
+def _configured(wire_params: Mapping[str, Any], node_name: str, key: str) -> str | None:
+    """A string the dataset overlay pinned for this node. Neither ``model`` nor ``provider`` is
+    guessable downstream: the provider is half of a price, so dropping it bills the wrong vendor."""
+    cfg = wire_params.get(node_name)
+    value = cfg.get(key) if isinstance(cfg, dict) else None
+    return value if isinstance(value, str) else None
+
+
+def _reported_usage(
+    entry: Mapping[str, Any], node_name: str, wire_params: Mapping[str, Any]
+) -> StepTokenUsage:
+    # The connector's own entry is REBUILT here rather than carried, so a key absent
+    # from `_WIRE_SEEDED` is dropped however faithfully the connector reported it.
+    seeded: dict[str, Any] = {
+        "input": int(entry.get("input", 0)),
+        "output": int(entry.get("output", 0)),
+        "estimated": False,
+    }
+    # What each key buys, and what omitting one costs: `backend-integration.md`
+    # § Optional `step_tokens` fields.
+    for key, kind in _WIRE_SEEDED.items():
+        value = entry.get(key)
+        # A bool is an `int` to `isinstance`, and it is never a count.
+        if not isinstance(value, bool) and isinstance(value, str if kind is str else (int, float)):
+            seeded[key] = kind(value)
+    if "model" not in seeded and (model := _configured(wire_params, node_name, "model")):
+        seeded["model"] = model
+    # `_SEAM_OWNED`, so never the wire's — TermNorm's `spend.backend.model` answers a
+    # provider slug here.
+    provider = _configured(wire_params, node_name, "provider")
+    if provider is not None:
+        seeded["provider"] = provider
+    return cast("StepTokenUsage", seeded)
+
+
+def _estimated_usage(
+    node: PipelineNode, resp_data: Mapping[str, Any], wire_params: Mapping[str, Any]
+) -> StepTokenUsage:
+    node_cfg = wire_params.get(node.name) or {}
+    in_text = node_cfg.get("prompt", "") if isinstance(node_cfg, dict) else ""
+    out_text = " ".join(_observed_texts(node, resp_data))
+    estimated: StepTokenUsage = {
+        "input": len(in_text) // 4,
+        "output": len(out_text) // 4,
+        "estimated": True,
+    }
+    model = _configured(wire_params, node.name, "model")
+    if model is not None:
+        estimated["model"] = model
+    provider = _configured(wire_params, node.name, "provider")
+    if provider is not None:
+        estimated["provider"] = provider
+    return estimated
+
+
+def _observed_texts(node: PipelineNode, resp_data: Mapping[str, Any]) -> list[str]:
+    """What the node's LLM observations carry in this reply, one string per answer it gave."""
+    texts: list[str] = []
+    for mapping in node.observation_mappings:
+        value = resp_data.get(mapping.pipeline_key) if mapping.is_llm else None
+        if value is None:
+            continue
+        field = mapping.output_field
+        if field and isinstance(value, dict):
+            texts.append(str(value.get(field, "")))
+        elif field and isinstance(value, list):
+            texts.extend(
+                str(item[field]) for item in value if isinstance(item, dict) and field in item
+            )
+        else:
+            texts.append(str(value))
+    return texts
 
 
 def _error_result(
@@ -484,82 +489,20 @@ async def measure_sample(
     pipeline_params: dict[str, Any] | None = None,
 ) -> QueryMeasurement:
     """One cell's FACTS — ungraded; the walk grades every row it takes, fresh or replayed."""
-    query = sample.query
     # The ONE place a labelless cell becomes a row. `QueryMeasurement.ground_truth` is `str`, and
     # everything downstream of here — the matcher, the rank, the archive — reads it as one; a
     # verifier-graded cell says so by carrying `""`, which no answer matches.
     ground_truth = sample.ground_truth or ""
-
     pipeline_schema = session.pipeline_schema
-
     try:
         wire_params = interpolate_pipeline_params(pipeline_params or {}, sample.model_dump())
-
-        client = session.backend_client
-        bound = await cell_bound(session, wire_params)
-        envelope = CellEnvelope(
-            client.cell_envelope_s(query, wire_params), label=f"{sample.id}:{query[:40]}"
-        )
-        # Created UNCONDITIONALLY and OUTSIDE the envelope scope: this loop carries the envelope's
-        # only sighting of a machine sleep, and its teardown must not unwind inside the timeout.
-        heartbeat_task = asyncio.create_task(
-            heartbeat(
-                session.state.ledger,
-                call_id=f"scoring:{sample.id}",
-                node="backend_scoring",
-                round_num=_CURRENT_ROUND.get(),
-                start_monotonic=time.monotonic(),
-                on_suspend=envelope.on_suspend,
-            )
-        )
-        try:
-            async with envelope:
-                try:
-                    resp = await client.run_query(
-                        query,
-                        pipeline_params=wire_params,
-                        bound=bound,
-                        billed=cell_billing(pipeline_schema, wire_params),
-                    )
-                except httpx.HTTPStatusError as exc:
-                    if (answered := _answered_nothing(exc)) is None:
-                        raise
-                    logger.warning(
-                        "measure_sample for %s: answered nothing gradeable (%s) — a miss",
-                        query[:60],
-                        _extract_upstream_detail(exc),
-                    )
-                    resp = {"data": answered}
-        finally:
-            # Cancel whether the query succeeded or raised — an in-flight task survives and
-            # keeps appending progress records against a closed call.
-            heartbeat_task.cancel()
-            try:
-                await heartbeat_task
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                logger.warning(
-                    "heartbeat task for backend scoring raised on teardown",
-                    exc_info=True,
-                )
-        data = resp.get("data", {})
+        data, envelope = await _send_cell(sample, session, wire_params)
 
         # The head of the TERMINAL ranker's output, read through the schema rather than a
         # hardcoded key: candidate_ranking when token_matching is terminal, final_ranking when
         # an llm_ranking/llm_only node is.
-
         ranked = terminal_ranking({"pipeline_data": data}, pipeline_schema)
-        # Where the backend DECLARED an answer key, that is the answer — the ranking is not
-        # consulted, because two sources for one fact is how they come to disagree. A backend
-        # declaring none keeps the ranking as its only source, which is every ranked-label one.
-        # Either way an absent answer is `NO_RESULT`, and that sentinel is the honest reading:
-        # the pipeline ran and emitted nothing nameable (`domain/results.py`).
-        answer_key = session.backend_client.answer_key
-        if answer_key is not None:
-            predicted = str(data.get(answer_key) or "").strip() or NO_RESULT
-        else:
-            predicted = extract_item_label(ranked[0]) if ranked else NO_RESULT
+        predicted = _predicted(data, ranked, session.backend_client.answer_key)
         if predicted == "ERROR":
             return _error_result(
                 sample,
@@ -568,43 +511,12 @@ async def measure_sample(
             )
         gt_rank, n_candidates = rank_ground_truth(ranked, predicted, ground_truth)
 
-        # `result_ranking` is the canonical derived terminal ranking the scorer + find_gt_rank
-        # read; the raw per-node observation keys are copied below for their own diagnostics.
-        pd: dict[str, Any] = {"result_ranking": ranked}
-        for key in pipeline_schema.observation_keys | _INFRA_KEYS:
-            val = data.get(key)
-            if val is not None:
-                pd[key] = val
-        # Here, not in a connector: every backend that emits `turns` earns the same terms.
-        pd.update(turn_scalars(pd.get("turns")))
-        terminal_node = data.get("terminal_node")
-        if terminal_node is None:
-            st = pd.get("step_timings") or {}
-            for node in pipeline_schema.nodes:
-                if st.get(node.name) is not None:
-                    terminal_node = node.name
-        if terminal_node is not None:
-            pd["terminal_node"] = terminal_node
-
+        pd = _observations(data, ranked, pipeline_schema)
         # The envelope's own final reading, taken AFTER its scope closed. Here and not in a
         # connector: this is the one seam that HOLDS an envelope, so every backend gets the answer.
         if envelope.budget_s is not None:
             pd["unworked_s"] = envelope.unworked
-
-        # Off the node `to_job_search_point` renders the candidate onto, and off `pipeline_params`
-        # rather than `wire_params`, so no sample's own length reaches a prompt-length term.
-        prompt_nodes = pipeline_schema.prompt_node_names()
-        node_cfg = (pipeline_params or {}).get(prompt_nodes[0]) if prompt_nodes else None
-        if isinstance(node_cfg, dict) and isinstance(node_cfg.get("prompt"), str):
-            pd["target_prompt_chars"] = len(node_cfg["prompt"])
-
-        # The bare question, where the dataset declared one distinct from `query` — banked so a
-        # JUDGE can read it, since a judge is handed this row and never the `Sample`. Absent on
-        # every dataset where the two are the same string, which is what keeps the judges'
-        # fallback to `query` the normal path rather than a special case.
-        if sample.question:
-            pd["question"] = sample.question
-
+        pd.update(_candidate_and_sample_facts(sample, pipeline_schema, pipeline_params or {}))
         # Metered where the cell was admitted (`BackendClient.run_query`); a replay of this row
         # meters itself off what is banked here.
         step_tokens = _compute_step_tokens(data, pipeline_schema, wire_params)
@@ -614,7 +526,7 @@ async def measure_sample(
         result: dict[str, Any] = {
             "sample_id": sample.id,
             "sample_key": sample.key,
-            "query": query,
+            "query": sample.query,
             "predicted": predicted,
             "ground_truth": ground_truth,
             "cached": False,
@@ -643,29 +555,145 @@ async def measure_sample(
             )
         )
         return result  # type: ignore[return-value]
-    except httpx.HTTPStatusError as exc:
+    except SendRefusedError:
+        # A refused send is refused for every cell after it: a stop, never a row.
+        raise
+    except Exception as exc:
+        return _unmeasured(sample, exc)
+
+
+async def _send_cell(
+    sample: Sample, session: Session, wire_params: dict[str, Any]
+) -> tuple[dict[str, Any], CellEnvelope]:
+    """The reply's ``data`` and the envelope the cell ran under, closed."""
+    query = sample.query
+    client = session.backend_client
+    bound = await cell_bound(session, wire_params)
+    envelope = CellEnvelope(
+        client.cell_envelope_s(query, wire_params), label=f"{sample.id}:{query[:40]}"
+    )
+    # Created UNCONDITIONALLY and OUTSIDE the envelope scope: this loop carries the envelope's
+    # only sighting of a machine sleep, and its teardown must not unwind inside the timeout.
+    heartbeat_task = asyncio.create_task(
+        heartbeat(
+            session.state.ledger,
+            call_id=f"scoring:{sample.id}",
+            node="backend_scoring",
+            round_num=_CURRENT_ROUND.get(),
+            start_monotonic=time.monotonic(),
+            on_suspend=envelope.on_suspend,
+        )
+    )
+    try:
+        async with envelope:
+            try:
+                resp = await client.run_query(
+                    query,
+                    pipeline_params=wire_params,
+                    bound=bound,
+                    billed=cell_billing(session.pipeline_schema, wire_params),
+                )
+            except httpx.HTTPStatusError as exc:
+                if (answered := _answered_nothing(exc)) is None:
+                    raise
+                logger.warning(
+                    "measure_sample for %s: answered nothing gradeable (%s) — a miss",
+                    query[:60],
+                    _extract_upstream_detail(exc),
+                )
+                resp = {"data": answered}
+    finally:
+        # Cancel whether the query succeeded or raised — an in-flight task survives and
+        # keeps appending progress records against a closed call.
+        heartbeat_task.cancel()
+        try:
+            await heartbeat_task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.warning(
+                "heartbeat task for backend scoring raised on teardown",
+                exc_info=True,
+            )
+    return resp.get("data", {}), envelope
+
+
+def _predicted(data: Mapping[str, Any], ranked: list[Any], answer_key: str | None) -> str:
+    # Where the backend DECLARED an answer key, that is the answer — the ranking is not
+    # consulted, because two sources for one fact is how they come to disagree. A backend
+    # declaring none keeps the ranking as its only source, which is every ranked-label one.
+    # Either way an absent answer is `NO_RESULT`, and that sentinel is the honest reading:
+    # the pipeline ran and emitted nothing nameable (`domain/results.py`).
+    if answer_key is not None:
+        return str(data.get(answer_key) or "").strip() or NO_RESULT
+    return extract_item_label(ranked[0]) if ranked else NO_RESULT
+
+
+def _observations(
+    data: Mapping[str, Any], ranked: list[Any], pipeline_schema: PipelineSchema
+) -> dict[str, Any]:
+    """What the backend reported for this cell, as ``pipeline_data`` opens."""
+    # `result_ranking` is the canonical derived terminal ranking the scorer + find_gt_rank
+    # read; the raw per-node observation keys are copied below for their own diagnostics.
+    pd: dict[str, Any] = {"result_ranking": ranked}
+    for key in pipeline_schema.observation_keys | _INFRA_KEYS:
+        val = data.get(key)
+        if val is not None:
+            pd[key] = val
+    # Here, not in a connector: every backend that emits `turns` earns the same terms.
+    pd.update(turn_scalars(pd.get("turns")))
+    reached = data.get("terminal_node")
+    if reached is None:
+        timings = pd.get("step_timings") or {}
+        timed = [node.name for node in pipeline_schema.nodes if timings.get(node.name) is not None]
+        reached = timed[-1] if timed else None
+    if reached is not None:
+        pd["terminal_node"] = reached
+    return pd
+
+
+def _candidate_and_sample_facts(
+    sample: Sample, pipeline_schema: PipelineSchema, pipeline_params: Mapping[str, Any]
+) -> dict[str, Any]:
+    """The facts a formula or a judge reads that no backend reports."""
+    facts: dict[str, Any] = {}
+    # Off the node `to_job_search_point` renders the candidate onto, and off `pipeline_params`
+    # rather than `wire_params`, so no sample's own length reaches a prompt-length term.
+    prompt_nodes = pipeline_schema.prompt_node_names()
+    node_cfg = pipeline_params.get(prompt_nodes[0]) if prompt_nodes else None
+    if isinstance(node_cfg, dict) and isinstance(node_cfg.get("prompt"), str):
+        facts["target_prompt_chars"] = len(node_cfg["prompt"])
+    # The bare question, where the dataset declared one distinct from `query` — banked so a
+    # JUDGE can read it, since a judge is handed this row and never the `Sample`. Absent on
+    # every dataset where the two are the same string, which is what keeps the judges'
+    # fallback to `query` the normal path rather than a special case.
+    if sample.question:
+        facts["question"] = sample.question
+    return facts
+
+
+def _unmeasured(sample: Sample, exc: Exception) -> QueryMeasurement:
+    """The row a cell that raised is banked as: the error's category decides what the walk does."""
+    query = sample.query
+    if isinstance(exc, httpx.HTTPStatusError):
         category, error_msg = _classify_http_error(exc)
         logger.warning("measure_sample for %s: %s", query[:60], error_msg)
         return _error_result(sample, error_msg, category=category)
-    except httpx.TransportError as exc:
+    if isinstance(exc, httpx.TransportError):
         error_msg = f"{type(exc).__name__}: {exc} — Backend may be down or unreachable."
         logger.warning("measure_sample CONNECTION for %s: %s", query[:60], error_msg)
         return _error_result(sample, error_msg, category=ErrorCategory.CONNECTION)
-    except (KeyboardInterrupt, asyncio.CancelledError, SendRefusedError):
-        # A refused send is refused for every cell after it: a stop, never a row.
-        raise
-    except CellUnscoreableError as exc:
+    if isinstance(exc, CellUnscoreableError):
         # The cell RAN and there is nothing to grade. The exception's own category says WHICH of the
         # two — a cut we made, or a reward the backend never produced — and a repair reads them apart.
         # What it paid was billed where it was admitted: an ungraded cell is not a free one.
         logger.warning("measure_sample %s for %s: %s", exc.category.value, query[:60], exc)
         return _error_result(sample, str(exc), category=exc.category)
-    except Exception as exc:
-        # Named by TYPE: a bare `TimeoutError()` has no message, and banked as its `str` it read
-        # "unknown error" on every surface while the cause sat one attribute away.
-        failure = f"{type(exc).__name__}: {exc}"
-        logger.warning("measure_sample failed for %s: %s", query[:60], failure, exc_info=True)
-        return _error_result(sample, failure, category=ErrorCategory.UNKNOWN)
+    # Named by TYPE: a bare `TimeoutError()` has no message, and banked as its `str` it read
+    # "unknown error" on every surface while the cause sat one attribute away.
+    failure = f"{type(exc).__name__}: {exc}"
+    logger.warning("measure_sample failed for %s: %s", query[:60], failure, exc_info=exc)
+    return _error_result(sample, failure, category=ErrorCategory.UNKNOWN)
 
 
 def find_gt_rank(result: Mapping[str, Any]) -> int | None:

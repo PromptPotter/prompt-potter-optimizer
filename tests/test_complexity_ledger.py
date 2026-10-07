@@ -193,7 +193,9 @@ LEDGER_BASELINE = {
     # TypeDB's own `db-llm-bench` harness in a container, graded by executing the query.
     # +1: `domain/prompt_block.py` — the block library's typed entry. It sits outside the hashed
     # `config/prompt_blocks.py` so a provenance field added to it re-keys no banked cell.
-    "modules": 391,
+    # +1: `infrastructure/docker_host.py` — the docker CLI, daemon probe, package cache and
+    # dead-producer sweep `harbor` and `dbllmbench` each carried a copy of.
+    "modules": 392,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     # +2: `application/optimizers/__init__.py` (the member registry) and its `potter/`, empty.

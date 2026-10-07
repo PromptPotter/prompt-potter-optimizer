@@ -5228,6 +5228,8 @@ def test_the_container_sweep_spares_a_run_that_is_still_measuring(
     and dropped by the kernel when it dies, so the two are distinguishable with no heartbeat."""
     from filelock import FileLock
 
+    from promptpotter.infrastructure import docker_host
+
     removed: list[tuple[str, ...]] = []
     overlay = str(harbor._DOCKER_OVERLAY)
     listing = "\n".join(
@@ -5247,14 +5249,15 @@ def test_the_container_sweep_spares_a_run_that_is_still_measuring(
         removed.append(args)
         return 0, ""
 
-    monkeypatch.setattr(harbor, "_TRIALS_HOME", tmp_path)
-    monkeypatch.setattr(harbor, "_docker", fake_docker)
+    monkeypatch.setattr(docker_host, "docker", fake_docker)
     for token in ("alive", "dead"):
         (tmp_path / token).mkdir()
-    held = FileLock(str(tmp_path / "alive" / harbor._PRODUCER_LOCK), timeout=0)
+    held = FileLock(str(tmp_path / "alive" / docker_host._PRODUCER_LOCK), timeout=0)
     held.acquire()
     try:
-        asyncio.run(harbor._reap_dead_producers())
+        asyncio.run(
+            docker_host.reap_dead_producers(tmp_path, compose_overlay=harbor._DOCKER_OVERLAY)
+        )
     finally:
         held.release()
 

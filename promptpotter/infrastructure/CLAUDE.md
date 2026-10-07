@@ -225,6 +225,12 @@ or cache key. Do not delete it as write-only surface; read its field note first.
 `backend.py`: `BackendClient` is connector-agnostic; per-connector wire
 adapters live in `promptpotter/connectors/`.
 
+## Docker host
+
+`docker_host.py` is the ONE `docker` CLI call, daemon probe, package cache and dead-producer sweep.
+**A containerized connector imports it and passes what is its own** — scratch home, compose
+overlay — never a second copy beside its adapter.
+
 ## Tracing — fan-out only, and DORMANT ON PURPOSE
 
 `tracing/` exposes no read API. State reaches the optimizer via the
