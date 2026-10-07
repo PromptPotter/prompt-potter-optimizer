@@ -92,4 +92,4 @@ re-key an inner cell leaves equal.
   would differ.
 
 **Adding an optimizer** needs nothing here: it runs as its manifest declares. `tests/test_numerics.py`
-§ 4 runs one installed through its entry points alone, from `tests/fixtures/optimizer_plugin/`.
+§ 4 runs one installed through its entry points alone, from `examples/optimizer-plugin/`.

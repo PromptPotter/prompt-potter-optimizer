@@ -323,6 +323,7 @@ fail_under = 0
 extend_exclude = [
     "docs/research/bbeh-comparison/.*",
     "notebooks/bbeh_potter.ipynb",
+    "examples/.*",  # each a distribution of its own, with its own dependency list
 ]
 
 # CI installs neither `observability` nor `all`, so deptry cannot read the

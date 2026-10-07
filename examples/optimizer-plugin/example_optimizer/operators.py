@@ -1,4 +1,4 @@
-"""What the fixture's rephrasing node sends."""
+"""What the example's proposing node sends."""
 
 from __future__ import annotations
 

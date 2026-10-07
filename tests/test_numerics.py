@@ -15,6 +15,7 @@ import os
 import random
 import subprocess
 import sys
+import tomllib
 import types
 from collections.abc import Callable
 from pathlib import Path
@@ -2173,9 +2174,20 @@ def test_every_installed_optimizer_closes_its_campaign_on_a_bench_headline(tmp_p
     plugin installed through its entry points alone, which no file of this package names."""
     home = tmp_path / "offline"
     root = Path(__file__).resolve().parents[1]
-    plugin = root / "tests" / "fixtures" / "optimizer_plugin"
+    plugin = root / "examples" / "optimizer-plugin"
+    # What installing the plugin writes: the entry points its own pyproject declares.
+    declared = tomllib.loads((plugin / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    installed = tmp_path / "site" / "example_optimizer-0.dist-info"
+    installed.mkdir(parents=True)
+    (installed / "METADATA").write_text(f"Metadata-Version: 2.1\nName: {declared['name']}\n")
+    (installed / "entry_points.txt").write_text(
+        "".join(
+            f"[{group}]\n" + "".join(f"{label} = {value}\n" for label, value in entries.items())
+            for group, entries in declared["entry-points"].items()
+        )
+    )
     # The tree under test first, so its children never import another checkout's package.
-    path = os.pathsep.join([str(root), str(plugin)])
+    path = os.pathsep.join([str(root), str(plugin), str(installed.parent)])
     done = subprocess.run(
         [sys.executable, str(root / "scripts" / "offline_run.py"), "--rounds", "1", "--rows", "60"],
         env={**os.environ, "PROMPTPOTTER_HOME": str(home), "PYTHONPATH": path},
@@ -2185,7 +2197,7 @@ def test_every_installed_optimizer_closes_its_campaign_on_a_bench_headline(tmp_p
     )
     assert done.returncode == 0, done.stdout + done.stderr
     ran = json.loads((home / "offline-run.json").read_text(encoding="utf-8"))["workspaces"]
-    assert set(ran) == {*optimizers.runtimes(), "fixture"}
+    assert set(ran) == {*optimizers.runtimes(), "example"}
     for name in ran:
         run = json.loads((home / name / "decisions.json").read_text(encoding="utf-8"))["run"]
         bench = run["bench"]

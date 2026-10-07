@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar, cast
 
 from pydantic import Field
 
-from fixture_optimizer import operators
+from example_optimizer import operators
 from promptpotter.application.bench.resume_and_fork.decisions import GatingMode, record_decision
 from promptpotter.application.campaign_config import Estimand, Knob, Scope
 from promptpotter.application.optimizers import nodes
@@ -55,26 +55,26 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
-MANIFEST = "fixture"
+MANIFEST = "example"
 
 
-class FixtureCheckpointKind(CheckpointKind):
-    KEPT = "fixture_kept"
+class ExampleCheckpointKind(CheckpointKind):
+    KEPT = "example_kept"
 
 
-class FixtureRoundState(RoundPayload, manifest=MANIFEST):
+class ExampleRoundState(RoundPayload, manifest=MANIFEST):
     rounds_without_advance: int
 
 
 @dataclass
-class FixtureState:
+class ExampleState:
     rounds_without_advance: int = 0
 
     def snapshot(self, prompt_hashes: dict[str, str], stall: int) -> OptimizerState:
         return OptimizerState(
             manifest=MANIFEST,
             prompt_hashes=prompt_hashes,
-            payload=FixtureRoundState(rounds_without_advance=stall),
+            payload=ExampleRoundState(rounds_without_advance=stall),
         )
 
     def origin_state(self, selected: SelectedOptimizer) -> OptimizerState:
@@ -89,15 +89,15 @@ class FixtureState:
         return None
 
     def absorb(self, round_result: RoundResult) -> None:
-        payload = round_result.optimizer_state.payload_as(FixtureRoundState)
+        payload = round_result.optimizer_state.payload_as(ExampleRoundState)
         self.rounds_without_advance = payload.rounds_without_advance
 
     def standing(self) -> tuple[int, int | None]:
         return self.rounds_without_advance, None
 
 
-def _state(state: WorkingState) -> FixtureState:
-    assert isinstance(state, FixtureState)
+def _state(state: WorkingState) -> ExampleState:
+    assert isinstance(state, ExampleState)
     return state
 
 
@@ -108,7 +108,7 @@ class DrawKnobs(StrictModel):
 
 
 class Draw:
-    name: ClassVar[str] = "fixture_draw"
+    name: ClassVar[str] = "example_draw"
     kind: ClassVar[NodeKind] = NodeKind.SAMPLER
     knobs: ClassVar[type[StrictModel]] = DrawKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
@@ -123,23 +123,23 @@ class Draw:
         return nodes.Panel(cells=cells, order=list(cells), block_size=len(cells))
 
 
-class RephraseKnobs(StrictModel):
+class ProposeKnobs(StrictModel):
     variants: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
-        ge=1, description="Rephrasings a round proposes."
+        ge=1, description="Arms a round proposes."
     )
 
 
-class Rephrase:
-    name: ClassVar[str] = "fixture_rephrase"
+class Propose:
+    name: ClassVar[str] = "propose"
     kind: ClassVar[NodeKind] = NodeKind.LLM
-    knobs: ClassVar[type[StrictModel]] = RephraseKnobs
+    knobs: ClassVar[type[StrictModel]] = ProposeKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
 
     async def propose(
         self, ctx: RoundContext, panel: Panel, population: Population | None
     ) -> Population:
         cycle = ctx.cycle
-        n = cast("RephraseKnobs", cycle.optimizer.knobs(self.name)).variants
+        n = cast("ProposeKnobs", cycle.optimizer.knobs(self.name)).variants
         parent = cycle.opt_sp
         prompt = operators.rephrase_prompt(cycle, self.name, instruction=parent.instruction)
         answers = await asyncio.gather(*(ask(ctx, self.name, i, prompt) for i in range(n)))
@@ -183,7 +183,7 @@ class KeepKnobs(StrictModel):
 
 
 class Keep:
-    name: ClassVar[str] = "fixture_keep"
+    name: ClassVar[str] = "example_keep"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     knobs: ClassVar[type[StrictModel]] = KeepKnobs
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ()
@@ -203,7 +203,7 @@ class Keep:
         selected_id = ranked[0] if ranked and fitness[ranked[0]] > bar else ""
         record_decision(
             ctx.cycle.pending_decisions,
-            FixtureCheckpointKind.KEPT,
+            ExampleCheckpointKind.KEPT,
             {"round_num": ctx.round_num, "ranked": ranked},
             selected_id,
             node=self.name,
@@ -220,7 +220,7 @@ class Keep:
         )
 
 
-class FixtureRuntime:
+class ExampleRuntime:
     name: ClassVar[str] = MANIFEST
     manifest_dir: ClassVar[Path] = Path(__file__).parent
     own_axes: ClassVar[dict[str, set[str]]] = {}
@@ -228,14 +228,14 @@ class FixtureRuntime:
     phases: ClassVar[tuple[nodes.OptimizerPhase, ...]] = ()
     response_models: ClassVar[Mapping[str, type[BaseModel]]] = {}
     checkpoint_gating: ClassVar[Mapping[CheckpointKind, GatingMode]] = {
-        FixtureCheckpointKind.KEPT: GatingMode.ARCHIVAL
+        ExampleCheckpointKind.KEPT: GatingMode.ARCHIVAL
     }
     replayers: ClassVar[Mapping[str, Replayer]] = {}
 
     def start(
         self, session: Session, config: CampaignConfig, origin_results: list[dict[str, Any]]
-    ) -> FixtureState:
-        return FixtureState()
+    ) -> ExampleState:
+        return ExampleState()
 
     def complete(self) -> None:
         return None
@@ -274,11 +274,11 @@ class FixtureRuntime:
         return None
 
     def pacing(self, selected: SelectedOptimizer) -> nodes.OptimizerPacing:
-        n = cast("RephraseKnobs", selected.knobs(Rephrase.name)).variants
+        n = cast("ProposeKnobs", selected.knobs(Propose.name)).variants
         return nodes.OptimizerPacing(patience=None, stalls_left=None, arms_per_round=n, limits=())
 
     def round_cells_ceiling(self, selected: SelectedOptimizer, pool: int) -> int:
-        n = cast("RephraseKnobs", selected.knobs(Rephrase.name)).variants
+        n = cast("ProposeKnobs", selected.knobs(Propose.name)).variants
         return (n + 1) * selected.round_cells(pool)
 
     def opening(self, ctx: RoundContext) -> nodes.RoundOpening:
@@ -290,5 +290,5 @@ class FixtureRuntime:
         return []
 
 
-DRAW, REPHRASE, KEEP = Draw(), Rephrase(), Keep()
-RUNTIME = FixtureRuntime()
+DRAW, PROPOSE, KEEP = Draw(), Propose(), Keep()
+RUNTIME = ExampleRuntime()

@@ -1,7 +1,0 @@
-[promptpotter.optimizer_nodes]
-fixture_draw = fixture_optimizer.members:DRAW
-fixture_rephrase = fixture_optimizer.members:REPHRASE
-fixture_keep = fixture_optimizer.members:KEEP
-
-[promptpotter.optimizer_runtimes]
-fixture = fixture_optimizer.members:RUNTIME

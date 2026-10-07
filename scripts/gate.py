@@ -227,7 +227,7 @@ def _claude_md_size(_: Sel) -> Outcome:
 # and it was absent, which made the two modes disagree: ``--staged`` passes the staged paths
 # verbatim, so the hook lints a script the full run never looks at. An import-order violation
 # in this very file passed `gate.py` and was then rejected by `gate.py --staged` seconds later.
-_RUFF_TARGETS = ("promptpotter/", "scripts/", "tests/")
+_RUFF_TARGETS = ("promptpotter/", "scripts/", "tests/", "examples/")
 
 
 def _ruff(*argv: str) -> Callable[[Sel], Outcome]:

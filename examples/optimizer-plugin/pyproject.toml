@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "example-optimizer"
+version = "0"
+description = "A third-party PromptPotter optimizer: one manifest, registered through entry points"
+requires-python = ">=3.13"
+dependencies = ["promptpotter"]
+
+# One entry per manifest node a member answers. The member's own `name` is the registry key.
+[project.entry-points."promptpotter.optimizer_nodes"]
+example_draw = "example_optimizer.members:DRAW"
+propose = "example_optimizer.members:PROPOSE"
+example_keep = "example_optimizer.members:KEEP"
+
+# The runtime's `name` is what `optimization.optimizer` selects.
+[project.entry-points."promptpotter.optimizer_runtimes"]
+example = "example_optimizer.members:RUNTIME"
+
+[tool.setuptools]
+packages = ["example_optimizer"]
+
+[tool.setuptools.package-data]
+example_optimizer = ["pipeline.yaml", "resolved_schemas.json"]

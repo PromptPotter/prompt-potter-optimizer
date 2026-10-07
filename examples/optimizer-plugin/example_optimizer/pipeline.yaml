@@ -1,17 +1,17 @@
-name: fixture
+name: example
 version: v1.0
 available_models:
   - openai/gpt-oss-20b:nitro
 nodes:
-  fixture_draw:
+  example_draw:
     type: sampler
     config:
       size: 8
-  fixture_rephrase:
+  propose:
     type: llm
     description: Rephrases the parent's instruction.
     config:
-      prompt_family: fixture_rephrase
+      prompt_family: propose
       prompt_version: 1
       temperature: 1.0
       max_tokens: 8000
@@ -21,18 +21,18 @@ nodes:
   score:
     type: measurement
     config: {}
-  fixture_keep:
+  example_keep:
     type: selector
     description: Keeps the best-scoring arm when it beats its parent.
     config: {}
 pipelines:
   default:
-    - fixture_draw
-    - fixture_rephrase
+    - example_draw
+    - propose
     - score
-    - fixture_keep
+    - example_keep
 resolved_prompts:
-  fixture_rephrase/1:
+  propose/1:
     instruction: |-
       Rephrase this prompt for the task: {{task_description}}
       Prompt: {{instruction}}

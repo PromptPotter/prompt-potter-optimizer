@@ -307,7 +307,8 @@ unwrapped LLM call is an automatic block at review (pre-flight gate), not a test
 and `RUNTIME` (a plugin ships them through the two entry-point groups instead), the runtime's
 `manifest_dir` holds its `pipeline.yaml`, its payload is a `RoundPayload` registered under the
 manifest's name and its decision kinds a `CheckpointKind` its runtime gates.
-`tests/test_numerics.py` § 4 runs `tests/fixtures/optimizer_plugin/` as the proof.
+[`examples/optimizer-plugin/`](../../examples/optimizer-plugin/) is that package, installable as it
+stands, and `tests/test_numerics.py` § 4 runs it as the proof.
 
 ---
 
