@@ -8,7 +8,7 @@ import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useSelection } from "@/lib/SelectionContext";
 import { SegmentedControl, Toolbar, ToolbarSpacer } from "@/components/ui";
 import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
-import { NodeKnobsPanel } from "@/components/dashboard/control/NodeKnobsPanel";
+import { NodeKnobsPanel } from "@/components/dashboard/pipeline/NodeKnobsPanel";
 import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 
 // The check-in's optimizer: which manifest this campaign runs, its loop, and its knobs. Not

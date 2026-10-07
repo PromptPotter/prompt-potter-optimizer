@@ -19,7 +19,7 @@ import {
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { readyData, useRead, type ReadResult } from "@/lib/hooks/useRead";
 import type { ConnectorView, PipelineStatus } from "@/lib/types";
-import type { NodeDataLike } from "@/components/workflow";
+import type { NodeDataLike } from "@/lib/types";
 
 const EMPTY: ConnectorView = {
   connector: null,

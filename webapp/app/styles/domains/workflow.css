@@ -6,7 +6,7 @@
 
 /* The toolbar is `contain:inline-size`, so it never widens the card past the flow's frame;
    the round scroller takes the squeeze instead. */
-.workflow-card{background:var(--color-background-primary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-lg);overflow:hidden;margin-bottom:14px;width:fit-content;max-width:100%}
+.workflow-card{background:var(--color-background-primary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-lg);overflow:hidden;min-width:0}
 /* Under reduced-motion the tint, border and "● live" label still carry it. */
 .workflow-card.running{border-color:var(--color-success-border);background:var(--color-success-bg);animation:wf-running-pulse 2s ease-in-out infinite}
 .workflow-card.running .workflow-graph{background-color:var(--color-success-bg)}

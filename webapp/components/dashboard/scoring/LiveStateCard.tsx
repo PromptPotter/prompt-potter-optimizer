@@ -4,9 +4,9 @@ import { headlineStats } from "@/lib/derivations";
 import { fmtNum, fmtClock } from "@/lib/format";
 import { cx } from "@/lib/cx";
 import { CardFrame } from "@/components/ui";
-import { FreqChart } from "@/components/eval/FreqChart";
-import { TrendChart } from "@/components/eval/TrendChart";
-import { CostStrip } from "@/components/eval/CostStrip";
+import { FreqChart } from "@/components/dashboard/scoring/FreqChart";
+import { TrendChart } from "@/components/dashboard/scoring/TrendChart";
+import { CostStrip } from "@/components/dashboard/scoring/CostStrip";
 
 // Fields surfaced elsewhere, or withheld from the UI.
 const SHOWN_ELSEWHERE = new Set([

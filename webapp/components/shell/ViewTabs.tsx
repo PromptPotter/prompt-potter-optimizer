@@ -10,12 +10,15 @@ import {
   groupOf,
   isRecordsTab,
   tabLabel,
+  type CampaignTab,
   type RecordsTab,
   type Tab,
   type ViewGroup,
 } from "@/lib/view-tab";
 
-// The app's ONE nav surface for the view axis; below --bp-md it is the phone's bottom tab bar.
+// The view axis, one strip per LEVEL. `ViewTabs` is the frame's campaign nav (below --bp-md the
+// phone's bottom bar); `RecordsTabs` belongs to the Records view. A workspace view has no strip:
+// it is entered from the campaign list.
 
 // `Record<Tab, …>` on purpose: a new view is a compile error here until it has a glyph.
 const ICONS: Record<Tab, ReactNode> = {
@@ -25,13 +28,12 @@ const ICONS: Record<Tab, ReactNode> = {
   dashboard: <path d="M2.5 13V6.5M6.5 13V3M10.5 13V8M14 13H2" />,
   measurements: <path d="M2.5 3.5h11M2.5 6.5h11M2.5 9.5h11M2.5 12.5h7" />,
   compare: <path d="M4 13V7M8 13V3M12 13V9M2 13h12" />,
-  verify: <path d="M2.5 8.5 6 12l7.5-8" />,
   files: (
     <path d="M2.5 4.5A1 1 0 0 1 3.5 3.5h2.2l1.3 1.6h5.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z" />
   ),
 };
 
-function Glyph({ tab }: { tab: Tab }) {
+export function ViewGlyph({ tab }: { tab: Tab }) {
   return (
     <svg
       width="16"
@@ -54,7 +56,7 @@ const PRIMARY_SEGMENTS: readonly Segment<ViewGroup>[] = [
     value: t,
     label: (
       <>
-        <Glyph tab={t} />
+        <ViewGlyph tab={t} />
         {tabLabel(t)}
       </>
     ),
@@ -63,7 +65,7 @@ const PRIMARY_SEGMENTS: readonly Segment<ViewGroup>[] = [
     value: "records",
     label: (
       <>
-        <Glyph tab="files" />
+        <ViewGlyph tab="files" />
         {RECORDS_LABEL}
       </>
     ),
@@ -81,7 +83,7 @@ export function ViewTabs({
   onIntent,
   className,
 }: {
-  tab: Tab;
+  tab: CampaignTab;
   onSelect: (tab: Tab) => void;
   // The pointer or the focus reached the strip: the moment to warm what a click will ask for.
   onIntent?: () => void;
@@ -95,7 +97,12 @@ export function ViewTabs({
   };
 
   return (
-    <div className={cx("view-tabs", className)} onPointerEnter={onIntent} onFocus={onIntent}>
+    <nav
+      className={cx("view-tabs", className)}
+      aria-label="Campaign view"
+      onPointerEnter={onIntent}
+      onFocus={onIntent}
+    >
       <SegmentedControl
         size="lg"
         options={PRIMARY_SEGMENTS}
@@ -103,14 +110,19 @@ export function ViewTabs({
         onChange={pickGroup}
         ariaLabel="Campaign view"
       />
-      {isRecordsTab(tab) && (
-        <SegmentedControl
-          options={RECORDS_SEGMENTS}
-          value={tab}
-          onChange={onSelect}
-          ariaLabel={RECORDS_LABEL}
-        />
-      )}
+    </nav>
+  );
+}
+
+export function RecordsTabs({ tab, onSelect }: { tab: RecordsTab; onSelect: (tab: Tab) => void }) {
+  return (
+    <div className="view-subnav">
+      <SegmentedControl
+        options={RECORDS_SEGMENTS}
+        value={tab}
+        onChange={onSelect}
+        ariaLabel={RECORDS_LABEL}
+      />
     </div>
   );
 }

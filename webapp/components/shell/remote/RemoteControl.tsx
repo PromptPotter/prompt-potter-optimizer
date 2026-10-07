@@ -10,8 +10,8 @@ import { fmtText, fmtDuration, fmtSigned, fmtUsd, fmtTokens } from "@/lib/format
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useLineageTree } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
-import { RunControlButton } from "@/components/dashboard/control/RunControlButton";
-import { RunLimitsControl } from "@/components/dashboard/control/RunLimitsControl";
+import { RunControlButton } from "@/components/shell/remote/RunControlButton";
+import { RunLimitsControl } from "@/components/shell/remote/RunLimitsControl";
 
 // The global remote, bottom-fixed on every tab: the strip carries only what it ACTS on, every
 // other number is a panel row, and WHERE the run is stays RunMasthead's.

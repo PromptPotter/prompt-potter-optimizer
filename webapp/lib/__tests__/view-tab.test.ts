@@ -4,17 +4,29 @@ import {
   PRIMARY_TABS,
   RECORDS_ENTRY,
   RECORDS_TABS,
+  WORKSPACE_TABS,
   groupOf,
   isRecordsTab,
   isTab,
+  isWorkspaceTab,
+  type CampaignTab,
   type Tab,
 } from "../view-tab";
 
-const ALL: readonly Tab[] = [...PRIMARY_TABS, ...RECORDS_TABS];
+const CAMPAIGN: readonly CampaignTab[] = [...PRIMARY_TABS, ...RECORDS_TABS];
+const ALL: readonly Tab[] = [...CAMPAIGN, ...WORKSPACE_TABS];
 
 describe("view-tab", () => {
-  it("groups every view — the strip's top row has exactly three values", () => {
-    expect(ALL.map(groupOf)).toEqual(["chat", "dashboard", "records", "records", "records", "records"]);
+  it("groups every campaign view — the strip has exactly three values", () => {
+    expect(CAMPAIGN.map(groupOf)).toEqual(["chat", "dashboard", "records", "records"]);
+  });
+
+  it("a workspace view is on no campaign strip — it reads across campaigns", () => {
+    for (const t of WORKSPACE_TABS) {
+      expect(isWorkspaceTab(t)).toBe(true);
+      expect(isRecordsTab(t)).toBe(false);
+    }
+    for (const t of CAMPAIGN) expect(isWorkspaceTab(t)).toBe(false);
   });
 
   it("the Records entry is inside Records, so arriving there lights its own segment", () => {

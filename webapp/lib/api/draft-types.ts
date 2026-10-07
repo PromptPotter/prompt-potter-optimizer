@@ -8,7 +8,7 @@ import type {
   NodeOutputSchema,
   NodeReach,
 } from "./types";
-import type { PipelineView } from "@/components/workflow";
+import type { PipelineView } from "@/lib/types";
 
 // Must match `domain/origin_provenance.Provenance`. Nothing reaches mint until `confirmed`.
 export type ProvenanceTag = "unset" | "proposed" | "confirmed";

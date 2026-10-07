@@ -11,7 +11,7 @@ import {
   lensOf,
   termRows,
   type ScoringMask,
-} from "@/components/shell/mask/scoring-mask";
+} from "@/lib/scoring-mask";
 
 // The whole vocabulary: a board can span pipelines, and the server reports a term a channel cannot answer.
 const ALL_ROWS = termRows();

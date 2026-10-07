@@ -1,4 +1,4 @@
-import type { PipelineViewEdge, PipelineViewNode } from "@/components/workflow";
+import type { PipelineViewEdge, PipelineViewNode } from "@/lib/types";
 
 // A looping pipeline as a two-row serpentine, read boustrophedon in running order. The order is
 // read off the served graph — nothing placed by hand, nothing inferred from an id.

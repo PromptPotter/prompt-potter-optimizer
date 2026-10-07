@@ -13,7 +13,7 @@ import {
   outputContract,
 } from "@/lib/derivations";
 import { Button } from "@/components/ui";
-import type { PipelineViewNode } from "@/components/workflow";
+import type { PipelineViewNode } from "@/lib/types";
 import { PromptFieldsEditor } from "./PromptFieldsEditor";
 import { LockButton, NodeConfigEditor } from "./NodeConfigEditor";
 import { SchemaTreeEditor } from "./SchemaTreeEditor";

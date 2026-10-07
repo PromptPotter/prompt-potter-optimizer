@@ -79,7 +79,11 @@ const listeners = new Set<() => void>();
 
 export function setScoringMask(patch: Partial<MaskState>): void {
   state = { ...state, ...patch };
-  for (const l of listeners) l();
+  // Deferred: the cycle seed writes during render, and a subscriber told mid-render is an update
+  // to a component React is still rendering.
+  queueMicrotask(() => {
+    for (const l of listeners) l();
+  });
 }
 
 export function useScoringMask(): MaskState {

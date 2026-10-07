@@ -20,11 +20,17 @@ import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { decodeCyclePath, encodeCyclePath, type CyclePath } from "@/lib/ids";
 import { applyChartDefaults } from "@/lib/theme";
 import { cx } from "@/lib/cx";
-import type { Tab } from "@/lib/view-tab";
+import {
+  DEFAULT_TAB,
+  isRecordsTab,
+  isWorkspaceTab,
+  type CampaignTab,
+  type Tab,
+} from "@/lib/view-tab";
 import { VendorSprite } from "@/components/ui";
 import { AccountModal } from "@/components/account/AccountModal";
-import { Sidebar } from "@/components/shell/Sidebar";
-import { SidebarResizer } from "@/components/shell/SidebarResizer";
+import { Sidebar } from "@/components/shell/sidebar/Sidebar";
+import { SidebarResizer } from "@/components/shell/sidebar/SidebarResizer";
 import { JobsDock } from "@/components/shell/JobsDock";
 import { MobileAppBar } from "@/components/shell/MobileAppBar";
 import { DashboardTab } from "@/components/dashboard/layout/DashboardTab";
@@ -36,18 +42,16 @@ import { LineageProvider } from "@/lib/lineage";
 import { IngestFlowProvider, useIngest } from "@/lib/ingest-flow";
 import { useViewMemory } from "@/lib/view-memory";
 import { CriticalAlertBanner } from "@/components/shell/CriticalAlertBanner";
-import { RemoteControl } from "@/components/shell/RemoteControl";
-import { RunMasthead } from "@/components/shell/RunMasthead";
+import { RemoteControl } from "@/components/shell/remote/RemoteControl";
+import { RunMasthead } from "@/components/shell/masthead/RunMasthead";
+import { RecordsTabs, ViewTabs } from "@/components/shell/ViewTabs";
+import { WorkspaceHeader } from "@/components/shell/WorkspaceHeader";
 
 const ChatPane = dynamic(() => import("@/components/chat/ChatPane").then((m) => m.ChatPane), {
   ssr: false,
   loading: () => <div className="content" aria-busy="true" />,
 });
-const FilesPane = dynamic(() => import("@/components/tree/FilesPane").then((m) => m.FilesPane), {
-  ssr: false,
-  loading: () => <div className="content" aria-busy="true" />,
-});
-const VerifyPane = dynamic(() => import("@/components/verify/VerifyPane").then((m) => m.VerifyPane), {
+const FilesPane = dynamic(() => import("@/components/files/FilesPane").then((m) => m.FilesPane), {
   ssr: false,
   loading: () => <div className="content" aria-busy="true" />,
 });
@@ -59,8 +63,7 @@ const IngestPane = dynamic(() => import("@/components/ingest/IngestPane").then((
 function preloadLazyPanes(): void {
   for (const chunk of [
     import("@/components/chat/ChatPane"),
-    import("@/components/tree/FilesPane"),
-    import("@/components/verify/VerifyPane"),
+    import("@/components/files/FilesPane"),
   ]) {
     void chunk.catch(() => undefined);
   }
@@ -208,6 +211,14 @@ function AppShellInner() {
     [switchView],
   );
 
+  // Where a workspace view returns to: the campaign view last on screen. Render-phase, because
+  // the address can move `tab` without passing through `switchView`.
+  const [campaignTab, setCampaignTab] = useState<CampaignTab>(
+    isWorkspaceTab(tab) ? DEFAULT_TAB : tab,
+  );
+  if (!isWorkspaceTab(tab) && tab !== campaignTab) setCampaignTab(tab);
+  const backToCampaign = useCallback(() => openView(campaignTab), [openView, campaignTab]);
+
   // A mint lands the operator on what it created. Selecting the new cycle is the provider's
   // job; leaving the phone list screen is the shell's half.
   const [prevMintCount, setPrevMintCount] = useState(mintCount);
@@ -249,13 +260,14 @@ function AppShellInner() {
     (path: CyclePath, candidate?: string | null) => {
       selectCyclePath(...restoreNavigation(path, candidate));
       setListScreen(false);
-      // Selecting never hijacks the tab, except a check-in (no dashboard.json) goes to Chat.
-      // An inner run is never a check-in, so a descended path never redirects.
-      if (path.length > 1) return;
+      // Selecting never hijacks the tab, with two exceptions: a check-in (no dashboard.json)
+      // goes to Chat, and a pick made from a workspace view opens the campaign it named.
+      // An inner run is never a check-in, so a descended path never redirects to Chat.
       const hop = path[0]!;
-      if (isCheckin(hop.campaignId, hop.cycleId)) openView("chat");
+      if (path.length === 1 && isCheckin(hop.campaignId, hop.cycleId)) openView("chat");
+      else if (isWorkspaceTab(tab)) openView(campaignTab);
     },
-    [selectCyclePath, restoreNavigation, isCheckin, openView],
+    [selectCyclePath, restoreNavigation, isCheckin, openView, tab, campaignTab],
   );
   const onNewCycle = useCallback(() => {
     // Two doors onto one thread: on the chat tab it resets in place; elsewhere the modal
@@ -293,6 +305,8 @@ function AppShellInner() {
       <Sidebar
         onSelectPath={onSelectPath}
         onNewCycle={onNewCycle}
+        tab={tab}
+        onOpenView={openView}
         collapsed={sidebarCollapsed}
         onToggleCollapse={toggleSidebar}
       />
@@ -307,9 +321,9 @@ function AppShellInner() {
       {/* A `.shell` child, not a sidebar one: the sidebar clips its overflow. */}
       <JobsDock onPicked={openDashboard} />
       <main className="main" id="main-content" tabIndex={-1}>
-        {/* The view axis is NOT here: ViewTabs owns it. */}
         <MobileAppBar
           listScreen={listScreen}
+          workspace={isWorkspaceTab(tab)}
           onBack={() => setListScreen(true)}
           onNewCycle={() => setNewCampaignOpen(true)}
         />
@@ -324,13 +338,21 @@ function AppShellInner() {
               : undefined
           }
         />
-        {/* Chrome rather than a pane's first child, so it cannot scroll away. */}
-        <RunMasthead
-          tab={tab}
-          onSelectTab={openView}
-          onTabIntent={preloadLazyPanes}
-          onFollowed={openDashboard}
-        />
+        {/* Chrome rather than a pane's first child, so it cannot scroll away. The header says
+            WHERE (one run, or the workspace); the nav beside it is the frame's, never its child. */}
+        {isWorkspaceTab(tab) ? (
+          <WorkspaceHeader
+            tab={tab}
+            onBack={campaignId ? backToCampaign : undefined}
+            backLabel="Back to campaign"
+          />
+        ) : (
+          <>
+            <RunMasthead onFollowed={openDashboard} />
+            <ViewTabs tab={tab} onSelect={openView} onIntent={preloadLazyPanes} />
+            {isRecordsTab(tab) && <RecordsTabs tab={tab} onSelect={openView} />}
+          </>
+        )}
         {tab === "chat" ? (
           <ChatPane
             checkinCampaignId={showCheckin ? campaignId : null}
@@ -340,15 +362,14 @@ function AppShellInner() {
           <DashboardTab />
         ) : tab === "measurements" ? (
           <MeasurementsPane claimsAddress />
-        ) : tab === "compare" ? (
-          <ComparePane />
         ) : tab === "files" ? (
           <FilesPane campaignId={campaignId} cycleId={cycleId} />
         ) : (
-          <VerifyPane />
+          <ComparePane />
         )}
       </main>
-      <RemoteControl cycleStartedAt={cycleStartedAt} />
+      {/* It acts on the viewed run, so a workspace view carries none. */}
+      {!isWorkspaceTab(tab) && <RemoteControl cycleStartedAt={cycleStartedAt} />}
       {/* Mounted only while open so its chunk stays off first paint. */}
       {newCampaignOpen && <IngestPane open onClose={() => setNewCampaignOpen(false)} />}
       {/* A `.shell` child, not a sidebar one: the phone hides the sidebar off its list

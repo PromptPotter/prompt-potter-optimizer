@@ -1,9 +1,8 @@
 "use client";
 import { useMemo } from "react";
 import { Badge, CopyButton, Term, VendorLogo } from "@/components/ui";
-import { CampaignSwitcher } from "@/components/shell/CampaignSwitcher";
+import { CampaignSwitcher } from "@/components/shell/masthead/CampaignSwitcher";
 import { SpendBuckets } from "@/components/shell/SpendBuckets";
-import { ViewTabs } from "@/components/shell/ViewTabs";
 import {
   METER_WORD,
   benchReading,
@@ -24,21 +23,10 @@ import { cx } from "@/lib/cx";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { TERMS } from "@/lib/terms";
 import { useWorkspace } from "@/lib/workspace";
-import type { Tab } from "@/lib/view-tab";
 
-// ONE header over every tab, owning "where is this run": no pane below repeats a fact it shows
-// (webapp/components/CLAUDE.md § Component conventions).
-export function RunMasthead({
-  tab,
-  onSelectTab,
-  onTabIntent,
-  onFollowed,
-}: {
-  tab: Tab;
-  onSelectTab: (t: Tab) => void;
-  onTabIntent: () => void;
-  onFollowed: () => void;
-}) {
+// ONE header over every campaign view, owning "where is this run": no pane below repeats a fact
+// it shows (webapp/components/CLAUDE.md § Component conventions).
+export function RunMasthead({ onFollowed }: { onFollowed: () => void }) {
   const { campaignId, leafCycleId, viewedPath, campaigns, cycles, following, followActive } =
     useWorkspace();
   const { dash, dashRound } = useDashboard();
@@ -190,7 +178,6 @@ export function RunMasthead({
             {metered && <span className="chip-of"> {METER_WORD[metered.meter]}</span>}
           </span>
         </div>
-        <ViewTabs tab={tab} onSelect={onSelectTab} onIntent={onTabIntent} />
       </div>
     </header>
   );

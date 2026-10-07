@@ -35,10 +35,15 @@
   --chart-series-3:#3fb27f; --chart-series-4:#c9639e;
   --chart-series-5:#d4b02c; --chart-series-6:#6f6bd8;
   --chart-series-7:#4bb3c4; --chart-series-8:#b5603f;
-  /* NarrowSpine wraps the header + diagnostics; WideSpine wraps the panel grids. */
-  --dash-narrow-max:980px;
-  --dash-wide-max:1400px;
-  --dash-zone-gap:18px;
+  /* BOX SIZING — the whole vocabulary. A box states no width or height of its own: a view's
+     `.box-grid` lays boxes in columns no narrower than `--box-min` (one column on a phone, as
+     many as fit on a desktop), a box whose content is unbounded scrolls under `--box-scroll-max`,
+     and a chart is `--chart-h` tall. `--reading-measure` caps PROSE (the chat thread), never a box. */
+  --box-min:26rem;
+  --box-gap:var(--space-14);
+  --box-scroll-max:60dvh;
+  --chart-h:clamp(140px,22dvh,220px);
+  --reading-measure:980px;
 
   /* @media cannot read custom properties, so the numbers are literal in @media rules; these name
      the only allowed breakpoints. */

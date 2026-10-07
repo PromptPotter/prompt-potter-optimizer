@@ -14,7 +14,19 @@ h1{font-size:var(--text-4xl);font-weight:600;line-height:1.2}
 .topstrip-trace{font-size:var(--text-xs);color:var(--color-accent);text-decoration:none;font-weight:600}
 .topstrip-trace:hover{text-decoration:underline}
 
-.card{background:var(--color-background-primary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-lg);padding:var(--space-16)}
+/* ONE sizing rule for every box (tokens.css § BOX SIZING). The phone is the BASE: one column,
+   each box the full width, its height its content's. From --bp-md the same boxes share the row in
+   columns no narrower than `--box-min`, so a desktop fills its width; `.card-full` / `.box-full`
+   take the whole row. A box never states a width, a max-width or a margin of its own — a child
+   that did would be arguing with the grid. */
+.box-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--box-gap);align-items:start}
+.box-grid > *{min-width:0;margin:0}
+@media (min-width:880px){
+  .box-grid{grid-template-columns:repeat(auto-fit,minmax(min(var(--box-min),100%),1fr))}
+  .box-grid > .card-full,.box-grid > .box-full,.box-grid > .dash-lane{grid-column:1 / -1}
+}
+
+.card{background:var(--color-background-primary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-lg);padding:var(--space-16);min-width:0}
 .card-title{font-size:var(--text-md);font-weight:500;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between}
 .card-title > h2{font:inherit}
 

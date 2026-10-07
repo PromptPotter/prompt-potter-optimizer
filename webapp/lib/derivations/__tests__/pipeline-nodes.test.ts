@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { nodeOriginPrompt } from "../pipeline-nodes";
-import type { PipelineDoc } from "@/components/workflow";
+import type { PipelineDoc } from "@/lib/types";
 
 // Keys are `"{node}/{version}"`, split on the LAST slash: `startsWith` would take
 // `l1_generate_extra` for `l1_generate`, and a lexical sort puts `"10"` before `"2"`.

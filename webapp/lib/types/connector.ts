@@ -10,7 +10,7 @@ import type {
   NodeOutputSchema,
   NodeReach,
 } from "@/lib/api";
-import type { NodeDataLike, PipelineView } from "@/components/workflow";
+import type { NodeDataLike, PipelineView } from "./pipeline";
 
 export type PipelineStatus = "unbound" | "loading" | "ok" | "error";
 

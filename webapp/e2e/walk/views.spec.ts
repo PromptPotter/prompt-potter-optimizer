@@ -1,55 +1,77 @@
 import { test, expect, open, ready } from "../harness";
 
-const TABS = ["chat", "dashboard", "compare", "verify", "files"] as const;
-const LABEL: Record<(typeof TABS)[number], string> = {
-  chat: "Chat",
-  dashboard: "Dashboard",
-  compare: "Compare",
-  verify: "Verify",
-  files: "Files",
-};
-const RECORDS = ["compare", "verify", "files"] as const;
+// Each campaign view, the strip that owns it, and the segment that lights there (a Records
+// member lights its own strip besides). The workspace view has no strip; its test is below.
+const VIEWS = [
+  { tab: "chat", strip: "Campaign view", label: "Chat" },
+  { tab: "dashboard", strip: "Campaign view", label: "Dashboard" },
+  { tab: "measurements", strip: "Records", label: "Measurements" },
+  { tab: "files", strip: "Records", label: "Files" },
+] as const;
 
-async function tabPressed(page: import("@playwright/test").Page, label: string) {
-  await expect(page.getByRole("button", { name: label, exact: true }).first()).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+type Page = import("@playwright/test").Page;
+
+function segment(page: Page, strip: string, label: string) {
+  return page.getByRole("group", { name: strip }).getByRole("button", { name: label, exact: true });
+}
+
+async function tabPressed(page: Page, strip: string, label: string) {
+  await expect(segment(page, strip, label)).toHaveAttribute("aria-pressed", "true");
 }
 
 test.describe("the view axis", () => {
-  for (const tab of TABS) {
+  for (const { tab, strip, label } of VIEWS) {
     test(`deep-links straight to ${tab}`, async ({ page, rich }) => {
       await open(page, `${rich.addr}${tab === "chat" ? "" : `/${tab}`}`);
-      await tabPressed(page, RECORDS.includes(tab as never) ? "Records" : LABEL[tab]);
+      await tabPressed(page, strip, label);
+      if (strip === "Records") await tabPressed(page, "Campaign view", "Records");
     });
   }
+
+  test("deep-links straight to compare, where the campaign strip is not on screen", async ({
+    page,
+    rich,
+  }) => {
+    await open(page, `${rich.addr}/compare`);
+    await expect(page.getByRole("group", { name: "Campaign view" })).toHaveCount(0);
+  });
 
   test("clicking the strip moves the view and rewrites the address", async ({ page, rich }) => {
     await open(page, rich.addr);
 
-    await page.getByRole("button", { name: "Dashboard", exact: true }).first().click();
-    await tabPressed(page, "Dashboard");
+    await segment(page, "Campaign view", "Dashboard").click();
+    await tabPressed(page, "Campaign view", "Dashboard");
     await expect.poll(() => new URL(page.url()).hash).toContain("/dashboard");
 
-    await page.getByRole("button", { name: "Records", exact: true }).first().click();
-    await expect.poll(() => new URL(page.url()).hash).toContain("/compare");
+    await segment(page, "Campaign view", "Records").click();
+    await expect.poll(() => new URL(page.url()).hash).toContain("/measurements");
 
-    for (const member of ["Verify", "Files"]) {
-      await page.getByRole("button", { name: member, exact: true }).first().click();
-      await expect.poll(() => new URL(page.url()).hash).toContain(`/${member.toLowerCase()}`);
-    }
+    await segment(page, "Records", "Files").click();
+    await expect.poll(() => new URL(page.url()).hash).toContain("/files");
 
     // Re-clicking Records must not bounce back to its entry member (`ViewTabs::pickGroup`).
-    await page.getByRole("button", { name: "Records", exact: true }).first().click();
+    await segment(page, "Campaign view", "Records").click();
     await expect.poll(() => new URL(page.url()).hash).toContain("/files");
+  });
+
+  test("a workspace view is entered from the campaign list and returns to the view it left", async ({
+    page,
+    rich,
+  }) => {
+    await open(page, `${rich.addr}/dashboard`);
+
+    await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Compare", exact: true }).click();
+    await expect.poll(() => new URL(page.url()).hash).toContain("/compare");
+
+    await page.getByRole("button", { name: /Back to campaign/ }).click();
+    await tabPressed(page, "Campaign view", "Dashboard");
   });
 
   test("a reload restores the view, not Chat", async ({ page, rich }) => {
     await open(page, `${rich.addr}/dashboard`);
     await page.reload();
     await ready(page);
-    await tabPressed(page, "Dashboard");
+    await tabPressed(page, "Campaign view", "Dashboard");
   });
 
   test("the pinned cycle is named on screen and can be released", async ({ page, rich }) => {

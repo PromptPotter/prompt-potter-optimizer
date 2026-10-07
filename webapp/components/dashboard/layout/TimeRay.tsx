@@ -1,6 +1,6 @@
 "use client";
 // THE TIME-RAY: every event in sequence, one even step each — sequence is the x-axis, not time.
-// Full-bleed, outside `DashSpine`; its round steps write the same `SelectionContext.round` as `RoundAxis`.
+// A full row of the dashboard grid; its round steps write the same `SelectionContext.round` as `RoundAxis`.
 
 import { memo, useEffect, useMemo, useRef } from "react";
 import { cx } from "@/lib/cx";

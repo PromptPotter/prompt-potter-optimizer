@@ -17,7 +17,7 @@ import { encodeCyclePath, rootCycleId, type CyclePath } from "@/lib/ids";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useViewedLineage } from "@/lib/lineage";
 import { useViewMemory } from "@/lib/view-memory";
-import { setCandidatesState, useCandidatesState } from "./candidates-store";
+import { setCandidatesState, useCandidatesState } from "@/lib/candidates-store";
 
 interface LineageCleanup {
   open: boolean;

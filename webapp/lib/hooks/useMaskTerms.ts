@@ -6,7 +6,7 @@ import { useMemo } from "react";
 import type { CellTermMeta } from "@/lib/api/types.generated";
 import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
-import { identifiersInFormula, setScoringMask, termRows, useScoringMask } from "./scoring-mask";
+import { identifiersInFormula, setScoringMask, termRows, useScoringMask } from "@/lib/scoring-mask";
 
 export interface MaskTerms {
   rows: CellTermMeta[];

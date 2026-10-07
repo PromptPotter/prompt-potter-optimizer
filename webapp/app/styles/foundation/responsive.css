@@ -4,7 +4,6 @@
   .auth-chip{height:32px;padding:0 var(--space-12);font-size:var(--text-sm)}
 
   /* The Input/Output flanks drop to icons; `FlowEnd` still names the button from `path.label`. */
-  .wf-hero{padding:var(--space-6) var(--space-12) var(--space-8);max-width:none}
   .wf-hero-flow{justify-content:center;gap:0;padding:var(--space-4) 0;flex-wrap:nowrap;overflow:visible;max-width:100%;min-width:0}
   .wf-hero-node-toggle{
     flex:0 0 auto;min-width:var(--touch-target-min);min-height:var(--touch-target-min);
@@ -29,7 +28,7 @@
   .hs-mini-btn{height:26px}
   /* `--touch-floor` INHERITS, so a container retunes the floor for its subtree without
      out-specifying the rule that sets it. */
-  .wf-hero,.run-card,.round-axis{--touch-floor:0px}
+  .run-card,.round-axis{--touch-floor:0px}
   .run-card{font-size:var(--text-sm)}
   /* The headline already reads the before/after; the counts would restate it in a second unit. */
   .run-flips{display:none}

@@ -1,4 +1,4 @@
-import type { PipelineView } from "@/components/workflow";
+import type { PipelineView } from "@/lib/types";
 import { interiorNodes } from "@/lib/derivations";
 
 // Operator vocabulary for in-product tooltips — one short sentence each; longer goes to docs/manual/.

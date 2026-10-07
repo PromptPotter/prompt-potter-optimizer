@@ -38,7 +38,7 @@ assistant" endpoint is a deferred Arc 2 —
 
 To strip this down to a generic chat + tool-activity app, remove:
 
-- **The optimizer panes:** `components/dashboard/`, `components/verify/`,
+- **The optimizer panes:** `components/dashboard/`,
   `components/tree/` (Files), and the ingest setup flow
   (`components/ingest/`, `lib/hooks/useIngestFlow.ts`'s `IngestPhase` machine).
 - **The optimizer-specific activity mappings** in `lib/chat/activity.ts` — the

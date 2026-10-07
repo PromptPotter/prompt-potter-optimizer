@@ -1,4 +1,4 @@
-import type { PipelineDoc, PipelineView, PipelineViewNode } from "@/components/workflow";
+import type { PipelineDoc, PipelineView, PipelineViewNode } from "@/lib/types";
 
 // `input` / `output` are synthetic terminals the server adds for arrow ends
 // (`domain/pipeline_parsing.py`).

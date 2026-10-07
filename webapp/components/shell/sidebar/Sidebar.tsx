@@ -15,13 +15,17 @@ import { useNodeToggle } from "@/lib/view-memory";
 import { useShowCandidates } from "@/lib/tree-prefs";
 import { applyTheme, readStoredTheme } from "@/lib/theme";
 import { buildForest, nodeKey } from "@/lib/derivations";
-import type { TreeCtx } from "./sidebar/ForestRows";
-import { AccountSpend } from "./sidebar/AccountSpend";
+import type { TreeCtx } from "./ForestRows";
+import { AccountSpend } from "./AccountSpend";
 import { SidebarContent } from "./SidebarContent";
+import { ViewGlyph } from "@/components/shell/ViewTabs";
+import { WORKSPACE_TABS, tabLabel, type Tab } from "@/lib/view-tab";
 
 interface Props {
   onSelectPath: (path: CyclePath, candidate?: string | null) => void;
   onNewCycle: () => void;
+  tab: Tab;
+  onOpenView: (tab: Tab) => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
 }
@@ -37,6 +41,8 @@ function flipTheme() {
 export function Sidebar({
   onSelectPath,
   onNewCycle,
+  tab,
+  onOpenView,
   collapsed,
   onToggleCollapse,
 }: Props) {
@@ -149,6 +155,21 @@ export function Sidebar({
         >
           + New campaign
         </button>
+        {/* The workspace views hang off the campaign LIST, the surface they read across. */}
+        <div className="sidebar-views">
+          {WORKSPACE_TABS.map((t) => (
+            <button
+              key={t}
+              type="button"
+              className="sidebar-view"
+              aria-current={tab === t ? "page" : undefined}
+              onClick={() => onOpenView(t)}
+            >
+              <ViewGlyph tab={t} />
+              {tabLabel(t)}
+            </button>
+          ))}
+        </div>
       </div>
       <SidebarContent
         status={status}

@@ -21,7 +21,7 @@ for (const vp of WIDTHS) {
     });
 
     test("every view fits its viewport", async ({ page, rich }) => {
-      for (const tab of ["", "/dashboard", "/compare", "/verify", "/files"]) {
+      for (const tab of ["", "/dashboard", "/compare", "/files"]) {
         await open(page, `${rich.addr}${tab}`);
         await noSidewaysScroll(page);
       }

@@ -39,8 +39,12 @@ let state: CandidatesState = {
 
 const listeners = new Set<() => void>();
 
+// Deferred: the per-cycle seeds write during render, and a subscriber told mid-render is an update
+// to a component React is still rendering.
 function emit(): void {
-  for (const l of listeners) l();
+  queueMicrotask(() => {
+    for (const l of listeners) l();
+  });
 }
 
 function subscribe(l: () => void): () => void {

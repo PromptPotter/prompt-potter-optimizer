@@ -96,7 +96,7 @@ describe("parseAddress round trip", () => {
           { campaignId: "pp-self__aa11bb", cycleId: "cycle_outer0000" },
           { campaignId: "justlogic__cc22dd", cycleId: "cycle_inner0000" },
         ],
-        tab: "verify",
+        tab: "compare",
         candidateId: null, cell: null,
       },
     ],

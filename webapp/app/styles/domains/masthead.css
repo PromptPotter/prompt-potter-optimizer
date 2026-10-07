@@ -3,7 +3,7 @@
 .run-header{border-bottom:0.5px solid var(--color-border);padding:var(--space-10) var(--space-18) var(--space-8)}
 /* `stretch`, not `flex-start`: a column flex cross-sizes children to their own
    content, and every `%` max-width below then resolves against nothing. */
-.run-header-inner{display:flex;flex-direction:column;align-items:stretch;gap:var(--space-4);width:100%;max-width:var(--dash-narrow-max);margin:0 auto}
+.run-header-inner{display:flex;flex-direction:column;align-items:stretch;gap:var(--space-4);width:100%}
 .run-title{display:flex;align-items:baseline;gap:var(--space-8);min-width:0}
 .run-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--text-3xl);font-weight:700;letter-spacing:-0.015em;color:var(--color-text-primary)}
 /* The `__xxxxxx` tail never truncates: it is what separates ten runs of one dataset. */

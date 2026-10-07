@@ -20,7 +20,7 @@ import { fmtPct0 } from "@/lib/format";
 import { CleanupConfirmModal } from "./CleanupConfirmModal";
 import { Forest, type CladogramCtx } from "./Forest";
 import { ROOMY } from "./forest-layout";
-import { useLineage } from "./useLineage";
+import { useLineage } from "@/lib/hooks/useLineage";
 
 // The lineage forest card: a cladogram of cycles, sharing no axis with the candidates card's bars.
 // The toggle opening it lives beside the dendrogram and writes `showForest`.

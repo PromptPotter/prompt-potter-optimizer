@@ -3,15 +3,12 @@
    and none shifts content sideways when a pane passes the fold. */
 .content{flex:1;overflow-y:auto;scrollbar-gutter:stable both-edges;padding:var(--space-18);container-type:inline-size;container-name:content}
 
-/* Centred in the MAIN COLUMN, the method the chat column and masthead also use, so all three align. */
-.dash-spine-narrow{width:100%;max-width:var(--dash-narrow-max);margin-left:auto;margin-right:auto;margin-bottom:var(--dash-zone-gap)}
 @media (max-width:880px){
   .content{padding:var(--space-12)}
   /* Ceiling the BOX, never the list: four server-authored warnings fill half a
      phone pane, and clamping the text would hide a state with nothing to report it. */
   .run-error-banner{max-height:26vh;overflow-y:auto;overscroll-behavior:contain}
 }
-.dash-spine-narrow:last-child{margin-bottom:0}
 
 .critical-alert{position:sticky;top:0;z-index:40;display:flex;align-items:baseline;gap:var(--space-12);
   padding:var(--space-10) var(--space-18);border-bottom:1px solid transparent;font-size:var(--text-md)}
@@ -56,7 +53,7 @@
 .run-error-banner.is-warn{background:var(--color-warn-bg);border-color:var(--color-warn-border)}
 .run-error-banner.is-warn .run-error-banner-head{color:var(--color-warn)}
 
-.dash-lane{margin:0 auto var(--dash-zone-gap);max-width:var(--dash-wide-max)}
+.dash-lane{min-width:0}
 .dash-lane-head{display:flex;align-items:baseline;gap:var(--space-10);width:100%;padding:var(--space-6) var(--space-12);background:transparent;border:0;border-bottom:0.5px solid var(--color-border);cursor:pointer;color:inherit;text-align:left;font:inherit}
 .dash-lane-head:hover{background:var(--color-background-secondary)}
 .dash-lane-caret{color:var(--color-text-secondary);font-size:var(--text-sm);width:14px;flex:none}
@@ -65,21 +62,9 @@
 .dash-lane-body{display:flex;flex-direction:column;gap:var(--space-12);padding-top:14px}
 .dash-lane.closed .dash-lane-head{border-bottom-color:transparent}
 
-/* Both cards size to their content: Candidates' 100% basis drops it to its own row the moment
-   it needs the band, so nothing here knows which view is on. */
-.dash-now-row{display:flex;flex-wrap:wrap;align-items:flex-start;gap:var(--space-18);width:100%}
-.dash-now-row > *{margin-bottom:0}
-/* In the row, `margin:auto` would shove it off the optimizer. */
-.dash-now-row > .cand-card{margin-left:0;margin-right:0;flex:0 1 auto}
-.dash-now-row > .workflow-card{flex:0 0 auto}
-
-.inspector-card{max-height:520px;overflow:auto;margin-bottom:14px}
+.inspector-card{max-height:var(--box-scroll-max);overflow:auto}
 .inspector-card .scoring-inspector{border-top:0;margin-top:0;padding-top:0}
 .inspector-samples{margin-top:12px;border-top:0.5px solid var(--color-border);padding-top:var(--space-8)}
-
-@media (max-width:640px){
-  .fitness-chart-frame{height:140px}
-}
 
 .lsc-charts{display:flex;flex-direction:column;gap:var(--space-14);margin-top:14px}
 .lsc-charts > *{margin-bottom:0;min-width:0}
@@ -177,9 +162,9 @@
 .cmap-knob-value{font-family:var(--font-mono);font-weight:600;color:var(--color-text-primary)}
 .cmap-knob-source-default{font-size:var(--text-xs);color:var(--color-text-secondary)}
 
-/* Mounted OUTSIDE .dash-spine-narrow, so it must not inherit its max-width. Steps are EVEN:
+/* Steps are EVEN:
    sequence is the x-axis, not time — gaps are stated in words. */
-.dash-time-ray{display:flex;align-items:stretch;gap:0;margin-bottom:var(--dash-zone-gap);
+.dash-time-ray{display:flex;align-items:stretch;gap:0;
   border:0.5px solid var(--color-border);border-radius:10px;
   background:var(--color-background-secondary);overflow:hidden}
 .dash-time-ray-track{flex:1;min-width:0;display:flex;align-items:center;gap:var(--space-6);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cycleOf, flowOrder, layoutGrid } from "../pipeline-layout";
-import type { PipelineViewEdge, PipelineViewNode } from "@/components/workflow";
+import type { PipelineViewEdge, PipelineViewNode } from "@/lib/types";
 
 const node = (
   id: string,

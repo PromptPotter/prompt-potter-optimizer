@@ -4,6 +4,7 @@
 
 import { useCallback, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { CELL_MEAN_ROWS } from "@/lib/cell-means";
 import type {
   BenchScore,
   CycleListEntry,
@@ -375,23 +376,6 @@ function SpentReading({ metered }: { metered: MeteredSpend | null }) {
     </span>
   );
 }
-
-// The terms a composite fitness prices a cell on, as served means over this point's own cells
-// (`SubjectReading.cell_means`). Indexed through a guard: a channel no cell carries is absent.
-const CELL_MEAN_ROWS: readonly {
-  key: string;
-  label: string;
-  fmt: (v: number) => string;
-}[] = [
-  { key: "cost", label: "avg cost / cell", fmt: (v) => fmtMetricValue("usd", v) },
-  { key: "latency", label: "avg time / cell", fmt: (v) => fmtMetricValue("seconds", v) },
-  { key: "tokens", label: "avg tokens / cell", fmt: (v) => fmtMetricValue("tokens", v) },
-  {
-    key: "target_prompt_chars",
-    label: "prompt length",
-    fmt: (v) => `${Math.round(v).toLocaleString()} chars`,
-  },
-];
 
 function CellMeans({ means }: { means: Record<string, number> | undefined }) {
   const rows = CELL_MEAN_ROWS.flatMap((r) => {

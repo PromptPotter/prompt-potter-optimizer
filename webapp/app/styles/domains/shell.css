@@ -1,12 +1,18 @@
-/* The sidebar is the campaign FOREST; `components/shell/ViewTabs` is the view axis, restyled into
-   the bottom tab bar by the ≤bp-md block at the foot of this file. */
+/* The sidebar is the campaign FOREST; `components/shell/ViewTabs` is the view axis, a ROW of
+   `.main` at every width — the ≤bp-md block at the foot of this file orders it last, as the
+   bottom tab bar. */
 .shell{--sidebar-width:200px;--nav-dock-h:0px;--remote-dock-h:0px;position:relative;display:flex;height:var(--vh-full);min-height:700px}
 /* A spacer ITEM, not padding: Chrome omits a flex container's end padding from scrollable
-   overflow, and the chat pane is one. Heights come from whoever is docked. */
-.content::after{content:"";display:block;flex:0 0 auto;height:calc(var(--nav-dock-h) + var(--remote-dock-h) + var(--safe-bottom))}
+   overflow, and the chat pane is one. Only what FLOATS over the pane reserves here; the nav is a
+   row of its own and takes its height in flow. */
+.content::after{content:"";display:block;flex:0 0 auto;height:calc(var(--remote-dock-h) + var(--safe-bottom))}
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
 /* Scrolls rather than compressing: a squeezed strip silently loses its last nav. */
-.view-tabs{display:flex;flex-direction:column;align-items:flex-start;gap:var(--space-6);width:100%;margin-top:var(--space-8);overflow-x:auto;scrollbar-width:thin}
+.view-tabs,.view-subnav{display:flex;flex:0 0 auto;padding:var(--space-6) var(--space-18);border-bottom:0.5px solid var(--color-border);overflow-x:auto;scrollbar-width:thin}
+.view-subnav{background:var(--color-background-secondary)}
+.workspace-header{display:flex;flex:0 0 auto;flex-wrap:wrap;align-items:center;gap:var(--space-8) var(--space-12);padding:var(--space-10) var(--space-18);border-bottom:0.5px solid var(--color-border)}
+.workspace-title{font-size:var(--text-md);font-weight:600}
+.workspace-back{margin-left:auto}
 .skip-link{position:absolute;left:8px;top:-48px;z-index:1000;padding:var(--space-8) var(--space-14);background:var(--color-accent);color:var(--color-text-on-accent);border-radius:var(--border-radius-md);font-size:var(--text-base);text-decoration:none;transition:top .15s ease}
 .skip-link:focus{top:8px}
 .shell.sidebar-collapsed{--sidebar-width:36px}
@@ -52,6 +58,10 @@
 .sidebar-primary{padding:var(--space-8) var(--space-12) var(--space-6);display:flex;flex-direction:column;gap:var(--space-6)}
 .sidebar-cta{display:flex;align-items:center;justify-content:center;gap:var(--space-6);padding:var(--space-8) var(--space-12);background:var(--color-background-tint);color:var(--color-text-primary);border:0.5px solid var(--color-border);border-radius:8px;font-family:inherit;font-size:var(--text-base);font-weight:500;cursor:pointer;width:100%}
 .sidebar-cta:hover{background:var(--color-background-hover);border-color:var(--color-text-secondary)}
+.sidebar-views{display:flex;gap:var(--space-6)}
+.sidebar-view{flex:1 1 0;min-width:0;display:flex;align-items:center;justify-content:center;gap:var(--space-6);padding:var(--space-6) var(--space-8);background:transparent;color:var(--color-text-secondary);border:0.5px solid var(--color-border);border-radius:8px;font-family:inherit;font-size:var(--text-sm);cursor:pointer}
+.sidebar-view:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
+.sidebar-view[aria-current="page"]{color:var(--color-accent);border-color:var(--color-accent);font-weight:600}
 .unit-library{margin-top:14px;padding:0 var(--space-8) 0 3px;border-top:0.5px solid var(--color-border);padding-top:10px;display:flex;flex-direction:column;min-height:0;flex:1}
 /* The header keeps its inset so only the TREE moves left. */
 .unit-library-head{display:flex;align-items:center;justify-content:space-between;padding:0 var(--space-8) var(--space-6) var(--space-12);font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-secondary)}
@@ -279,32 +289,26 @@
   /* Desktop-only: on a phone the live-run signal is the dot on the app bar's back arrow. */
   .jobs-dock{display:none}
 
-  /* Same DOM as ViewTabs; `column-reverse` docks the always-present primary row on the edge. */
+  /* The bottom tab bar: the same row, ordered last. In flow, so no pane reserves room for it. */
   .view-tabs{
-    position:fixed;left:0;right:0;bottom:0;z-index:60;
-    flex-direction:column-reverse;align-items:stretch;gap:0;
-    margin-top:0;overflow:visible;
+    order:99;padding:0 0 var(--safe-bottom);overflow:visible;
     background:var(--color-background-primary);
-    border-top:0.5px solid var(--color-border);
-    padding-bottom:var(--safe-bottom);
+    border-top:0.5px solid var(--color-border);border-bottom:0;
   }
   .view-tabs > [role="group"]{display:flex;width:100%;border:0;border-radius:0;overflow:visible}
-  .view-tabs > [role="group"] > button{flex:1 1 0;min-width:0;border-right:0;background:transparent;color:var(--color-text-secondary)}
-  .view-tabs > [role="group"]:first-child > button{
+  .view-tabs > [role="group"] > button{
+    flex:1 1 0;min-width:0;border-right:0;background:transparent;color:var(--color-text-secondary);
     flex-direction:column;justify-content:center;gap:2px;
-    min-height:56px;padding:var(--space-6) var(--space-4);font-size:var(--text-xs);
+    min-height:var(--nav-row-h);padding:var(--space-6) var(--space-4);font-size:var(--text-xs);
   }
-  .view-tabs > [role="group"]:first-child > button svg{width:22px;height:22px}
+  .view-tabs > [role="group"] > button svg{width:22px;height:22px}
   /* Inked, never filled: an accent block reads as a pressed button, not "you are here". */
-  .view-tabs > [role="group"]:first-child > button[aria-pressed="true"]{color:var(--color-accent);font-weight:600}
-  .view-tabs > [role="group"]:nth-child(2){border-bottom:0.5px solid var(--color-border);background:var(--color-background-secondary)}
-  .view-tabs > [role="group"]:nth-child(2) > button{justify-content:center;min-height:38px;font-size:var(--text-sm)}
-  .view-tabs > [role="group"]:nth-child(2) > button[aria-pressed="true"]{
-    color:var(--color-text-primary);font-weight:600;box-shadow:inset 0 -2px 0 var(--color-accent);
-  }
-  /* `:not(.mobile-list)` is load-bearing: `:has()` takes its argument's specificity and outscores
-     the reset otherwise. */
-  .shell{--nav-dock-h:56px}
-  .shell:not(.mobile-list):has(.view-tabs > [role="group"]:nth-child(2)){--nav-dock-h:94px}
+  .view-tabs > [role="group"] > button[aria-pressed="true"]{color:var(--color-accent);font-weight:600}
+  .view-subnav,.workspace-header{padding-left:var(--space-12);padding-right:var(--space-12)}
+  .view-subnav > [role="group"]{display:flex;width:100%}
+  .view-subnav > [role="group"] > button{flex:1 1 0;justify-content:center}
+  /* What the floating remote stands ON; zero wherever the bar is not on screen. */
+  .shell{--nav-row-h:56px}
+  .shell:has(> .main > .view-tabs){--nav-dock-h:var(--nav-row-h)}
   .shell.mobile-list{--nav-dock-h:0px}
 }

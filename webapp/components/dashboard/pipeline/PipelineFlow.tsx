@@ -6,7 +6,7 @@ import {
   type PipelineView,
   type PipelineViewEdge,
   type PipelineViewNode,
-} from "@/components/workflow";
+} from "@/lib/types";
 import type { NodeReach } from "@/lib/api";
 import type { NodeScope } from "@/lib/SelectionContext";
 import type { PipelineStatus } from "@/lib/types";

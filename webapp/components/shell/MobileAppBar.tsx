@@ -3,26 +3,34 @@ import { useAuth } from "@/lib/auth-context";
 import { useWorkspace } from "@/lib/workspace";
 import { campaignDisplayName } from "@/lib/names";
 import { cx } from "@/lib/cx";
+import { WORKSPACE_LABEL } from "@/lib/view-tab";
 import { CampaignMenu } from "@/components/shell/sidebar/CampaignMenu";
 import s from "./MobileAppBar.module.css";
 
-// The phone CAMPAIGN screen's app bar. The VIEW axis is not here — ViewTabs owns it; the `←`
-// dot reads the same `runningCycles` as JobsDock (I6), not a second dock.
+// The phone's app bar over whatever `.main` shows: one campaign, or a workspace view. The VIEW
+// axis is not here — ViewTabs owns it; the `←` dot reads the same `runningCycles` as JobsDock
+// (I6), not a second dock.
 
 interface Props {
   listScreen: boolean;
+  // A workspace view is on screen: the bar names the workspace and carries no campaign menu.
+  workspace: boolean;
   onBack: () => void;
   onNewCycle: () => void;
 }
 
-export function MobileAppBar({ listScreen, onBack, onNewCycle }: Props) {
+export function MobileAppBar({ listScreen, workspace, onBack, onNewCycle }: Props) {
   const { status, openAuthPrompt } = useAuth();
   const { campaignId, campaigns, runningCycles } = useWorkspace();
 
   if (listScreen) return null;
 
-  const campaign = campaigns.find((c) => c.campaign_id === campaignId);
-  const title = campaign ? campaignDisplayName(campaign) : "PromptPotter";
+  const campaign = workspace ? undefined : campaigns.find((c) => c.campaign_id === campaignId);
+  const title = workspace
+    ? WORKSPACE_LABEL
+    : campaign
+      ? campaignDisplayName(campaign)
+      : "PromptPotter";
   const anon = status === "unauthed";
   const running = runningCycles.length;
 

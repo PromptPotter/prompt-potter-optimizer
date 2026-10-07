@@ -77,7 +77,7 @@ test.describe("cold start", () => {
   });
 
   test("every tab renders against an empty read", async ({ page }) => {
-    for (const tab of ["", "#/dashboard", "#/compare", "#/verify", "#/files"]) {
+    for (const tab of ["", "#/dashboard", "#/compare", "#/files"]) {
       await open(page, tab);
       await passConsent(page);
       await ready(page);

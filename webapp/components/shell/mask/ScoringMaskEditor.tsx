@@ -20,7 +20,7 @@ import {
 import type { CellTermMeta } from "@/lib/api/types.generated";
 import { cx } from "@/lib/cx";
 import { TERMS } from "@/lib/terms";
-import { DEFAULT_MASK_WEIGHT, type ScoringMask } from "./scoring-mask";
+import { DEFAULT_MASK_WEIGHT, type ScoringMask } from "@/lib/scoring-mask";
 
 const TERM_GLYPHS: Record<string, ComponentType> = {
   fitness: IconTarget,

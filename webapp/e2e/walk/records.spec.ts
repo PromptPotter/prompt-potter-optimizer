@@ -13,11 +13,6 @@ test.describe("records", () => {
     await expect(page.locator("#main-content")).toBeVisible();
   });
 
-  test("Verify mounts", async ({ page, rich }) => {
-    await open(page, `${rich.addr}/verify`);
-    await expect(page.locator("#main-content")).toBeVisible();
-  });
-
   test("Files lists the campaign's on-disk record", async ({ page, rich }) => {
     await open(page, `${rich.addr}/files`);
     await expect(page.getByRole("tree").or(page.getByRole("list")).first()).toBeVisible();

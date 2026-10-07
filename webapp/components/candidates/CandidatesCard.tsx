@@ -4,7 +4,7 @@ import { activeSeries, metricInkToken, type SeriesCtx } from "./series";
 import { FitnessChart, type PlotGeometry, geomEqual } from "./FitnessChart";
 import { DendrogramStrip } from "./DendrogramStrip";
 import { AbilityHelp, ThetaCaveatNotice } from "./AbilityInfo";
-import { setCandidatesState, toggleMetric, useCandidatesState } from "./candidates-store";
+import { setCandidatesState, toggleMetric, useCandidatesState } from "@/lib/candidates-store";
 import {
   Badge,
   CardFrame,
@@ -27,21 +27,19 @@ import { ABORT_LENS_LABELS } from "@/lib/api/types.generated";
 import type { DashboardCandidate, RoundSummary } from "@/lib/api/types";
 import { subjectKey, withMask } from "@/lib/api/reads";
 import { useCompareSelection } from "@/lib/compare-selection";
-import { useCompareWithOrigin } from "@/lib/hooks/useCompareWithOrigin";
 import { useSelection } from "@/lib/SelectionContext";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { ScoringMaskEditor } from "@/components/shell/mask/ScoringMaskEditor";
-import { ApplyScenarioPanel } from "@/components/dashboard/control/ApplyScenarioPanel";
+import { ApplyScenarioPanel } from "@/components/candidates/ApplyScenarioPanel";
 import {
   criterionOf,
   lensOf,
   setScoringMask,
   useScoringMask,
-} from "@/components/shell/mask/scoring-mask";
+} from "@/lib/scoring-mask";
 import { FitnessRankSummary } from "./FitnessRankSummary";
-import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
+import { useVerifyRuns } from "@/lib/hooks/useVerifyRuns";
 import type { LineageNode } from "@/lib/api";
-import { readyData, useRead } from "@/lib/hooks/useRead";
 import {
   barsAreCourses,
   benchByLabel,
@@ -57,8 +55,8 @@ import {
 import { isSelectedCandidate } from "@/lib/types";
 import { encodeCyclePath } from "@/lib/ids";
 import { useWorkspace } from "@/lib/workspace";
-import { useLineage } from "./useLineage";
-import { useMaskTerms } from "@/components/shell/mask/useMaskTerms";
+import { useLineage } from "@/lib/hooks/useLineage";
+import { useMaskTerms } from "@/lib/hooks/useMaskTerms";
 import { SampleSetControl } from "./SampleSetControl";
 import { measuredUniverse } from "@/lib/sample-set";
 import { useViewedLineage, divergenceRoundsFor } from "@/lib/lineage";
@@ -99,7 +97,6 @@ export function CandidatesCard() {
     setSelectionForSampleSet,
   } = useSelection();
   const comparing = useCompareSelection();
-  const withOrigin = useCompareWithOrigin(viewedPath, selectedCandidate?.candidate_id ?? null);
 
   const {
     showForest,
@@ -117,26 +114,8 @@ export function CandidatesCard() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const history: RoundSummary[] = useMemo(() => sortedRounds(dash), [dash?.rounds]);
 
-  // Never polled: re-run `promptpotter verify` and reload for a fresh red bar.
-  const diagRunsResp = readyData(
-    useRead(
-      {
-        key: `${campaignId}\x1f${cycleId}`,
-        fetch: (s) => fetchDiagnosticRuns(undefined, s),
-      },
-      { surface: "diagnostic-runs", auth: true },
-    ),
-  );
-  const diagByLabel = useMemo(() => {
-    const m = new Map<string, DiagnosticRunRecord>();
-    if (!campaignId || !cycleId) return m;
-    for (const r of diagRunsResp?.runs ?? []) {
-      if (r.source_campaign !== campaignId || r.source_cycle !== cycleId) continue;
-      const prior = m.get(r.source_label);
-      if (!prior || r.ts > prior.ts) m.set(r.source_label, r);
-    }
-    return m;
-  }, [diagRunsResp, campaignId, cycleId]);
+  // Never polled here: a fresh red bar lands when this card next mounts.
+  const diagByLabel = useVerifyRuns(campaignId, cycleId);
 
   const benchReadings = useMemo(
     () => benchByLabel(history, dash?.bench_pass),
@@ -516,17 +495,6 @@ export function CandidatesCard() {
                   }
                 >
                   Compare this searchpoint
-                </MenuCheck>
-                <MenuCheck
-                  on={false}
-                  disabled={withOrigin.run === null}
-                  onClick={() => {
-                    withOrigin.run?.();
-                    close();
-                  }}
-                  title="Open Compare on the origin and the selected searchpoint, or this branch's head with none selected. Replaces what is on the board."
-                >
-                  Compare with {withOrigin.originLabel ?? "the origin"}
                 </MenuCheck>
                 {dash?.stamps_theta && (
                   <>

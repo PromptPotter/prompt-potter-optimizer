@@ -3,9 +3,8 @@ import { SignInPrompt } from "@/components/ui";
 import type { AuthStatus } from "@/lib/auth-context";
 import type { LifecycleFilter } from "@/lib/api";
 import type { OriginGroup } from "@/lib/derivations";
-import type { TreeCtx } from "./sidebar/ForestRows";
-import { CampaignTreePane } from "./CampaignTreePane";
-import { SidebarFilterPopover } from "./sidebar/SidebarFilterPopover";
+import { ForestRows, type TreeCtx } from "./ForestRows";
+import { SidebarFilterPopover } from "./SidebarFilterPopover";
 
 interface Props {
   status: AuthStatus;
@@ -95,7 +94,11 @@ export function SidebarContent({
           </div>
         </div>
       )}
-      {loaded && origins.length > 0 && <CampaignTreePane origins={origins} ctx={ctx} />}
+      {loaded && origins.length > 0 && (
+        <ul className="unit-library-list">
+          <ForestRows origins={origins} ctx={ctx} />
+        </ul>
+      )}
     </div>
   );
 }

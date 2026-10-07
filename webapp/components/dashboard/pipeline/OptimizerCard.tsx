@@ -14,9 +14,9 @@ import {
   ToolbarSpacer,
 } from "@/components/ui";
 import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
-import { NodeKnobsPanel } from "@/components/dashboard/control/NodeKnobsPanel";
+import { NodeKnobsPanel } from "@/components/dashboard/pipeline/NodeKnobsPanel";
 import { RoundAxis } from "./RoundAxis";
-import type { PipelineDoc } from "./types";
+import type { PipelineDoc } from "@/lib/types";
 
 // The Optimizer card: the loop's frame, round axis and liveness around the shared `PipelineFlow`;
 // it draws no graph of its own. The optimizer's knobs are read-only here and sit behind the header's last icon.

@@ -86,7 +86,9 @@ export const DendrogramStrip = memo(function DendrogramStrip({
             y2={s.y2}
           />
         ))}
-        {geo.nodes.map((n) => {
+        {/* Keyed positionally besides: a repair re-measures without re-minting, so two bars of one
+            timeline can share an address. */}
+        {geo.nodes.map((n, i) => {
           const view = byKey.get(n.key);
           const selected = n.key === selectedKey;
           const forkCycle = forkedFrom.get(n.candidateId);
@@ -94,7 +96,7 @@ export const DendrogramStrip = memo(function DendrogramStrip({
             ? fmtDisplayValue(metric, metric === "composite" ? view.composite : view.accuracy, view.theta)
             : "—";
           return (
-            <g key={n.key} className="cand-dendro-node">
+            <g key={`${n.key}|${i}`} className="cand-dendro-node">
               <g
                 {...pressable(() => onSelect(selected ? null : (view ?? null)))}
                 aria-pressed={selected}

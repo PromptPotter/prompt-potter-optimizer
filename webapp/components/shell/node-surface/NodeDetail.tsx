@@ -18,7 +18,7 @@ import {
   type ObserveState,
 } from "@/lib/derivations";
 import { fmtPct0, fmtSecs, fmtValue } from "@/lib/format";
-import { nodeKind } from "@/components/workflow";
+import { nodeKind } from "@/lib/types";
 import { CopyButton, SegmentedControl } from "@/components/ui";
 import { NodeSurface } from "./NodeSurface";
 import { MeasurementRun } from "./MeasurementRun";

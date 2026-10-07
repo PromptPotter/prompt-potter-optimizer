@@ -16,7 +16,12 @@ export interface CompareWithOrigin {
   /** `null` until the tree places both ends: a candidate still scoring has no lineage id. */
   run: (() => void) | null;
   originLabel: string | null;
+  /** The pair as `/evidence` subjects, ORIGIN first; one entry while the point IS the origin,
+   *  none until the tree places it. A stable identity per pair, so it can key a read. */
+  subjects: readonly string[];
 }
+
+const NO_SUBJECTS: readonly string[] = [];
 
 export function useCompareWithOrigin(
   path: CyclePath | null,
@@ -60,7 +65,7 @@ export function useCompareWithOrigin(
     if (!originKey || !second) return null;
     const channels: CompareChannel[] = [{ rootCampaignId: top.campaignId, subject: originKey }];
     if (second !== originKey) channels.push({ rootCampaignId: top.campaignId, subject: second });
-    return { channels, originLabel: origin.label };
+    return { channels, subjects: channels.map((c) => c.subject), originLabel: origin.label };
   }, [index, path, candidateId]);
 
   const run = useCallback(() => {
@@ -69,5 +74,9 @@ export function useCompareWithOrigin(
     setTab("compare");
   }, [pair, show, setTab]);
 
-  return { run: pair ? run : null, originLabel: pair?.originLabel ?? null };
+  return {
+    run: pair ? run : null,
+    originLabel: pair?.originLabel ?? null,
+    subjects: pair?.subjects ?? NO_SUBJECTS,
+  };
 }

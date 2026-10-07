@@ -3,7 +3,7 @@
 // `ConnectorView.optimizer` — which manifest the viewed course runs — or null to read nothing.
 
 import { fetchPipeline } from "@/lib/api";
-import type { PipelineDoc } from "@/components/workflow";
+import type { PipelineDoc } from "@/lib/types";
 import { readyData, useRead } from "./useRead";
 
 export interface OptimizerPipeline {

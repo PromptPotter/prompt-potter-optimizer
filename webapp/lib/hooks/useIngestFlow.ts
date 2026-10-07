@@ -25,7 +25,8 @@ import {
 } from "@/lib/api";
 import { plainLanguageRecap } from "@/lib/origin-readiness";
 import type { RunSummary } from "@/lib/derivations";
-import type { OnMinted } from "@/components/ingest/types";
+// `start-checkin` returns the (campaign, cycle) synchronously, so the caller can select it at once.
+type OnMinted = (selection: { campaignId: string; cycleId: string }) => void;
 
 type ChatMsg =
   | { id: string; kind: "user-file"; name: string; rows: number | null }

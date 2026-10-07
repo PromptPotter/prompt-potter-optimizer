@@ -50,7 +50,8 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
+    // `themeInit` stamps `data-theme` before hydration, so the attribute is the client's alone.
+    <html lang="en" suppressHydrationWarning>
       <head>
         {/* Not `metadata.icons`: that is re-emitted at hydration, after `SurfaceFavicon`
             repaints, and takes the tab back. */}

@@ -7,7 +7,7 @@ import { useNestedPipelines } from "@/lib/hooks/useNestedPipelines";
 import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import type { NodeReach } from "@/lib/api";
 import type { NodeScope } from "@/lib/SelectionContext";
-import type { PipelineView } from "@/components/workflow";
+import type { PipelineView } from "@/lib/types";
 import type { PipelineStatus } from "@/lib/types";
 import { ConnectorInspector } from "./ConnectorInspector";
 import { PipelineFlow } from "./PipelineFlow";

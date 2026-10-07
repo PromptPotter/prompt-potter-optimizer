@@ -25,7 +25,7 @@ test.describe("dashboard", () => {
 
   test("the secondary panes and the config map mount", async ({ page }) => {
     await expect(page.getByRole("region", { name: /Config map/ })).toBeVisible();
-    await expect(page.getByRole("region", { name: /2ndary-relevant-info/ })).toBeVisible();
+    await expect(page.getByRole("region", { name: /Run details/ })).toBeVisible();
   });
 
   test("a served object in scope can be copied", async ({ page }) => {
@@ -34,7 +34,7 @@ test.describe("dashboard", () => {
 
   test("the collapsed panes open, and what they draw survives a poll", async ({ page }) => {
     // Sit through a poll: the spend map arrives on the wire, not at mount.
-    const fold = page.getByRole("button", { name: /2ndary-relevant-info/ }).first();
+    const fold = page.getByRole("button", { name: /Run details/ }).first();
     if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click();
     await expect(page.getByText(/Cost by round/)).toBeVisible();
     await page.waitForTimeout(6000);
