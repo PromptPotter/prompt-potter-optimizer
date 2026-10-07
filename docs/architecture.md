@@ -627,19 +627,14 @@ writes land through the running loop.
 #### The on-disk layout
 
 The on-disk layout makes the four-entity model literal. Under each
-tenant, `campaigns/{campaign_id}/` is the Campaign directory:
-`campaign.json` (manifest — `dataset_name, label, created_at,
-root_cycle_id, root_content_hash, treatment, arm, backend_id, config`; identity + config
-+ lifecycle intent only — run state is owned per-cycle by
-`index.json` (`finished_at` + `stop_reason`) and derived on read for campaign surfaces), `result.json` (the campaign's
-result as facts, rewritten by the cycle holding its line — § The bench score is not an
-optimizer's selection), `log.md`
-(campaign digest — covers every session, its forks, and its rounds),
-`hard_samples.json` (campaign-scope heatmap), and `cycles/{cycle_id}/`
-holding **every** cycle — all N session roots and every fork and diag —
-**all flat** — the sibling kind is read off the id, not directory nesting. A flat `cycles/` store keyed by
-`parent_cycle_id` scales as the fork tree grows; nested fork-of-fork
-directories do not.
+tenant, `campaigns/{campaign_id}/` is the Campaign directory, and its `cycles/{cycle_id}/`
+holds **every** cycle — all N session roots and every fork and diag —
+**all flat**: the sibling kind is read off the id, not directory nesting.
+**The tree, each file's content and why it is flat** — owned by
+[`operations/persistence-and-state.md`](operations/persistence-and-state.md) § Layout and
+§ File reference; what §0 fixes is that `campaign.json` holds identity, config and lifecycle
+intent only — run state is owned per-cycle by `index.json` (`finished_at` + `stop_reason`) and
+derived on read for campaign surfaces.
 
 `dashboard.json` is **per-cycle**: every cycle (root,
 fork, diag) owns its live file in its own dir
@@ -654,8 +649,6 @@ Each campaign is a
 standalone dashboard: the operator understands a campaign from
 `campaign.json` + `log.md` plus the per-cycle `dashboard.json`
 streams, without descending into per-cycle round detail.
-`measurements/` stays a peer of `campaigns/` — dataset-scoped,
-cross-campaign by design (§ Measurement archive (the actual database)).
 
 ### Tracing, Langfuse-shaped, lightweight by default
 
@@ -727,11 +720,8 @@ The entry points (**how many there are, and the parity rule over them, is owned 
 
 #### Layer shape
 
-- **The bench never imports an optimizer.** An optimizer's node implementations import the
-  bench's node-type Protocols, never the reverse, and the bench reaches the member a manifest
-  names through the registry alone — the layer rule's generalization, which
-  [`../promptpotter/application/CLAUDE.md`](../promptpotter/application/CLAUDE.md) § Layer rule
-  enforces.
+- **The bench never imports an optimizer** (§ Every optimizer is a manifest) — an optimizer's
+  node implementations import the bench's node-type Protocols, never the reverse.
 - **No display in `domain/`** — the layer holds no renderer module, and the text it does produce
   is what a model says about itself (a value's flat form, a reading's one-line wording, a
   declaration's description, a verdict's reason and advice, an error's message), kept beside that
@@ -792,9 +782,7 @@ silent additions.
 
 The `new` verb + the `/potter-run` skill sit in `presentation/` and
 orchestrate one-time onboarding (TermNorm download, dataset
-conversion, API key prompts) — load-bearing for the operator's first
-run; audit for accumulated cruft but don't delete the underlying
-mechanism.
+conversion, API key prompts) — load-bearing, per §0.5.
 
 #### Run admission — one seam in, one queue
 
@@ -907,16 +895,10 @@ the PR description.
 - **Per-cycle `CycleEventLog` + `Projection` dispatch** — the
   persistence backbone. No second ingress, ever.
 
-- **Control-remote highway** — the `CommandRecord` / `CommandAckRecord`
-  / `ProjectionEnvelope` triple riding the canonical `.runtime/ledger.jsonl` via
-  sole `CommandDispatcher` (inbound AND ack), `CycleLedgerTail` reading
-  the ledger directly (outbound SSE, no writer). The closed inbound +
-  outbound sets live in `docs/specs/api-openapi.yaml` and
-  `docs/specs/events-asyncapi.yaml`; the permanent contract is
-  `docs/adr/0001-m12-control-plane.md`. Cleanup PRs cannot collapse
-  commands into a parallel queue, drop the YAML-first rule, or remove
-  the sole-writer invariants — every M12-onward interactive surface
-  rides this highway.
+- **Control-remote highway** (§ Control-remote) — the `CommandRecord` / `CommandAckRecord`
+  / `ProjectionEnvelope` triple riding the canonical `.runtime/ledger.jsonl`. Cleanup PRs
+  cannot collapse commands into a parallel queue, drop the YAML-first rule, or remove
+  the sole-writer invariants — every interactive surface rides this highway.
 
 - **Hard-sample sorter (Rasch)**
   (`application/intelligence/hard_sample_sorter.py`) + the leaderboard
@@ -1012,9 +994,8 @@ the PR description.
     `rescore_results` and folded by `fold_cells` (`application/mask/load.py`): the reading a
     fresh run under `F` reports. A round's evaluator map is a served reading, never a formula
     input. The webapp recomputes nothing.
-  - **The headline is the bench score, and no optimizer computes it.** One evaluator
-    scores every optimizer's result on the held-out bench set (§ The bench score is not an
-    optimizer's selection). A cleanup cannot let a node read the bench set, serve an
+  - **The headline is the bench score, and no optimizer computes it** (§ The bench score is
+    not an optimizer's selection). A cleanup cannot let a node read the bench set, serve an
     optimizer's own selection score as the headline, or fold the bench score into a
     selector — each lets an optimizer grade itself. Potter's θ is no exception: it is its
     election signal, never substituted into the bench score, and it surfaces only on the
@@ -1086,9 +1067,6 @@ the PR description.
 §0.5 is binary: surface is either load-bearing (named above, can't
 be cut) or it isn't. Items needing a load-bearing-or-drop decision are
 tracked in `docs/specs/code-debt-cleanup.md`, not in this list.
-(The MLflow + Langfuse sinks are
-**resolved as kept** — the observability-nexus drop-in is a core
-capability, not an audit candidate; see § Tracing, Langfuse-shaped, lightweight by default.)
 
 When in doubt about an item already in the list above: file a
 one-line "kept because" note in the PR rather than cutting silently.

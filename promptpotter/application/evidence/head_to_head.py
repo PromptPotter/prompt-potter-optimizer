@@ -10,8 +10,8 @@ from promptpotter.application.datasets.authored import config_cell_scorer
 from promptpotter.application.evidence.subjects import SubjectReading
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
-from promptpotter.application.runner.bench import bench_rows, read_bench
-from promptpotter.application.runner.campaign_result import read_line_spend
+from promptpotter.application.runner.bench import bench_rows
+from promptpotter.application.runner.campaign_result import headline_under, read_line_spend
 from promptpotter.application.scoring.selection import paired_fitness
 from promptpotter.domain.bench import (
     BENCH_HEADLINE,
@@ -70,8 +70,8 @@ class HeadToHeadRow(StrictModel):
     stop_reason: StopReason | None
     # Its class off `STOP_REASON_INFO`; a `failed` arm ended on no result, whatever `bench` holds.
     outcome: StopOutcome | None
-    # `None` where the line banked no origin's pass: nothing held out, or none sent yet. Its
-    # `selected` is `None` until the line grades its selection.
+    # `None` until the line banks an origin's pass; `missing_reason` where it holds nothing out.
+    # Its `selected` is `None` until the line grades its selection.
     bench: BenchScore | None
     bench_set: Instrument | None
     # Against the declared instrument, else the row most others share one with; `None` for a row
@@ -376,7 +376,11 @@ def _read(
     layout = CycleLayout(stores.campaigns.cycle_dir(hop))
     selected = select_optimizer(config.optimization)
     passes = None if result is None else result.bench
-    bench = None if passes is None else read_bench(stores, passes, scorer, scorer_id=scorer_id)
+    bench = (
+        None
+        if result is None
+        else headline_under(stores, result, config, scorer, scorer_id=scorer_id)
+    )
     origin_rows, selected_rows = (
         (None, None) if passes is None else bench_rows(stores, passes, scorer, scorer_id=scorer_id)
     )

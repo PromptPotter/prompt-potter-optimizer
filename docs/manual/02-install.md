@@ -53,7 +53,7 @@ Next: [Your first campaign](03-first-campaign.md).
 
 ## Environment variables
 
-The `.env` file (see `.env.example`) carries API keys. The optimizer's provider + model are declared per node in its manifest, `promptpotter/assets/optimizers/potter/pipeline.yaml`, and a campaign may move one through `optimization.nodes` — no env-var default. (Target/scoring model is per-dataset in the pipeline overlay.)
+The `.env` file (see `.env.example`) carries API keys and nothing else: where the optimizer's provider + model are declared is [step 3](#3-create-env) above. (Target/scoring model is per-dataset in the pipeline overlay.)
 
 | Variable | When required | Purpose |
 |----------|---------------|---------|

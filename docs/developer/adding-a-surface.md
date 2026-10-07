@@ -2,7 +2,7 @@
 
 Expansion in PromptPotter is **fill-in-the-blank, CI-guarded**. Each surface
 below has a fixed set of edits and a contract test that fails the build when you
-wire only half of it. The pre-flight gate (root `CLAUDE.md`) and the six
+wire only half of it. The pre-flight gate (root `CLAUDE.md`) and the
 per-layer `CLAUDE.md` files say *what* the rules are; this page says *where you
 type* and *which test catches you* if you miss a half.
 
@@ -26,14 +26,14 @@ tests. Add new ones the same way — never as a `test_structure` scan.
 | An optimizer node | [§6](#6-an-optimizer-node) | `validate_template()` at prompt load |
 | A CLI verb | [§7](#7-a-cli-verb) | Import-time: the `COMMANDS` ↔ `parser_verbs` assert |
 | A control-plane command kind | [§8](#8-a-control-plane-command-kind) | Import-time: three asserts over `ALL_DISPATCHED_KINDS` — cap, payload model, **and the CLI verb** |
-| A served READ (a GET) | [§9](#9-a-served-read) | `gate.py --only openapi` / `--only ts-types`, but **only once the route carries a `response_model`** — a read without one is invisible to both, which is how several shipped undeclared |
+| A served READ (a GET) | [§9](#9-a-served-read) | `gate.py --only openapi` / `--only ts-types`, but **only once the route carries a `response_model`** — a read without one is invisible to both |
 | A measurement field | [developer README §4](README.md#4-cross-run-memory) | **Arm-time where a connector declares the key** (`Connector.required_observation_keys`), otherwise nothing — it is dropped at `sample_measurement.py::measure_sample` in silence. Declare it on `domain/scoring.py::QueryMeasurement` / `PipelineData`; a `pipeline_data` key also needs `_INFRA_KEYS` or a dataset `observation_mapping`, plus the compaction asserts beside those types |
 
 ---
 
 ## 1. A ledger record / telemetry event
 
-**First, the one decision** (this is the rule that used to be tribal): there are
+**First, the one decision**: there are
 two writer shapes, and they are *not* interchangeable — pick by whether the call
 site holds an explicit ledger handle.
 
@@ -58,18 +58,14 @@ which is exactly what the guard prevents.
 for every `CycleRecord` arm, and which arms are deliberately unfolded is stated there with
 each one's reason rather than here — a second list is what let the first one go wrong.
 
-**A missing arm does NOT break loud** — that claim was the error, and it is checked now rather
-than asserted. `ElectionRecord` was listed as deliberately unprojected when it was not, so the
-crown reached no fold; `CandidateMintedRecord` had no second channel at all, so `dashboard.json`
-never learned a candidate had been minted.
+**A missing arm does NOT break loud** — a record no fold answers for reaches no artifact and
+nothing raises, which is why the claim is checked at import rather than asserted in prose.
 
 **A tracing event is not a second home for the same fact.** `infrastructure/tracing/`
 carries the trace TOPOLOGY — campaign / round / node spans and their scores, the shape a
 remote sink renders — and every `Event` member must have a remote sink to reach. A
 mid-round fact (a candidate created or scored, a round winner, a critique, a layer
-applied) lands on the ledger and in `rounds/round_NNNN.json`, and stops there; five such
-events once existed whose only sink was the unread local mirror, so each cost its writer a
-second emit for nothing. Adding a real one is the dataclass in `tracing/events.py`, its
+applied) lands on the ledger and in `rounds/round_NNNN.json`, and stops there. Adding a real one is the dataclass in `tracing/events.py`, its
 row in `ObservabilityBridge._routes`, and a handler per sink named in that row.
 
 **Guard (at bridge construction):** `_routes` is the registry, and `__init__` raises when
@@ -110,10 +106,9 @@ Contract: [`dispatch-hub.md`](dispatch-hub.md) § L1 layout.
 
 ## 3. A dashboard / view field
 
-A field on a phase view (the live CLI render + `dashboard.json`). Since the
-typed-view roundtrip collapsed (the producer hands the **typed** view onto the
-ledger fan-out and Pydantic serializes it for disk/SSE), there is **no
-reconstructor to keep in sync** — that synchronized third edit is gone.
+A field on a phase view (the live CLI render + `dashboard.json`). The producer
+hands the **typed** view onto the ledger fan-out and Pydantic serializes it for
+disk/SSE, so there is **no reconstructor to keep in sync**.
 
 **Recipe:**
 
@@ -133,8 +128,7 @@ reconstructor to keep in sync** — that synchronized third edit is gone.
 `RoundResult` (`domain/results.py`) and it reaches `rounds/round_NNNN.json` and every
 reader of that file, because the model IS the document (`save_round_file` persists
 `model_dump()`; `load_round_file` validates it back). There is no payload builder to
-mirror it into — the one that existed hand-wrote 24 of the model's fields and silently
-dropped the other twelve.
+mirror it into.
 
 **But the webapp does not read round files** — it reads `dashboard.json`. Which model you
 mirror onto decides the cost, so ask first *whose* fact it is:
@@ -164,8 +158,7 @@ invisible to every check that could exist — it is declared, so no schema refus
 so no compaction moves it; the panel renders blank and each reader honestly reports "this backend
 does not say". `domain/scoring.py` names this as the third direction and states outright that no
 assert can catch it, so the enforcement is procedural and costs one glance: run it, look at the
-surface, confirm a number appeared. The judge's prefix-cache capture read a hard `0` across the
-entire archive that way — four surfaces faithfully reading a field the judge path never emitted.
+surface, confirm a number appeared.
 
 **Guard:** the two-factories-onto-one-View correctness invariant — the live
 builder and the disk builder must produce an equal `RoundCompleteView`. No
@@ -272,21 +265,16 @@ the list there rather than a copy here.
 
 Three things the recipe cannot show you:
 
-- **`BackendClient.run_query` dispatches on the declared `execution` mode, never the
-  connector name**, so transport stays a capability rather than a core-loop branch. The
-  `in_process` arm is SHIPPED and three connectors ride it — `promptpotter` (an inner cycle,
-  L4, via `runner/inner/spawn.py`), `harbor` (one containerized agent episode) and `dspy`. It
-  does not raise `NotImplementedError`. **`in_process` is a statement about TRANSPORT and
-  nothing else** — a `harbor` cell holds a container, spends real money and takes minutes.
+- **Execution mode** — owned by
+  [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § Execution mode — declare
+  `execution` on the connector; transport is never a branch in the core loop.
 - **The answer shape** — owned by
   [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § The answer shape — decide
   it while writing `extract_experiment`, which is where a verifier-graded backend yields
   `ground_truth: None` and where it declares that nowhere else.
-- **A credential is a per-backend fact and belongs on the connector's `auth_token` hook**,
-  never read at the construction site. `build_backend_client` (`infrastructure/backend.py`)
-  is the one place a `BackendClient` is built and it takes the token off the connector it was
-  handed. Read a token at the construction site instead, and registering a second
-  `remote_http` backend POSTs the first one's bearer token to a third-party host.
+- **The credential** — owned by
+  [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § The credential rides the
+  connector — declare it on the `auth_token` hook, never read one at a construction site.
 
 ---
 
@@ -338,10 +326,7 @@ rebuilds a derived index from the detail files and deletes nothing, so it owes n
 `new <file.csv>`, not an `ingest` verb.
 
 **Guard:** the import-time assert named above — `COMMANDS.keys()` must equal
-`parser_verbs(build_parser())`. Both halves fail *quietly* without it: a parser row with no
-handler raises a bare `KeyError` after the operator's verb already parsed, and a handler with no
-parser row is reported as an *unknown* verb rather than a missing one. If the verb answers a
-`/commands/{kind}`, §8 owns the other half.
+`parser_verbs(build_parser())`. If the verb answers a `/commands/{kind}`, §8 owns the other half.
 
 ---
 
@@ -361,8 +346,7 @@ Join the right `Literal` and three import-time asserts start demanding the rest 
 | a payload model | `PAYLOAD_MODEL_FOR_KIND` (`application/commands/payloads.py`) | the sibling raise beside it |
 | **the terminal's half** | `CLI_VERB_FOR_KIND` (`cli/campaign_runner.py`) | totality over `ALL_DISPATCHED_KINDS`, plus every named verb being a real `COMMANDS` key |
 
-`CLI_VERB_FOR_KIND` is the `<entry-point-parity>` guard, and it is the one that had to be written
-after the fact: five kinds shipped browser-only and were found one at a time. Its value is either
+`CLI_VERB_FOR_KIND` is the `<entry-point-parity>` guard. Its value is either
 a CLI verb or `None` — and `None` is a **declaration**, not an escape hatch. Exactly one exists
 (`set-sample-lookahead`, whose absence from the terminal is the contract; root `CLAUDE.md`
 § Conventions). Writing a second one is a design decision with a reason, not a wiring shortcut.
@@ -377,20 +361,18 @@ Then declare it on the wire: `docs/specs/api-openapi.yaml`, *before* the handler
 ## 9. A served read
 
 A new `GET`. **Not a Control-remote command and not a sixth I/O kind** — that kind is defined by
-MUTATION, so a read adds no ingress and no writer (`architecture.md` § Control-remote). Reads
-having had no bucket is exactly why several shipped undeclared, `api-openapi.yaml` says so at its
-own head, and this recipe is the fix.
+MUTATION, so a read adds no ingress and no writer (`architecture.md` § Control-remote).
 
 **Nothing here is caught by an import-time assert.** Steps 2–4 are what make a read
 machine-checked at all; skip them and every gate stays green over a surface nobody declared.
 
 | Step | Do | Why it is not optional |
 |---|---|---|
-| 1 | **Name the scope the read is a fact ABOUT**, and address it by that entity's id | A read keyed on the wrong entity is not a bug you find later — it answers *plausibly and wrongly*, which is how a dataset default was served as five different campaigns' running config |
+| 1 | **Name the scope the read is a fact ABOUT**, and address it by that entity's id | A read keyed on the wrong entity is not a bug you find later — it answers *plausibly and wrongly* |
 | 2 | **Declare path + response schema in `docs/specs/api-openapi.yaml`, before the handler** | Root `CLAUDE.md` § Pre-flight gate. That file has **no enforcer** for reads, so this one is a review act — the only step on the page nothing can catch |
-| 3 | **Resolve in `application/`, never in the router** | ADR-0006 (`cli/` + `embedded_run.py` must reach it) and `presentation/CLAUDE.md` § Out-of-bounds. A router that composes an answer is how one file came to have two parsers |
+| 3 | **Resolve in `application/`, never in the router** | ADR-0006 (`cli/` + `embedded_run.py` must reach it) and `presentation/CLAUDE.md` § Out-of-bounds |
 | 4 | **Give the route a `response_model` and register it in `scripts/build_ts_types.py::EXPORTED_MODELS`** | Now `--only openapi` and `--only ts-types` cover it, and `webapp/CLAUDE.md` § A wire shape is GENERATED keeps its hand-write escape closed |
-| 5 | **Serve provenance for anything the client could otherwise infer** | A closed set belongs on the server (`webapp/CLAUDE.md`). Every value the browser has to *diff* to explain becomes a client twin that drifts — the `·evolved` badge was one, and it fired on every param |
+| 5 | **Serve provenance for anything the client could otherwise infer** | A closed set belongs on the server (`webapp/CLAUDE.md`). Every value the browser has to *diff* to explain becomes a client twin that drifts |
 | 6 | **Add the row to `webapp/CLAUDE.md` § Display-data sources** | A data class with no row is a data class with no owner, and the gap fills itself with stores |
 | 7 | **Run it and look at the panel** | §3's rule, and it binds hardest here: a served field that is declared, typed and never *written* renders as nothing, and no check that could exist would see it |
 

@@ -1,31 +1,23 @@
 # Code-Debt Cleanup — Backlog
 
-**Nothing smaller than a multi-arc or blocked item goes here.** A fix you could make in the pass that found it is made there, not filed, and an adjacent finding is part of the topic you are already on. An item ships by being DELETED from this file.
-
 **Only what cannot be picked up now, and only what ASKS FOR WORK.** An item earns a line by being
 **blocked** or **multi-arc**. Everything else — anything adjacent to work already in hand, anything
 one edit closes — is **fixed in the pass that found it**, never filed. Enough to pick up cold:
-`file::symbol — why — action — blocker`. `git log` is the history layer; when an item ships, delete
-it.
+`file::symbol — why — action — blocker`. An item ships by being DELETED from this file; `git log`
+is the history layer.
 
 > **Every entry names its RE-TEST: the command, the landing, or the person and the question they
-> must answer.** This is the whole discipline. A blocker without one is a claim about the world on
-> the day it was written, and nothing ever forces a re-read, so a blocker that cleared months ago
-> goes on reading as current. **An entry with no re-test is not blocked, it is unverified.** Write
-> the re-test or do not file the entry; where an entry carries one, RUN IT before acting. Audits
-> keep finding entries that were stale or outright wrong — a "dead" field mlflow reads, an
-> "always-False return slot" that is a live signal, a directory deleted by the same commit that
-> filed it. If an entry is wrong, fix or drop it as part of the work.
+> must answer.** A blocker without one is a claim about the world on the day it was written, and
+> nothing ever forces a re-read. **An entry with no re-test is not blocked, it is unverified.**
+> Write the re-test or do not file the entry; where an entry carries one, RUN IT before acting,
+> and fix or drop a wrong entry as part of the work.
 
 > **And every entry names the work that will REACH it: `Rides with:`.** The file, surface or kind
 > of pass that lands on this anyway — written for a reader holding no context, so that a session
-> already in there does the item ON THE WAY, inside the commit it came to make. This is the
-> forward half of "fixed in the pass that found it": nothing here is large enough to earn a
-> session of its own, which is what made it a backlog item rather than a task, so an entry that
-> names no carrier is waiting for a pass that will never be scheduled. Name the carrier even when
-> it is a whole surface ("any stylesheet change") — a vague one still fires, and none never does.
-> Under § Blocked the blocker already IS the carrier: whatever lifts it is the pass that lands the
-> item, so a second line there would only restate it.
+> already in there does the item ON THE WAY, inside the commit it came to make. Nothing here earns
+> a session of its own, so an entry naming no carrier waits for a pass that will never be
+> scheduled. Name the carrier even when it is a whole surface ("any stylesheet change") — a vague
+> one still fires. Under § Blocked the blocker already IS the carrier.
 
 **Not debt — goes elsewhere, and none of it comes back here:**
 
@@ -38,6 +30,17 @@ it.
 
 ## Open — multi-arc, no blocker
 
+- **`domain/results_health.py::compute_degradation_health` is one 65-statement function, and
+  reshaping it moves every optimizer's identity.** The module is `shapes_optimizer_prompt`, so its
+  source is hashed into `treatment.source`: a behaviour-identical decomposition still mints potter,
+  CAPO, GEPA and LEVI as new instruments, which breaks comparison with a banked head-to-head.
+  Action: apply the written refactor (a private `_RoundCounts`, `_grade`, `_suggested_action` as
+  one `match` on the cause; proven equal to the original over every grade and cause) in the same
+  commit that next re-runs the head-to-head, never on its own. **Rides with:** the next
+  head-to-head re-run, or any change to `results_health.py` that already moves the digest.
+  **Re-test:** `ruff check --select C901 --config 'lint.mccabe.max-complexity=10'
+  promptpotter/domain/results_health.py` — a hit on `compute_degradation_health` means still open;
+  the patch is `.scratch/results_health-refactor.patch`.
 A leading `NEXT` marks the one to take up cold when nothing else is in hand.
 
 - **NEXT — the prompt cache is a cost lever only on a route that stays on ONE host, and nothing
@@ -64,8 +67,7 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
 - **Raising the in-flight depth takes effect only when a call LANDS.**
   `application/scoring/query_loop.py::run_walks` re-reads `_armed_cells` every step, then blocks
   on `asyncio.wait(calls, return_when=FIRST_COMPLETED)`, so a press that widens the window waits
-  for whatever is already out — on Harbor a whole agent episode, minutes. Seen 2026-09-18: a
-  Qwen run launched at depth 1 and set to 5 stayed at one cell until the first episode returned.
+  for whatever is already out — on Harbor a whole agent episode, minutes.
   Operator: a press applying at once is **the only behaviour that should exist**, not a UX nicety.
   Action: the wait also wakes on the depth rising (`.runtime/sample_lookahead.json` is written by
   another process, so a short poll alongside the calls, armed only while the depth is below
@@ -169,10 +171,12 @@ and delete the entry if the answer is no.
 
 **The ruler and the peers**
 
-- **INVESTIGATE — the webapp's per-arm text for `unmeasured_delta` is unverified**, and so are the
-  docs and tests the ruler-linking change touched: neither was read after it landed. **Rides
-  with:** any webapp caveat surface. **Re-test:** grep `unmeasured_delta` under `webapp/lib`, and
-  `git log -p` that change's `docs/` and `tests/` hunks.
+- **The webapp's `unmeasured_delta` copy states one of its two causes.**
+  `components/candidates/AbilityInfo.tsx::CAVEAT_COPY` describes the pinned prior, which θ still
+  counts; `domain/ruler.py::ThetaCaveat.UNMEASURED_DELTA` also names a cell the ruler does not
+  carry, which θ SKIPS, and rides an arm's own row as well as the round's. Action: copy that
+  holds for both causes and both scopes. **Rides with:** any webapp caveat surface. **Re-test:**
+  read `CAVEAT_COPY.unmeasured_delta` against that member's comment.
 
 **Spend**
 
@@ -186,16 +190,6 @@ and delete the entry if the answer is no.
   query_loop.py::Walk.end` drops a paid look-ahead cell that crossed a block decision. **Rides
   with:** any change to `spend_book.py`, `quota.py` or `run_walks`. **Re-test:** resume an arm and
   read its first `spend_hold` against the ledger's billed maximum for that label.
-- **A paused run prints no spend line.** The run-end line carries billed and incurred; a pause
-  writes neither to the readout. **Rides with:** any change to the readout's stop lines.
-  **Re-test:** `pause` a running cycle and grep its `readout.log` for the spend line.
-- **A campaign holding nothing out gives its head-to-head row no reason.**
-  `evidence/head_to_head.py::_read` reads `result.bench` itself, so that row serves `bench: null`
-  and prints `no bench headline`, where every other surface reads
-  `runner/campaign_result.py::_headline` and states `unheld_bench`'s `missing_reason`. Action: the
-  row takes the one headline rule, under the table's scorer. **Rides with:** any change to `_read`
-  or `_headline`. **Re-test:** run `scripts/offline_run.py` with `BENCH`'s split at `bench: 0` and
-  read `rows[].bench` off `subject_evidence` for that campaign.
 - **INVESTIGATE — the bench pass runs serial at look-ahead depth 1**, which is clock, not dollars.
   Whether the held-out pass should ride the depth the search uses is undecided. **Rides with:**
   any change to `runner/bench.py`. **Re-test:** time one bench pass against its cell count.
@@ -210,10 +204,6 @@ and delete the entry if the answer is no.
   `projection.py::resolve_resume_state` or the origin round in `runner/entry.py`. **Re-test:**
   `scripts/offline_run.py --rounds 1 --rows 60` — `decisions MOVED` on the resume line means it
   still does.
-- **INVESTIGATE — `presentation/cli/commands/reset.py` does not recognise `.cache`**, so `reset`
-  reports it as unknown rather than preserving or clearing it by rule. Changing the preserve list
-  was refused by the permission layer once; it needs the operator's explicit say. **Rides with:**
-  any change to `reset.py`. **Re-test:** run `reset` dry and read what it says about `.cache`.
 - **INVESTIGATE — two items filed with their re-tests in `.scratch/debug-arc-seed.md`**: errored
   cells (`finish_reason=error` then a schema repair) and whether their rate differs by arm; and
   potter's round-5 L2 layout refusal.
@@ -230,9 +220,7 @@ and delete the entry if the answer is no.
 ## Bypasses — one defect class, held for ONE holistic pass
 
 **A path that goes around the mechanism the rest of the code rides, and re-derives the answer
-itself.** The model case, root-fixed 2026-09-19: Harbor's agent called its provider through
-litellm, outside our client, so one 429 had three outcomes depending on which path met it. The
-entries below are the same class, found by a three-way audit that day, and they are filed
+itself.** The entries below are filed
 TOGETHER rather than patched one by one on purpose: read side by side they sort into three shapes,
 and each shape names an upstream redesign that makes the class hard to write at all. Patched
 singly, each fix is one more local copy of the rule it restores. **Rides with:** that redesign.
@@ -305,9 +293,6 @@ an untyped dict.
 - The `/potter-run` skill reads `run_phase` off `dashboard.json`, where it is `exclude=True` and
   never written, and no CLI verb serves `derive_run_phase` or the machine queue `cancel-queued`
   needs. `grep -n run_phase .claude/skills/potter-run/SKILL.md`.
-- `webapp/components/verify/VerifyPane.tsx` computes "N cached" by its own formula, which
-  `verify_candidate` computes differently and never persists. `grep -n "const cacheReplays"
-  webapp/components/verify/VerifyPane.tsx`.
 
 ## Blocked — named blocker
 
@@ -331,9 +316,8 @@ an untyped dict.
 **Archive hygiene — the reclaim, its attribution, and the map over both:**
 - **Re-test: `compact-archive inventory`**, which is what sizes the three below: runs, cells, bytes
   and replay rate by dataset / label family / age, plus the index rows carrying no detail file,
-  which is what makes every other count an upper bound. It supersedes the 2026-09-02 reading that
-  most of the measurement data was gone — run it before concluding a piece has nothing to be built
-  against. **Build them BEFORE the next bulk delete, never after:** that is the one moment both
+  which is what makes every other count an upper bound. Run it before concluding a piece has
+  nothing to be built against. **Build them BEFORE the next bulk delete, never after:** that is the one moment both
   halves exist at once, something to measure and a delete about to strand it.
 - **Reclaim** — the destructive counterpart of `delete`, dataset-scoped, dry-run by default,
   refusing while a producer can append, and NAMING what it would strand for a dataset whose rows
@@ -355,12 +339,8 @@ an untyped dict.
   reaches is what nothing answers, and it is the join `sp_hash` → `prompt_fields_id` would buy.
 
 **Cross-repo (TermNorm sibling at `OfficeAddinApps/TermNorm-excel/backend-api`):**
-- **The TermNorm `/version` endpoint** is what remains genuinely owed on that side; this repo then
-  bumps `termnorm.py::_EXPECTED_REVISION`. The per-request `model` beside it is now a nicety, not a
-  blocker: `_compute_step_tokens` stamps every step-token entry with the node's model — the backend's
-  per-node `model` when it reports one, else the model the dataset overlay pinned
-  (`pipeline.yaml::nodes.{n}.config.model`, mandatory for an LLM node) — so per-node cost is
-  derivable today, including for chars/4-estimated nodes. **Re-test:** `termnorm.py::_EXPECTED_REVISION`
+- **The TermNorm `/version` endpoint** is what remains owed on that side; this repo then
+  bumps `termnorm.py::_EXPECTED_REVISION`. **Re-test:** `termnorm.py::_EXPECTED_REVISION`
   is `None`; the moment it holds a string the endpoint landed and this entry goes.
 - **A backend fix isn't observable without clearing a cache** — PP's measurement cache and
   TermNorm's `match_database` both key on query/searchpoint, never on backend code/revision, so a
@@ -397,9 +377,8 @@ an untyped dict.
   `key_source: host|user` lands (declared on `TokenUsagePayload` in the asyncapi), replace the
   fake-slug derivation with the real dimension. Blocker: the coupon build adds the field.
 
-**Needs a capability neither the bench nor the preprint opens** — the no-new-features clause is
-retired, so the bar is no longer "is a feature allowed" but "does M13 or M14 need it", and these do
-not. The bench does not rescue the first one in particular: a third party ships an optimizer through
+**Needs a capability neither the bench nor the preprint opens** — the bar is "does M13 or M14 need
+it", and these do not. The bench does not rescue the first one in particular: a third party ships an optimizer through
 an entry point, in-process, so it never touches the inbound credential.
 - **The REST API has no inbound credential** — owned by
   [`../developer/stable-api.md`](../developer/stable-api.md) § 8. What is NOT stable. Owed HERE: the
@@ -408,10 +387,7 @@ an entry point, in-process, so it never touches the inbound credential.
   a bearer or API-key reader on the inbound path; while the session cookie is the only one, this
   stands.
 - **Swapping a model means hand-editing two `pipeline.yaml` lines and remembering to revert both**,
-  and a leaked pin mislabels the next run. The half of this that was about `response_format` is
-  closed: the OpenRouter catalogue's `supported_parameters` already answers whether a route takes
-  the key, and `PipelineSchema._refused` spends that answer on the search space rather than on a
-  badge — so an unsupporting model no longer has to be discovered by paying for it. Blocker: the
+  and a leaked pin mislabels the next run. Blocker: the
   swap-verb, which is a new capability. **Re-test:** a swap verb in the `presentation/cli/commands/`
   listing; while it has none, this stands.
 - **`infrastructure/llm/json_parse.py::try_groq_json_validate_repair` banks a MISSING count as an

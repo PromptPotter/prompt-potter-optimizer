@@ -74,15 +74,7 @@ Every optimizer LLM node — `l1_generate`, `l1_critique`, `l2_context`, `l3_pla
   </picture>
 </p>
 
-The runner asks the escalation rules engine after every round. `EscalationFSM.observe_round` builds a frozen `EscalationInputs` snapshot and delegates to `decide_escalation`, which sort-by-priority first-match-wins over `DEFAULT_ESCALATION_RULES`. All three live in `application/optimizers/potter/escalation/rules.py` — the input vocabulary, the rules and the router are one file, so the policy reads without a hop:
-
-```
-round runs L1 → EscalationInputs(current_objective, l1_stall_count, l1_patience, separable, axes_with_positive_yield, …)
-                  ↓
-        decide_escalation(inputs) → EscalationRule
-                  ↓
-   {STOP_PERFECT, FIRE_L2 (yield-drought rule | patience-exhausted rule), CONTINUE}
-```
+The runner asks the escalation rules engine after every round. `EscalationFSM.observe_round` builds a frozen `EscalationInputs` snapshot and delegates to `decide_escalation`, which sort-by-priority first-match-wins over `DEFAULT_ESCALATION_RULES`. All three live in `application/optimizers/potter/escalation/rules.py` — the input vocabulary, the rules and the router are one file, so the policy reads without a hop.
 
 **Which rules exist, and which of them preempt patience, is owned by [`dispatch-hub.md`](dispatch-hub.md) § Trigger** — read the membership there and in `escalation/rules.py`, never from a copy on this page.
 

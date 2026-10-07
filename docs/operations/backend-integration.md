@@ -20,7 +20,7 @@ Wire shapes: [`../developer/node-standard.md`](../developer/node-standard.md).
 
 Every key is ABSENT when the backend reported nothing, and PromptPotter reads absence as "not reported" rather than as a value. **The coupling is soft by construction: an older backend that sends none of them degrades what can be asked afterwards and breaks nothing**, so these need no version gate between the two repos and no release may claim one.
 
-**The roster is `scoring/sample_measurement.py::_WIRE_SEEDED`**, asserted total over `domain/spend.py::StepTokenUsage` at import — read it there. It is named rather than re-listed because the hand-kept copy that used to sit here fell three keys behind, and the table below is only what a backend author cannot derive from the type: what it COSTS to omit one. An **in-tree** connector annotates its producer with that type and lets the checker enforce the roster; the type sits in `domain/` so it can.
+**The roster is `scoring/sample_measurement.py::_WIRE_SEEDED`**, asserted total over `domain/spend.py::StepTokenUsage` at import — read it there; the table below is only what a backend author cannot derive from the type: what it COSTS to omit one. An **in-tree** connector annotates its producer with that type and lets the checker enforce the roster; the type sits in `domain/` so it can.
 
 | Key | Missing ⇒ |
 |---|---|
@@ -80,7 +80,7 @@ exactly **one** metered Brave query per match, so sweeping `strategy` holds sear
 fixed and varies only evidence depth, latency, and LLM token cost. Sweep it on the
 LCA ground-truth set and read the winner off accuracy vs the per-match cost block.
 
-Each `/matches` response (and a langfuse `web_search` observation) now carries `web_cost`:
+Each `/matches` response (and a langfuse `web_search` observation) carries `web_cost`:
 `{strategy, brave_queries, usd, scrape_attempts, scrape_ok, scrape_failed, evidence_chars}`.
 `brave_queries` is the metered count (==1 on a live search, 0 when skipped/precomputed) and
 `usd` its price, which PromptPotter bills; `evidence_chars` + `scrape_failed` are the efficiency/reliability
@@ -108,7 +108,7 @@ uvicorn promptpotter.main:app --port 8001 --reload   # Swagger: /docs
 
 ## Debugging the highway
 
-- **Diagnose from the code path, not by restarting.** When the backend "goes down" — `/status` itself times out, scoring stalls — the cause is almost always a **blocking call in an `async def` request path**, not a crash / SQLite lock / double-start. Grep the handler for sync I/O (`requests`, `ThreadPoolExecutor.map`, `time.sleep`, blocking DB) FIRST; restarting the worker and theorizing about ports and timeouts is the slow path, and it cannot distinguish the two. One sync call freezes the single uvicorn worker for its whole step, so every concurrent request stalls with it, `/status` included. Offload via `asyncio.to_thread` / `run_in_executor`. **Backend async hygiene is a standing check: no sync I/O on the event loop.**
+- **Diagnose from the code path, not by restarting.** When the backend "goes down" — `/status` itself times out, scoring stalls — the cause is almost always a **blocking call in an `async def` request path**, not a crash / SQLite lock / double-start. Grep the handler for sync I/O (`requests`, `ThreadPoolExecutor.map`, `time.sleep`, blocking DB) FIRST; a restart cannot distinguish the two. One sync call freezes the single uvicorn worker for its whole step, so every concurrent request stalls with it, `/status` included. Offload via `asyncio.to_thread` / `run_in_executor`. **Backend async hygiene is a standing check: no sync I/O on the event loop.**
 - **The highway IS a cross-repo contract — change one side, fix both.** PP consumes TermNorm response *shapes*, so a shape change on either side silently breaks the other. Coupling points: the error envelope is TermNorm's `{status, message, code}` (a global handler in `main.py`), **not** FastAPI's `{detail}` — PP must read `message`. Session-loss self-heal keys on a stable machine-readable `code: "no_session"` (prefer codes over substring/shape guessing), and the resend policy on the typed `detail.retryable`. The web_search warning `stats` dict keys are read by PP's display. When you touch a response field, grep the *other* repo for its consumer.
 - **`--reload` wipes the in-memory session on every backend code edit.** TermNorm holds sessions in `user_sessions = {}` (process memory), so any backend edit reloads uvicorn and in-flight PP runs hit `400 no_session`. PP self-heals (re-`POST /sessions` + retry); keep it that way — a developer editing the backend mid-run must not abort the campaign.
 - **Provider latency is the recurring root, and the guards are bounds rather than a faster host.** Bound optimizer reasoning (`medium`) and keep request timeouts under PP's `QUERY_TIMEOUT`; an unbounded optimizer node blows `OPTIMIZER_CALL_DEADLINE_S` and raises `OPTIMIZER_TIMEOUT` before round 1. Which provider a campaign runs on is the operator's daily-volume knob — don't flip it unprompted.

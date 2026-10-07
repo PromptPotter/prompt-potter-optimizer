@@ -342,8 +342,8 @@ def _reported_usage(
     # The connector's own entry is REBUILT here rather than carried, so a key absent
     # from `_WIRE_SEEDED` is dropped however faithfully the connector reported it.
     seeded: dict[str, Any] = {
-        "input": int(entry.get("input", 0)),
-        "output": int(entry.get("output", 0)),
+        "input": int(entry.get("input") or 0),
+        "output": int(entry.get("output") or 0),
         "estimated": False,
     }
     # What each key buys, and what omitting one costs: `backend-integration.md`
@@ -367,7 +367,7 @@ def _estimated_usage(
     node: PipelineNode, resp_data: Mapping[str, Any], wire_params: Mapping[str, Any]
 ) -> StepTokenUsage:
     node_cfg = wire_params.get(node.name) or {}
-    in_text = node_cfg.get("prompt", "") if isinstance(node_cfg, dict) else ""
+    in_text = (node_cfg.get("prompt") if isinstance(node_cfg, dict) else None) or ""
     out_text = " ".join(_observed_texts(node, resp_data))
     estimated: StepTokenUsage = {
         "input": len(in_text) // 4,

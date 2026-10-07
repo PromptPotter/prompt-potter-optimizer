@@ -7,7 +7,7 @@ Every wound is two axes, not a four-item taxonomy:
 - **Detection point** picks the record type, the score effect and the lifecycle. Parse-time → `ValidationFailure`, synthetic-0, per-candidate. Mid-eval → `RuntimeFailure`, real score + rate, accumulated and deduped. Post-parse → `ValidatorOutcome`, no score effect, per-round.
 - **Nurse owner** picks who heals it, and falls out of the record type. Only a `RuntimeFailure` carries a real choice, so only it carries `owner: NurseOwner` ∈ `{L1, OPERATOR}` — an L1-retunable rate degradation, or an operator-terminal break (the token blowout) no in-loop layer can reach.
 
-The **nurse is not the producer**: L1 tends its own malformed proposal because it owns `pipeline_params`, and a break whose only fix is a locked surface escalates to the operator rather than churning at a layer that cannot reach the lever. L2 produces wounds and heals none. The producer-keyed `nurse_target` field is **retired** — gone from the code entirely, and no test guards this ([`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)), so do not reintroduce it.
+The **nurse is not the producer**: L1 tends its own malformed proposal because it owns `pipeline_params`, and a break whose only fix is a locked surface escalates to the operator rather than churning at a layer that cannot reach the lever. L2 produces wounds and heals none. No field keys a nurse by producer, and none may be added.
 
 Three detection points but **four** typed `WoundChannels` lists: post-parse splits `l2_guard_breaches` from `l3_guard_breaches` because each is read by the OTHER layer on its next fire — distinct consumers, so merging them would need a discriminator. A fifth channel, `l3_note`, is a sticky free-text L3→L2 steer, not a failure record.
 
@@ -82,17 +82,9 @@ Two mid-eval checks stop a candidate and only one is healing. `DegradationCheck`
 
 ## `classify_result()` — fatal classification
 
-`classify_result()` (`domain/results_health.py`) derives **fatal** and **infra** codes from the backend's neutral advisories (`llm_only:content_empty`, `*:content_filtered`, …) and raw response shape (`pipeline_data.step_tokens.{node}`: normalised `finish_reason`, `reasoning` token count). Backend = facts, optimizer = policy.
+`classify_result()` (`domain/results_health.py`) derives **fatal** and **infra** codes from the backend's neutral advisories and raw response shape (`pipeline_data.step_tokens.{node}`: normalised `finish_reason`, `reasoning` token count). Backend = facts, optimizer = policy. **Read the rule table in the function, never from a copy here** — its comments state why each row routes where it does.
 
-Every `content_empty` row is gated on **the result not having answered** — the advisory describes one ATTEMPT, the backend retries beside it, and that retry can succeed, so a row carrying a real `predicted` is not an empty response whatever the advisory says. Among the unanswered, `reasoning_tokens > 0` proves the model **worked** (a refusal carries content, or `content_filter`), so emitting nothing after thinking is route shape whatever ended the call — `stop` and `length` are one fault at two budgets.
-
-- `content_empty`, unanswered, `reasoning_tokens > 0`, `finish_reason=length` → `reasoning_budget_exhausted` *(infra)*
-- `content_empty`, unanswered, `reasoning_tokens > 0`, any other `finish_reason` → `reasoning_only_response` *(infra)*
-- `content_empty`, unanswered, `reasoning_tokens = 0`, `finish_reason=length` → `output_truncated` *(infra)*
-- `content_empty`, unanswered, `reasoning_tokens = 0`, any other `finish_reason` → `empty_response` *(fatal)*
-- `*:content_filtered` → passthrough as fatal
-
-A fatal code is deterministic for the whole config — one sighting proves the candidate is broken for every remaining query, which is why a rule allowed to fire on a row that answered *correctly* eliminates a good candidate. Grow the rule table (don't expose it as a tunable) when a new pattern proves equally conclusive.
+Two rules a new row must keep. Every `content_empty` row is gated on **the result not having answered** — the advisory describes one ATTEMPT, and the backend's retry beside it can succeed. And a fatal code is deterministic for the whole config — one sighting proves the candidate is broken for every remaining query, which is why a rule allowed to fire on a row that answered *correctly* eliminates a good candidate. Grow the rule table (don't expose it as a tunable) when a new pattern proves equally conclusive.
 
 Two load-boundary effects, consumed via `is_deprecated()`: `DegradationCheck` eliminates the candidate on first sighting; and `open_walk` splits deprecated entries off `archive_queries.replay_feed` (`_split_off_deprecated_samples`) so fatal entries are evicted from cache and re-measured with `retry_of_deprecated_cache=True`. `_compute_accuracy` counts them apart as `deprecated`, a count WITHIN `total`: a deprecated row stays in every denominator as the miss the formula grades — which rows a reading counts is [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#which-rows-a-reading-counts)'s.
 

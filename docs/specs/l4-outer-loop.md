@@ -43,10 +43,7 @@ by its wall clock against a fixed anchor; the reason is the comment beside it in
   (`domain/l4/proxies.py`): that seed's origin level, where it ended, its peak, its round count,
   its stop reason and its own spend. Those are REPORTING channels — what `evidence`'s Compare read
   and any panel may ask about a cell — and none of them is a scoring term; the bullet below records
-  that peak and endpoint were measured as candidates for the measurand and lost. They exist because
-  they previously reached the row only inside `reasoning_trace`'s prose, where no reader could
-  compute on them, so the outer surfaces could report the scored lift and nothing else about the
-  run that produced it.
+  that peak and endpoint were measured as candidates for the measurand and lost.
 
 - **One term, not a basket — measured, not aesthetic.** `lift × cleanliness × diversity_health × efficiency`
   went to a full panel and every factor beside the lift core failed the candidate-gradient bar: `cleanliness`
@@ -60,8 +57,7 @@ by its wall clock against a fixed anchor; the reason is the comment beside it in
   therefore what lets the paired verdict cancel the inner loop's noise. But the arm that replays is the
   *origin* arm; a variant writes different prompts, so every hash is new and it pays full freight. A cost
   denominator measures how often we have run the candidate before. At the limit a replayed cell bills zero
-  and is dropped with a warning that reads like a fluke — which is how it presented: an outer origin died on
-  its first cell, three inner rounds in four seconds, no spend reported.
+  and is dropped with a warning that reads like a fluke.
 - **Deliberately absent.** A peak / lift-and-hold reading (a one-line derivation, but it changes the
   estimand — under a pure peak ruler the origin loses). `rounds_to_N` or any declared target (it asserts up
   front how much room the benchmark has; a task the inner model looks bad at is one it has not been tuned
@@ -87,13 +83,11 @@ exposed to.
   (`ruler_id`), which arms are replicates, the cell/subject/residual decomposition against the scatter a
   subject mean shows under the null, and whether run order is confounded with outcome. Its per-round peer `PanelPrecision`
   reports one round's estimation noise beside its observed between-cell spread, off `mean_parent_level_se`.
-  **Two bars, never their ratio**: the ratio shipped once as `estimation_share`, and `min(1.0, …)` rendered a
-  raw 5.55 — noise claiming to exceed the spread it is a component of — as a tidy "100% measurement noise".
-- **There is no within-cell noise term, by design** — and the claim is about the ESTIMATOR as much as the
-  rows, which is the half it silently did not cover. The inner instrument is content-addressed, so asking
-  twice replays rather than re-measures; but a replayed row still had to be READ, and while each cell fit its
-  own scale the reading moved even where the rows did not. Both halves are fixed now: same rows plus the
-  shared ruler above is the same θ. Manufacturing a noise term measures how noisy an LLM is on an identical
+  **Two bars, never their ratio**: a ratio clamped at 1.0 renders noise exceeding the spread it is a
+  component of as a tidy "100% measurement noise".
+- **There is no within-cell noise term, by design** — and the claim covers the ESTIMATOR as well as the
+  rows. The inner instrument is content-addressed, so asking twice replays rather than re-measures, and a
+  replayed row is READ on the shared ruler above: same rows, same θ. Manufacturing a noise term measures how noisy an LLM is on an identical
   request, which is not a quantity the loop can act on. Depth on a specific candidate is `verify`'s job — it
   re-scores on MORE samples without touching the cycle.
 - **A cell that failed is not a cell that scored zero** (`domain/scoring.py::is_graded`). An outer cell carries no
@@ -105,14 +99,10 @@ exposed to.
 ## Invariants — break one and the corpus is void, silently
 
 - **The inner scorer, formula, seeds and held-out cells are unreachable by the outer loop**, and none can
-  ever be a `pipeline_param` — no adoption, self-adopt included, carries the instrument. [DGM](https://arxiv.org/abs/2505.22954)
-  rewrote its own checker's logging to fake a pass when it could see it, and
-  [Auditing Harness Tampering](https://arxiv.org/abs/2609.00069) found tampering in five self-improving
-  systems (ADAS 84.6%, HyperAgents 73.6%, DGM 63.1%, ScientistOne 29.6%, AFlow 18.3%), persisting in the
-  best-scoring agent's lineage ([`../research/external-constraints.md`](../research/external-constraints.md)
-  § Ranked, item 1). Keeping the instrument out of reach is cheap and works: the
-  [Reward Hacking Benchmark](https://arxiv.org/abs/2605.02964) found exploit rates of 0–13.9% across 13
-  frontier models, cut by 87.7% relative by simple environment hardening, without hurting task success.
+  ever be a `pipeline_param` — no adoption, self-adopt included, carries the instrument. Why this is a
+  stated invariant rather than a property of today's code, and the evidence that keeping the instrument
+  out of reach is cheap and works: [`../research/external-constraints.md`](../research/external-constraints.md)
+  § Ranked, item 1 and § L4.
 - **`connectors/promptpotter.py::_identity_config` enumerates the inner-origin fingerprint.** Read it before
   assuming a file is safe to touch: a dispatch *renderer* and an *estimator* move it exactly as an inner
   node's prompt body does. It resolves once per init, so a mid-flight edit is invisible to the RUNNING cycle
@@ -129,12 +119,12 @@ exposed to.
 - **`terminal_node` is the outer chain's last llm node (`runner/inner/tasks.py::InnerCells.terminal`).** An
   inner campaign consumes the ENTIRE outer config at once, and off-chain nodes lead `node_configs`, so only
   a stamp at the chain's end limits prefix-trust replay to a full match; any earlier one serves the ORIGIN's
-  rows to a candidate that edits a later node. It is not a health signal and nothing may tally it — one panel
-  counted it and the critique spent an arm fixing a stall that never happened.
+  rows to a candidate that edits a later node. It is not a health signal and nothing may tally it: a panel
+  that counts it sends the critique after a stall that never happened.
 - **A HIT/MISS panel stays silent at L4** (`panels._no_labels`). The cell is verifier-graded, so
   `Sample.ground_truth` is `None` and no cell can ever be a hit; rendered as misses, the critique
-  diagnosed the artifact and steered the inner loop off its only objective. A prompt clause telling the model
-  to ignore the panel is NOT the fix — one was already there, and round 1 ignored it.
+  diagnoses the artifact and steers the inner loop off its only objective. A prompt clause telling the model
+  to ignore the panel is NOT the fix — the model ignores the clause.
 - **`L1Variant` is `extra="forbid"`.** A field a prompt set declares but the model lacks fails *every* outer
   variant at validation: the Pydantic model, both `answer_format`s and `resolved_schemas` move in ONE commit.
 - **`token_budget` stays `null`.** The rollup lands each inner campaign's tokens on the outer ledger as
@@ -170,13 +160,9 @@ quotes no figure; re-measure before quoting a price to anyone.
    PoBB-decisive promotion over inner-campaign arms (`scoring/selection.py::elimination_p_best`).
 7. **Self-adopt mode — the SIFT / Darwin Gödel Machine loop, with our statistics in its gates.** Proposal,
    unbuilt, off by default. [SIFT](../research/landscape.md#sift--self-improvement-via-fast-tree-search-paper)
-   and DGM let the improved agent write the next improvement; ours keeps the outer optimizer fixed. Prior art
-   beside them: [STOP](https://arxiv.org/abs/2310.02304) is the closest, an improver improving its own code
-   with weights frozen; [Gödel Agent](https://arxiv.org/abs/2410.04444) and
-   [ADAS](https://arxiv.org/abs/2408.08435) keep an archive of past designs, as our content-addressed archive
-   does; and [SICA](https://arxiv.org/abs/2504.15228) runs an asynchronous LLM overseer that steers or cancels
-   a drifting run — a runtime monitor shaped like our heartbeat and pause contract, not a gate on a self-edit,
-   so a pre-landing review gate here would be our own addition. The mode:
+   and DGM let the improved agent write the next improvement; ours keeps the outer optimizer fixed. The prior
+   art beside them, and what each decides for this mode, is
+   [`../research/external-constraints.md`](../research/external-constraints.md) § L4. The mode:
    when an outer election is **decisive**, the winner's overrides become the outer campaign's own
    `optimization.nodes` overlay and the outer cycle forks onto it — the improved optimizer proposes the next
    round. The overlay already binds per task (`runner/entry.py::run_optimization`, task-isolated from the
@@ -194,16 +180,15 @@ quotes no figure; re-measure before quoting a price to anyone.
    | unevaluated node inherits its parent's accuracy | excluded, never filled | an inherited score is a measurement nobody made |
    | rank + visit-penalty parent sampling | UCB1 over backpropagated θ (`mask/backprop.py`), [`roadmap.md`](roadmap.md) § Selector members | same role; see *take* below |
    | 50-task subset → 225-task full run | sequential measurement to decisiveness; `verify` for depth on the winner | the stop is a statistic, not a subset size |
-   | adopt the best node | decisive election + the held-out gate below + anchor + rollback by fork | an adoption compounds, so it is the decision that most needs an interval — and the round's best is not the best lineage: the [Huxley-Gödel Machine](https://arxiv.org/abs/2510.21614) found a round's top scorer often has unproductive descendants, and scores clades instead ([`../research/external-constraints.md`](../research/external-constraints.md) § Ranked, item 2) |
+   | adopt the best node | decisive election + the held-out gate below + anchor + rollback by fork | an adoption compounds, so it is the decision that most needs an interval — and the round's best is not the best lineage ([`../research/external-constraints.md`](../research/external-constraints.md) § Ranked, item 2) |
 
    **Take from them.** (a) The judge as a *zero-sample prior on measurement order* — which arm PoBB walks
    first — never as a score; gated on the predicted-vs-realized reading [`roadmap.md`](roadmap.md)
    § Selector members already asks for, with their ρ≈0.68 as the bar. At L4 it pays most: here one measurement is a whole
    inner campaign. (b) Rank-based rather than value-based parent sampling: a rank needs no min-max
    normalization across forks, which is that spec's open *Normalization across forks* item.
-   [ShinkaEvolve](https://arxiv.org/abs/2509.19349) reached a state-of-the-art circle-packing result in 150
-   samples by spending on selection, not only on proposers — exploration-balanced parent sampling, novelty
-   rejection-sampling and a bandit over LLM mutators — so read its sampling policy before designing this. (c) Expansion
+   Read ShinkaEvolve's sampling policy before designing this
+   ([`../research/external-constraints.md`](../research/external-constraints.md) § L4). (c) Expansion
    overlapping measurement ("disaggregated"), once run admission and concurrency land. (d) Their cost split —
    expansion vs judge vs evaluation per step, plus wall clock — as a reading `SpendRollup` should serve.
 

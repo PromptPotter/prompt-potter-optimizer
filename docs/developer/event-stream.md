@@ -33,7 +33,7 @@ data: {"kind": "phase", "version": 1, "cycle_id": "cycle_abc123",
 | `sequence` | integer | Ledger offset. Snapshot frame carries the high-water mark the snapshot reflects; live tail strictly greater. Gap = missed frames. |
 | `payload` | object | Per-kind body. For record-derived kinds, the record's `model_dump` content; for `stream_snapshot`, `dashboard.json` + `snapshot_at_offset`. |
 
-Adding a new kind requires updating [`events-asyncapi.yaml`](../specs/events-asyncapi.yaml) **first** (closed-set policy — security box 1), then `ProjectionKind` in [`promptpotter/domain/projection_envelope.py`](../../promptpotter/domain/projection_envelope.py), then the record class on `CycleRecord` (or `_PROJECTION_ONLY`, for a kind the tail synthesizes rather than reads), then its `RENDERS_AS_ACTIVITY` answer beside it — can a feed item ever be made of this? — which is what `/ray` drops on. The last two raise at import if skipped. Keep the YAML enum and the Python Literal in sync by hand — drift fails loud (an unknown kind raises on dispatch); no standing test (see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
+Adding a new kind requires updating [`events-asyncapi.yaml`](../specs/events-asyncapi.yaml) **first** (closed-set policy — security box 1), then `ProjectionKind` in [`promptpotter/domain/projection_envelope.py`](../../promptpotter/domain/projection_envelope.py), then the record class on `CycleRecord` (or `_PROJECTION_ONLY`, for a kind the tail synthesizes rather than reads), then its `RENDERS_AS_ACTIVITY` answer beside it — can a feed item ever be made of this? — which is what `/ray` drops on. The last two raise at import if skipped; the YAML enum is synced by hand (§ Testing).
 
 ## Subscription contract — snapshot-then-tail
 
@@ -53,15 +53,15 @@ The runtime guarantees, in order:
 
 `sequence` is the per-cycle ledger offset, monotonic and dense for live tail (no holes between consecutive records). A client observing `sequence` jumping from N to N+2 missed offset N+1. Recovery: re-subscribe; the new snapshot covers the gap.
 
-**Density depends on the `kind` enum covering every ledger `record_type`, and that is the whole reason coverage is mandatory.** `CycleLedgerTail.read_new` advances `_line_index` for every line it reads, including one it cannot map — so a record whose kind is missing from the enum is *silently skipped while consuming an offset*, which reaches the client as a gap and drives the reconnect above. `candidate_minted` and `cycle_seed` sat outside the enum for exactly this reason and produced exactly this: two spurious holes per round. With full coverage, `_to_envelope` returns `None` only for a genuinely malformed line — which is a gap worth noticing.
+**Density depends on the `kind` enum covering every ledger `record_type`, and that is the whole reason coverage is mandatory.** `CycleLedgerTail.read_new` advances `_line_index` for every line it reads, including one it cannot map — so a record whose kind is missing from the enum is *silently skipped while consuming an offset*, which reaches the client as a gap and drives the reconnect above. With full coverage, `_to_envelope` returns `None` only for a genuinely malformed line — which is a gap worth noticing.
 
 The `Last-Event-ID` header is reserved for a future profile's resume-from-sequence semantics (declared in the AsyncAPI HTTP binding, not yet honored by the handler).
 
 ## History lives on the ray, not here
 
-This stream has **no replay**, by construction: `snapshot_frame` unconditionally calls `_seek_to_eof()`, so a subscriber always starts at the current end of the ledger and never receives what came before.
+This stream has **no replay**, by construction: `snapshot_frame` parks the tail one past the offset its dashboard is a fold of (`at_offset`) — at end-of-file only for a warming shape, which carries none — so a subscriber starts where its snapshot ends and never receives what came before.
 
-That is correct, and it is correct because history has its own home — `GET /campaigns/{c}/cycles/{cy}/ray`, the **time-ray**: one merged chronology across a course, its forks, and its inner runs, windowed and paged backwards. This is the "later profile's replay endpoint" named in [`projection_envelope.py`](../../promptpotter/domain/projection_envelope.py); it is now that endpoint. Its items carry a `ProjectionEnvelope`'s `kind` and a subset of the same `payload`, so one client translator serves both, plus a `path` the envelope cannot carry (an inner `cycle_id` repeats across sibling sandboxes, so it does not identify a cycle in a family).
+That is correct, and it is correct because history has its own home — `GET /campaigns/{c}/cycles/{cy}/ray`, the **time-ray**: one merged chronology across a course, its forks, and its inner runs, windowed and paged backwards. Its items carry a `ProjectionEnvelope`'s `kind` and a subset of the same `payload`, so one client translator serves both, plus a `path` the envelope cannot carry (an inner `cycle_id` repeats across sibling sandboxes, so it does not identify a cycle in a family).
 
 **The subset is the difference in SHAPE between the two, and it follows from the difference in scope.** This stream hands over one record at a time as it lands, so it hands over the whole thing; a ray window is up to `MAX_RAY_LIMIT` records at once, so it serves what a chronology reads — identity, address and the one-line reading — and leaves each record's bulk (an LLM's prompt and response, a sample's query and prediction, a phase's whole view) to the surface built for it, every one of which is fetched one round at a time. The declaration is `projection_envelope.py::RAY_PAYLOAD_FIELDS`, beside the by-kind one, and it is a validator input on the ray's ETag for the same reason the drop set is: it decides the body and it moves on deploy rather than on a write. **Adding a field to the ray means declaring it there** — a field the client reads and the projection omits is not an error anywhere; the step simply renders without it.
 
@@ -69,11 +69,11 @@ That is correct, and it is correct because history has its own home — `GET /ca
 
 ## Writer / reader split
 
-The **ledger is the writer**: `CycleEventLog.append` serializes every `CycleRecord` to `.runtime/ledger.jsonl` (one JSON object per line; line index = offset). The **SSE stream is a reader**: `CycleLedgerTail` tails that file, mapping each line to a `ProjectionEnvelope` (`kind` = the record's `record_type`, `sequence` = line index) and reading `dashboard.json` for the leading snapshot. No projection synthesizes frames; the on-disk ledger is the single medium. (This replaces the old in-memory `EventStreamView` fan-out, which only existed in the runner's own process.)
+The **ledger is the writer**: `CycleEventLog.append` serializes every `CycleRecord` to `.runtime/ledger.jsonl` (one JSON object per line; line index = offset). The **SSE stream is a reader**: `CycleLedgerTail` tails that file, mapping each line to a `ProjectionEnvelope` (`kind` = the record's `record_type`, `sequence` = line index) and reading `dashboard.json` for the leading snapshot. No projection synthesizes frames; the on-disk ledger is the single medium.
 
 ## Cross-process by construction
 
-Because the stream reads a file, it works from any process that shares the filesystem — the API server, the CLI runner, a spawned subprocess, a future MCP "watch this run" client. There is no in-memory registry and no requirement that the run live in the reader's process (the bug that left a webapp chat blank against a CLI-launched run). The same medium the `dashboard.json` poll already crosses processes on.
+Because the stream reads a file, it works from any process that shares the filesystem — the API server, the CLI runner, a spawned subprocess, a future MCP "watch this run" client. There is no in-memory registry and no requirement that the run live in the reader's process. The same medium the `dashboard.json` poll already crosses processes on.
 
 ## Efficiency
 

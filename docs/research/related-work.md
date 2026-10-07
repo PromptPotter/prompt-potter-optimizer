@@ -13,15 +13,14 @@ not worth arguing against are recorded in [`landscape.md`](landscape.md), not he
 | Layer | What it ships | Where it stops |
 |---|---|---|
 | **Telemetry** — [Langfuse](https://langfuse.com), and the tracing half of most LLMOps stacks | Spans, token and latency accounting, prompt storage and versioning, LLM-as-judge scoring over captured traces | Prompt changes are written by a human. Nothing searches. |
-| **Eval + an optimizer menu** — [Opik Agent Optimizer](https://www.comet.com/docs/opik/agent_optimization/overview), [agent-opt](https://github.com/future-agi/agent-opt), Promptolution | Several search algorithms behind one interface. Opik ships six — evolutionary, few-shot Bayesian, GEPA, a hierarchical-reflective optimizer, meta-prompt, and a `ParameterOptimizer` over temperature and `top_p` — all through one `optimize_prompt()`, with one optimizer's result usable as another's input. agent-opt ships six of its own: Bayesian search, meta-prompt, ProTeGi, GEPA, random search, PromptWizard | Each algorithm runs *however it wants*. The menu makes them reachable; it does not make their numbers comparable. |
+| **Eval + an optimizer menu** — [Opik Agent Optimizer](https://www.comet.com/docs/opik/agent_optimization/overview), [agent-opt](https://github.com/future-agi/agent-opt), Promptolution | Several search algorithms behind one interface. Opik ships six — a `ParameterOptimizer` over temperature and `top_p` among them — all through one `optimize_prompt()`, with one optimizer's result usable as another's input; agent-opt ships six of its own. Both rosters are [`landscape.md`](landscape.md)'s | Each algorithm runs *however it wants*. The menu makes them reachable; it does not make their numbers comparable. |
 | **A single algorithm, in a paper** — APE, OPRO, MIPROv2, PromptWizard, CAPO, GEPA on the prompt side, plus [Promptim](landscape.md#promptim-langchain) as the LangSmith-bound CLI form; SkillOpt, WikiSkill, DarwinX, AutoDesign on the harness side; AlphaEvolve, OpenEvolve, AlgoTuner on the code side | One search method, usually one benchmark suite, usually one budget convention | No interface, and no obligation to be runnable beside anything else. |
 
 **The gap is the third column, not the first two.** Some rows race inside their own algorithm —
 CAPO does — but no one serves a **stopping rule** across methods, and none, ours included today,
 is anytime-valid under optional stopping
-([`external-constraints.md`](external-constraints.md) § Ranked, item 3); the form that would be is a
-confidence sequence built from test supermartingales
-([Hsu & Shekhar](https://arxiv.org/abs/2607.17409)). Nobody serves a
+([`external-constraints.md`](external-constraints.md) § Ranked, item 3, which names the form that
+would be). Nobody serves a
 **comparability guard** either — what has to be held equal before two methods' numbers may sit in
 the same table. That is where PromptPotter is pointed, and
 it is why the direction of travel is a **bench**: a place a third party's search method plugs in as
@@ -51,13 +50,11 @@ searching its instructions and demonstrations; [PromptWizard](https://arxiv.org/
 racing and an explicit token budget. [GEPA](https://arxiv.org/abs/2507.19457) (ICLR 2026 Oral) is the
 one most people now compare against — though CAPO outscored it on both tasks of the promptolution
 paper's own head-to-head, so the reference point is not automatically the best result. Its
-reported gains shrink under matched rollout budgets ([`external-constraints.md`](external-constraints.md)
-§ Ranked, item 4): [LEVI](https://arxiv.org/abs/2605.09764) matches or exceeds it at less than half
-its rollout budget on four benchmarks. Against weight updates the economics run GEPA's way — it
-beats GRPO by 6% on average with up to 35× fewer rollouts — and
-[Databricks](https://www.databricks.com/blog/building-state-art-enterprise-agents-90x-cheaper-automated-prompt-optimization)
-found SFT and GEPA compound (+4.8 together, against +1.9 and +2.1 alone on GPT-4.1), so prompt
-search comes *before* fine-tuning, not instead of it.
+reported gains shrink under matched rollout budgets — [LEVI](https://arxiv.org/abs/2605.09764) is
+the case ([`external-constraints.md`](external-constraints.md) § Ranked, item 4) — while against
+weight updates the economics run GEPA's way, and SFT and GEPA compound, so prompt search comes
+*before* fine-tuning, not instead of it (that page § Direction and § Cost reporting carry the
+numbers).
 
 ## A menu is not a bench — the honest version
 
@@ -75,9 +72,8 @@ is the property that makes two of those algorithms' numbers mean the same thing:
 - **One exam, chosen before anybody proposes.** The round's sample subset is selected before
   generation, so no method picks the questions it is graded on.
 - **Ability, not accuracy.** Scores are subset-invariant (Rasch θ, 1PL graduating to 2PL per
-  dataset; the field default is 2PL, [`external-constraints.md`](external-constraints.md) § M14;
-  tinyBenchmarks, metabench and [Fluid Benchmarking](https://arxiv.org/abs/2509.11106) all validate
-  IRT ability as the comparability tool),
+  dataset; the field's 2PL default and the benchmarks validating IRT ability are
+  [`external-constraints.md`](external-constraints.md) § M14),
   so a method that drifted onto easier samples cannot out-rank an honest one —
   [`../methods/verdict-resolution.md`](../methods/verdict-resolution.md).
 - **A stopping rule.** Sequential elimination with a posterior (PoBB) rather than a fixed trial
@@ -99,20 +95,11 @@ an outer cycle whose backend is an inner cycle
 ([`../specs/l4-outer-loop.md`](../specs/l4-outer-loop.md)) — which means the comparability problem
 arrives there too, one level harder: in the recursion the optimizer *is* the instrument, so the
 thing being varied is also the thing doing the measuring. A bench that holds a harness constant is
-the only place that question is answerable. The precedent to cite and the findings that bind it are
-[`external-constraints.md`](external-constraints.md) § L4, and in short:
-[STOP](https://arxiv.org/abs/2310.02304) is the closest prior art, an improver improving its own
-code with weights frozen; [Gödel Agent](https://arxiv.org/abs/2410.04444) and
-[ADAS](https://arxiv.org/abs/2408.08435) keep an archive of past designs, not only the current best;
-the [Huxley-Gödel Machine](https://arxiv.org/abs/2510.21614) found a round's top scorer often has
-unproductive descendants, so it scores clades; [ShinkaEvolve](https://arxiv.org/abs/2509.19349)
-gets its sample efficiency (150 samples) from parent sampling, novelty rejection and a bandit over
-mutators; and [SICA](https://arxiv.org/abs/2504.15228) watches a run with an asynchronous overseer
-rather than gating edits. The danger is measured too: DGM faked its own checker's pass when it
-could see it, [Auditing Harness Tampering](https://arxiv.org/abs/2609.00069) found tampering in the
-best-scoring agent's lineage across five self-improving systems, and the
-[Reward Hacking Benchmark](https://arxiv.org/abs/2605.02964) cut exploit rates 87.7% by hardening
-the environment alone.
+the only place that question is answerable.
+
+**The precedent to cite, and the measured danger** — owned by
+[`external-constraints.md`](external-constraints.md) § Ranked, items 1–2, and § L4; cite STOP,
+Gödel Agent, ADAS, the Huxley-Gödel Machine, ShinkaEvolve, SICA and the tampering audits from there.
 
 ## Test-time compute, moved out of the request
 

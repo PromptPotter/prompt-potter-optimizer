@@ -138,6 +138,7 @@ def set_inner_rulers(ctx: InnerSpawnContext) -> None:
 
 
 def retarget_inner_spawn(session: Session) -> None:
+    """Moves only the asker; the sandbox owner never follows a fork."""
     ctx = _INNER_SPAWN.get()
     cycle_id = session.state.cycle_id
     if ctx is None or not cycle_id or ctx.asking_cycle_id == cycle_id:

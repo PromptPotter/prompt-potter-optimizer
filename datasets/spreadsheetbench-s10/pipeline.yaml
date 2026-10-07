@@ -9,7 +9,7 @@ description: >-
 backend_name: Harbor
 backend_type: harbor
 available_models:
-  - qwen/qwen3.7-flash:nitro
+  - inception/mercury-2.5
 nodes:
   agent:
     type: agent
@@ -23,12 +23,10 @@ nodes:
       # `provider` is separate from `model` by this repo's convention, and the connector composes
       # the two into the single slug Harbor wants (its prefix IS the provider).
       provider: openrouter
-      # `:nitro` routes to the highest-throughput host of this model. On this backend that is a
-      # WALL-CLOCK knob, not a nicety: a cell is one agent episode, so generation speed multiplies
-      # by turn count. Measured on gpt-oss-120b through this same connector, the suffix moved
-      # 20 tok/s to 87 — and it changes which host answers, so it changes price too
-      # (`docs/operations/backend-integration.md` § Endpoints).
-      model: qwen/qwen3.7-flash:nitro
+      # The fastest agent phase among the models that open the skill, and a cell
+      # is one agent episode, so generation speed multiplies by turn count
+      # (`docs/operations/dataset-reasoning-matrix.md` § The agent model on a Harbor dataset).
+      model: inception/mercury-2.5
       temperature: 0.0
       max_turns: 20
       # With `max_turns`, the limits a cell's spend is bounded by — sent to Harbor, and held

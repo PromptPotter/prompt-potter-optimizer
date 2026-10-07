@@ -7,8 +7,8 @@ collects everything else.
 
 ## Code style
 
-- **PEP 604** type hints (`X | None`, `list[str]`); never `Optional[X]` /
-  `List[str]`.
+- **PEP 604** type hints and **line-length 100** — ruff's (`UP`, `line-length` in
+  `pyproject.toml`), run by `scripts/gate.py`, which is what CI runs.
 - **`logging` in library code; `print()` only where a human is the reader.** Setup
   via `promptpotter/config/logging.py`. A print is an operator-facing OUTPUT, never a
   debug aid, so it belongs to the CLI (`presentation/cli/`), the terminal views, the
@@ -18,7 +18,6 @@ collects everything else.
   `ReadoutProjection._write`, the single funnel that writes ANSI-stripped to the cycle's
   `readout.log` and hands the line to the entry point's sink, so a bare `print()` there is a
   line no headless reader can recover.
-- **Ruff line-length: 100.** Enforced by `scripts/gate.py`, which is what CI runs.
 - **Direct field access** — `dict[key]` for guaranteed fields, not
   `.get(key, fallback)`. Fallbacks announce uncertainty; if you have a
   contract, lean on it.
@@ -136,20 +135,16 @@ collects everything else.
   definition site (the `@signal` `injection_table()` pattern); enum-keyed dict +
   import-time completeness assert is the third acceptable form. String-keyed
   *data* tables are fine.
-- **A function-local import of our OWN package goes to module scope.** All three
-  reasons for deferring one were measured and none holds. *Startup:* `--help`
-  costs 1.38 s warm against a 0.16 s bare interpreter, so the deferrals buy no
-  fast CLI; a real startup fix is `-X importtime`, not scattered deferrals.
-  *Extras gating* ([`ADR-0006`](../adr/0006-embeddable-core-and-extras.md)) is
-  real but lives on the **third-party** import inside the function, never on a
-  `promptpotter` → `promptpotter` one. *A cycle* is a layer boundary in the wrong
-  place, so the fix is to move the shared piece down (root `CLAUDE.md`
-  § `<entry-point-parity>`). All therefore count against
-  `complexity_ledger::deferred_imports` — read how many survive off that
-  baseline, never off this page; `# extras: <name>` on the import line
-  exempts one that earns it. **The defect the rule ends is the ambiguity** — an
-  unmarked deferral cannot be told from a load-bearing one, so nobody can hoist
-  safely or add one knowingly.
+- **A function-local import of our OWN package goes to module scope**, and
+  `complexity_ledger::deferred_imports` counts every one — read how many survive
+  off that baseline; `# extras: <name>` on the import line exempts one that earns
+  it. None of the three reasons for deferring holds: scattered deferrals buy no
+  startup (`-X importtime` is the real fix), *extras gating*
+  ([`ADR-0006`](../adr/0006-embeddable-core-and-extras.md)) lives on the
+  **third-party** import inside the function, and *a cycle* is a layer boundary in
+  the wrong place (root `CLAUDE.md` § `<entry-point-parity>`). **The defect the
+  rule ends is the ambiguity** — an unmarked deferral cannot be told from a
+  load-bearing one, so nobody can hoist safely or add one knowingly.
 
 ## Auditing for debt
 
@@ -186,8 +181,9 @@ helpers used by one caller **in the same file**.
 
 - **Timeouts: 30s default for ALL commands.** Increase only when explicitly
   told "ready for data collection".
-- **Never run `campaign_runner` with `run_in_background`** — always
-  foreground.
+- **A campaign launch is backgrounded and SUPERVISED, never fired and left** —
+  stdout to a log under `.scratch/`. Which autonomy mode may launch one without
+  asking is root [`CLAUDE.md`](../../CLAUDE.md) § Working principles.
 
 ## Git
 

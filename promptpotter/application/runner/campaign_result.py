@@ -27,14 +27,17 @@ from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.run_observers import RunCallbacks
+    from promptpotter.domain.scoring import CellScorer
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.infrastructure.store.stores import Stores
 
 __all__ = [
     "bank_campaign_result",
     "bench_origin",
+    "headline_under",
     "read_campaign_bench",
     "read_cycle_bench",
     "read_line_spend",
@@ -181,6 +184,19 @@ def _headline(stores: Stores, campaign: Campaign, result: CampaignResult) -> Ben
     hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=result.cycle_id)
     config = resolve_campaign_config(stores, campaign, hop)
     scorer, scorer_id = config_cell_scorer(config)
+    return headline_under(stores, result, config, scorer, scorer_id=scorer_id)
+
+
+def headline_under(
+    stores: Stores,
+    result: CampaignResult,
+    config: CampaignConfig,
+    scorer: CellScorer,
+    *,
+    scorer_id: str,
+) -> BenchScore | None:
+    """The one headline rule, under a grader the caller names: a table reading many campaigns
+    grades them all under one, where a campaign's own read takes its line's."""
     if result.bench is not None:
         return read_bench(stores, result.bench, scorer, scorer_id=scorer_id)
     split = config.dataset_split

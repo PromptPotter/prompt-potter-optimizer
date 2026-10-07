@@ -57,8 +57,10 @@ into the headline role once L1 produces measurable lift on BBEH.
 
 Default conditions unless noted: **`gpt-oss-20b @ low`, `temperature: 0.0`**, 25-sample slice. These
 are *measurements*, not projections — the trail's one systemic finding is that literature anchors
-from older proxies **underpredict `gpt-oss-20b @ low` by 10–20pp**, so bias every sub-20B-class prior
-upward before trusting it.
+from older proxies **underpredict `gpt-oss-20b @ low` by 10–20pp** (five recons out of five), so bias
+every sub-20B-class prior upward before trusting it. Reasoning benchmarks designed for the GPT-3.5 /
+Llama-3-8B era are ceiling-prone for this model; the one measured exception was language transfer
+(Swahili), where reasoning strength in English does not carry across the language barrier.
 
 | Dataset | Origin | Verdict |
 |---|---|---|
@@ -85,10 +87,9 @@ upward before trusting it.
 | BBEH @ `high` | ~25% naïve | ❌ the *effort* is rejected, not the dataset — the reasoning trace exhausts the visible-token budget |
 | IFBench · CRUXEval-O · MuSR (2-subtask) | — | ❌ desk-rejected / not measurable |
 
-**Rejected without trial**, so they are not re-investigated: GPQA · MMLU-Pro · MATH-500 · HLE ·
-ZebraLogic · ARC-AGI-2 · FrontierMath · SimpleBench · LiveBench · AGIEval-EN · DROP · ReClor ·
-StrategyQA · ANLI R3 · LogiQA 2.0 · HumanEval/CRUX · IFEval · τ-bench · AA-LCR · GDPval-AA. The
-recurring reasons are *above the bar*, *below the floor*, *unstable test set*, and *outside PoBB's
+**Rejected without trial** — the list, and the reason beside each name, is owned by
+[`../operations/dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md)
+§ Rejected without trial; none is re-investigated. The recurring reasons are *above the bar*, *below the floor*, *unstable test set*, and *outside PoBB's
 cost model* (tool-call dependent — the budget gate polls at the sample edge, so one
 agent episode is unbounded spend between polls). Neither *boundary* is a reason any more: a
 containerized agent episode is a measured cell through `connectors/harbor.py`, and an LLM-judge
@@ -143,15 +144,10 @@ Definition only; instance assembly TBD. PromptPotter is the reference solver.
 
 **Absolute Accuracy** — `correct / total` on test — per (method, model), from `results_*.json`. It is
 the raw performance of the best prompt found, and the standard comparison point. Its interval is
-paired and clustered, exact or bootstrapped, with signal-to-noise per benchmark — never a binomial
-SE ([`external-constraints.md`](external-constraints.md) § M14).
-[Adding Error Bars to Evals](https://arxiv.org/abs/2411.00640) shows clustering can inflate SEs up
-to 3×, so a head-to-head differences the two arms per cell; ["Don't use the CLT…"](https://arxiv.org/abs/2503.01747)
-applies below a few hundred datapoints, which covers most of our panels; and
-[Signal and Noise](https://arxiv.org/abs/2508.13144) down-weights low-SNR subtasks before a delta
-is trusted. The reporting section of the [Agentic Benchmark Checklist](https://arxiv.org/abs/2507.02825),
-which 10 of 10 popular agent benchmarks failed, gets filled in for this bench and published as an
-appendix.
+paired and clustered — a head-to-head differences the two arms per cell — exact or bootstrapped,
+with signal-to-noise per benchmark, never a binomial SE; and the reporting section of the Agentic
+Benchmark Checklist gets filled in for this bench and published as an appendix. The source binding
+each is [`external-constraints.md`](external-constraints.md) § M14.
 
 Beside it, two of the round counts a cycle banks in `index.json::final`, which say how *fast* rather
 than how *high*: **`rounds_to_separable`**, the first round whose pick separates from the origin on the shared panel,
@@ -165,10 +161,9 @@ and spend is backend scoring, and the optimizer's own calls are a few percent of
 optimization query" prices the cheap part and hides the bill the operator actually pays. Price a
 lift in wall clock and dollars. That rules out a *denominator*, not the count: a head-to-head
 still holds total calls equal across arms, and reports calls, tokens and dollars (with the price
-table's date) as separate axes beside wall clock ([`external-constraints.md`](external-constraints.md)
-§ Ranked, item 4, and § Cost reporting). That is the template [HAL](https://arxiv.org/abs/2510.11977)
-and [AI Agents That Matter](https://arxiv.org/abs/2407.01502) set: a cost–accuracy Pareto frontier,
-dollars and tokens as separate axes, and a holdout never used for tuning.
+table's date) as separate axes beside wall clock, with a holdout never used for tuning — the
+template [`external-constraints.md`](external-constraints.md) § Ranked, item 4, and § Cost reporting
+name.
 
 ### The winner's own number is biased upward
 
@@ -178,4 +173,4 @@ Accuracy is read off the **selected** candidate, and selection and estimation mu
 
 **The bench set is itself spent by reuse.** Every campaign an operator keeps or drops off its headline is one adaptive query against the same rows, so a holdout read by many picks drifts optimistic the same way the search rows did. The head-to-head serves the count (`HeadToHeadRow.bench_reads`: individuals ever graded on those rows) rather than hiding it. There is deliberately no once-only final split: a head-to-head needs every optimizer's pick graded on ONE set, so "read once" either forbids the second arm or has to mean once per comparison — a boundary nothing on disk can tell apart from a fresh campaign on the same seed. A new `dataset_split.seed` is the honest fresh holdout, and the count says when one is due.
 
-Named and corrected for in *Correcting the Winner's Curse in Adaptive Benchmarking* ([arXiv:2605.05973](https://arxiv.org/abs/2605.05973)), whose protocol assumes a fixed shortlist and smooth stabilized selection — the assumption PoBB's adaptive stopping strains, so their estimator needs checking against it before it is adopted. The same data-dependent stopping is why PoBB's ε carries no anytime-valid guarantee ([`external-constraints.md`](external-constraints.md) § Ranked, item 3); the form that would carry one is a confidence sequence from test supermartingales ([Hsu & Shekhar](https://arxiv.org/abs/2607.17409)).
+Named and corrected for in *Correcting the Winner's Curse in Adaptive Benchmarking* ([arXiv:2605.05973](https://arxiv.org/abs/2605.05973)), whose protocol assumes a fixed shortlist and smooth stabilized selection — the assumption PoBB's adaptive stopping strains, so their estimator needs checking against it before it is adopted. The same data-dependent stopping is why PoBB's ε carries no anytime-valid guarantee ([`external-constraints.md`](external-constraints.md) § Ranked, item 3, which names the form that would carry one).

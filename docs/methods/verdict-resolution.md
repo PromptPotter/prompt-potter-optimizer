@@ -68,11 +68,10 @@ prior rather than floored — a response with no residual variance carries no ev
 dispersion, and an unshrunk `φ→0` would report infinite confidence.
 
 **1PL by default; each dataset graduates to 2PL where it wins held-out CV**
-(`enable_2pl_graduation`, on by default). Elsewhere 2PL is the field default —
-[`../research/external-constraints.md`](../research/external-constraints.md) § M14. tinyBenchmarks,
-metabench and [Fluid Benchmarking](https://arxiv.org/abs/2509.11106) all validate IRT ability as
-the comparability tool, which supports θ, but they fit discrimination as well as difficulty, so
-1PL is the choice that needs defending here, not 2PL. With enough
+(`enable_2pl_graduation`, on by default). Elsewhere 2PL is the field default, so 1PL is the choice
+that needs defending here, not 2PL —
+[`../research/external-constraints.md`](../research/external-constraints.md) § M14 carries the
+benchmarks that set it. With enough
 observations per sample a 2PL fit adds per-sample **discrimination** `aₛ` — how sharply a sample
 separates able from unable candidates, i.e. its signal-to-noise — giving both selection and the gate
 more power. It graduates **per-dataset**, behind the same θ interface, only when it provably beats
@@ -112,11 +111,9 @@ high-water, as its own signal.
 `domain/ruler.py::ThetaCaveat`, not off prose.
 
 **Every one is SERVED as a `ThetaCaveat` member, so the screen and the optimizer's
-`confounds` panel read one verdict rather than each deciding.** They arrive on two carriers,
-because they are facts about different things: the SCALE states are decided by
-`ruler.py::theta_caveat` and ride the round's `AbilityReading.caveat`; the 0% floor is decided by
-`results.py::is_floor_pinned` and rides the candidate row, since it is a property of one arm's
-responses. A sound round can carry a pinned arm, and a pinned arm can sit on a sound ruler.
+`confounds` panel read one verdict rather than each deciding.** Which carrier each rides — the
+round's `AbilityReading.caveat` for the scale states, the candidate row for the 0% floor — is that
+enum's docstring's. A sound round can carry a pinned arm, and a pinned arm can sit on a sound ruler.
 
 - **The 0% floor** (`floor_pinned`, per-ARM). An arm that misses every cell gives the fit no
   information, so θ pins to the same constant regardless of which samples it saw — every zero arm
@@ -141,28 +138,23 @@ responses. A sound round can carry a pinned arm, and a pinned arm can sit on a s
   one is SILENT — the ruler is warm, `ruler_id` matches, every number renders.
   Check the round's own cells against the ruler's δ spread before trusting a θ lift: a panel whose
   δ all sit within a logit of each other carries no difficulty information to adjust for, so the
-  θ column there is logit-accuracy wearing a ruler's name. The ratio is measured against the ruler,
-  so a flat ruler makes the yardstick the thing under test — which is why `flat_ruler` above is
-  checked FIRST and has an absolute floor rather than a ratio.
+  θ column there is logit-accuracy wearing a ruler's name. `flat_ruler` above is checked FIRST,
+  on an absolute floor, because this ratio cannot see it.
 - **Unmeasured difficulty** (`unmeasured_delta`). At least `PRIOR_PINNED_RATIO` of the round's cells
   sit on a δ the ruler hands to more than one cell. A continuous fit does not produce ties: a run of
   identical δ is the PRIOR determining the value for cells whose observations carried no variance —
   every arm that ever saw them answered the same way, which on a hard bank is most of them. Those
   cells still enter the θ fit and still move it, against a difficulty nobody measured.
   The damage is that the pin MOVES. It is a function of the ruler's current composition, so each
-  batch of never-solved cells shifts it, and an unchanged prompt walks up the scale: on
-  `sealqa-longseal-12__def880` the origin — never promoted, never re-run, replayed from cache in
-  every round — read `+0.120`, `+0.543`, `+0.769` and `+0.839` over four rounds, `caveat: null`
-  throughout, while its accuracy on those same draws went 7.5% → 35% → 50% → 55%. Silent for the
+  batch of never-solved cells shifts it, and an unchanged prompt — never promoted, never re-run,
+  replayed from cache — walks up the scale round on round. Silent for the
   same reason `collapsed_band` is: warm ruler, matching id, every number renders.
   **Read the LIFT, never the level, and never a level across rounds.** Within one round the pin is
   shared by every arm, so it cancels out of a lift; between rounds it does not cancel at all.
-  Checked after the band, because inside a collapsed band θ is logit-accuracy plus a constant
-  whatever the δ were fit from, and naming the pin there would name the smaller fault.
+  Checked after the band (`ruler.py::theta_caveat` — order is severity).
   The same state covers a cell with NO δ: one the ruler does not carry, because no arm already on
   the scale answered it in this cycle (`DeltaRuler.unlinked`). θ leaves that cell out, so it is
-  read on fewer cells than the accuracy beside it. It is the one caveat with both scopes — the
-  round's reading carries it for the frontier's cells, an arm's row for that arm's own — and a
+  read on fewer cells than the accuracy beside it. It is the one caveat with both scopes, and a
   later round links the cell once an arm that answered it is on the scale.
 
   **The question this state makes unanswerable — "is the round-N winner better than C0?" — has its
@@ -236,13 +228,6 @@ provisional, and say so rather than passing it on.
   the clock a result quotes (`index.json::final.rounds_to_separable`) — it does NOT gate adoption,
   which stays `improved`. The panel is fixed, so the LEAD accumulates across rounds; its width
   does not shrink.
-- **The posterior did no work, and that half is FIXED.** The quasi-likelihood dispersion φ was
-  floored at a constant, which caught 8 of 9 outer arms (raw median 0.0127) and left θ_se not
-  varying with the arm at all — `p_exceeds` reduced to a monotone map of the raw gap, so
-  rank-by-posterior WAS rank-by-gap. φ is now shrunk toward the nominal dispersion on its own
-  degrees of freedom (the inverse-gamma the two σ already use), so the same 9 arms carry 7
-  distinct dispersions instead of 2. Posteriors are WIDER, so expect PoBB to eliminate slightly
-  more slowly and a round to cost a little more.
 - **The right toolkit exists and is only PARTLY on this path.** `holm_adjusted`,
   `exact_paired_reading`, `exact_p_floor`, `cells_for_exact_verdict`, `min_detectable_effect`,
   `panel_precision` are wired to `application/evidence/`, the offline read verb, and to nothing
@@ -253,12 +238,10 @@ provisional, and say so rather than passing it on.
 - **At the current width it could not pass anyway.** `cells_for_exact_verdict(3) = 7` against a
   6-cell panel, so no Holm-corrected exact verdict is reachable at α=0.05 at ANY effect size.
 
-**Why it is still open rather than fixed.** The largest error was elsewhere — each inner cell fit
-its own δ scale, so re-reading identical rows moved θ by a whole winning margin (§ above,
-`runner/inner/ruler.py`). That is fixed, and it changes what a re-read of separability would say.
-Redesigning the bar against the old numbers would be tuning to noise. **The next step is to
-re-read separability on a run that used the shared ruler, and only then choose a bar** — not to
-tighten one now.
+**Why it is still open rather than fixed.** Every number a bar could be designed against predates
+the shared inner ruler (`runner/inner/ruler.py`, below), so redesigning it now would be tuning to
+noise. **The next step is to re-read separability on a run that used the shared ruler, and only
+then choose a bar** — not to tighten one now.
 
 **The ruler grows; the anchor does not.** `ruler_id` names the ANCHORING fit, not the membership, so
 it is stable across the extensions that add cells within a cycle — that is what lets two θ read at
@@ -267,9 +250,9 @@ that round was read. The ruler is persisted (`RulerRecord`), so a resume reuses 
 re-deriving a different one from a grown archive, and a fork inherits its parent's.
 
 **On the recursion the scale is the SPAWNER's, not the cell's.** An inner cell's evidence epoch
-hides everything banked before it started, so the only arms it could fit against were its own —
-the δ came out of the treatment under test, and re-running byte-identical origin rows returned θ
-spread over a whole winning margin. `application/runner/inner/ruler.py` fits it once at the outer
+hides everything banked before it started, so the only arms it could fit against are its own —
+the δ would come out of the treatment under test, and byte-identical origin rows would read θ
+a whole winning margin apart. `application/runner/inner/ruler.py` fits it once at the outer
 round boundary, pooled over every arm that dataset has banked, and hands it down through
 instrument mode; the cell reads on it rather than deriving one. Same anchor for every candidate
 measured against a cell, so the origin level genuinely cancels in `variant − origin`.
@@ -385,9 +368,8 @@ follows. The guard is what stops a tail of pure hits from being read as probes.
 
 **Why unknown is not a miss.** `is_hit` returns False for a miss and for `None` alike. Under
 `per_round_resubset` round 1's panel shares no cell with the parent, so filing unknowns as
-win-opportunities put *every* cell in the miss stratum, left the hit stratum empty, never fired the
-`k=4` probe, and led with the easiest cells — on `justlogic-d234__8f6499`, three of the first six
-had been missed by nothing in 8–15 archived measurements. Harmless only while δ was flat.
+win-opportunities puts *every* cell in the miss stratum, leaves the hit stratum empty, never fires
+the `k=4` probe, and leads with the easiest cells — harmless only while δ is flat.
 
 **Why k=4.** Pure miss-first defers all regression evidence past the miss block. A proportional
 interleave spreads the misses so thin that a futility kill lands at the very end. k=4 costs a
@@ -448,10 +430,8 @@ campaign owns it, and `GET /datasets/{name}/cells?scope=dataset` folds it from t
   ruler (still **1PL**: feeding graduated discrimination `aₛ` in here is open,
   [`../specs/roadmap.md`](../specs/roadmap.md) § Fitness comparability).
 - Persisted ranking writer — `intelligence/hard_sample_sorter.py::build_hard_samples_artifact_from_observations`,
-  the one caller of the two-term `pick_value`. The between-round pick deliberately does NOT use it:
-  summing let `delta_learning_gain` dominate (0.085 against 0.053 on a live round) and the panel
-  bought whatever the ruler knew least, so `select_round_subset` ranks on
-  `::decision_order` — term 1 alone — and buys the ruler its cells as a reserved tail instead.
+  the one caller of the two-term `pick_value`. The between-round pick deliberately does NOT use it
+  (§ The acquisition score — the two terms are spent separately).
 
 ## Phase 2 sketch — origin-relative weighting (not shipped)
 

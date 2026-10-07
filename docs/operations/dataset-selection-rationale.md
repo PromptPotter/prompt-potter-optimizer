@@ -6,9 +6,7 @@ Which datasets we trial during L1 optimizer prompt evolution and why, and at the
 
 ## Frame — BBEH is the headline; the self-optimizing campaign needs signal
 
-**BBEH stays the headline benchmark** for publication framing, and nothing in the candidate list changes that. But at the optimizer's current maturity BBEH is the wrong *iteration* target: `gpt-oss-20b @ low` scores low enough that every cycle ties at noise, PoBB cannot separate candidates, and the campaign cannot tell good edits from bad. Our in-house BBEH-mini reading does **not** debunk the public figure — that gap is an open publication blocker owned by [`../research/bbeh-comparison/README.md`](../research/bbeh-comparison/README.md), and quoting it as a result is the error to avoid.
-
-The operator's framing (2026-05-18): *we are too far from the local valley on BBEH; work toward it with more tractable signal first, then return to BBEH as headline with better hyperparameters and a more mature optimizer.*
+**BBEH is the headline benchmark and the wrong *iteration* target, until L1 produces lift it can measure** — owned by [`../research/benchmarks.md`](../research/benchmarks.md) § Order of use; nothing in the candidate list below changes the headline. Our in-house BBEH-mini reading does **not** debunk the public figure — that gap is an open publication blocker owned by [`../research/bbeh-comparison/README.md`](../research/bbeh-comparison/README.md), and quoting it as a result is the error to avoid.
 
 **Which dataset holds which role** — owned by [`../research/benchmarks.md`](../research/benchmarks.md) § Order of use. TermNorm (`lca-termnorm`) sits outside the question entirely: per-connector regression, not optimizer iteration.
 
@@ -16,7 +14,7 @@ The operator's framing (2026-05-18): *we are too far from the local valley on BB
 
 A focus dataset for L1 optimizer prompt evolution must satisfy:
 
-1. **Origin in band.** `gpt-oss-20b @ low` scores **15–40%** at origin. Below 15% → floor effect (the BBEH problem). Above 40% → ceiling effect, no headroom for L1 lift to register against PoBB noise. The band tops out at 40 rather than 35 because of the projection slop in § What the trail established.
+1. **Origin in band.** `gpt-oss-20b @ low` scores **15–40%** at origin. Below 15% → floor effect (the BBEH problem). Above 40% → ceiling effect, no headroom for L1 lift to register against PoBB noise. The band tops out at 40 rather than 35 because of the projection slop [`../research/benchmarks.md`](../research/benchmarks.md) § Every dataset we measured states.
 1b. **Origin clears its CONSTANT-ANSWER floor** — the score a stub emitting the single commonest label would earn. This floor is per-dataset, not 15%: on a 3-class set whose majority label holds 40% of the bank, a collapsed pipeline scores 40% and reads as a healthy in-band origin with headroom. An origin that merely ties its constant is not a measurement, because the pipeline is not reading the input. **Read it off the `answer_distribution` panel**, the live surface for this criterion. It is enforced where the measurement is taken — `domain/scoring.py::is_answer_collapsed` withholds θ from a collapsed candidate and PoBB eliminates it — so a dataset whose pipeline ties its constant cannot contribute a fitted ability at all. Criterion 1 alone cannot see this, and let a degenerate JustLogic cell into the L4 panel for the whole of its first campaign.
 2. **Reachable ceiling.** Plausible **50–75%** under strong prompt engineering. The origin-to-ceiling gap is what L1 climbs; bigger gap = cleaner signal/noise.
 3. **N ≥ 400, preferably 800+**, for stable cycle-to-cycle verdicts under PoBB. Smaller N is usable with per-subtask stratification.
@@ -29,9 +27,9 @@ A focus dataset for L1 optimizer prompt evolution must satisfy:
 
 **Toy and demo datasets are picked on deliberation length, not difficulty.** The criteria above buy signal; a toy buys turnaround, and what costs turnaround is how long the model thinks per cell, not how many cells there are. Prefer a task answerable in one pass — recognition, extraction, ordering a given set — over one that invites the model to reason its way there, and read the split off `dashboard.json::spend.backend` (`reasoning_tokens` against `output_tokens`) on the first round rather than after the campaign. The same test applies when **evolving** one: a toy task that has grown a deliberation step has stopped being a toy.
 
-## Why `gpt-oss-20b @ reasoning_effort: low` (operator commitment 2026-05-19)
+## Why `gpt-oss-20b @ reasoning_effort: low`
 
-Operator-pinned model for the self-optimizing campaign focus: leading open-source at the 20B-active scale, fast on Groq routing (845 tok/s on `:nitro`-eligible providers, ~5s median per call), very cheap at $0.03 in / $0.14 out per Mtok, and conservative at `low` so the optimizer climbs from the floor — `medium` / `high` stay L1-reachable mutations when sibling-yield supports them.
+Operator-pinned model for the self-optimizing campaign focus: leading open-source at the 20B-active scale, chosen on price and `:nitro` throughput ([`dataset-reasoning-matrix.md`](dataset-reasoning-matrix.md) carries both), and conservative at `low` so the optimizer climbs from the floor — `medium` / `high` stay L1-reachable mutations when sibling-yield supports them.
 
 Pinning is via the `nodes.llm_only.config` overlay in each dataset's `pipeline.yaml`, and the pin holds because these datasets do not list `model` in `optimizer.param_keys` — the engine searches `model` wherever a dataset opens it. `provider` cannot be opened at all (`PARAM_FORBIDDEN_KEYS`).
 
@@ -42,7 +40,6 @@ Every dataset reconned, and what its number MEANT for wiring it. **The measured 
 | Dataset | Slice | What the number means |
 |---|---|---|
 | **JustLogic — `justlogic-d234`** | iid mix of depths 2/3/4 | Synthetic 3-class deduction (`TRUE`/`FALSE`/`Uncertain`, Chen 2025): zero contamination, balanced gold distribution, so a class bias the pipeline shows is a reasoning failure rather than a label-skew coast. Cut, scoring rule and the `:nitro` speed trade are [`../../datasets/justlogic-d234/dataset.md`](../../datasets/justlogic-d234/dataset.md)'s. |
-| **JustLogic — `justlogic-d234-held`** | the same pools, a wider bench | `justlogic-d234`'s search and demo pools under a bench wide enough to tell two selections apart — owned by [`../../datasets/justlogic-d234-held/dataset.md`](../../datasets/justlogic-d234-held/dataset.md). |
 | **SealQA — `sealqa-longseal-12`** | LongSeal at k=12 | Rejected on the LLM-judge ground, since half-lifted. Its GPT-4o-mini auto-rater is validated by the authors at 98% agreement with two human annotators over 100 answers and ships as the `sealqa` built-in (`promptpotter/judges/simpleqa.py`). Measured on `harbor` as one containerized episode per cell, graded beside two unscreened evidence rubrics. It carries no loader **by requirement**: a connector's `experiment_file` owns its panel, so a loader registered under the name would win and the panel would never publish. |
 | **PlanBench task_1** | `tasksource/planbench`, `task_1_plan_generation`, multi-domain stratified | 1.5s/sample. PDDL-style symbolic planning, a brand-new family with no overlap against deduction / math / multi-hop QA. Obfuscated-domain variants (`paltry`, `sip`, `wretched` as action names) test reasoning against pattern-matching. Recon scorer is coarse 50% action-call overlap; wire-time needs a **PDDL plan validator** (~half-day) for credible per-cycle scoring. |
 | **NaturalPlan** | `google-deepmind/natural-plan` raw GitHub (not on HF), 3-subtask stratified | 0.5s/sample. Wire `meeting_planning` ONLY: the macro is a Frankenstein average and the per-subtask breakdown is the trap: `trip_planning` 0/9 (real floor at low — combinatorial flight-chain search), `calendar_scheduling` 6/9 (ceiling; bare 4-token boilerplate gold), `meeting_planning` 3/7 = **43%**, clean in-band. L1 would game calendar's boilerplate and never progress on trip. Scorer needs per-subtask dispatch. |
@@ -65,7 +62,7 @@ Every dataset reconned, and what its number MEANT for wiring it. **The measured 
 
 ### Rejected without trial
 
-Captured so they are not re-investigated. All are projections, and **the recon trail overshot published anchors five times out of five**, so bias every `<20B`-class anchor upward 10–20pp before trusting one.
+Captured so they are not re-investigated. All are projections, so read each through the upward bias [`../research/benchmarks.md`](../research/benchmarks.md) § Every dataset we measured states.
 
 - **GPQA Diamond / Main** — 56.8% (Diamond) → top of band, ~10pp ceiling-room; N=198 also sub-spec.
 - **MMLU-Pro** (~63–67%), **MATH-500 / Level 5** (~40–55%), **AGIEval-EN** (~50–60%), **StrategyQA** (~55–65% origin, ~70% ceiling) — all above band.
@@ -85,10 +82,6 @@ Captured so they are not re-investigated. All are projections, and **the recon t
 
 - **Depth cuts do not compare** — owned by [`../../datasets/CLAUDE.md`](../../datasets/CLAUDE.md) § L4 — `promptpotter-self`. Read it before reading two depth rows above as one band: the earlier d6-7 wiring and its recon numbers were replaced for that reason, not refined.
 - **The hedge is not a prompt-shaped target.** The pipeline's dominant pathology at `low` is retreat to `Uncertain`, and it does **not** respond to being told off — anti-hedge wording, derivation procedures and personas all measure *worse* than the plain origin, because the extra text competes for the budget the derivation needs. Attack the chain, not the conclusion.
-
-## What the trail established
-
-Eight rounds of literature triage and empirical recon converged on one systemic finding: **model-strength projections taken from older proxies underpredict `gpt-oss-20b @ low` by 10–20pp.** Reasoning benchmarks designed for the GPT-3.5 / Llama-3-8B era are ceiling-prone for this model. The one measured exception was language transfer (Swahili), which bypasses the effect because reasoning strength in English does not carry across the language barrier — and which was rejected anyway.
 
 ## What a cell costs — and why an agent-backed dataset is a different animal
 

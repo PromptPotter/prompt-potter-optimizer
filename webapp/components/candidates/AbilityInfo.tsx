@@ -23,7 +23,7 @@ export const CAVEAT_COPY: Record<Caveat, { head: string; body: string }> = {
   },
   unmeasured_delta: {
     head: "θ is not ability this round",
-    body: "Most of this round's cells share a difficulty the ruler handed to several cells at once — that is its prior, not a reading of any of them: every candidate that ever saw them answered the same way. θ still counts them, and the value they are pinned to moves as the ruler grows, so a θ higher than last round's can be the scale shifting rather than the prompt improving. Compare candidates within this round; don't read the level across rounds.",
+    body: "The ruler has no reading for most of these cells. Either it handed several of them one shared difficulty — its prior, since every candidate that ever saw them answered the same way — or it does not carry them at all, and θ skips those. A pinned value moves as the ruler grows, so a θ higher than last round's can be the scale shifting rather than the prompt improving. Compare candidates within this round; don't read the level across rounds.",
   },
   floor_pinned: {
     head: "θ reads nothing for an all-miss arm",

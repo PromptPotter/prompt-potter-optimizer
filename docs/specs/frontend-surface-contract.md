@@ -1,15 +1,11 @@
 # Frontend Surface Contract
 
-Minimal, dual-read spec of every user-facing surface in `webapp/` — what each
-control **must do**, per state. Companion to `webapp/CLAUDE.md` (implementation
-invariants) and `promptpotter-web/BRAND.md` (brand + copy register). This file owns *behavior*: the
-contract a PR is measured against, and the source of truth when reality drifts.
-
-**How to read.** This file owns the cross-cutting **invariants** and the two consent gates —
-the rules a PR is measured against and that a plausible edit would silently undo. It does **not**
-describe surfaces: what a control renders is owned by the component, and a doc that copies rendered
-strings is a stale screenshot, not a contract. `webapp/CLAUDE.md` owns the implementation rules,
-`promptpotter-web/BRAND.md` the brand and copy register.
+What every user-facing surface in `webapp/` **must do**, per state. This file owns *behavior* —
+the cross-cutting **invariants** and the two blocking gates, the rules a PR is measured against and
+that a plausible edit would silently undo. It does **not** describe surfaces: what a control
+renders is owned by the component, and a doc that copies rendered strings is a stale screenshot,
+not a contract. `webapp/CLAUDE.md` owns the implementation rules, `promptpotter-web/BRAND.md` the
+brand and copy register.
 
 ## State vocabulary
 
@@ -24,8 +20,8 @@ states:
              has never run one. Nothing is wrong in this state, so no surface may present it
              as a failure: no error styling, no alert role, and no remediation the visitor
              cannot perform where they are standing. Same distinction `gone` draws below,
-             one state earlier — collapsing it into offline is what once met a first-run
-             account with a critical alert telling it to go run a CLI command.'
+             one state earlier: collapsed into offline, it meets a first-run account with a
+             critical alert telling it to go run a CLI command.'
   warming:   campaign selected, origin running, dashboard.json not yet written (warming_up:true).
   live:      logged in, campaign streaming dashboard.json.
   loading:   a fetch is in flight — transient, MUST resolve to live/empty/error.
@@ -33,9 +29,8 @@ states:
   offline:   poll stale / server unreachable.
   gone:      'the server ANSWERED and says this address does not exist (404) — deleted
              campaign, reaped .inner/ sandbox, reset store. Terminal, not retryable.
-             Distinct from offline on purpose: the absence of that distinction is what
-             once reported a deleted campaign as "API unreachable, check the server is
-             running", sending an operator to restart a perfectly healthy server.'
+             Distinct from offline on purpose: read as offline, a deleted campaign sends
+             the operator to restart a perfectly healthy server.'
 ```
 
 ## Invariants (cross-cutting — the refinement directives)
@@ -59,8 +54,8 @@ invariants:
                       accepted floor (it's the probe that decides anon vs authed).
   I6_run_state_server_owned: '"Is anything running?" has ONE server-owned answer: run_phase ∈
                       {running, gate} (hasLiveProducer, webapp/lib/run-phase.ts). paused is NOT
-                      one — the worker has exited — so a parked campaign kept the jobs dock lit and
-                      destroyed its all-quiet signal; a paused cycle stays reachable as a sidebar row
+                      one — the worker has exited, and counting it keeps the jobs dock lit and
+                      destroys its all-quiet signal; a paused cycle stays reachable as a sidebar row
                       wearing its phase. detached means a dead producer (the heartbeat invariant,
                       architecture.md § Display) and never renders as running.
                       Client-side connection loss (failed poll, offline, hidden tab) is presented as
@@ -70,13 +65,13 @@ invariants:
                       the app bar back-arrow dot), workspace runningCycles — reads this one set AND
                       one shared ordering (what needs you first). A surface that RENDERS the
                       phase goes through a map TOTAL over RunPhase (runPhaseLabel, runPhaseAction):
-                      testing `=== "running"` renders half the vocabulary as nothing, which is how
-                      a gate-held run — blocked on the operator, first in that ordering — read as
+                      testing `=== "running"` renders half the vocabulary as nothing, so
+                      a gate-held run — blocked on the operator, first in that ordering — reads as
                       an idle sidebar row. `isLive` (poll.tsx) is NOT this answer and never
                       substitutes for it: it means "should transient indicators be on", which is
                       false at the gate because nothing is being measured, while the producer is
-                      alive and polling for a decision. Read as "the run ended" it froze **Run
-                      finished** into the chat above a card saying the run was holding.
+                      alive and polling for a decision. Read as "the run ended" it freezes **Run
+                      finished** into the chat above a card saying the run is holding.
                       COROLLARY (the time-ray). run_phase provably cannot express running vs
                       WEDGED: every await outlasting RUN_FRESH_S must heartbeat (heartbeat.py
                       states the rule), so a live cycle can never go stale and a
@@ -136,19 +131,17 @@ invariants:
                       the layer that won it (dataset | campaign | seed | evolved | identity |
                       unset), so a badge, a compact fold, a lock glyph or a
                       "(current)" off-menu option derived from a client-side diff is the
-                      violation this invariant names — the ·evolved badge was exactly that, and
-                      fired on every param because a resolved config carries them all.
-                      The compact fold died with it: once the base is served AT the addressed
-                      subject, `value !== baseValue` compares a number with itself and folds the
-                      whole configuration away. WHY an axis is shut is served too (`never_axis`),
-                      because the browser inferring it from the key''s name told the cost-lever
-                      story for the output-schema contract.
+                      violation this invariant names: a resolved config carries every param, so
+                      a diffed ·evolved badge fires on all of them, and once the base is served AT
+                      the addressed subject, `value !== baseValue` compares a number with itself
+                      and folds the whole configuration away. WHY an axis is shut is served too
+                      (`never_axis`), because the browser inferring it from the key''s name tells
+                      the cost-lever story for the output-schema contract.
                       A component must not take a prop that RE-ROUTES which store it reads;
                       identity props (which campaign, which round) are fine, source props are
-                      not. That distinction is the whole bug: one panel answered
-                      upstage/solar-pro4:nitro on Dashboard and openai/gpt-oss-20b on Chat
-                      because its call sites disagreed about where to look, and a dataset file
-                      shared by five campaigns is nobody''s answer in particular.
+                      not. That distinction is the whole bug: call sites that disagree about
+                      where to look make one panel answer two models on two tabs, and a dataset
+                      file shared by several campaigns is nobody''s answer in particular.
                       TWO BOUNDARIES, both deliberate. (1) A NEST is dataset-scoped until it
                       SPAWNS: before any cell runs, an inner benchmark''s pipeline is topology
                       and the dataset read is honest; once a cell has run it IS a whole inner
@@ -188,11 +181,3 @@ consent_gate:  # components/onboarding/ConsentGate.tsx — access_state==='activ
     TERMS_VERSION bump re-prompts without a frontend redeploy. A 409 re-probes /me.
   - NO dismiss: no ×, no backdrop-close, no ESC. Accept is the only exit.
 ```
-
-## Surfaces — deliberately not here
-
-There is no per-surface block. Every one that stood here described behavior already shipped,
-none of it was cited by anything, and the copies had begun to drift from the strings they
-quoted. Read a surface off its component; read the rules it must satisfy off the invariants
-above and `webapp/CLAUDE.md`. Recover the old blocks from `git log` if a decision inside one
-is ever needed.

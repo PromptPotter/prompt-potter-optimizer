@@ -40,7 +40,7 @@ How do we constrain the M12 interactivity envelope so that the wire surface is a
 
 Chosen option: **A — OpenAPI 3.1 + AsyncAPI 3.0**.
 
-The contract bounds the entire interactivity envelope (what a client can send, what it can observe) with two industry-standard schemas. Drift is CI-detectable by off-the-shelf linters. The schemas constrain only the wire — internals remain free. Permanent — the contract stays alive after M12 ships; items move out into `docs/developer/` / `docs/operations/` as they get certified, with checkboxes flipping in this ADR.
+The contract bounds the entire interactivity envelope (what a client can send, what it can observe) with two industry-standard schemas. Drift is CI-detectable by off-the-shelf linters. The schemas constrain only the wire — internals remain free. Permanent — the contract stays alive after M12 ships; what is enforced and what has shipped are recorded elsewhere (§ Where enforcement is recorded).
 
 The §0 amendment defining the Control-remote I/O kind is the precondition. Schemas are declared in `docs/specs/api-openapi.yaml` (inbound) and `docs/specs/events-asyncapi.yaml` (outbound). Adding a command or event kind requires updating the YAML first.
 
@@ -154,7 +154,7 @@ must resolve from one source, or a steer taints or fails to taint wrongly.
 
 ### Profile gradient
 
-Each profile is a named, stable conformance level. Newer profiles compose with older ones. Once certified + on disk + tested + documented, a profile's guardrails promote to `docs/developer/` / `docs/operations/` and the checklist boxes flip below.
+Each profile is a named, stable conformance level. Newer profiles compose with older ones.
 
 | Profile | Title | Direction | Auth posture |
 |---|---|---|---|
@@ -165,9 +165,7 @@ Each profile is a named, stable conformance level. Newer profiles compose with o
 | D | Hub mode | bidirectional | OIDC + per-tenant scoping |
 | E | URL-as-truth client | client contract | OIDC + capability gates |
 
-**Profile −1 deliverables (shipped this ADR):** §0 amended; this ADR landed in MADR shape; OpenAPI + AsyncAPI YAMLs scaffolded with empty closed sets; drift invariant test in place. No behavior change.
-
-**Profile A** — `GET /campaigns/{c}/cycles/{cy}/events:subscribe` serves SSE frames by tailing the on-disk `.runtime/ledger.jsonl` (`CycleLedgerTail`) — no projection subscriber synthesizes frames; the ledger is the single medium (superseded the originally-specified in-process `EventStreamView` fan-out, which 404'd for any reader outside the runner's own process). Snapshot-then-tail; boundary sequence explicit; heartbeat every 15 s. Certified: `docs/developer/event-stream.md`; boxes 4, 13, 14, 15 flipped.
+**Profile A** — `GET /campaigns/{c}/cycles/{cy}/events:subscribe` serves SSE frames by tailing the on-disk `.runtime/ledger.jsonl` (`CycleLedgerTail`) — no projection subscriber synthesizes frames; the ledger is the single medium, because an in-process fan-out 404s for any reader outside the runner's own process. Snapshot-then-tail; boundary sequence explicit; heartbeat every 15 s.
 
 **Profile B** — `CommandRecord` + `CommandAckRecord` added to `domain/run_records.py::CycleRecord`. `emit_command` + `emit_command_ack` kwargs-only helpers. `CommandDispatcher` at API seam, binding `_CYCLE_LEDGER` to the target cycle. The sanctioned POSTs migrate to ride the highway:
 
@@ -182,19 +180,15 @@ Each profile is a named, stable conformance level. Newer profiles compose with o
 
 **Closed inbound set draft.** The full enumeration lives in `docs/specs/api-openapi.yaml` and is the single source of truth for the inbound surface; the ADR keeps only the migration table above + the category map below. Categories (= OpenAPI `tags`): cycle-control (pause / step / rewind — `pause-cycle` is the single operator-interrupt, no separate stop/resume-cycle), cycle-lifecycle (fork / delete / cleanup-empty / archive / mint-campaign / start-run), budget (run-limits / sample), pipeline-params (change-pipeline-param / reset-pipeline-overlay), scoring (change-scoring-composite), operator-feedback (mark / unmark hard-sample / annotate-round / endorse-candidate), backends (register). All v0 — operator-redline cycle precedes any handler.
 
-First end-to-end command: **`pause-cycle`**. On certification, boxes 1–10 and 17 flip.
+**Profile C** — Stage 1 of identity-foundation. `resolve_identity` swaps from Stage-0 default to OIDC verification. `presentation/api/middleware/oidc.py` populates `IdentityContext` from a verified ID Token. Session cookies are opaque server-side ids, NOT JWTs (identity-foundation no-drift gate #2). The capability matrix as built is [`../operations/access-model.md`](../operations/access-model.md).
 
-**Profile C** — Stage 1 of identity-foundation. `resolve_identity` swaps from Stage-0 default to OIDC verification. `presentation/api/middleware/oidc.py` populates `IdentityContext` from a verified ID Token. Session cookies are opaque server-side ids, NOT JWTs (identity-foundation no-drift gate #2). On certification, box 10 flips with OIDC-aware semantics; the capability matrix as built is [`../operations/access-model.md`](../operations/access-model.md).
+**Profile D** — `JobRegistry` (new at `application/jobs/`) becomes identity-scoped. Control routes reject cross-tenant `job_id`; SSE fans only the caller's tenant. No bare `tenant_id` parameters (identity-foundation no-drift gate #3). `projects/{install_id}/tenant.json` carries brand.
 
-**Profile D** — `JobRegistry` (new at `application/jobs/`) becomes identity-scoped. Control routes reject cross-tenant `job_id`; SSE fans only the caller's tenant. No bare `tenant_id` parameters (identity-foundation no-drift gate #3). `projects/{install_id}/tenant.json` carries brand. On certification, box 12 flips.
-
-**Profile E** — Webapp `usePoll` → SSE subscription. Every view state reachable via URL; every mutation routes through a command. No client-side optimistic mutations — clients believe only ack frames. Chat-panel launcher (`webapp/components/chat/ChatPane.tsx`) alongside the configuration form. On certification, boxes 16 and 17 flip; the client contract as built is [`../specs/frontend-surface-contract.md`](../specs/frontend-surface-contract.md).
+**Profile E** — The webapp reads state by polling `dashboard.json` and events by the SSE ledger-tail; the pair is the design ([`../specs/roadmap.md`](../specs/roadmap.md) § Hard ordering). Every view state reachable via URL; every mutation routes through a command. No client-side optimistic mutations — clients believe only ack frames. Chat-panel launcher (`webapp/components/chat/ChatPane.tsx`) alongside the configuration form. The client contract as built is [`../specs/frontend-surface-contract.md`](../specs/frontend-surface-contract.md).
 
 ### Where enforcement is recorded
 
-This ADR fixes the *contract*; it does not track how much of it is on disk. The
-checklist and profile-certification log that lived here reported neither reliably —
-every box still read unchecked long after the highway shipped. **What is enforced,
+This ADR fixes the *contract*; it does not track how much of it is on disk. **What is enforced,
 by which symbol, is owned by [`../operations/access-model.md`](../operations/access-model.md); what has shipped is owned by**
 **[`../specs/roadmap.md`](../specs/roadmap.md)'s Status column.** The closed sets themselves are the two YAMLs, and they
 are the only self-checking record: a command with no schema there has nowhere to land.
@@ -218,7 +212,7 @@ enforcement detail that must move freely, so they are named in prose (see
 | Sole-writer template | `promptpotter/infrastructure/projections/live_dashboard/projection.py::LiveDashboardProjection._handle_token_usage` |
 | `CycleRecord` discriminated union (closed outbound record set) | `promptpotter/domain/run_records.py::CycleRecord` |
 | `ProjectionEnvelope` Python wire type (Profile A) | `promptpotter/domain/projection_envelope.py` |
-| Outbound highway ledger tail (Profile A; supersedes the originally-specified `EventStreamView` in-process projection) | `promptpotter/infrastructure/projections/event_stream.py::CycleLedgerTail` |
+| Outbound highway ledger tail (Profile A) | `promptpotter/infrastructure/projections/event_stream.py::CycleLedgerTail` |
 | SSE endpoint handler (Profile A) | `promptpotter/presentation/api/routers/campaigns/events.py::stream_cycle_events` |
 | Certified Profile A contract | `docs/developer/event-stream.md` |
 

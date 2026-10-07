@@ -100,9 +100,9 @@ The decisions the models cannot state:
   (`SCHEMA_TOGGLE_PARAM`) is synthesized at parse time onto every node `PipelineNode.tunes_llm`
   names — a thinking `type` whose `optimizer.param_keys` opens an axis — and resolved at the wire
   seam: `json` sends `output_schema` + `answer_field`, `text` sends NEITHER. A node declaring the
-  key in its own `param_keys` makes two mechanisms for one thing, which is how TermNorm came to
-  offer an axis its `output_schema` silently outranked — every arm produced the identical call and
-  the round scored the difference anyway. What a connector owes instead is the READING: **a schema
+  key in its own `param_keys` makes two mechanisms for one thing — an axis its `output_schema`
+  silently outranks, so every arm produces the identical call and the round scores the
+  difference anyway. What a connector owes instead is the READING: **a schema
   on the wire means structured output, its absence means prose**, and `json` arriving with no
   schema is a caller error to raise on, never one to guess a key out of.
 - **`param_allowed_values` drives three things at once** — L1's prompt guidance, the JSON-schema
@@ -123,7 +123,7 @@ Capabilities are opt-in. A deterministic node declares none; an LLM node in the 
 - **Prompt exposure** — expose the prompt as a `PromptTemplate`. PromptPotter reads, displays, and optimises it. See [`README.md`](README.md) § 1. Prompt structure.
 - **Optimizer-discoverable parameters** — declare accepted parameters and valid values. PromptPotter picks these up automatically as optimisation axes, with no hardcoding on either side.
 - **Self-healing Wounds 1 and 2** — a `ValidationFailure` caught at L1 parse time, a `RuntimeFailure` attached to the candidate mid-run. **Who heals each** — owned by [`self-healing-internals.md`](self-healing-internals.md) § The wounds, mapped to the two axes.
-- **Warnings → optimizer context** — per-sample warnings surface to the optimizer through the round's `evidence_health` / `diagnostics` panels. They do **not** select samples: the cumulative warned-query subset that once fed probe-round selection is gone, along with the probe lever it served.
+- **Warnings → optimizer context** — per-sample warnings surface to the optimizer through the round's `evidence_health` / `diagnostics` panels. They do **not** select samples.
 - **Warnings → escalation counter** — sustained degradation increments a patience counter.
 - **Warnings → search-point attachment** — failures pin to the exact configuration that caused them, not the round.
 - **Skip** — a candidate producing too many degraded or empty results is eliminated mid-run.
@@ -182,7 +182,7 @@ The per-sample `predicted` value is the **head of the terminal ranker's output**
 `parse_pipeline_response()` in `promptpotter/domain/pipeline_parsing.py` is the single ingress for every `pipeline.yaml`. **Two non-negotiables:**
 
 1. **No silent-default forgiveness.** Either a field is required and the connector supplies it, or it is optional and PromptPotter ignores it absent. The "TermNorm doesn't supply X so PromptPotter assumes Y" pattern is what makes a second connector painful.
-2. **Same parser, same shape, every time.** A backend's `pipeline.yaml` and every optimizer manifest under `promptpotter/assets/optimizers/` MUST round-trip through `parse_pipeline_response()` identically. No test pins this; the shared parser does — add a special-case field to one and it is rejected at load (§ Optimizer-manifest parity).
+2. **Same parser, same shape, every time.** A backend's `pipeline.yaml` and every optimizer manifest under `promptpotter/assets/optimizers/` MUST round-trip through `parse_pipeline_response()` identically. No test pins this ([`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)); the shared parser does — a manifest that drifts (parallel registries, ad-hoc keys, special-case fields) is rejected at load.
 
 ## Worked examples
 
@@ -192,8 +192,6 @@ the full multi-node shape.
 
 ## Optimizer-manifest parity
 
-PromptPotter's own optimizer prompt pipeline uses the **same shape** as a backend's: the same `nodes` dict keyed by node name, the same `config` + `optimizer` per-node sub-objects, the same `pipelines` dict over those names, and the same `resolved_prompts` + `resolved_schemas` registries — prompts inline, schemas from the generated `resolved_schemas.json` merged at load — where a backend serves them via `GET /pipeline`. It publishes its controller's alternative sequences beside `default`, which no backend needs; the shape is identical either way.
+PromptPotter's own optimizer manifest uses the **same shape** as a backend's (§ Pipeline declaration format). It publishes its controller's alternative sequences beside `default`, which no backend needs; the shape is identical either way.
 
-So the same parser, scoring gateway, projection, tracing and observability pathway PromptPotter applies to a target pipeline applies to the optimizer itself — that is the foundation the PromptPotter-as-backend connector and the L4 self-optimization closure are built on ([`../specs/roadmap.md`](../specs/roadmap.md)).
-
-The parity fails loud: if the optimizer manifest ever drifts from a backend pipeline's shape (parallel registries, ad-hoc keys, special-case fields), the shared parser rejects it at load. No standing test — see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md).
+So the same parser, scoring gateway, projection, tracing and observability pathway PromptPotter applies to a target pipeline applies to the optimizer itself — that is the foundation the PromptPotter-as-backend connector and the L4 self-optimization closure are built on ([`../specs/roadmap.md`](../specs/roadmap.md)). What holds the parity is § Strict parsing, rule 2.

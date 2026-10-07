@@ -46,7 +46,7 @@ The ceiling is the run's spend book (`infrastructure/llm/spend_book.py`), armed 
 
 * **Good** — per-asyncio-task isolation comes free from the `_CYCLE_LEDGER` ContextVar; concurrent cycles isolate without ceremony.
 * **Good** — audit trail shape identical to every other record; one stream of truth.
-* **Good** — `emit_token_usage` becomes the template every subsequent per-call telemetry kind copies (`emit_command`, `emit_command_ack`, future `emit_*`). Forward direction: every other `RunCallbacks.on_*` that wraps a per-call event in a `*Record` and appends is a candidate for the same shape — catalogued in [`../specs/code-debt-cleanup.md`](../specs/code-debt-cleanup.md).
+* **Good** — `emit_token_usage` becomes the template every subsequent per-call telemetry kind copies (`emit_command`, `emit_command_ack`, future `emit_*`); where it stops and `RunCallbacks` begins is [`../developer/adding-a-surface.md`](../developer/adding-a-surface.md)'s.
 * **Good** — adding new `*Record` types is additive; no schema churn elsewhere.
 * **Neutral** — `LiveDashboardProjection` owns spend semantics. Operator-accepted: it is the authoritative rollup, and the halt probe just reads it back.
 * **Bad** — none on disk; the arc shipped clean.

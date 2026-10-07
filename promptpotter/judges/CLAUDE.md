@@ -16,9 +16,6 @@ warms**. Instead a judge runs ONCE, at measure time, and banks its verdict into 
 formula reads that banked number by name. Re-grading stays free, which is what makes `--from N`,
 `--fork-on-divergence` and `verify` cheap.
 
-`compiler.py::_refuse_label_formula` already names the pattern for the connector case: *"Score the
-observation the backend emits instead."* A judge is that sentence with a different producer.
-
 ## The seam — a judge IS an `Evaluator`
 
 No new concept reaches the scoring layer. `build_evaluators(specs)` returns ordinary
@@ -66,25 +63,17 @@ parallel (a panel, voted) are the same type. `Judge.grade` returns one `JudgeVer
 calls it made is its own business, and token accounting is per underlying call via `call.py::ask`,
 so a chain prices correctly with no special case.
 
-**Every judge shipped today asks exactly ONE stage, and says so in `Judge.max_stages`.**
-`build_evaluators` refuses a spec declaring more than the judge reads, at init, before a cell is
-bought. Without that the extra stage is silent and expensive in the worst way: `fingerprint` hashes
-the whole chain, so a stage nothing asks still re-cuts every archive key and re-pays for every row
-while changing no verdict. A judge that genuinely composes raises its own `max_stages`.
+**Every judge shipped today asks exactly ONE stage, and says so in `Judge.max_stages`**, which
+`build_evaluators` enforces at init, before a cell is bought. A judge that genuinely composes
+raises its own.
 
-`call.py::graded` is the other half of that: `ask` plus the verdict shaping every judge repeats,
-in one place because its absence arms are not formatting. **A grader that FAILED must never be
-bankable as a graded answer** — an unreachable model and an unparseable reply both return
-`score=None`, and a judge writing its own copy of that is one edit from defaulting to a category
-instead.
-
-**`call.py::absent(judge, reason)` is what that verdict IS**, and every arm that declines to grade
-goes through it — a failed call, an unreadable reply, an input the cell does not carry. They are
-one fact, *this term has no reading*, and writing it per site is how it collapses into a zero the
-first time someone reaches for a sensible default. Two readers feed it: `judge_question` (the bare
-question, not the question plus its haystack) and **`judge_answer`** (the answer, or `None` for
-empty and for the `NO_RESULT` sentinel). One reader each — a judge reading `predicted` raw grades
-the sentinel string and banks a category for it.
+**A grader that FAILED must never be bankable as a graded answer.** Every arm that declines to
+grade — a failed call, an unreadable reply, an input the cell does not carry — returns
+`call.py::absent`, and a judge shapes its verdict through `call.py::graded`, never a copy of it:
+they are one fact, *this term has no reading*, and written per site it collapses into a zero the
+first time someone reaches for a sensible default. A judge reads its cell through `judge_question`
+and `judge_answer`, one reader each — `predicted` read raw grades the `NO_RESULT` sentinel and
+banks a category for it.
 
 ## The step schema — one per task SHAPE
 
@@ -172,11 +161,8 @@ functions, and a ruler or a head-to-head keyed on the id would pool them.
 `compute` returns `float | None`, and `None` is **not** a zero: the materializer omits the key,
 `cell_namespace` leaves the term unbound, and the formula raises `ScoringTermMissingError`. That
 is the difference between *this answer was wrong* and *we did not find out*, and it is why
-`call.py::ask` never raises — a provider hiccup must not be bankable as a wrong answer, nor kill
-the measurement of a cell the backend already paid for. **A refused send is the one exception** — a
-spent provider account, a provider throttling past every wait, or the run's ceiling: it is no
-grading at all, so `ask` raises `CellSendRefusedError`, the cell is a hole of that refusal's
-category, and the walk halts.
+`call.py::ask` never raises. **A refused send is the one exception** (`CellSendRefusedError`): the
+cell is a hole of that refusal's category, and the walk halts.
 
 **`ask` not raising is only half of it, and the other half is one frame up.** Anything else that
 throws inside `grade` — a rubric placeholder the caller does not fill, a label outside `to_score`,

@@ -70,7 +70,7 @@ def default_jobs_dir() -> Path:
 
 def optimizers_root() -> Path:
     """Install content: one directory per built-in optimizer manifest. Ships in the wheel and is
-    not the operator's tier (``stable-api.md`` §3); a plugin's runtime names its own directory."""
+    not the operator's tier (``stable-api.md`` §4b); a plugin's runtime names its own directory."""
     return PACKAGE_ROOT / "assets" / "optimizers"
 
 

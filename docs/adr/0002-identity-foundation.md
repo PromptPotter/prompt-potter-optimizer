@@ -77,7 +77,7 @@ The no-drift gates that protect the seam from regression — gates #3 (`build_st
 | Stage | Who we serve | Identity source | Data layer | Code delta from prior stage |
 |---|---|---|---|---|
 | **Stage 0 — today** | one operator, one machine | `IdentityContext(user_id="default", tenant_id="default")` from init; auth-off | file-based, tenant-prefixed (`projects/{tenant_id}/`) | nothing — [`0003-spend-and-tenancy.md`](0003-spend-and-tenancy.md) lands the `IdentityContext` reification |
-| **Stage 1 — small SaaS / casual multi-user** | dozens to thousands of end-users | **OIDC client** to Google / Apple / GitHub / Microsoft. We never store passwords, never run a passkey ceremony — we federate to providers whose passkey UX already works. `(provider, subject) → user_id` mapping is the only thing we persist. | same file-based layout, tenant-prefixed for real | one OIDC client module (~200 LoC) + one dep (`cryptography` for JWT signature verify) |
+| **Stage 1 — small SaaS / casual multi-user** | dozens to thousands of end-users | **OIDC client** to Google / Apple / GitHub / Microsoft; `(provider, subject) → user_id` is the only thing we persist. | same file-based layout, tenant-prefixed for real | one OIDC client module (~200 LoC) + one dep (`cryptography` for JWT signature verify) |
 | **Stage 2 — Facebook / Netflix-shape** | millions+; B2B SSO; enterprise compliance | **Become OIDC provider** — front Ory Hydra / Zitadel / Authentik / Keycloak (open-source IdPs publicly run by enterprises) as a sibling process; we own the issuer URL. | PostgreSQL + RLS; the file-based stage migrates behind a clean store adapter | swap the issuer; data layer migrates via the adapter — no application-code rewrite |
 
 ### Contract A — OIDC (wire / identity ingress)
@@ -88,7 +88,7 @@ Every request that crosses a trust boundary into the application carries an **OI
 - **Discovery** — `{issuer}/.well-known/openid-configuration` provides authorization / token / JWKS / userinfo endpoints; the client treats this URL as the only piece of provider config it hardcodes.
 - **Tokens never enter app code.** They're verified at the boundary (`presentation/api/middleware/`); past the boundary, the codebase sees `IdentityContext` only. PR rule: a JWT type appearing outside `presentation/api/middleware/` and `infrastructure/identity/` is a block.
 - **Session pattern** — first-party browser sessions are **server-side sessions keyed by HttpOnly cookie**, per [The Copenhagen Book](https://thecopenhagenbook.com/sessions) (Lucia Auth's author deprecated his library in favor of these patterns; framework-agnostic; OWASP-aligned). **ID Tokens are only for cross-trust-boundary** (callback from the provider, B2B SSO, service-to-service). The "stuff a JWT in a cookie" anti-pattern is an explicit gate violation.
-- **Code anchor (Stage 1+):** `promptpotter/infrastructure/identity/` — `google.py::GoogleProviderClient`, `github.py::GitHubProviderClient`, `verifier.py`, `jwks.py::JWKSCache`, with `cryptography` for signature verification.
+- **Code anchor (Stage 1+):** `promptpotter/infrastructure/identity/` — `google.py::GoogleProviderClient`, `github.py::GitHubProviderClient`, `verifier.py`, `jwks.py::JWKSCache`, with `cryptography` for signature verification. `presentation/api/middleware/oidc.py` verifies the inbound ID Token and populates `IdentityContext`; `presentation/api/deps.py::resolve_identity` reads it back from the session-cookie store. The sign-up surface is `webapp/app/login/page.tsx` over `/auth/login/{provider}` → `/auth/callback/{provider}`.
 - **Code anchor (Stage 0, shipped):** `IdentityContext` constructed by `presentation/api/deps.py::resolve_identity` returning the auth-off default; CLI seam constructs it from `args.tenant` via `presentation/cli/commands/_shared.py::identity_from_args` and threads it through `init_services_cli(identity=…)`.
 
 ### Contract B — PostgreSQL RLS (data / storage isolation)
@@ -102,7 +102,7 @@ The tenant boundary is enforced **at the data engine**, not by every `WHERE tena
 
 ### Data model — SCIM 2.0 Core + EnterpriseUser
 
-The internal `User` / `Group` shape is **SCIM 2.0 Core + EnterpriseUser** ([RFC 7643](https://datatracker.ietf.org/doc/html/rfc7643)). Every workforce IdP — Microsoft Entra, Okta, Google Workspace, Auth0, OneLogin, Ping — already produces and consumes SCIM resources; the schema is JSON Schema, vendor-portable, and a decade mature ([WorkOS 2026 SCIM provider survey](https://workos.com/blog/scim-providers)). Adopting it now means our user records speak the same vocabulary every enterprise integration will ask for, with zero translation layer.
+The internal `User` / `Group` shape is **SCIM 2.0 Core + EnterpriseUser** ([RFC 7643](https://datatracker.ietf.org/doc/html/rfc7643)); the schema is JSON Schema and a decade mature. Why SCIM: § Decision Drivers.
 
 #### SCIM ↔ OIDC field mapping
 
@@ -160,7 +160,7 @@ class IdentityContext:
 
 - **Stage 0** — `shared/identity.py::default_identity`: user and tenant `"default"`, no issuer, no claims, and `OWNER_COMMAND_CAPABILITIES` — the terminal operator owns its workspace. Constructed once at init. The single-operator path is the auth-off branch — one branch, not a feature flag.
 - **Stage 1** — constructed by the OIDC middleware from a verified ID Token. `user_id` is `infrastructure/identity/user.py::derive_user_id` over `(issuer, sub)` — a hash, not a concatenation — and `tenant_id` is that same id (one tenant per user); `issuer` from `iss`. A provider-set B2B tenant claim waits for Stage 2.
-- **`TenantContext` collapsed into `IdentityContext`** (shipped). `Session.identity: IdentityContext` (`application/initialization/session.py`) replaces the deleted `Session.tenant`. The spend seam — and every consumer — takes `IdentityContext`, never bare `tenant_id` or bare `TenantContext`. Behavior change, no shim.
+- **Every consumer takes `IdentityContext`** — `Session.identity` (`application/initialization/session.py`), the spend seam — never a bare `tenant_id` (gate #3).
 
 ### No-drift gates
 
@@ -179,7 +179,6 @@ Enforceable rules. A PR violating any of these is a block. The **(test)** marker
 - **Stage 1 — one new Python dep: `cryptography`** for JWT/JWS signature verification against JWKS. Everything else (HTTP discovery fetch, session cookies, opaque token generation, PKCE) is stdlib. The OIDC client is ~200 LoC we write ourselves.
 - **Stage 2 — zero new Python deps.** Open-source IdPs (Ory / Zitadel / Keycloak / Authentik) are **sibling processes** — we call them over HTTP/OIDC, we do not import a Python auth library. The PostgreSQL adapter rides our existing storage abstractions plus the `psycopg` binding we'd already need for any DB store.
 - **Never** add a Python auth library (no `python-jose`, no `authlib`, no `python-social-auth`, no `flask-login`-shape framework). Either we implement OIDC client ourselves (Stage 1) or we call out to a sibling IdP (Stage 2).
-- Reference for zero-dep patterns: [The Copenhagen Book](https://thecopenhagenbook.com/). Framework-agnostic, OWASP-aligned, by Lucia Auth's author after he deprecated his library in favor of the patterns themselves.
 - **Schema vendoring (not a Python dep).** Vendor [`bjmc/scim-jsonschema`](https://github.com/bjmc/scim-jsonschema) as a git submodule at `vendor/schemas/scim/`, tag-pinned. JSON Schema files for `User`, `Group`, `EnterpriseUser` plus RFC 7643 normative text live in our tree, version-pinned. **No `pip install`, no runtime cost** — schema vendor, not a library import. Schema.org JSON-LD context copies from [`schemaorg/schemaorg`](https://github.com/schemaorg/schemaorg) on demand for the public-facing projection only (submodule optional; copy-and-pin fine).
 
 ### Stage-2 swap targets — pre-vetting, not dependencies
@@ -193,10 +192,6 @@ Both decisions stay deferrable because the seams speak OIDC, so the swap is a mi
 **Graduate to Zanzibar-shape relational ReBAC only when one of three things is required**: cross-tenant sharing, group-of-groups hierarchies, or "who has access to X" reverse-lookup for compliance audits. The safest pick then is [OpenFGA](https://openfga.dev/) on breadth of adoption (CNCF sandbox; Docker, Grafana, Okta, Auth0), with [SpiceDB](https://authzed.com/spicedb) the cleaner schema language and closer to the paper (Netflix, Reddit). [Cerbos](https://cerbos.dev/) is a policy engine rather than a Zanzibar graph — pick it only if rule-based ABAC suffices.
 
 **Do not adopt:** XACML (legacy XML policy, supplanted by OPA), Casbin (library-not-spec, weak SaaS adoption), AWS IAM JSON policies (vendor-locked), OAuth scopes (API-gating, orthogonal to app-internal authz).
-
-### Stage 1 implementation (shipped)
-
-Stage 1 OIDC sign-up landed at `promptpotter/infrastructure/identity/` and `promptpotter/presentation/api/middleware/oidc.py`. The package splits per provider (`google.py`, `github.py`) on top of shared infrastructure (`verifier.py`, `jwks.py`, `session.py`, `bundle.py`, `provider_config.py`, `blocklist.py`, `grants.py`, `migration.py`, `paths.py`, `user.py`); `cryptography` is the only new Python dep per the minimal-deps invariant. The middleware at `presentation/api/middleware/oidc.py` verifies the inbound ID Token against the issuer's JWKS, populates `IdentityContext`, and ensures tokens never appear past the boundary (gate #2 — review-enforced; no standing test). `presentation/api/deps.py::resolve_identity` reads the verified context from the session-cookie store; Stage 0 (auth-off) substitutes `default_identity()`. Auto-mint at first sign-in is one-tenant-per-user (`tenant_id = UserId`), encoded by `infrastructure/identity/user.py::derive_user_id`. Sign-up surface lives at `webapp/app/login/page.tsx` over `/auth/login/{provider}` → `/auth/callback/{provider}`.
 
 ### §0 amendment
 

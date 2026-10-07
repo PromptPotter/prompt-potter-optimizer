@@ -361,10 +361,9 @@ SkillEvaluator does not do.
 - the baseline is the skill being *absent*, not the previous version of it;
 - checking overlap against the rest of the library is what keeps many skills maintainable.
 
-Its validation tier has a sibling in NVIDIA's own [SkillSpector](https://github.com/nvidia/skillspector)
-(71 patterns; a risk score above 50 means do not install), and a scan of that class before a
-candidate is measured is the long-run form of our tier-1 security floor
-([`external-constraints.md`](external-constraints.md) § SKILL).
+Its validation tier has a sibling in NVIDIA's own [SkillSpector](https://github.com/nvidia/skillspector),
+the scanner class [`external-constraints.md`](external-constraints.md) § SKILL names as the long-run
+form of our tier-1 security floor.
 
 **Checked** 2026-09-24 — README only; the four buckets and the exact Skill Lift statistic were not
 read at the source.

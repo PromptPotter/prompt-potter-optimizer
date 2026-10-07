@@ -45,10 +45,12 @@ Two gaps made this urgent. The identity model stops at user/admin, with no sub-p
 A user may mint **sub-principals**, each an `IdentityContext` whose capabilities and spend ceiling the delegator chooses, subject to the invariant:
 
 > **Attenuation:** a delegate's capability set ⊆ the delegator's, and its spend ceiling ≤ the delegator's remaining ceiling. Enforced at grant time and re-checked at use. Re-delegation only narrows further.
+>
+> **One-level delegation:** the grant writer rejects a delegator that is itself a sub-principal (`grants.py::grant_principal`).
 
 **The grant store is sealed** — a sub-principal's grants live in a store it **cannot write**, the identity zone rather than the tenant's own editable space, because a delegate that could edit its own grant would self-escalate and defeat attenuation. Same protected-zone rule as ADR-0004's sign-in blocklist: the file that decides authority is the most protected file in the install.
 
-As shipped (`infrastructure/identity/grants.py`, `.promptpotter/identity/grants.json`): a delegate authenticates via its own OIDC identity, `_identity_context_from_session` resolves its grant and rebinds it to act inside the delegator's tenant with `grant ∩ owner` capabilities — attenuation enforced at read, defense in depth — audited as itself (`claims["principal"]` → `issued_by_user_id`). A malformed or delegator-less grant fails secure: own tenant, no caps. Provisioned through the operator-admin channel (`admin_bot.py`: `/grant`, `/revoke`, `/grants`), the identity zone a delegate cannot write. One-level delegation is enforced at the grant writer, which rejects a delegator that is itself a sub-principal.
+**How it is enforced** — owned by [`../operations/access-model.md`](../operations/access-model.md) § owner ↔ delegate; what this ADR fixes is that attenuation is re-checked at read, a delegate is audited as itself (`claims["principal"]` → `issued_by_user_id`), and a malformed grant fails secure.
 
 The user's **own AI assistant**, in the host==user case, acts under the user's identity as a co-principal with full caps. An **external assistant or MCP client** is a distinct sub-principal holding an attenuated subset.
 
@@ -76,7 +78,7 @@ The ladder is the point: a delegate with `campaign.step` but **not** `campaign.r
 
 Three deltas from the original strawman, all deliberate. `fork-cycle` sits at **run**, not step, because an operator fork mints *and launches* an autonomous continuation. `register-backend` folds into `campaign.create` rather than earning its own cap — a delegate that may author campaigns may register the backend they run against. And `replace-dataset` sits at **lifecycle**, not create, because a dataset slug is part of the measurement cache key, so repointing one re-addresses every campaign that already measured against it.
 
-**A route is the only way to add a verb, so the route set is what the ladder is checked against.** `CAP_FOR_KIND`'s exhaustiveness raise can only see kinds that dispatch, so it read as total while `replace-dataset` called `version_and_repoint` directly — gated by nothing and recorded nowhere. `routers/commands.py` now raises at import when a typed route names a kind outside `ALL_DISPATCHED_KINDS`, which is what makes the gap unwritable rather than merely known.
+**A route is the only way to add a verb, so the route set is what the ladder is checked against.** `CAP_FOR_KIND`'s exhaustiveness raise can only see kinds that dispatch, so a route calling its handler directly would read as covered while gated by nothing and recorded nowhere. `routers/commands.py` therefore raises at import when a typed route names a kind outside `ALL_DISPATCHED_KINDS`, which makes the gap unwritable rather than merely known.
 
 ### 4. Babysat — a lineage-subtree tag, escapable by forking clean
 
@@ -98,7 +100,7 @@ A steer to a PERMITTED model is a clean human fork: no cap, no taint. The done C
 
 Each grant carries a spend ceiling enforced by the existing spend-cap probe (ADR-0003): `admit_launch` reads a sub-principal's declaration down to the grant (`quota.py::_delegated_spend_ceiling`), and the host wallet then admits or refuses that declaration whole. The ceiling comes from the identity claims the sub-principal carries — no new spend machinery, a narrower input to the one that exists. Per-*channel* ceilings await §2.
 
-**The grant is a bound, never a declaration, and both directions of that were wrong once.** A launch declaring NOTHING declares the account's headroom bounded by the grant; composed the other way the grant became the declaration, and a delegate whose headroom had fallen below its grant was refused the last of its own allowance. And `clamp_budget_change` composes the grant only into an arm the request SUPPLIED — folded into an absent one it wrote a ceiling the caller asked to leave alone, which the `run_limits` file merge then made stick for the rest of the run.
+**The grant is a bound, never a declaration, in both directions.** A launch declaring NOTHING declares the account's headroom bounded by the grant; composed the other way the grant becomes the declaration, and a delegate whose headroom has fallen below its grant is refused the last of its own allowance. And `clamp_budget_change` composes the grant only into an arm the request SUPPLIED — folded into an absent one it writes a ceiling the caller asked to leave alone, which the `run_limits` file merge then makes stick for the rest of the run.
 
 ### 6. The bounded step verb — SHIPPED as `step-cycle`
 

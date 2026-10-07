@@ -65,19 +65,12 @@ touch one side, fix both. Debugging →
 
 ## Execution mode — declared, never name-branched
 
-A connector declares **how its backend runs** via `Connector.execution`
-(`ConnectorExecution`): `remote_http` (default — posts to a live `/matches`)
-or `in_process` (runs in this process, no HTTP). `BackendClient.run_query`
-**dispatches on this declared mode, never on the connector name** — so a new
-backend's transport is a capability it declares, not a branch in the core loop.
-
-**The `in_process` arm.** `run_query` calls the
-connector-supplied `Connector.in_process_run(workload, query, payload) -> {"data": {…}}` —
-the same shape the scorer parses from an HTTP `/matches` body. The registry guard
-(`__init__.py`) enforces the pairing: an `in_process` connector MUST supply
-`in_process_run`, a `remote_http` one MUST NOT. The mode is not a synonym for "cheap and
-local" — a `harbor` cell holds a container, spends real money and takes minutes. **`in_process` is a statement about TRANSPORT — there is no HTTP — and about
-nothing else.**
+**`BackendClient.run_query` dispatches on the declared `Connector.execution` (`remote_http` |
+`in_process`), never on the connector name** — so a new backend's transport is a capability it
+declares, not a branch in the core loop. `__init__.py::_validate` enforces the pairing with
+`in_process_run`, whose reply is the `{"data": {…}}` shape the scorer parses from a `/matches`
+body. **`in_process` is a statement about TRANSPORT — there is no HTTP — and about nothing else:**
+a `harbor` cell holds a container, spends real money and takes minutes.
 
 **Per-run state is the `workload` argument, never a ContextVar or a module cache.**
 `InProcessWorkload` (`protocol.py`) is built once by `init_services` and held by the run's own
@@ -92,25 +85,19 @@ and moves every round.
   `application/runner/inner/spawn.py::run_inner_cycle`, because running a whole inner campaign is
   heavy orchestration and belongs in `application/runner`. Its graph is SERVED
   (`pipeline_declaration`) off the manifest the panel's cells run, so no dataset mirrors a node.
-  Five facts about the arrangement:
-  - **Its own `asyncio.Task`.** The three per-task ContextVars — `_CYCLE_LEDGER` + `_CURRENT_ROUND`
-    (`infrastructure/llm/telemetry.py`) and `_ABORT_CHECK` (`infrastructure/llm/rate_limit.py`) —
-    isolate per task rather than per call, and the child gets a COPY, which is how `_ABORT_CHECK`
-    carries the outer's pause into the inner run.
-  - **Sandboxed stores in a FLAT per-cycle registry** `<workspace>/.inner/<key>/` — no
-    active-pointer collision, and it holds no machine slot. Flat, never physically nested
-    (`infrastructure/store/layout.py` says why), so the **re-entrant** invariant holds and L5+ nests.
-  - **The spawning cycle publishes its context** via `publish_inner_spawn_context` at the runner
-    seam, so the hook can find where to sandbox, which inner benchmark to run and the campaign
-    template it runs under, read once for every cell.
-  - **Owner and asker are two facts, and a fork splits them.** `retarget_inner_spawn` moves only
-    the *asker* (`spawned_by.outer_cycle_id`); the sandbox owner never follows a fork, because a
-    repaired cell CONTINUING the campaign the parent banked is the whole point. One field meaning
-    both files a fork's measurements under the cycle it superseded.
-  - **The outer L1's prompt mutations reach the inner optimizer** through a per-run override
-    ContextVar (`set_optimizer_prompt_overrides`), set inside the inner task. One process, no
-    networking; a localhost-endpoint worker mode would be a new `execution` value with no core-loop
-    edit.
+  What a change there must keep, each stated at its site:
+  - **The inner campaign runs in its own `asyncio.Task`** (`spawn.py::_run_inner_campaign`).
+    `_CYCLE_LEDGER` + `_CURRENT_ROUND` (`infrastructure/llm/telemetry.py`), `_ABORT_CHECK`
+    (`infrastructure/llm/rate_limit.py`) and the optimizer-prompt overrides are per-task
+    ContextVars: the child's COPY is how `_ABORT_CHECK` carries the outer's pause inward, and how
+    the outer L1's mutations reach the inner optimizer and never the outer's.
+  - **Sandboxes are a FLAT per-cycle registry** `<workspace>/.inner/<key>/`, never physically
+    nested (`infrastructure/store/layout.py`) — no active-pointer collision, no machine slot held,
+    and the recursion stays **re-entrant** at L5+.
+  - **Sandbox owner and asker are two fields, and a fork moves only the asker**
+    (`spawn_context.py::retarget_inner_spawn`).
+  - One process, no networking; a localhost-endpoint worker mode would be a new `execution` value
+    with no core-loop edit.
 - **`harbor`** — `in_process_run` builds a `TrialConfig` and awaits Harbor's own
   `Trial.create(...).run()`; the container, the verifier and the reward file are all theirs, so
   this connector shapes payloads and reads a number rather than orchestrating anything. What it
@@ -136,17 +123,14 @@ and moves every round.
   downloads out of a cell, are
   [`../../docs/operations/package-cache.md`](../../docs/operations/package-cache.md).
 
-- **`dbllmbench`** — `in_process_run` writes TypeDB's `db-llm-bench` a config for ONE question, runs
-  its binary in a container built from a pinned upstream commit
-  (`resources/dbllmbench.Dockerfile`) and reads its results file. The retry loop and the scorer are
-  theirs, so nothing of the benchmark is ported. **The candidate prompt is the one skill file their
-  runner loads**, into their own template cut at its `{{skills}}` slot: everything below the slot
-  stays the harness's, and a cell's pair of files drops into their runner unchanged. **The dataset's
+- **`dbllmbench`** — `in_process_run` runs TypeDB's `db-llm-bench` for ONE question in a container
+  built from a pinned upstream commit (`resources/dbllmbench.Dockerfile`). The retry loop, the
+  scorer and everything below their template's `{{skills}}` slot stay theirs, and the candidate
+  prompt is the one skill file their runner loads (module docstring). **The dataset's
   assets are the image's**, named by path in node config, so the image tag is measurement identity
   and no dataset carries a second copy of a schema; the first cell refuses an image whose build
   commit is not the one its tag names (`_check_image`). **The harness sends from its container**, so
-  the cell is held whole and billed off the token counts its results report — with the provider's
-  cache discount only on an image patched to report it (`_spent`). **One execution is
+  the cell is held whole and billed off the token counts its results report (`_spent`). **One execution is
   read at every retry budget** (`retry_levels`), the lower ones cut from the highest — sum across
   them and an attempt is counted once per budget. A harness that ended without a full set of verdicts
   measured its provider or its database (`_failure`), never the prompt. Where the database is rides
@@ -222,14 +206,11 @@ belong here, because they are what a connector author gets wrong:
 ## Injection is not consumption — one backend, and the absence elsewhere is DECLARED
 
 **On every connector but one, the candidate prompt is IN the request, so "did the model receive it"
-is not a question.** termnorm, dspy and promptpotter all put the rendered prompt on the wire.
-Harbor, by default, does not: `harbor.py::_write_skill` drops it into the container as an Agent
-Skill, and `terminus-2` eagerly shows the model only the frontmatter — name, description, location.
-**The candidate's prompt is the BODY, and it reaches the model only if the model opens the file.** An episode that never does ran as no-skill, so every arm of that
-round was the same episode, the δ ruler is flat by construction, and the round reports a tie it
-never measured. `harbor.py::_skill_opened` measures it and `SKILL_KEY` is a required observation.
-Under `skill_delivery: system_prompt` the same key reports whether the first request CARRIED the
-body (`_skill_in_first_request`), so a healthy campaign in that mode reads 1.0 rather than warning.
+is not a question.** Harbor's default channel is an Agent Skill whose BODY reaches the model only
+if the model opens the file (`protocol.py::Connector.prompt_delivery`), so arrival is MEASURED:
+`harbor.py::_skill_opened` — or `_skill_in_first_request` under `skill_delivery: system_prompt` —
+fills the required observation `SKILL_KEY`, and a round of unopened skills is a tie it never
+measured.
 
 **There is deliberately no core `turn_scalars` member for this, and that hole is not an oversight to
 fix.** A term whose value is decided by which backend you are on is not a core projection: on the
@@ -237,10 +218,9 @@ other three it would be the constant `1.0`. The rule generalizes rather than the
 new connector whether what it injects is what the model consumes**, and if the two can diverge, that
 gap is a measured observation and not a diagnostic.
 
-**A per-step aggregate can flatter, and Harbor's does** — `_aggregate_step_rewards` drops a step
-with no verifier result from the denominator, so a crashed step scores better than a wrong one.
-`harbor.py::_unscoreable_step` raises instead. Whatever the next episodic backend rolls up, ask what its
-roll-up does with a step that produced nothing — the answer is usually silence.
+**A per-step aggregate can flatter, and Harbor's does** (`harbor.py::_unscoreable_step` raises
+instead). Whatever the next episodic backend rolls up, ask what its roll-up does with a step that
+produced nothing — the answer is usually silence.
 
 ## The measured unit — declared, never sniffed
 
@@ -263,9 +243,7 @@ backend ([`../../docs/methods/verdict-resolution.md`](../../docs/methods/verdict
 
 **And `cell` implies NOTHING about the run's CONTROL LOOP — a flag reasoning "a cell is expensive,
 therefore…" is the one to refuse.** A connector declares what a row costs (`max_cells_in_flight`,
-the ceiling it may be run at; `cells_hold_the_machine`, whether that ceiling is the MACHINE's —
-every run on it drawing one pool — because a cell holds a container here; `cell_envelope_s`, the
-wall clock ONE of them may spend); how long an operator's look-ahead arming lasts is the round's
+`cells_hold_the_machine`, `cell_envelope_s` — each defined on its `Connector` field); how long an operator's look-ahead arming lasts is the round's
 and the operator's to decide — no connector can see the round it is inside. Refuse a second flag
 beside `measured_unit` set by RESEMBLING the recursion rather than by any fact about the run.
 

@@ -6,45 +6,18 @@ What downstream forks build on without breaking on the next refactor. Anything n
 
 ## 1. Connector protocol
 
-Frozen dataclass at `promptpotter/connectors/protocol.py::Connector`:
+The frozen dataclass `promptpotter/connectors/protocol.py::Connector`. **The dataclass is the roster and its field docstrings are the contract** — the signature, the default, and what each field costs to get wrong. Four fields are required (`name`, `wire_adapter`, `session_factory`, `extract_experiment`); every other one defaults, and `connectors/__init__.py::_validate` raises on a combination that cannot run.
 
-```python
-@dataclass(frozen=True)
-class Connector:
-    name: str                                                       # lowercase id; matches pipeline.yaml::backend_type
-    wire_adapter: Callable[[str, dict | None], dict]                # outbound HTTP body shaper
-    session_factory: Callable[[], SessionProtocol]                  # fresh session per BackendClient
-    extract_experiment: Callable[[dict], tuple[list[dict], list[str]]]  # → (queries, index_terms)
-    execution: ConnectorExecution = "remote_http"                   # "remote_http" | "in_process" (no HTTP; TRANSPORT only)
-    in_process_run: InProcessRun | None = None                      # async (workload, query, payload) -> {"data": …}; required iff in_process
-    holds_own_sends: bool = False                                   # True: every paid send is billed where it is made, so a cell only RESERVES its bound
-    sent_spend_bound: SentSpendBound | None = None                  # (node, config) -> what one cell bills as DECLARED, read off the payload actually sent; None leaves the cell unbounded, and an unbounded cell cannot run under a ceiling
-    cancel_stops_billing: bool = False                              # True: cancelling a sent cell stops what it bills; else it is left to land
-    required_observation_keys: tuple[str, ...] = ()                 # keys the payload ALWAYS carries; init RAISES if the dataset declares no mapping
-    experiment_file: str = ""                                       # on-disk experiment doc read from the dataset dir in place of a sample table
-    resolve_experiment: ExperimentResolver | None = None            # parsed experiment_file -> the document every read sees (a named roster pinned)
-    pipeline_declaration: Callable[[Stores, Mapping | None], dict] | None = None  # in_process only: the graph served in place of GET /pipeline; pipeline.yaml overlays it
-    identity_config: Callable[[Path, Mapping | None], dict] | None = None  # (dataset dir, resolved experiment) -> what EVERY cell is measured with, not the wire
-    measured_unit: MeasuredUnit = "sample"                          # what ONE row is CALLED — "sample" | "cell"
-    expected_revision: str | None = None                            # backend rev this PP rev expects (paired w/ version_check)
-    version_check: VersionCheck | None = None                       # async (http, base_url) -> str | None; init WARNs on drift
-    preflight: PreflightFn | None = None                            # async (backend_url) -> None reachability probe; None opts out
-    auth_token: AuthTokenFn | None = None                           # () -> str | None bearer for THIS backend; unset when in_process
-    completion_check: Callable[[], None] | None = None              # () -> None, run where the table completes; a raise stops boot and run init
-```
+Four declarations are named on this page because omitting one produces WRONG NUMBERS rather than a missing feature, silently:
 
-Plus the first-tenant draft seeds (`default_pipeline`, `default_node_config`, `default_optimization`, `default_exclude_nodes`, `node_types`) and `max_cells_in_flight`, which shape the ingest UI and the scoring walk rather than the measurement. **The dataclass is the roster** — read the field notes there, which say what each one costs to get wrong.
-
-Four of the fields above are on this page because omitting them produced WRONG NUMBERS rather than a missing feature, silently:
-
-- **`required_observation_keys`** — an undeclared key is dropped at `sample_measurement.py::measure_sample` and never reaches `pipeline_data`, so the formula grades a measurement it never received. `wiring.py::_verify_required_observation_keys` raises at init instead.
-- **`identity_config`** — what every cell is measured WITH, when that is not in the wire payload (a Harbor agent, the inner optimizer's effective revision). Without it, banked rows are silently replayed against bytes nobody read. What ONE cell is measured on — a Harbor task's git pins — rides that cell's row from `extract_experiment` as `source_pin` instead, so a panel that grows re-keys none of its cells.
-- **`sent_spend_bound`** — what one cell bills when it runs as DECLARED, read off the payload the wire adapter actually sends, so the hold cannot count on a limit the agent was never given. Without one the cell is unbounded, and an unbounded cell cannot run under a ceiling at all. Declare the run it declares, never every retry it might need at once: the ceiling admits what the reservation does not cover, so an over-large bound buys nothing and silently holds the walk to one cell in flight.
+- **`required_observation_keys`** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § Conventions — a plugin declares every key its payload always carries, and init raises on one the dataset does not map.
+- **`identity_config`** — what every cell is measured WITH, when that is not in the wire payload; without it, banked rows are silently replayed against bytes nobody read. What ONE cell is measured on rides that cell's row as `source_pin` instead (the field's docstring).
+- **`sent_spend_bound`** — without one the cell is unbounded, and an unbounded cell cannot run under a ceiling at all. Declare the run it declares, never every retry it might need at once: the ceiling admits what the reservation does not cover, so an over-large bound buys nothing and silently holds the walk to one cell in flight.
 - **The answer shape** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § The answer shape — a query yielding `ground_truth: None` declares it, and `extract_experiment` is the only place a connector may.
 
 `SessionProtocol` (`promptpotter/domain/connector.py`): `async set_terms(http, base_url, terms)` (backend handshake; noop ok) · `async recover(http, base_url)` (re-establish after transport error).
 
-`InProcessWorkload` (`protocol.py`) is the run's own state, handed to every `in_process_run` call: `experiment` (the resolved `experiment_file` the samples came from, `None` without one) · `program` (what an embedded host passed to `open_session`, §5b; `None` otherwise). Per-run state rides it — never a ContextVar or a module cache.
+`InProcessWorkload` (`protocol.py`) is handed to every `in_process_run` call: `experiment` (the resolved `experiment_file` the samples came from, `None` without one) · `program` (what an embedded host passed to `open_session`, §5b; `None` otherwise). **Per-run state rides it** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § Execution mode — a plugin keeps none in a ContextVar or a module cache.
 
 **Registering one, from your own package — no fork.** `promptpotter.connectors` is a published entry-point group:
 
@@ -57,7 +30,7 @@ The object named must be a `Connector`; **its `name` field is the registry key**
 
 **What a plugin is held to** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md); all three rules are enforced when the table completes (`connectors/__init__.py::_validate` and `shared/plugin_registry.py`, the loader every entry-point group shares), and each raise names its rule. What this page promises is only that they will not tighten within v1.
 
-`connector_origins()` maps every registered name to `"built-in"` or `"<distribution>: <module>:<attr>"` (the entry point's *value*, not its label — the label is free, the value is what was imported), so a name that greps to nothing in this tree can still be traced to its package. Audit what is loaded with:
+`connector_origins()` traces every registered name to `"built-in"` or the distribution that shipped it. Audit what is loaded with:
 
 ```bash
 python -c "from promptpotter.connectors import connector_origins as o; print(*o().items(), sep='\n')"
@@ -65,7 +38,7 @@ python -c "from promptpotter.connectors import connector_origins as o; print(*o(
 
 ⚠️ **A connector is trusted code, not sandboxed** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md). What v1 promises here is narrower and worth saying out loud: entry points do **not** lower that bar, and no future version will make them a sandbox. The capability scoping in [ADR-0005](../adr/0005-delegated-principals-and-capability-scoping.md) governs API principals, not in-process code.
 
-Adding one *to this repo* is one new file under `promptpotter/connectors/` defining `CONNECTOR`. Built-ins are deliberately **not** declared as entry points: reading them from install metadata would make a source-tree run with no metadata find zero backends.
+Adding one *to this repo* is one new file under `promptpotter/connectors/` defining `CONNECTOR`; built-ins are deliberately **not** entry points ([`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § A connector is trusted code).
 
 **Contracts beyond `protocol.py`:** wire adapters MUST be pure `(query, pipeline_params) → dict` — no I/O, no logging above debug · `extract_experiment` MUST return `(queries, index_terms)` (the latter may be empty).
 
@@ -165,7 +138,7 @@ rules; the constants themselves are internal.
 |---|---|---|
 | **Install content** | `promptpotter/assets/` inside the package | The optimizer's own `pipeline.yaml` + `resolved_schemas.json` + `sets/{name}.yaml`, and the exported dashboard. Ships in the wheel; ours, not the operator's. |
 | **User data** | `$PROMPTPOTTER_HOME` → the checkout's `.promptpotter/` when running from a source tree → the OS app-data dir | Campaigns, sessions, measurements, jobs, identity. |
-| **Benchmarks** | the checkout's `datasets/` → `promptpotter/assets/benchmarks/` | Sample dataset **definitions**, read-only on both shapes. Anything DERIVED from a definition on the operator's machine lands in the user-data root instead, under a flat keyed file per kind — the HuggingFace rows at `benchmark-rows/{name}.json`, the first-sight LLM decomposition of `task_description.md` at `task-context/{name}.yaml`. Never beside the definition, which under a wheel is inside `site-packages`. A tenant dataset of the same name shadows an installed one. |
+| **Benchmarks** | the checkout's `datasets/` → `promptpotter/assets/benchmarks/` | Sample dataset **definitions**, read-only on both shapes. Anything DERIVED from one lands in the user-data root, never beside the definition ([`infrastructure/CLAUDE.md`](../../promptpotter/infrastructure/CLAUDE.md) § Dataset content has two tiers). A tenant dataset of the same name shadows an installed one. |
 
 **`PROMPTPOTTER_HOME` is stable.** Set it to relocate the whole user-data tree; it is
 read once at import, so it is an environment decision, not a runtime one.
@@ -178,9 +151,8 @@ seam is a file, never a directory.
 
 Both derived asset trees (`assets/webapp/`, `assets/benchmarks/`) are staged by
 `scripts/build_release.py`, the supported way to build a wheel — a bare `uv build` produces
-one that quietly serves no dashboard and resolves no dataset. There is no `REPO_ROOT`: the
-parent walk that once stood for all three roots resolved to `site-packages/` when installed,
-which is both where `pip` deletes on upgrade and where the HuggingFace `datasets` library lives.
+one that quietly serves no dashboard and resolves no dataset. There is no `REPO_ROOT`, and
+nothing resolves to `site-packages/`: `pip` deletes there on upgrade.
 
 ## 5. CLI flags — `new` and `resume`
 

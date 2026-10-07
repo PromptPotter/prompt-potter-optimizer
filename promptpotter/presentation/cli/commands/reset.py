@@ -61,6 +61,7 @@ _PRESERVE_NAMES = (
     "benchmark-rows",
     "task-context",
     ".workspace",
+    ".cache",
     "user.json",
 )
 

@@ -232,6 +232,7 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
             if metered is None or metered.replay_share is None
             else f"{metered.replay_share:.0%}"
         )
+        missing = (b.missing_reason if b is not None else None) or "no bench headline"
         lines.append(
             f" {mark}{r.campaign_id[:24]:<24}  {r.optimizer[:9]:<9}  "
             + (
@@ -240,7 +241,7 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
                 f"{_banded(b.headline_lift, '{:+.3f}', 7, 18)}  "
                 f"{_value(b.lift.of(beside), '{:+.3f}'):>9}  "
                 if b is not None and sel is not None
-                else f"{'no bench headline':<106}  "
+                else f"{missing:<106.106}  "
             )
             + (
                 f"{spend.total_used_usd:>8.4f}  {spend.total_incurred_usd:>10.4f}  "

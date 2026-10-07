@@ -22,7 +22,7 @@ L1 picks specific values. L2 reframes *how* L1 searches by writing L1's attentio
 
 The critique step is the only place in the loop that reads raw per-sample results; it feeds forward to next-round L1 (primary) and to L2 (operating context on escalation). **`l1_critique → l1_generate` is performance-driven feedback, not failure-driven healing** — different mechanism from self-healing.
 
-Post-round transitions are decided by escalation rules over `EscalationInputs` (`application/optimizers/potter/escalation/`), not a hard-coded patience FSM — predicates are pure functions over a frozen snapshot; adding a rule is one row in `escalation/rules.py`. Several preemptor rules fire L2 *before* patience runs out — **which ones is owned by [`../developer/dispatch-hub.md`](../developer/dispatch-hub.md) § Trigger**, and a copy of that set on this page is what goes stale.
+Post-round transitions are decided by escalation rules over `EscalationInputs` (`application/optimizers/potter/escalation/`), not a hard-coded patience FSM — predicates are pure functions over a frozen snapshot; adding a rule is one row in `escalation/rules.py`. Several preemptor rules fire L2 *before* patience runs out — **which ones is owned by [`../developer/dispatch-hub.md`](../developer/dispatch-hub.md) § Trigger**.
 
 Five LLM call sites: `checkin` (runs around the loop and skips the dispatch hub; it decomposes a dataset's framing once — on the first mint that finds none committed, `new --task-file` / `--task-text`, `new <raw file>`, or the web check-in), `l1_generate`, `l1_critique`, `l2_context`, `l3_plan`. Critique-and-refine pattern inspired by [PromptWizard](https://arxiv.org/abs/2405.18369).
 
@@ -44,7 +44,6 @@ It is the optimizer's working memory for two independent reasons:
 ## Pointers
 
 - Architecture invariants: [`../architecture.md`](../architecture.md) §0
-- Dispatch routing + four wounds: [`../developer/dispatch-hub.md`](../developer/dispatch-hub.md), [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md)
-- L1 / L2 internals: [`../developer/dispatch-hub.md`](../developer/dispatch-hub.md)
+- Dispatch routing, L1 / L2 internals + four wounds: [`../developer/dispatch-hub.md`](../developer/dispatch-hub.md), [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md)
 - Candidate elimination (PoBB): [`../methods/candidate-elimination.md`](../methods/candidate-elimination.md)
 - Escalation signal stream: [`../operations/observability.md`](../operations/observability.md)
