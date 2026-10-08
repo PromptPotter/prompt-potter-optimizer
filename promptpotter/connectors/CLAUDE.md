@@ -51,8 +51,8 @@ connector shapes its `experiment_data` to fit the loader, never the reverse**.
 ## TermNorm is not a third party
 
 **A structural bug whose cause sits in TermNorm's code gets fixed in TermNorm — never
-papered over on this side.** Its checkout sits beside this one (`../TermNorm-excel` from the repo
-root, backend in its `backend-api` folder), and this line is the one statement of where. It is the same project as PromptPotter, split into a separate
+papered over on this side.** Where its checkout sits is a fact about the machine, so `CLAUDE.local.md` names it
+(`termnorm_checkout`; the backend is its `backend-api` folder) and a fresh clone goes beside this repo. It is the same project as PromptPotter, split into a separate
 repo for security reasons only; folding it back in is the goal. That makes it the
 exception to "backends are read-only" — and to nothing else: per-dataset config still
 rides the overlay, backend *behaviour* still earns a TermNorm root-fix, and which one

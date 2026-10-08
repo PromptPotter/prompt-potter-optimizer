@@ -262,6 +262,16 @@ an untyped dict.
 
 ## Blocked — named blocker
 
+- **`infrastructure/llm/anthropic.py::AnthropicClient` cannot run an optimizer node on a current
+  Claude model.** It refuses a set `reasoning_effort` (no mapping onto `output_config.effort`),
+  sends `temperature` on every call (current Claude models reject sampling parameters), never
+  sends the response schema (`output_config.format`), and sizes `max_tokens` from a stale 8192.
+  The manifests offer `provider: anthropic` all the same. **Blocker:** no Anthropic credential on
+  the dev machine, so none of the four can be measured, and which models reject sampling is a
+  per-model fact `registry.py::_MODEL_PROFILES` admits only as a measurement.
+  **Re-test:** `settings.ANTHROPIC_API_KEY` is empty; once it holds a key, `probe-reasoning` a
+  Claude model and this is one pass.
+
 - **Concurrent sibling cycles of one campaign each spend up to the whole ceiling.**
   `spend_budget_usd` binds a CYCLE (`runner/entry.py::_build_budget_gate` seeds its book off that
   cycle's folded history), so two forks launched side by side are each admitted the full ceiling
@@ -304,7 +314,7 @@ an untyped dict.
   is not owned by a campaign. The partitions are now countable; which of them a given family
   reaches is what nothing answers, and it is the join `sp_hash` → `prompt_fields_id` would buy.
 
-**Cross-repo (TermNorm sibling at `OfficeAddinApps/TermNorm-excel/backend-api`):**
+**Cross-repo (the TermNorm sibling's `backend-api`):**
 - **The TermNorm `/version` endpoint** is what remains owed on that side; this repo then
   bumps `termnorm.py::_EXPECTED_REVISION`. **Re-test:** `termnorm.py::_EXPECTED_REVISION`
   is `None`; the moment it holds a string the endpoint landed and this entry goes.
