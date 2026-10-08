@@ -4,7 +4,8 @@
 **blocked** or **multi-arc**. Everything else — anything adjacent to work already in hand, anything
 one edit closes — is **fixed in the pass that found it**, never filed. Enough to pick up cold:
 `file::symbol — why — action — blocker`. An item ships by being DELETED from this file; `git log`
-is the history layer.
+is the history layer. **Never the root of a patch just shipped** — that root ships instead
+(root `CLAUDE.md` `<root-fix>`); a bridge left standing with its cure filed here is refused.
 
 > **Every entry names its RE-TEST: the command, the landing, or the person and the question they
 > must answer.** A blocker without one is a claim about the world on the day it was written, and

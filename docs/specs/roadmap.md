@@ -143,8 +143,8 @@ What collapses: greedy promotion becomes the acquisition at `c = 0`, and the rew
 - **CAPO's features, ours too.** A demo pool held out at run init that `select_round_subset` and `sample_dataset` never draw; shots carried by sample id, rendered by `_render_few_shot_block` and emittable by `L1Variant` within `k_max` ([`prompt-field-roster.md`](prompt-field-roster.md) § What this does NOT change); a `target_prompt_chars` channel in the `per_cell` namespace, which lets any campaign's formula price prompt length; the `blocks` sampler, the `paired_t` eliminator, and a `population` selector with crossover lineage.
 - **LEVI's calibration, ours too.** A screening phase any manifest can opt into — potter's
   included — on the check-in node rather than in a round: N calibration prompts (the origin plus
-  proposed seeds) scored on the whole search pool before round 1, the matrix banked on the cycle,
-  and a sampler handed it (`shared/statistics.py::greedy_column_subset` is the proxy; the
+  proposed seeds) scored on the discovery set before round 1, the matrix banked on the cycle,
+  and a sampler handed it (`shared/statistics.py::greedy_column_subset` draws the proxy off that set; the
   δ ruler could anchor on the same rows). Today it is LEVI's round 1, so the matrix exists only
   where the calibration round's own rows hold it; lifting it needs a check-in step that measures,
   a banked-matrix record, and a sampler input that is not a round document.
@@ -361,6 +361,7 @@ Hard-Sample Sorter Phase 2/3 · MCP server mode · research extensions.
 - **Export / copy from dashboard** — one-click copy of the winning prompt + state on the optimizer box. The artifact is § Application radius's; this is it behind a button.
 - **Origin check-in plain-language recap** — folded into the origin check-in flow; pending review.
 - **CPU-hours as a suite-wide measurement** — container and CPU time metered per phase (expansion · judge · evaluation) beside `SpendRollup`, for every connector rather than for one comparison. SIFT's cost table (§ SIFT reproduction) is the shape; to be designed, not dropped.
+- **Model screen as a `seed-screen` variant** — the model as the screened axis, so a screen's results land in the tree with the analytics `seed-screen` already has, never in a script outside PromptPotter that only an agent can read.
 
 ## Identity — live forward gap (non-derivable)
 

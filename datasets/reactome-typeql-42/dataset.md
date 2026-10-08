@@ -90,15 +90,21 @@ directory. Clone with LF line endings; upstream's `.gitattributes` says why.
    values** — the dump this dataset was built on has SHA-256
    `8b0eb24f1418edcadb345082502283db89ef22e552edd49cdec29b320585fabc`. On a machine with under
    ~12 GB for containers, run the export and the load one after the other: Neo4j serves only the
-   export, so stop it before TypeDB bulk-loads.
+   export, so stop it before TypeDB bulk-loads. Under an 8 GB WSL2 cap the Neo4j export runs with
+   heap 3G, pagecache 1G and `db_transaction_timeout 1800s`. A local TypeDB serves without TLS, so
+   upstream's `load.sh` needs `--tls-disabled` on both the loader and the console.
 
 3. **Where the database is**, if not upstream's compose stack on this machine: the four
    `DBLLMBENCH_DB_*` keys in `.env`, beside the API keys (`config/settings.py`). A TypeDB Cloud
    cluster is its gRPC `host:port`, the admin password and `DBLLMBENCH_DB_TLS=true`. Loading it is
    upstream's `load.sh` with `ADDRESS`/`DB_PASS` set and a loader whose version equals the
    cluster's — TLS is the loader's default, so the exported CSVs reach the cloud with no Neo4j and
-   no local TypeDB running.
+   no local TypeDB running. The cloud needs TypeDB ≥ 3.12, and the version on the cluster page is
+   not the server's: probe `https://<host>:80/v1/version` (a 404 means the server is down). Load
+   with `PARALLEL=1` — at 2 the cluster rejects writes as isolation conflicts. A 4 GB node
+   (e2-medium) dies on the R-HSA-168256 recursive traversal.
 
 **The fidelity check** is upstream's own `verify` binary, run through the same image: it executes
 every reference query and compares the result with `expected`. Run it after every load and before
 every campaign — a store it does not pass grades every cell against answers it does not hold.
+Its config sends no model: `models: [dummy: {}]`, `exampleCounts: [0]`, `maxRetryCounts: [0]`.
