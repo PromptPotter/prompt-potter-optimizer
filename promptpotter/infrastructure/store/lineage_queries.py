@@ -114,7 +114,7 @@ class LineageNode(StrictModel):
         default="",
         description="THE address of this candidate's measurements — the searchpoint id the "
         "archive stores on every row it wrote, under its own spelling `prompt_fields_id`. "
-        "Neither `id` (a per-individual `uuid4`) nor `label` joins to a row; this does. Served "
+        "Neither `id` (the individual's lineage id) nor `label` joins to a row; this does. Served "
         "rather than derived: it hashes the node configs INCLUDING the rendered prompt, which "
         "no served field carries, so a client recomputing it would match nothing and see no "
         "error. Empty on a course and on a candidate that measured nothing. NOT unique — one "

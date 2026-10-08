@@ -10,6 +10,7 @@ from typing import Literal
 
 from pydantic import ConfigDict, Field
 
+from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellGrade
 from promptpotter.domain.spend import SpendRollup
@@ -28,6 +29,7 @@ __all__ = [
     "BenchScore",
     "BenchSubject",
     "DatasetSplit",
+    "bench_missing_reason",
     "partition_bank",
 ]
 
@@ -243,3 +245,14 @@ class BenchScore(StrictModel):
         nothing, which would price arriving second — and never the bench's own pass."""
         lift, usd = self.headline_lift, spend.search_incurred_usd
         return None if lift is None or usd is None or usd <= 0.0 else lift.value / usd
+
+
+def bench_missing_reason(stop_reason: StopReason | None) -> str:
+    """Why a run holds no ``BenchScore`` at all: the pass grades the line once its run ends, and a
+    pause ends nothing."""
+    outcome = None if stop_reason is None else stop_reason_outcome(stop_reason)
+    if outcome is None or outcome is StopOutcome.PAUSED:
+        return "graded when the run ends"
+    if outcome is StopOutcome.FAILED:
+        return "not graded — the run failed"
+    return "not graded — the run ended first"

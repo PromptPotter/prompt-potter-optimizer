@@ -24,6 +24,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.spend import TokenAccount, TokenUsageKind
 from promptpotter.infrastructure.llm.pricing import compute_usd
+from promptpotter.shared.instrument import measured_candidate
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -151,6 +152,7 @@ def emit_token_usage(
         mirrored=mirrored,
         cached=cached,
         round=_CURRENT_ROUND.get(),
+        role=cand.role if (cand := measured_candidate()) else None,
     )
     return record if _append_record(record) is not None else None
 

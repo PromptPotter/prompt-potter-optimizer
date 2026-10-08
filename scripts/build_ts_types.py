@@ -129,7 +129,7 @@ from promptpotter.domain.results import (
 )
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
-from promptpotter.domain.spend import MeteredSpend, SpendBucket, SpendRollup
+from promptpotter.domain.spend import KindSpend, MeteredSpend, SpendBucket, SpendRollup
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     BackendWarning,
@@ -227,6 +227,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     RoundResult,
     SpendBucket,
     SpendRollup,
+    KindSpend,
     MeteredSpend,
     # --- dashboard.json IS `LiveDashboardState` (the webapp polls it every 2s). It was
     # hand-declared webapp-side with an index signature that typechecked anything. ---
@@ -543,17 +544,17 @@ def _emit_non_activity_kinds() -> str:
 
 
 def _emit_stop_reason_tables() -> str:
-    """Emit ``STOP_REASON_INFO`` (domain/phases.py) as TS consts — the single label, next-step AND
-    outcome source, mirrored to the webapp without hand-maintained drift. All three ride the mirror
-    rather than ``dashboard.json`` because they are properties of the REASON, not of a cycle;
-    serving them per poll would ship the same twenty strings every two seconds.
+    """Emit ``STOP_REASON_INFO`` (domain/phases.py) as TS consts — the single label, next-step,
+    outcome AND category source, mirrored to the webapp without hand-maintained drift. All four ride
+    the mirror rather than ``dashboard.json`` because they are properties of the REASON, not of a
+    cycle; serving them per poll would ship the same twenty strings every two seconds.
 
-    **All three are keyed on the named ``StopReason`` union and TOTAL over it**, so a reason the
+    **All four are keyed on the named ``StopReason`` union and TOTAL over it**, so a reason the
     table gains is a compile error at every map the browser keeps beside these, and an index needs
     no ``||`` default — a ``Record<string, …>`` answers ``undefined`` for a renamed member and the
     surface papers over it with the raw value. ``""`` is a stated next step: nothing is owed.
     """
-    from promptpotter.domain.phases import STOP_REASON_INFO, StopOutcome, StopReason
+    from promptpotter.domain.phases import STOP_REASON_INFO, StopCategory, StopOutcome, StopReason
 
     def table(column: str) -> str:
         return "\n".join(
@@ -562,6 +563,7 @@ def _emit_stop_reason_tables() -> str:
         )
 
     outcome_union = " | ".join(repr(o.value) for o in StopOutcome)
+    category_union = " | ".join(repr(c.value) for c in StopCategory)
     return (
         _emit_enum_union(StopReason, "Why a cycle ended (domain/phases.py::StopReason).") + "\n\n"
         "// Operator-facing label per terminal reason. Mirror of\n"
@@ -581,6 +583,12 @@ def _emit_stop_reason_tables() -> str:
         f"export type StopOutcome = {outcome_union};\n"
         "export const STOP_REASON_OUTCOMES: Record<StopReason, StopOutcome> = {\n"
         f"{table('outcome')}\n"
+        "};\n\n"
+        "// WHAT ended a run (`StopCategory`) — a budget, a declared limit, the search itself, an\n"
+        "// operator, the outside world or a failure. Ask it rather than listing reasons.\n"
+        f"export type StopCategory = {category_union};\n"
+        "export const STOP_REASON_CATEGORIES: Record<StopReason, StopCategory> = {\n"
+        f"{table('category')}\n"
         "};"
     )
 

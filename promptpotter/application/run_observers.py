@@ -14,7 +14,7 @@ from promptpotter.application.run_phase_control import declare_run_phase
 from promptpotter.application.views.ingress import from_phase_event
 from promptpotter.application.views.readout import ReadoutProjection
 from promptpotter.application.views.view_models import ViewContext
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.dashboard_rows import RunStanding
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results import RoundResult
@@ -27,7 +27,7 @@ from promptpotter.domain.run_records import (
     SnapshotRecord,
 )
 from promptpotter.domain.scoring import QueryMeasurement, ledger_sample_view
-from promptpotter.infrastructure.ledger import CycleEventLog, branch_offset
+from promptpotter.infrastructure.ledger import CycleEventLog, open_with_history
 from promptpotter.infrastructure.llm.rate_limit import set_rate_tenant
 from promptpotter.infrastructure.llm.spend_book import (
     SpendBook,
@@ -63,7 +63,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "ForkInfo",
     "RunCallbacks",
     "RunObservers",
     "build_campaign_emitter",
@@ -83,12 +82,11 @@ def build_campaign_emitter(
     *,
     origin_accuracy: float | None,
     resumed_from_round: int | None = None,
-    seed_from_cycle_id: str | None = None,
     langfuse_trace_url: str | None = None,
 ) -> LiveDashboardProjection | None:
-    """Live dashboard projection from session + config. ``seed_from_cycle_id`` names the parent
-    cycle to seed prior trajectory from; ``None`` seeds from the cycle's own dir. ``None`` back
-    when the session carries no cycle to write into, which the return type states."""
+    """Live dashboard projection from session + config, seeded from the cycle's own history — a
+    fork's walks its parent's ledger up to the cut. ``None`` back when the session carries no
+    cycle to write into, which the return type states."""
     selected = select_optimizer(campaign_config.optimization)
     return LiveDashboardProjection.for_session(
         session.hop,
@@ -99,7 +97,6 @@ def build_campaign_emitter(
         display_metric=campaign_config.display_metric,
         langfuse_trace_url=langfuse_trace_url,
         resumed_from_round=resumed_from_round,
-        seed_from_cycle_id=seed_from_cycle_id,
         # The connector's own declarations, read at wiring — origin scoring runs before any
         # phase event, so anything that waits for one is absent exactly when round 0 needs it.
         max_cells_in_flight=session.backend_client.max_cells_in_flight,
@@ -580,15 +577,6 @@ class RunObservers:
             self.callbacks._round_token = None
 
 
-@dataclass(frozen=True)
-class ForkInfo:
-    """Forked-cycle wiring: the parent cycle to seed from — the fork gets its own ``dashboard.json``
-    and ``readout.log``, written by the parent's ``readout`` rebound so its round table carries over."""
-
-    parent_cycle_id: str
-    readout: ReadoutProjection
-
-
 def build_run_observers(
     *,
     session: Session,
@@ -596,10 +584,11 @@ def build_run_observers(
     readout_sink: StatusFn | None = None,
     resumed_from_round: int | None = None,
     origin_accuracy: float | None = None,
-    fork: ForkInfo | None = None,
+    fork_readout: ReadoutProjection | None = None,
 ) -> RunObservers:
-    """Open the ledger; build + bind every observer. A fork inherits the parent's ledger at its current
-    offset and seeds a fresh dashboard from the parent's drained file. An unminted session is a bug."""
+    """Open the ledger with its history bound; build + bind every observer. A fork mid-launch
+    passes its parent's ``fork_readout``, rebound to its own ``readout.log`` so the round table
+    carries over. An unminted session is a bug."""
     if session.state.cycle_id is None or session.store is None:
         raise RuntimeError(
             "build_run_observers: session must already be minted via "
@@ -611,7 +600,7 @@ def build_run_observers(
     session.state.audit_projection = audit
     racing = RacingStreamProjection.from_cycle_dir(cycle_dir)
 
-    ledger = CycleEventLog.open(cycle_dir)
+    ledger = open_with_history(cycle_dir)
     # A set-once identity stamp (like session_id), not a tracing-stream read — fan-out-only
     # stays intact. None when Langfuse is disabled. Keyed by `tracing_campaign_id`, the stable
     # root-cycle key the trace was stored under: a fork reassigns `cycle_id` but emits into
@@ -622,42 +611,23 @@ def build_run_observers(
         if obs
         else None
     )
-    if fork is None:
-        readout = ReadoutProjection.for_campaign(
+    readout = (
+        ReadoutProjection.for_campaign(
             session,
             campaign_config,
             sink=readout_sink,
             origin_acc=0.0 if origin_accuracy is None else origin_accuracy,
         )
-        dashboard = build_campaign_emitter(
-            session,
-            campaign_config,
-            origin_accuracy=origin_accuracy,
-            resumed_from_round=resumed_from_round,
-            langfuse_trace_url=trace_url,
-        )
-    else:
-        readout = fork.readout
-        dashboard = build_campaign_emitter(
-            session,
-            campaign_config,
-            origin_accuracy=origin_accuracy,
-            resumed_from_round=resumed_from_round,
-            seed_from_cycle_id=fork.parent_cycle_id,
-            langfuse_trace_url=trace_url,
-        )
-        parent_dir = CycleDir(
-            session.store.campaigns.cycle_dir(
-                CycleHop(campaign_id=session.campaign_id, cycle_id=fork.parent_cycle_id)
-            )
-        )
-        # The branch address as the CUT stamped it, never the parent's length re-read now: those
-        # are the same number only while the parent has stopped, and a fork of a live one inherits
-        # whatever it had appended by run start. The manifest is the one copy, so the in-memory
-        # walk and any off-disk reader begin at the same record.
-        cut = branch_offset(CycleDir(session.store.campaigns.cycle_dir(session.hop)))
-        if cut is not None:
-            ledger.inherit_from(CycleEventLog.open(parent_dir), cut)
+        if fork_readout is None
+        else fork_readout
+    )
+    dashboard = build_campaign_emitter(
+        session,
+        campaign_config,
+        origin_accuracy=origin_accuracy,
+        resumed_from_round=resumed_from_round,
+        langfuse_trace_url=trace_url,
+    )
 
     # `for_session` answers `None` on an incomplete address — the two halves the guard above
     # already covers, plus `tenant_root` / `session_id`. Binding that None to the ledger would

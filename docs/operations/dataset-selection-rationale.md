@@ -25,7 +25,7 @@ A focus dataset for L1 optimizer prompt evolution must satisfy:
 8. **Contamination-resistant.** 2024+ release preferred, synthetic generation a plus.
 9. **Anchored by measurement, not projection.** A 25-sample recon on `gpt-oss-20b @ low` is the verdict.
 
-**Toy and demo datasets are picked on deliberation length, not difficulty.** The criteria above buy signal; a toy buys turnaround, and what costs turnaround is how long the model thinks per cell, not how many cells there are. Prefer a task answerable in one pass — recognition, extraction, ordering a given set — over one that invites the model to reason its way there, and read the split off `dashboard.json::spend.backend` (`reasoning_tokens` against `output_tokens`) on the first round rather than after the campaign. The same test applies when **evolving** one: a toy task that has grown a deliberation step has stopped being a toy.
+**Toy and demo datasets are picked on deliberation length, not difficulty.** The criteria above buy signal; a toy buys turnaround, and what costs turnaround is how long the model thinks per cell, not how many cells there are. Prefer a task answerable in one pass — recognition, extraction, ordering a given set — over one that invites the model to reason its way there, and read the split off `dashboard.json::spend.by_kind.backend` (`reasoning_tokens` against `output_tokens`) on the first round rather than after the campaign. The same test applies when **evolving** one: a toy task that has grown a deliberation step has stopped being a toy.
 
 ## Why `gpt-oss-20b @ reasoning_effort: low`
 

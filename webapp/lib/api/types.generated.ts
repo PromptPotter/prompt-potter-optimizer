@@ -471,7 +471,7 @@ export interface RoundResult {
   scoreboard: ScoreboardRow[];
 }
 
-/** One spend sub-bucket (backend, optimizer-loop, or judge). Mutated only by */
+/** One spend sub-bucket — a spend kind's, or one node's. */
 export interface SpendBucket {
   used_usd: number;
   input_tokens: number;
@@ -487,28 +487,35 @@ export interface SpendBucket {
 
 /** A cycle's spend: a bucket per spend kind, and the totals every consumer reads off them. */
 export interface SpendRollup {
-  backend: SpendBucket;
-  loop: SpendBucket;
-  judge: SpendBucket;
-  diagnostic: SpendBucket;
-  bench: SpendBucket;
+  by_kind: Record<string, SpendBucket>;
   total_used_usd: number;
   total_incurred_usd: number;
   total_tokens_used: number;
   unpriced_tokens: number;
 }
 
-/** What a run's spend caps have counted, in the units they meter, by bucket. */
+/** One spend kind as every surface reads it: in the meter's units, beside its bill and what it */
+export interface KindSpend {
+  counted: boolean;
+  metered_usd: number;
+  billed_usd: number;
+  incurred_usd: number;
+  tokens: number;
+  cache_share: number | null;
+  cache_write_tokens: number;
+  rate_known: boolean;
+}
+
+/** What a run's spend caps have counted, in the units they meter, by kind. */
 export interface MeteredSpend {
   meter: 'bill' | 'search_incurred';
   usd: number;
   tokens: number;
-  buckets: Record<string, number>;
-  beside: Record<string, number>;
   billed_usd: number;
   incurred_usd: number;
-  billed_by_bucket: Record<string, number>;
-  incurred_by_bucket: Record<string, number>;
+  billed_tokens: number;
+  unpriced_tokens: number;
+  kinds: Record<string, KindSpend>;
   replay_share: number | null;
 }
 
@@ -759,6 +766,8 @@ export interface LiveDashboardState {
   lookahead_most: number | null;
   lookahead_affordable: number | null;
   cell_reserve_usd: number | null;
+  lookahead_money_pinned: boolean;
+  lookahead_pick_max: number;
   waiting_on: string | null;
   waiting_since: number | null;
   backpressure: BackpressureReading | null;
@@ -772,9 +781,12 @@ export interface LiveDashboardState {
   spend: SpendRollup;
   spend_metered: MeteredSpend | null;
   spend_by_round: Record<string, SpendRollup>;
+  spend_metered_by_round: Record<string, MeteredSpend> | null;
   catch_up_log: CatchUpLogEntry[];
   current_round: CurrentRound;
   error: DashboardError | null;
+  /** Why ``bench_score`` is null; null beside one. */
+  bench_missing_reason: string | null;
 }
 
 export interface DatasetItem {
@@ -1612,6 +1624,7 @@ export interface HeadToHeadRow {
   stop_reason: 'perfect_score' | 'max_rounds' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   outcome: 'success' | 'halted' | 'failed' | 'paused' | null;
   bench: BenchScore | null;
+  bench_missing_reason: string | null;
   bench_set: Instrument | null;
   comparable: boolean | null;
   spend: SpendRollup | null;
@@ -1619,7 +1632,7 @@ export interface HeadToHeadRow {
   worked_s: number | null;
   rounds: number;
   incurred_usd_ratio: number | null;
-  loop_incurred_usd_ratio: number | null;
+  optimizer_incurred_usd_ratio: number | null;
   worked_ratio: number | null;
   lift_per_incurred_usd: number | null;
   concurrent_with: string[];
@@ -1642,7 +1655,6 @@ export interface SelectionPair {
 export interface HeadToHead {
   rows: HeadToHeadRow[];
   head_to_head_id: string | null;
-  scorer_id: string;
   headline: 'accuracy' | 'composite';
   verdict: boolean | null;
   differs_on: string[];
@@ -1656,6 +1668,7 @@ export interface HeadToHead {
 /** The whole read for one selection of subjects — recomputed on every fetch. */
 export interface Evidence {
   generated_at: string;
+  scorer_id: string;
   subjects: SubjectReading[];
   comparability: Comparability;
   head_to_head: HeadToHead | null;
@@ -1750,9 +1763,9 @@ export interface LineageNode {
   round: number | null;
   /** THE address of this candidate's measurements — the searchpoint id the archive
    * stores on every row it wrote, under its own spelling `prompt_fields_id`.
-   * Neither `id` (a per-individual `uuid4`) nor `label` joins to a row; this
-   * does. Served rather than derived: it hashes the node configs INCLUDING
-   * the rendered prompt, which no served field carries, so a client
+   * Neither `id` (the individual's lineage id) nor `label` joins to a row;
+   * this does. Served rather than derived: it hashes the node configs
+   * INCLUDING the rendered prompt, which no served field carries, so a client
    * recomputing it would match nothing and see no error. Empty on a course
    * and on a candidate that measured nothing. NOT unique — one searchpoint
    * scored on two subsets is one `sp_hash` over two runs, and a re-proposed
@@ -2535,7 +2548,7 @@ export const STOP_REASON_NEXT_STEPS: Record<StopReason, string> = {
   'provider_credit_exhausted': "Raise the provider key's limit or top up its credit, then `resume`; a refused cell is a hole it re-measures.",
   'provider_throttled': 'Use your own key for that provider (OpenRouter BYOK) or route to another host (`route_order`), or wait out its quota, then `resume`; the refused cell is a hole it re-measures.',
   'crashed': 'Read `index.json::crash_traceback` for the cause; `python -m promptpotter resume` re-runs from the last closed round.',
-  'input_refused': "`dashboard.json::error` names the input the run declined; refused at run init, nothing was searched. A spend cap under one round is raised with `set-limits --max-usd` (on a head-to-head arm that moves every arm's budget) or met by narrowing the round in `optimization.nodes`; then `resume`.",
+  'input_refused': '`dashboard.json::error` names the input the run declined; refused at run init, nothing was searched. A spend cap under one round is raised with `set-limits --max-usd` or met by narrowing the round in `optimization.nodes`; then `resume`.',
   'not_admitted': '',
   'producer_vanished': '',
   'render_error': '',
@@ -2572,6 +2585,36 @@ export const STOP_REASON_OUTCOMES: Record<StopReason, StopOutcome> = {
   'render_error': 'failed',
   'diverged': 'failed',
   'optimizer_timeout': 'failed',
+};
+
+// WHAT ended a run (`StopCategory`) — a budget, a declared limit, the search itself, an
+// operator, the outside world or a failure. Ask it rather than listing reasons.
+export type StopCategory = 'search' | 'limit' | 'budget' | 'operator' | 'external' | 'failure';
+export const STOP_REASON_CATEGORIES: Record<StopReason, StopCategory> = {
+  'perfect_score': 'search',
+  'max_rounds': 'limit',
+  'target_hit': 'search',
+  'lives_exhausted': 'search',
+  'hard_cap_reached': 'limit',
+  'diag_complete': 'search',
+  'converged': 'search',
+  'rebased_to_fork': 'search',
+  'paused': 'operator',
+  'panel_cut': 'limit',
+  'optimizer_abort': 'search',
+  'spend_budget': 'budget',
+  'token_budget': 'budget',
+  'origin_gate': 'operator',
+  'backend_unreachable': 'external',
+  'provider_credit_exhausted': 'external',
+  'provider_throttled': 'external',
+  'crashed': 'failure',
+  'input_refused': 'failure',
+  'not_admitted': 'limit',
+  'producer_vanished': 'failure',
+  'render_error': 'failure',
+  'diverged': 'failure',
+  'optimizer_timeout': 'failure',
 };
 
 // Abort-lens variant -> operator label, in picklist order. Mirror of

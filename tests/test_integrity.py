@@ -407,11 +407,7 @@ def test_a_knob_edit_is_a_new_treatment_that_resume_continues() -> None:
     for a policy change. Left out of the treatment, two campaigns differing only in a knob read as
     one arm, and an inner cell continues rounds another knob banked. Swapping the optimizer is
     never a policy edit, though the measurement key it leaves untouched cannot say so."""
-    from promptpotter.application.campaign_config import (
-        CampaignConfig,
-        OptimizationConfig,
-        freeze_campaign_config,
-    )
+    from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
     from promptpotter.application.knobs import DiffScope, classify_config_diff
     from promptpotter.application.optimizer_manifest import select_optimizer
     from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
@@ -424,12 +420,12 @@ def test_a_knob_edit_is_a_new_treatment_that_resume_continues() -> None:
     before, after = (select_optimizer(c.optimization) for c in (ran, edited))
     assert after.treatment().digest != before.treatment().digest
     assert after.prompt_hashes() == before.prompt_hashes()
-    frozen = freeze_campaign_config(ran)
-    assert classify_config_diff(edited, frozen)[0] is DiffScope.POLICY_ONLY
+    frozen = ran.frozen(arm=False)
+    assert classify_config_diff(edited, frozen, arm=False)[0] is DiffScope.POLICY_ONLY
     swapped = ran.model_copy(
         update={"optimization": ran.optimization.model_copy(update={"optimizer": "capo"})}
     )
-    assert classify_config_diff(swapped, frozen)[0] is DiffScope.TREATMENT
+    assert classify_config_diff(swapped, frozen, arm=False)[0] is DiffScope.TREATMENT
 
 
 def test_a_blocks_provenance_is_free_and_its_material_is_not() -> None:
@@ -1085,7 +1081,6 @@ def test_unframed_ablation_renders_no_framing_where_one_is_committed(built_store
     from promptpotter.application.campaign_config import (
         CampaignConfig,
         OptimizationConfig,
-        freeze_campaign_config,
         load_campaign_config,
     )
 
@@ -1097,7 +1092,7 @@ def test_unframed_ablation_renders_no_framing_where_one_is_committed(built_store
     assert not campaign_framing(built_stores, unframed, "gsm8k"), (
         "the ablation arm rendered the committed framing it declared off"
     )
-    frozen = load_campaign_config(freeze_campaign_config(unframed))
+    frozen = load_campaign_config(unframed.frozen(arm=False))
     assert not campaign_framing(built_stores, frozen, "gsm8k"), (
         "the campaign manifest lost the declaration, so a resume of the ablation runs framed"
     )
@@ -3008,15 +3003,12 @@ def test_answering_in_TEXT_sends_no_contract_to_answer_INTO() -> None:
 
 def _frozen_config(**fields: Any) -> dict[str, Any]:
     """A manifest's `config` as a mint freezes it, over the default connector's loop knobs."""
-    from promptpotter.application.campaign_config import (
-        freeze_campaign_config,
-        load_campaign_config,
-    )
+    from promptpotter.application.campaign_config import load_campaign_config
     from promptpotter.connectors import DEFAULT_CONNECTOR, get
 
     defaults = dict(get(DEFAULT_CONNECTOR).default_optimization)
     optimization = {**defaults, **fields.pop("optimization", {})}
-    return freeze_campaign_config(load_campaign_config({"optimization": optimization, **fields}))
+    return load_campaign_config({"optimization": optimization, **fields}).frozen(arm=False)
 
 
 def test_a_campaign_runs_the_config_it_froze_whatever_its_dataset_file_says_later(
@@ -4463,7 +4455,7 @@ def test_wire_cost_reaches_the_response_or_nothing_prices_the_optimizer() -> Non
 
     That is what happened. ``call.py`` read ``response.usage["cost"]`` while the client built
     ``usage`` from four token keys and never copied it, so every optimizer row on disk carried
-    ``cost_usd: null``, ``spend.loop.used_usd`` read $0.00 in every cycle ever run, and
+    ``cost_usd: null``, the optimizer bucket's ``used_usd`` read $0.00 in every cycle ever run, and
     ``store/account_spend.py::record_cost_usd`` floored each call to 0.0 — a USD ceiling that could not
     see the half of the bill it was capping. Nothing raised; the numbers were simply absent.
 
@@ -5031,10 +5023,14 @@ def test_a_rounds_cost_reaches_the_markdown_digest_too() -> None:
     assert _render_round_cost(digest(None)) == ""
 
     rollup = SpendRollup(
-        backend=SpendBucket(used_usd=0.054, input_tokens=600_000, cache_read_tokens=132_000),
-        # The optimizer's real shape on the campaign that drove this arc: it billed, and no
-        # provider ever reported a cache breakdown for it.
-        loop=SpendBucket(used_usd=0.0021, input_tokens=40_000, cache_write_tokens=8_000),
+        by_kind={
+            "backend": SpendBucket(used_usd=0.054, input_tokens=600_000, cache_read_tokens=132_000),
+            # The optimizer's real shape on the campaign that drove this arc: it billed, and no
+            # provider ever reported a cache breakdown for it.
+            "optimizer": SpendBucket(
+                used_usd=0.0021, input_tokens=40_000, cache_write_tokens=8_000
+            ),
+        },
         total_used_usd=0.0561,
     )
     line = _render_round_cost(digest(rollup))
@@ -5045,7 +5041,9 @@ def test_a_rounds_cost_reaches_the_markdown_digest_too() -> None:
     # A bucket that neither billed nor consumed is absent, not a row of zeroes.
     assert "judge" not in line
     # A round the archive answered whole billed nothing and still cost something: it renders.
-    replayed = SpendRollup(backend=SpendBucket(incurred_usd=0.05), total_incurred_usd=0.05)
+    replayed = SpendRollup(
+        by_kind={"backend": SpendBucket(incurred_usd=0.05)}, total_incurred_usd=0.05
+    )
     assert "billed $0.0000 · incurred $0.0500 · 100%" in _render_round_cost(digest(replayed))
 
 
@@ -5463,7 +5461,7 @@ def test_a_ledger_index_serves_the_file_as_it_stands(tmp_path: Path) -> None:
         scan_ledger_spend,
     )
     from promptpotter.infrastructure.store.io import write_jsonl
-    from promptpotter.infrastructure.store.read_model import iter_jsonl
+    from promptpotter.infrastructure.store.read_model import LedgerSpan, iter_jsonl
 
     ledger = CycleEventLog.open(CycleDir(tmp_path))
 
@@ -5487,7 +5485,7 @@ def test_a_ledger_index_serves_the_file_as_it_stands(tmp_path: Path) -> None:
         ledger.append(CycleSeedRecord(seed=CycleSeed(pipeline_overlay=overlay)))
 
     def tailed() -> tuple[float, int, CycleSeed | None, float]:
-        spend, calls = scan_ledger_spend([ledger.path])
+        spend, calls = scan_ledger_spend([LedgerSpan(ledger.path)])
         wallet = iter_user_token_usage(ledgers=[ledger.path], since=0.0, until=float("inf"))
         charted = sum(row["cost_usd"] for row in wallet)
         return spend.total_used_usd, calls, scan_ledger_cycle_seed(ledger.path), charted

@@ -9,7 +9,7 @@ from pydantic import Field
 
 from promptpotter.config.settings import DEFAULT_ORIGIN_BUDGET
 from promptpotter.domain.bench import DatasetSplit
-from promptpotter.domain.campaign import ArmBudget
+from promptpotter.domain.campaign import ArmBudget, HeadToHeadRecord
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeSearchNarrowing
 from promptpotter.domain.results import DisplayMetric, HardSampleOrder
 from promptpotter.domain.strict_model import StrictModel
@@ -31,11 +31,11 @@ __all__ = [
     "apply_config_overrides",
     "apply_cycle_seed",
     "estimand_doc",
-    "freeze_campaign_config",
     "knob_label",
     "load_campaign_config",
     "merge_config_layers",
     "merge_node_overlays",
+    "under_record",
 ]
 
 
@@ -435,6 +435,12 @@ class CampaignConfig(StrictModel):
     # No `Knob` — the walk descends into OptimizationConfig.
     optimization: OptimizationConfig
 
+    def frozen(self, *, arm: bool) -> dict[str, Any]:
+        """Sole writer of ``campaign.json::config``: the WHOLE config the campaign was minted to
+        run, so no later edit to its dataset's files reaches a resume, a fork or a served read of
+        it — less, for an *arm*, what its head-to-head's record owns (:func:`under_record`)."""
+        return self.model_dump(mode="json", exclude=_RECORD_OWNED if arm else None)
+
 
 def load_campaign_config(raw: dict[str, Any] | CampaignConfig) -> CampaignConfig:
     if isinstance(raw, CampaignConfig):
@@ -480,10 +486,28 @@ def merge_node_overlays(
     return out
 
 
-def freeze_campaign_config(config: CampaignConfig) -> dict[str, Any]:
-    """Sole writer of ``campaign.json::config``: the WHOLE config the campaign was minted to run,
-    so no later edit to its dataset's files reaches a resume, a fork or a served read of it."""
-    return config.model_dump(mode="json")
+# What a head-to-head's record owns for every arm (:func:`under_record`), as a dump exclusion.
+_RECORD_OWNED: dict[str, Any] = {
+    "dataset_split": True,
+    "optimization": {"spend_budget_usd": True, "max_rounds": True, "determinism": True},
+}
+
+
+def under_record(config: CampaignConfig, record: HeadToHeadRecord) -> CampaignConfig:
+    """*config* as an arm of *record* runs it: the split its instrument drew and the budget it
+    declares. The record is their one owner, read at mint and at every resolution after it."""
+    budget = record.budget
+    optimization = type(config.optimization).model_validate(
+        {
+            **config.optimization.model_dump(),
+            "spend_budget_usd": budget.usd,
+            "max_rounds": budget.max_rounds,
+            "determinism": budget.determinism,
+        }
+    )
+    return config.model_copy(
+        update={"optimization": optimization, "dataset_split": record.instrument.split}
+    )
 
 
 def _scoring_block(scoring: str | dict[str, str] | None) -> dict[str, str]:

@@ -735,7 +735,7 @@ async def run_controlled(
     assert table is not None
     (workspace / "head_to_head.json").write_text(table.model_dump_json(indent=1), encoding="utf-8")
     print(
-        f"head-to-head {table.head_to_head_id}: scorer {table.scorer_id}, differs_on "
+        f"head-to-head {table.head_to_head_id}: scorer {ev.scorer_id}, differs_on "
         f"{table.differs_on}, pairs {[(p.campaign_a, p.campaign_b) for p in table.pairs]}, "
         f"controlled {[(r.optimizer, r.controlled) for r in table.rows]}"
     )

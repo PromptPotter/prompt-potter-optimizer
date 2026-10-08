@@ -54,7 +54,7 @@ export function runSummaryFacts(s: RunSummary): SummaryFacts {
             : undefined,
       },
       { label: "Rounds", value: String(s.rounds) },
-      s.metered ? spendStat(s.metered, "") : { label: SPEND_STAT_LABEL, value: "—" },
+      s.metered ? spendStat(s.metered) : { label: SPEND_STAT_LABEL, value: "—" },
     ],
   };
 }

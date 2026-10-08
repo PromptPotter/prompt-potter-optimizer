@@ -32,6 +32,8 @@
         "calibration_model": "1PL",
         "caveat": "flat_ruler"
       },
+      "best_so_far": null,
+      "bench": null,
       "improved": null,
       "electable_count": null,
       "verdict_reason": null,
@@ -64,6 +66,7 @@
           "changes_description": "Origin from datasets/justlogic-d234/prompts/",
           "theta": 0.3410594559486688,
           "theta_se": 0.2912087763408337,
+          "bench": null,
           "theta_caveat": null,
           "mean_fitness_ci_lo": 0.04014255282945531,
           "mean_fitness_ci_hi": 0.5312860185991161,
@@ -139,9 +142,11 @@
         "calibration_model": "1PL",
         "caveat": "flat_ruler"
       },
+      "best_so_far": null,
+      "bench": null,
       "improved": true,
       "electable_count": 3,
-      "verdict_reason": "C1.2 won on \u03b8 lift +0.362 (\u03b8 +0.704 vs parent +0.341, se 0.271); runner-up C1.1 at -0.855",
+      "verdict_reason": "C1.2 won on θ lift +0.362 (θ +0.704 vs parent +0.341, se 0.271); runner-up C1.1 at -0.855",
       "separable": true,
       "stamps_theta": true,
       "candidates": [
@@ -171,6 +176,7 @@
           "changes_description": "Rewrite the instruction (generation 0, variant 0).",
           "theta": -0.5137268264621557,
           "theta_se": 0.20758676264285109,
+          "bench": null,
           "theta_caveat": null,
           "mean_fitness_ci_lo": 0.0,
           "mean_fitness_ci_hi": 0.1479981992270027,
@@ -208,6 +214,7 @@
           "changes_description": "Rewrite the instruction (generation 0, variant 1).",
           "theta": 0.7035436102903825,
           "theta_se": 0.2713315679157062,
+          "bench": null,
           "theta_caveat": null,
           "mean_fitness_ci_lo": 0.3263036529341151,
           "mean_fitness_ci_hi": 0.773696347065885,
@@ -245,6 +252,7 @@
           "changes_description": "Rewrite the instruction (generation 0, variant 2).",
           "theta": -0.6311200338500182,
           "theta_se": 0.12585399490613852,
+          "bench": null,
           "theta_caveat": "floor_pinned",
           "mean_fitness_ci_lo": 0.0,
           "mean_fitness_ci_hi": 0.025788999796579656,
@@ -332,7 +340,8 @@
             "total": 14
           }
         ],
-        "measured": 0
+        "measured": 0,
+        "lead_interval": null
       },
       "panel_precision": null,
       "optimizer_facts": [
@@ -360,9 +369,11 @@
         "calibration_model": "1PL",
         "caveat": "flat_ruler"
       },
+      "best_so_far": null,
+      "bench": null,
       "improved": false,
       "electable_count": 3,
-      "verdict_reason": "no arm cleared the parent: best C2.2 \u03b8 +0.535 vs parent +0.805 (lift -0.054 = -0.270 over the parent + 0.216 parent selection bias, se 0.287); 3 of 3 electable, coverage floor 6",
+      "verdict_reason": "no arm cleared the parent: best C2.2 θ +0.535 vs parent +0.805 (lift -0.054 = -0.270 over the parent + 0.216 parent selection bias, se 0.287); 3 of 3 electable, coverage floor 6",
       "separable": true,
       "stamps_theta": true,
       "candidates": [
@@ -392,6 +403,7 @@
           "changes_description": "Rewrite the instruction (generation 1, variant 0).",
           "theta": 0.1996715899073831,
           "theta_se": 0.34050057884762497,
+          "bench": null,
           "theta_caveat": null,
           "mean_fitness_ci_lo": 0.08640108182208439,
           "mean_fitness_ci_hi": 0.5802655848445822,
@@ -429,6 +441,7 @@
           "changes_description": "Rewrite the instruction (generation 1, variant 1).",
           "theta": 0.5350608147337227,
           "theta_se": 0.28687529911413673,
+          "bench": null,
           "theta_caveat": null,
           "mean_fitness_ci_lo": 0.2751767120634365,
           "mean_fitness_ci_hi": 0.7248232879365635,
@@ -466,6 +479,7 @@
           "changes_description": "Rewrite the instruction (generation 1, variant 2).",
           "theta": -0.030075694912020647,
           "theta_se": 0.29308449150376326,
+          "bench": null,
           "theta_caveat": null,
           "mean_fitness_ci_lo": 0.020141369650749225,
           "mean_fitness_ci_hi": 0.3798586303492508,
@@ -553,7 +567,8 @@
             "total": 14
           }
         ],
-        "measured": 0
+        "measured": 0,
+        "lead_interval": null
       },
       "panel_precision": null,
       "optimizer_facts": [
@@ -581,9 +596,11 @@
         "calibration_model": "1PL",
         "caveat": "flat_ruler"
       },
+      "best_so_far": null,
+      "bench": null,
       "improved": false,
       "electable_count": 3,
-      "verdict_reason": "no arm cleared the parent: best C3.3 \u03b8 +0.048 vs parent +1.033 (lift -0.831 = -0.985 over the parent + 0.154 parent selection bias, se 0.388); 3 of 3 electable, coverage floor 6",
+      "verdict_reason": "no arm cleared the parent: best C3.3 θ +0.048 vs parent +1.033 (lift -0.831 = -0.985 over the parent + 0.154 parent selection bias, se 0.388); 3 of 3 electable, coverage floor 6",
       "separable": true,
       "stamps_theta": true,
       "candidates": [
@@ -613,6 +630,7 @@
           "changes_description": "Rewrite the instruction (generation 2, variant 0).",
           "theta": -0.06675594612307864,
           "theta_se": 0.4491211638280479,
+          "bench": null,
           "theta_caveat": null,
           "mean_fitness_ci_lo": 0.0,
           "mean_fitness_ci_hi": 0.5707744042336448,
@@ -650,6 +668,7 @@
           "changes_description": "Rewrite the instruction (generation 2, variant 1).",
           "theta": -0.5026063833319451,
           "theta_se": 0.26706171732771544,
+          "bench": null,
           "theta_caveat": null,
           "mean_fitness_ci_lo": 0.0,
           "mean_fitness_ci_hi": 0.1973309323026703,
@@ -687,6 +706,7 @@
           "changes_description": "Rewrite the instruction (generation 2, variant 2).",
           "theta": 0.04805382650524118,
           "theta_se": 0.3878002195276137,
+          "bench": null,
           "theta_caveat": null,
           "mean_fitness_ci_lo": 0.0,
           "mean_fitness_ci_hi": 0.5487602862287257,
@@ -769,7 +789,8 @@
             "total": 14
           }
         ],
-        "measured": 0
+        "measured": 0,
+        "lead_interval": null
       },
       "panel_precision": null,
       "optimizer_facts": [
@@ -788,6 +809,8 @@
       "composite_fitness": 0.598316268486917,
       "total": 0,
       "ability": null,
+      "best_so_far": null,
+      "bench": null,
       "improved": null,
       "electable_count": null,
       "verdict_reason": null,
@@ -808,32 +831,44 @@
     "scorer_id": "auto_5d0c7a19e2",
     "headline": "accuracy",
     "origin": {
-      "round": 0,
-      "sp_hash": "c274cdc71db2012c",
-      "headline": "accuracy",
-      "accuracy": {"value": 0.3, "ci_lo": null, "ci_hi": null},
+      "accuracy": {
+        "value": 0.3,
+        "ci_lo": null,
+        "ci_hi": null
+      },
       "composite": {
         "value": 0.3729087568891611,
         "ci_lo": 0.16991794712615302,
         "ci_hi": 0.5758995666521691
       },
+      "round": 0,
+      "sp_hash": "c274cdc71db2012c",
+      "headline": "accuracy",
       "n_scored": 10
     },
     "selected": {
-      "round": 4,
-      "sp_hash": "ec9a1dea39928e14",
-      "headline": "accuracy",
-      "accuracy": {"value": 1.0, "ci_lo": null, "ci_hi": null},
+      "accuracy": {
+        "value": 1.0,
+        "ci_lo": null,
+        "ci_hi": null
+      },
       "composite": {
         "value": 0.9301075268817204,
         "ci_lo": 0.881108427268219,
         "ci_hi": 0.9791066264952217
       },
+      "round": 4,
+      "sp_hash": "ec9a1dea39928e14",
+      "headline": "accuracy",
       "n_scored": 10
     },
     "missing_reason": null,
     "lift": {
-      "accuracy": {"value": 0.7, "ci_lo": null, "ci_hi": null},
+      "accuracy": {
+        "value": 0.7,
+        "ci_lo": null,
+        "ci_hi": null
+      },
       "composite": {
         "value": 0.5571987699925594,
         "ci_lo": 0.3229102229020594,
@@ -841,9 +876,9 @@
       }
     }
   },
+  "bench_pass": null,
   "bench_lift_per_incurred_usd": null,
   "composite_fitness_formula": "max(0.0, min(1.0, fitness * 692.0 / (692.0 + 0.5 * max(0.0, tokens - 692.0))))",
-  "composite_fitness_weights": null,
   "display_metric": "ability",
   "stamps_theta": true,
   "degraded_count": 0,
@@ -936,72 +971,74 @@
       {
         "node": "pobb",
         "knob": "epsilon",
-        "label": "PoBB \u03b5",
+        "label": "PoBB ε",
         "value": 0.3,
         "integer": false
       }
     ]
   },
   "spend": {
-    "backend": {
-      "used_usd": 0.0,
-      "input_tokens": 121425,
-      "output_tokens": 86988,
-      "reasoning_tokens": 0,
-      "cache_read_tokens": 0,
-      "cache_write_tokens": 0,
-      "rate_known": true,
-      "unpriced_tokens": 0,
-      "incurred_usd": 0.0,
-      "incurred_unpriced_tokens": 0
-    },
-    "loop": {
-      "used_usd": 0.0,
-      "input_tokens": 11000,
-      "output_tokens": 2200,
-      "reasoning_tokens": 0,
-      "cache_read_tokens": 0,
-      "cache_write_tokens": 0,
-      "rate_known": true,
-      "unpriced_tokens": 0,
-      "incurred_usd": 0.0,
-      "incurred_unpriced_tokens": 0
-    },
-    "judge": {
-      "used_usd": 0.0,
-      "input_tokens": 0,
-      "output_tokens": 0,
-      "reasoning_tokens": 0,
-      "cache_read_tokens": 0,
-      "cache_write_tokens": 0,
-      "rate_known": false,
-      "unpriced_tokens": 0,
-      "incurred_usd": 0.0,
-      "incurred_unpriced_tokens": 0
-    },
-    "diagnostic": {
-      "used_usd": 0.0,
-      "input_tokens": 0,
-      "output_tokens": 0,
-      "reasoning_tokens": 0,
-      "cache_read_tokens": 0,
-      "cache_write_tokens": 0,
-      "rate_known": false,
-      "unpriced_tokens": 0,
-      "incurred_usd": 0.0,
-      "incurred_unpriced_tokens": 0
-    },
-    "bench": {
-      "used_usd": 0.0,
-      "input_tokens": 10920,
-      "output_tokens": 6450,
-      "reasoning_tokens": 0,
-      "cache_read_tokens": 0,
-      "cache_write_tokens": 0,
-      "rate_known": true,
-      "unpriced_tokens": 0,
-      "incurred_usd": 0.0,
-      "incurred_unpriced_tokens": 0
+    "by_kind": {
+      "optimizer": {
+        "used_usd": 0.0,
+        "input_tokens": 11000,
+        "output_tokens": 2200,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "rate_known": true,
+        "unpriced_tokens": 0,
+        "incurred_usd": 0.0,
+        "incurred_unpriced_tokens": 0
+      },
+      "backend": {
+        "used_usd": 0.0,
+        "input_tokens": 121425,
+        "output_tokens": 86988,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "rate_known": true,
+        "unpriced_tokens": 0,
+        "incurred_usd": 0.0,
+        "incurred_unpriced_tokens": 0
+      },
+      "judge": {
+        "used_usd": 0.0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "rate_known": false,
+        "unpriced_tokens": 0,
+        "incurred_usd": 0.0,
+        "incurred_unpriced_tokens": 0
+      },
+      "diagnostic": {
+        "used_usd": 0.0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "rate_known": false,
+        "unpriced_tokens": 0,
+        "incurred_usd": 0.0,
+        "incurred_unpriced_tokens": 0
+      },
+      "bench": {
+        "used_usd": 0.0,
+        "input_tokens": 10920,
+        "output_tokens": 6450,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "rate_known": true,
+        "unpriced_tokens": 0,
+        "incurred_usd": 0.0,
+        "incurred_unpriced_tokens": 0
+      }
     },
     "total_used_usd": 0.0,
     "total_incurred_usd": 0.0,
@@ -1010,65 +1047,67 @@
   },
   "spend_by_round": {
     "0": {
-      "backend": {
-        "used_usd": 0.0,
-        "input_tokens": 7378,
-        "output_tokens": 5796,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": true,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
-      },
-      "loop": {
-        "used_usd": 0.0,
-        "input_tokens": 1000,
-        "output_tokens": 200,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": true,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
-      },
-      "judge": {
-        "used_usd": 0.0,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": false,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
-      },
-      "diagnostic": {
-        "used_usd": 0.0,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": false,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
-      },
-      "bench": {
-        "used_usd": 0.0,
-        "input_tokens": 5270,
-        "output_tokens": 4140,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": true,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
+      "by_kind": {
+        "optimizer": {
+          "used_usd": 0.0,
+          "input_tokens": 1000,
+          "output_tokens": 200,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": true,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        },
+        "backend": {
+          "used_usd": 0.0,
+          "input_tokens": 7378,
+          "output_tokens": 5796,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": true,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        },
+        "judge": {
+          "used_usd": 0.0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": false,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        },
+        "diagnostic": {
+          "used_usd": 0.0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": false,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        },
+        "bench": {
+          "used_usd": 0.0,
+          "input_tokens": 5270,
+          "output_tokens": 4140,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": true,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        }
       },
       "total_used_usd": 0.0,
       "total_incurred_usd": 0.0,
@@ -1076,65 +1115,67 @@
       "unpriced_tokens": 0
     },
     "1": {
-      "backend": {
-        "used_usd": 0.0,
-        "input_tokens": 36616,
-        "output_tokens": 23146,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": true,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
-      },
-      "loop": {
-        "used_usd": 0.0,
-        "input_tokens": 3000,
-        "output_tokens": 600,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": true,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
-      },
-      "judge": {
-        "used_usd": 0.0,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": false,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
-      },
-      "diagnostic": {
-        "used_usd": 0.0,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": false,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
-      },
-      "bench": {
-        "used_usd": 0.0,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": false,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
+      "by_kind": {
+        "optimizer": {
+          "used_usd": 0.0,
+          "input_tokens": 3000,
+          "output_tokens": 600,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": true,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        },
+        "backend": {
+          "used_usd": 0.0,
+          "input_tokens": 36616,
+          "output_tokens": 23146,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": true,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        },
+        "judge": {
+          "used_usd": 0.0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": false,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        },
+        "diagnostic": {
+          "used_usd": 0.0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": false,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        },
+        "bench": {
+          "used_usd": 0.0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": false,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        }
       },
       "total_used_usd": 0.0,
       "total_incurred_usd": 0.0,
@@ -1142,65 +1183,67 @@
       "unpriced_tokens": 0
     },
     "2": {
-      "backend": {
-        "used_usd": 0.0,
-        "input_tokens": 33317,
-        "output_tokens": 26797,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": true,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
-      },
-      "loop": {
-        "used_usd": 0.0,
-        "input_tokens": 3000,
-        "output_tokens": 600,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": true,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
-      },
-      "judge": {
-        "used_usd": 0.0,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": false,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
-      },
-      "diagnostic": {
-        "used_usd": 0.0,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": false,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
-      },
-      "bench": {
-        "used_usd": 0.0,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": false,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
+      "by_kind": {
+        "optimizer": {
+          "used_usd": 0.0,
+          "input_tokens": 3000,
+          "output_tokens": 600,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": true,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        },
+        "backend": {
+          "used_usd": 0.0,
+          "input_tokens": 33317,
+          "output_tokens": 26797,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": true,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        },
+        "judge": {
+          "used_usd": 0.0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": false,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        },
+        "diagnostic": {
+          "used_usd": 0.0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": false,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        },
+        "bench": {
+          "used_usd": 0.0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": false,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        }
       },
       "total_used_usd": 0.0,
       "total_incurred_usd": 0.0,
@@ -1208,65 +1251,67 @@
       "unpriced_tokens": 0
     },
     "3": {
-      "backend": {
-        "used_usd": 0.0,
-        "input_tokens": 21508,
-        "output_tokens": 19183,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": true,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
-      },
-      "loop": {
-        "used_usd": 0.0,
-        "input_tokens": 3000,
-        "output_tokens": 600,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": true,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
-      },
-      "judge": {
-        "used_usd": 0.0,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": false,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
-      },
-      "diagnostic": {
-        "used_usd": 0.0,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": false,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
-      },
-      "bench": {
-        "used_usd": 0.0,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": false,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
+      "by_kind": {
+        "optimizer": {
+          "used_usd": 0.0,
+          "input_tokens": 3000,
+          "output_tokens": 600,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": true,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        },
+        "backend": {
+          "used_usd": 0.0,
+          "input_tokens": 21508,
+          "output_tokens": 19183,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": true,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        },
+        "judge": {
+          "used_usd": 0.0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": false,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        },
+        "diagnostic": {
+          "used_usd": 0.0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": false,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        },
+        "bench": {
+          "used_usd": 0.0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": false,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        }
       },
       "total_used_usd": 0.0,
       "total_incurred_usd": 0.0,
@@ -1274,65 +1319,67 @@
       "unpriced_tokens": 0
     },
     "4": {
-      "backend": {
-        "used_usd": 0.0,
-        "input_tokens": 22606,
-        "output_tokens": 12066,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": true,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
-      },
-      "loop": {
-        "used_usd": 0.0,
-        "input_tokens": 1000,
-        "output_tokens": 200,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": true,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
-      },
-      "judge": {
-        "used_usd": 0.0,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": false,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
-      },
-      "diagnostic": {
-        "used_usd": 0.0,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": false,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
-      },
-      "bench": {
-        "used_usd": 0.0,
-        "input_tokens": 5650,
-        "output_tokens": 2310,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "rate_known": true,
-        "unpriced_tokens": 0,
-        "incurred_usd": 0.0,
-        "incurred_unpriced_tokens": 0
+      "by_kind": {
+        "optimizer": {
+          "used_usd": 0.0,
+          "input_tokens": 1000,
+          "output_tokens": 200,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": true,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        },
+        "backend": {
+          "used_usd": 0.0,
+          "input_tokens": 22606,
+          "output_tokens": 12066,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": true,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        },
+        "judge": {
+          "used_usd": 0.0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": false,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        },
+        "diagnostic": {
+          "used_usd": 0.0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": false,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        },
+        "bench": {
+          "used_usd": 0.0,
+          "input_tokens": 5650,
+          "output_tokens": 2310,
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "rate_known": true,
+          "unpriced_tokens": 0,
+          "incurred_usd": 0.0,
+          "incurred_unpriced_tokens": 0
+        }
       },
       "total_used_usd": 0.0,
       "total_incurred_usd": 0.0,

@@ -53,18 +53,14 @@ from promptpotter.judges import build_evaluators, judge_instrument
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.origin import CampaignOrigin
     from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.application.scoring.search_point_scorer import ScoredWalk
-    from promptpotter.domain.results import DisplayMetric
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.infrastructure.store.stores import Stores
     from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
-    from promptpotter.judges.protocol import JudgeSpec
 
 
 logger = logging.getLogger(__name__)
@@ -138,40 +134,30 @@ def init_cycle(
 
 
 def populate_session_scoring(
-    session: Session,
-    *,
-    obs: ObservabilityBridge | None,
-    scoring_formula: str | None,
-    scoring_cell_formula: str | None = None,
-    scorer_id: str,
-    display_metric: DisplayMetric = "accuracy",
-    judge_specs: Mapping[str, JudgeSpec],
-    source: RunSource,
+    session: Session, campaign_config: CampaignConfig, *, source: RunSource
 ) -> None:
-    """Attach scoring + obs to *session* in place (step 2 of run init).
-    Requires ``init_services`` already ran; ``scoring_formula`` and ``scorer_id`` both resolved from
-    ``campaign.json::scoring`` by the caller, through the one ``split_scoring_block`` that pairs them.
-
-    That precondition is what lets the compiler refuse a label-comparing formula here: ``session.samples``
-    is populated by the end of ``init_services``, so the bank's own declaration is available before a
-    single cell is spent."""
-
-    session.state.obs = obs
+    """Arm *session* with the scorer ``campaign_config.scoring`` declares (step 2 of run init),
+    once per session. Requires ``init_services`` already ran: ``session.samples`` is what lets the
+    compiler refuse a label-comparing formula before a single cell is spent."""
+    spec = split_scoring_block(
+        campaign_config.scoring, judge_instrument=judge_instrument(campaign_config.judges)
+    )
     session.source = source
     session.scoring.scorer = compile_scorer(
-        scoring_formula,
-        scoring_cell_formula,
+        spec.per_sample,
+        spec.per_cell,
         verifier_graded=all_verifier_graded(s.ground_truth for s in session.samples),
     )
-    session.scoring.scorer_id = scorer_id
-    session.scoring.scorer_cell_formula = scoring_cell_formula
-    session.scoring.display_metric = display_metric
-    # The sole judge builder, serving the runner and the four verbs that score outside it
+    session.scoring.scorer_id = spec.scorer_id
+    session.scoring.scorer_cell_formula = spec.per_cell
+    session.scoring.display_metric = campaign_config.display_metric
+    # The sole judge builder, serving the runner and the verbs that score outside it
     # (`arm_diagnostic_scoring`) — so one line arms grading reuse on every entry point, and a
     # bad spec fails here rather than on the first cell. Required and assigned unconditionally:
     # `{}` declares none, and never means "keep what was armed before".
-
-    session.scoring.judges = build_evaluators(judge_specs, cache=session.store.judge_reuse)
+    session.scoring.judges = build_evaluators(
+        campaign_config.judges, cache=session.store.judge_reuse
+    )
 
 
 def arm_diagnostic_scoring(
@@ -180,36 +166,18 @@ def arm_diagnostic_scoring(
     *,
     source: RunSource,
     log: Callable[[str], None] | None = None,
-) -> dict[str, Any]:
-    """Resolve the pipeline and arm the scorer for a verb that scores OUTSIDE the runner —
-    ``verify`` / ``ab`` / ``noise-floor`` / ``seed-screen``. Returns the resolved pipeline params.
-
-    ``obs=None`` is what makes these one thing rather than four copies of three calls: the runner
-    arms its own scoring with a live ``ObservabilityBridge``, and a diagnostic has none to give.
+) -> None:
+    """Resolve the pipeline onto *session* and arm the scorer for a verb that scores OUTSIDE the
+    runner — ``verify`` / ``ab`` / ``noise-floor`` / ``seed-screen``.
 
     A verb run inside a campaign — the saturation ``verify`` — spends under that run's book; one
     run on its own gets a book for its task, which no ceiling binds yet."""
 
     if bound_spend_book() is None:
         bind_spend_book(unbounded_spend_book())
-    pipeline_params = configure_and_apply_pipeline(
-        session, campaign_config, log=log or (lambda *_a, **_k: None)
-    )
-    spec = split_scoring_block(
-        campaign_config.scoring, judge_instrument=judge_instrument(campaign_config.judges)
-    )
-    populate_session_scoring(
-        session,
-        obs=None,
-        scoring_formula=spec.per_sample,
-        scoring_cell_formula=spec.per_cell,
-        scorer_id=spec.scorer_id,
-        display_metric=campaign_config.display_metric,
-        judge_specs=campaign_config.judges,
-        source=source,
-    )
+    configure_and_apply_pipeline(session, campaign_config, log=log or (lambda *_a, **_k: None))
+    populate_session_scoring(session, campaign_config, source=source)
     session.scoring.partition = partition_bank(session.samples, campaign_config.dataset_split)
-    return pipeline_params
 
 
 async def diagnostic_pass(
@@ -240,7 +208,7 @@ def diagnostic_trace(stores: Stores, hop: CycleHop | None) -> Iterator[None]:
     bill that reaches no ledger is money no account, campaign or ceiling ever sees.
 
     Inside every ceiling, always: the bucket is folded into ``SpendRollup``'s totals like any other
-    (``TOKEN_KIND_BUCKET``), so the budget gate sees this money. It is banked APART because it
+    (``SpendRollup.by_kind``), so the budget gate sees this money. It is banked APART because it
     answers a question about the search rather than advancing it — folded into ``backend``, an
     operator reads re-measuring a candidate as the cost of finding one.
 
@@ -330,7 +298,6 @@ async def _emit_preflight_and_init_session(
 
 def _build_and_start_cycle(
     origin: CampaignOrigin,
-    scoring_cell_formula: str | None,
     session: Session,
     config: CampaignConfig,
     dataset: list[Sample],
@@ -380,9 +347,6 @@ def _start_observability_and_scoring(
     resolved_cycle_id: str | None,
     started_at: str,
     langfuse_session_id: str | None,
-    scoring_formula: str | None,
-    scoring_cell_formula: str | None,
-    scorer_id: str,
 ) -> tuple[str, ObservabilityBridge | None]:
 
     tracing_campaign_id = resolved_cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
@@ -397,16 +361,8 @@ def _start_observability_and_scoring(
         langfuse_session_id=langfuse_session_id or resolved_cycle_id,
         langfuse=session.langfuse,
     )
-    populate_session_scoring(
-        session,
-        obs=obs,
-        scoring_formula=scoring_formula,
-        scoring_cell_formula=scoring_cell_formula,
-        scorer_id=scorer_id,
-        display_metric=config.display_metric,
-        judge_specs=config.judges,
-        source=RunSource.OPTIMIZATION_LOOP,
-    )
+    session.state.obs = obs
+    session.source = RunSource.OPTIMIZATION_LOOP
     return tracing_campaign_id, obs
 
 
@@ -507,9 +463,6 @@ async def init_optimization_loop(
     config: CampaignConfig,
     *,
     cb: RunCallbacks,
-    scoring_formula: str | None,
-    scoring_cell_formula: str | None,
-    scorer_id: str,
     no_divergence_check: bool,
     fork_on_divergence: bool,
     langfuse_session_id: str | None,
@@ -522,7 +475,6 @@ async def init_optimization_loop(
 
     cycle, resolved_cycle_id, resumed_from_round = _build_and_start_cycle(
         origin,
-        scoring_cell_formula,
         session,
         config,
         dataset,
@@ -538,9 +490,6 @@ async def init_optimization_loop(
         resolved_cycle_id=resolved_cycle_id,
         started_at=started_at,
         langfuse_session_id=langfuse_session_id,
-        scoring_formula=scoring_formula,
-        scoring_cell_formula=scoring_cell_formula,
-        scorer_id=scorer_id,
     )
 
     resolved_cycle_id, resumed_from_round = await _apply_resume_fork(

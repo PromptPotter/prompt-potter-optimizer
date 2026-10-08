@@ -15,6 +15,8 @@ import {
   assertThrowawayWorld,
   type Campaign,
 } from "../harness";
+import { STOP_REASON_CATEGORIES } from "@/lib/api/types.generated";
+import { isStopReason } from "@/lib/run-phase";
 
 // The recursion end to end, on the degenerate `promptpotter-self-e2e` panel. Minted through the
 // control plane: browser ingest materializes 0 items for an outer dataset, and the CLI blocks on a TTY.
@@ -149,7 +151,7 @@ test.describe("the recursion, end to end", () => {
 
     assertBoundedStop("the recursion", stopped);
     expect(
-      completed > 0 || /budget/.test(stopped),
+      completed > 0 || (isStopReason(stopped) && STOP_REASON_CATEGORIES[stopped] === "budget"),
       `nothing was measured and the run stopped on '${stopped}' rather than on its ceiling`,
     ).toBeTruthy();
 

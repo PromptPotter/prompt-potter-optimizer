@@ -38,7 +38,6 @@ __all__ = ["Cycle"]
 
 def _origin_round(
     opt_sp: OptSearchPoint,
-    sp: JobSearchPoint,
     *,
     report: ScoredCandidate,
     results: list[dict[str, Any]],
@@ -49,15 +48,12 @@ def _origin_round(
     """C0's row IS what the scoring gateway produced, plus the two facts only a round close can
     add: its θ on the cycle's δ ruler where the selector stamps one, and a reference that is
     itself. Nothing re-derived."""
-    prompt_fields = opt_sp.prompt_field_dict()
     deprecated = _compute_accuracy(cast("list[QueryMeasurement]", results))["deprecated"]
     arm = ability if stamps_theta else None
     row = report.model_copy(
         update={
             "theta": arm.theta if arm is not None else None,
             "theta_se": arm.se if arm is not None else None,
-            "prompt_fields": prompt_fields,
-            "resolved_pipeline_params": sp.config_params,
             "reference_id": opt_sp.lineage.id,
             "reference_accuracy": report.accuracy,
             "reference_composite": report.composite_fitness,
@@ -73,8 +69,8 @@ def _origin_round(
         not_attempted=max(0, row.expected_samples - row.scored_samples),
         improved=False,
         stamps_theta=stamps_theta,
-        prompt_fields=prompt_fields,
-        pipeline_params=sp.config_params,
+        prompt_fields=row.prompt_fields,
+        pipeline_params=row.resolved_pipeline_params,
         results=results,
         all_candidate_results={opt_sp.lineage.id: results},
         candidates_scored=1,
@@ -181,7 +177,6 @@ class Cycle:
             rounds=[
                 _origin_round(
                     opt_sp,
-                    sp,
                     report=origin_report,
                     results=list(origin_results or []),
                     ability=difficulty.reading(origin_theta, results=list(origin_results or [])),
@@ -225,45 +220,23 @@ class Cycle:
     def searchpoint(
         self, individual_id: str, *, rounds: Sequence[RoundResult] | None = None
     ) -> JobSearchPoint:
-        """Any individual a closed round measured, as it was measured — off what each round document
-        banks: the individual it ended on with its params, and every arm's fields and params.
-        ``rounds`` are the cycle's own unless a caller holds rounds it has not absorbed yet."""
+        """Any individual a closed round measured, as its arm row banked it. ``rounds`` are the
+        cycle's own unless a caller holds rounds it has not absorbed yet."""
         schema = self.session.pipeline_schema
         assert schema is not None, "a cycle is started under a pipeline_schema"
-
-        def built(individual: OptSearchPoint, params: dict[str, Any]) -> JobSearchPoint:
-            return individual.to_job_search_point(
-                base_pipeline_params=params,
-                schema=schema,
-                framing=self.framing,
-                demo=self.session.scoring.require_partition().demo,
-            )
+        demo = self.session.scoring.require_partition().demo
 
         for rr in reversed(self.rounds if rounds is None else rounds):
-            ended_on = rr.opt_sp
-            if ended_on and ended_on.lineage.id == individual_id and rr.pipeline_params is not None:
-                return built(ended_on, rr.pipeline_params)
             for cs in rr.candidate_scores:
-                if cs.candidate_id != individual_id or cs.resolved_pipeline_params is None:
-                    continue
-                sp = built(
-                    OptSearchPoint.from_prompt_fields(cs.prompt_fields), cs.resolved_pipeline_params
-                )
-                if cs.sp_hash and sp.sp_hash(schema) != cs.sp_hash:
-                    raise ValueError(
-                        f"{cs.label}: its banked fields and params rebuild searchpoint "
-                        f"{sp.sp_hash(schema)}, not the {cs.sp_hash} its rows were measured under"
-                    )
-                return sp
+                if cs.candidate_id == individual_id and cs.resolved_pipeline_params is not None:
+                    return cs.searchpoint(schema=schema, framing=self.framing, demo=demo)
         raise KeyError(f"no closed round of this cycle measured individual {individual_id}")
 
     def restamp_origin_round(self, parent: ReferenceReading) -> None:
         """A whole round in, a whole round out, so a re-measure cannot leave one field reading from
         the run it replaces. The reading is carried, not re-fit: the ruler is locked."""
-        assert self.tracking.current_sp is not None
         self.rounds[0] = _origin_round(
             self.opt_sp,
-            self.tracking.current_sp,
             report=parent.report,
             results=list(parent.results),
             ability=self.origin_round.ability,

@@ -45,25 +45,18 @@ is the history layer. **Never the root of a patch just shipped** — that root s
 A leading `NEXT` marks the one to take up cold when nothing else is in hand.
 
 - **NEXT — the prompt cache is a cost lever only on a route that stays on ONE host, and nothing
-  makes a route stay.** `infrastructure/llm/openai_compat.py` pins hosts only where a node config
-  names `route_order` by hand, and so do `connectors/harbor.py` and `connectors/dbllmbench.py`. A
-  backend node declares none by default, so a gateway spreads its calls over every host it lists
-  and each one starts cold: the stored ledgers read 1.2% cache capture on the backend, which is
-  72% of spend. Measured 2026-10-05 on `reactome-typeql-42`, where every call re-sends one 16k
-  prefix: `xiaomi/mimo-v2.6-flash` billed $0.030 per M input tokens unpinned and $0.019 pinned to
-  `xiaomi`, against a $0.14 list price and a $0.0028 cached one. So any design that counts on the
-  cache — a cost term in fitness, a spend estimate, a search front on cached price — holds only
-  under a condition no layer establishes or reports. Action: make stickiness the default rather
-  than a per-node secret. OpenRouter keeps a route on the host that served a `session_id`
-  (ten minutes idle), so send one per prompt prefix from the one request builder and from each
-  connector that sends past it; keep `route_order` as the explicit override; and serve cache
-  capture per node beside its spend, so a scattered route reads as one. **Rides with:** any change
-  to the request builder in `openai_compat.py`, a connector's route handling, or the caching arc
-  (`.scratch/caching-arc-state.md`). **Re-test:** `grep -n session_id
-  promptpotter/infrastructure/llm/openai_compat.py` — no hit means still open; then run
-  `.scratch/typeql-bench/screen_model.py xiaomi/mimo-v2.6-flash none 0,4,5,6,7,8` with and without
-  a trailing `xiaomi` and compare billed dollars per input token — a gap means the default route
-  still scatters.
+  makes a route stay.** `infrastructure/llm/openai_compat.py`, `connectors/harbor.py` and
+  `connectors/dbllmbench.py` pin hosts only where a node config names `route_order` by hand. An
+  OpenRouter `session_id` was tried and dropped: measured 2026-10-08 on `xiaomi/mimo-v2.6-flash`
+  over a ~15k-token head, it hopped hosts within three calls and billed $0.055–0.077 per M input
+  against $0.026 pinned to `xiaomi`. So any design that counts on the cache — a cost term in
+  fitness, a spend estimate, a search front on cached price — holds only under a pin. Action: a
+  default host pin per model that no node has to author, or a refusal to price on the cache
+  without one. **Rides with:** any change to the request builder in `openai_compat.py`, a
+  connector's route handling, or the caching arc (`.scratch/caching-arc-state.md`). **Re-test:**
+  the per-node table in an unpinned campaign's `review.md` (`domain/spend.py::SpendRollup.by_node`)
+  beside a pinned one on the same model — a prefix-cache share well below the pinned one means the
+  default route still scatters.
 
 - **Raising the in-flight depth takes effect only when a call LANDS.**
   `application/scoring/query_loop.py::run_walks` re-reads `_armed_cells` every step, then blocks
@@ -172,20 +165,8 @@ and delete the entry if the answer is no.
 
 **The ruler and the peers**
 
-- **The webapp's `unmeasured_delta` copy states one of its two causes.**
-  `components/candidates/AbilityInfo.tsx::CAVEAT_COPY` describes the pinned prior, which θ still
-  counts; `domain/ruler.py::ThetaCaveat.UNMEASURED_DELTA` also names a cell the ruler does not
-  carry, which θ SKIPS, and rides an arm's own row as well as the round's. Action: copy that
-  holds for both causes and both scopes. **Rides with:** any webapp caveat surface. **Re-test:**
-  read `CAVEAT_COPY.unmeasured_delta` against that member's comment.
-
 **Spend**
 
-- **Spend by measurement role is not built.** Overlap and catch-up spend are attributed by matching
-  token triples. Action: one optional role on `domain/run_records.py::TokenUsageRecord`, stamped
-  in `infrastructure/llm/telemetry.py::emit_token_usage` from `shared/instrument.py::
-  measured_candidate()` as `round` is. **Rides with:** any change to `TokenUsageRecord` or the
-  spend book. **Re-test:** grep `TokenUsageRecord` for a role field.
 - **Hold bounds leave three gaps.** `_billed_most` is not seeded on resume; `reserved()` does not
   hold `held_at(...)`, so a walk can plan a cell its reservation refuses; and `scoring/
   query_loop.py::Walk.end` drops a paid look-ahead cell that crossed a block decision. **Rides
@@ -211,18 +192,11 @@ and delete the entry if the answer is no.
 
 **Webapp — the control-plane session's files**
 
-- **Four stale reads of a run's ending.** `components/compare/ChannelCards.tsx` keeps a
-  `?? row.stop_reason` default the typed field made dead; `e2e/spend/l4.spec.ts` matches a stop
-  by a regex over its name where `STOP_REASON_OUTCOMES` answers; the `RunMasthead.tsx` headline
-  does not read the stop table; and `docs/specs/roadmap.md` still describes LEVI's proxy as drawn
-  on the pool. **Rides with:** that session's next webapp pass. **Re-test:** grep `stop_reason`
-  under `webapp/components/compare` and `webapp/e2e/spend`.
-
 ## Bypasses — one defect class, held for ONE holistic pass
 
 **A path that goes around the mechanism the rest of the code rides, and re-derives the answer
 itself.** The entries below are filed
-TOGETHER rather than patched one by one on purpose: read side by side they sort into three shapes,
+TOGETHER rather than patched one by one on purpose: read side by side they sort into two shapes,
 and each shape names an upstream redesign that makes the class hard to write at all. Patched
 singly, each fix is one more local copy of the rule it restores. **Rides with:** that redesign.
 A pass already rewriting one of these symbols may take its entry, but takes the shape's remedy,
@@ -252,23 +226,7 @@ through every nested loop.
   `diagnostics/probe_reasoning.py` reads every exception as "refuses this effort";
   `tracing/langfuse_client.py` runs a second private 429 loop beside `decide_429_wait`.
 
-**Shape 2 — a fact REBUILT from its inputs where the producer already resolved and stamped it.**
-Each rebuild drops one layer — the seed, the framing, an ancestor's delta, the typed error, the
-successor, the tenant tier. Remedy: resolution writes a persisted, typed, addressable artifact
-(per cycle: config after seed and overrides, dataset tier, validated panel; per measured point:
-opt_sp, resolved params, `sp_hash`), archive rows carry a required `error_category` behind
-predicates, and later readers accept nothing else.
-- `application/diagnostics/noise_floor.py` rebuilds C0's config from the campaign's alone, so a
-  fork seed's overlay is dropped and it spends on cells of a config that never ran. Silent.
-  `verify.py::verify_candidate` is the shape to copy: the point's banked
-  `resolved_pipeline_params`, refused on an `sp_hash` mismatch before a cell is bought.
-- `resume_and_fork/ab_replay.py` and `diagnostics/noise_floor.py` rebuild C0 with
-  `OptSearchPoint.from_prompt_fields(round0)` — a second origin recovery beside
-  `origin.py::resolve_origin_opt_search_point`, without the framing; `ab` then splits the origin
-  into two arms on its δ ruler. `grep -n "from_prompt_fields(origin.prompt_fields)\|from_prompt_fields(round_file.prompt_fields)"
-  promptpotter/application/bench/resume_and_fork/ab_replay.py promptpotter/application/diagnostics/noise_floor.py`.
-
-**Shape 3 — an act or a reading lives in ONE adapter, so the entry points disagree.** The
+**Shape 2 — an act or a reading lives in ONE adapter, so the entry points disagree.** The
 canonical mechanisms are ones an adapter may call, not the only path an act can take. Remedy:
 every operator act runs one application pipeline (validate → admit → apply → record) whose
 exemptions are parameters rather than skipped calls; every reading an operator acts on is one

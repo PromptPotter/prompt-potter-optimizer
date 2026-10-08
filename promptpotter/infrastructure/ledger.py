@@ -1,7 +1,7 @@
 """CycleEventLog — the append-only spine of facts about one cycle, at ``.runtime/ledger.jsonl``.
 
 Forks are first-class: ``inherit_from(parent, offset)``, cut recorded as a ``FORK_CUT`` and
-STAMPED at ``index.json::forked_at_offset``, read back by ``branch_offset``. Nothing wrote that
+STAMPED at ``index.json::forked_at_offset``, read back by ``ledger_chain``. Nothing wrote that
 until it existed, so where a fork's history began was known only inside the forking process —
 ``forked_from_round`` is a round and ``forked_at`` a clock, and neither addresses a ledger.
 
@@ -27,18 +27,17 @@ from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
 from promptpotter.domain.run_records import CycleRecord
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.read_model import LedgerSpan
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CycleEventLog", "branch_offset", "open_with_history"]
+__all__ = ["CycleEventLog", "ledger_chain", "open_with_history"]
 
 
-def _fork_link(cycle_dir: CycleDir) -> tuple[str, int] | None:
-    """This cycle's branch point as ``(parent_cycle_id, offset)``, or ``None`` for a root.
-
-    One manifest read for both halves — they are one fact, and the two readers below wanted
-    different sides of it."""
-    index = CycleLayout(Path(cycle_dir)).manifest
+def _fork_link(cycle_dir: Path) -> tuple[str, int] | None:
+    """``(parent_cycle_id, index.json::forked_at_offset)``, or ``None`` for a root. An unstamped
+    fork raises: a default ``0`` reads as a real, much shorter history."""
+    index = CycleLayout(cycle_dir).manifest
     if not index.is_file():
         return None
     data = json.loads(index.read_text(encoding="utf-8"))
@@ -57,32 +56,13 @@ def _fork_link(cycle_dir: CycleDir) -> tuple[str, int] | None:
     return parent, offset
 
 
-def branch_offset(cycle_dir: CycleDir) -> int | None:
-    """Where this cycle's history begins on its PARENT's ledger — a ``Cut`` on the parent, stored
-    as ``index.json::forked_at_offset``. ``None`` for a root, which inherits nothing.
-
-    The one copy of this number: ``forked_from_round`` is a round and ``forked_at`` a wall clock,
-    so neither substitutes for it. A FORK whose manifest carries no stamp raises rather than
-    defaulting — inheriting ``0`` would silently serve a fork as though it began from nothing,
-    which reads as a real (and much shorter) history."""
-    link = _fork_link(cycle_dir)
-    return None if link is None else link[1]
-
-
-def open_with_history(cycle_dir: CycleDir) -> CycleEventLog:
-    """This cycle's ledger with its fork chain already bound, so ``iter()`` off disk walks the
-    same prefix a live run walks in process.
-
-    The binding existed only inside the forking process until the cut was stamped, so a reader
-    that had not run the fork saw a history beginning at the branch — real, and much shorter than
-    the truth. Cycles are FLAT under one ``cycles/`` (``store/layout.py``), so a parent resolves
-    as a sibling directory and no store is needed to find it. A parent naming a cycle already on
-    the chain is refused rather than followed: a cyclic manifest is corrupt data, and walking it
-    would hang the reader that asked an ordinary question."""
-    log = CycleEventLog.open(cycle_dir)
-    seen = {Path(cycle_dir).name}
-    child_dir, child_log = Path(cycle_dir), log
-    while (link := _fork_link(CycleDir(child_dir))) is not None:
+def _fork_prefix(cycle_dir: CycleDir) -> list[tuple[Path, int]]:
+    """Each ancestor's ledger and its child's cut, oldest first; a parent resolves as a sibling dir
+    (``store/layout.py``). A parent already on the chain is refused: walking it would hang."""
+    prefix: list[tuple[Path, int]] = []
+    child_dir = Path(cycle_dir)
+    seen = {child_dir.name}
+    while (link := _fork_link(child_dir)) is not None:
         parent_id, cut = link
         if parent_id in seen:
             raise ValueError(
@@ -90,10 +70,28 @@ def open_with_history(cycle_dir: CycleDir) -> CycleEventLog:
                 "the manifests describe a cycle, which no walk can resolve."
             )
         seen.add(parent_id)
-        parent_dir = child_dir.parent / parent_id
-        parent_log = CycleEventLog.open(CycleDir(parent_dir))
-        child_log.inherit_from(parent_log, cut)
-        child_dir, child_log = parent_dir, parent_log
+        child_dir = child_dir.parent / parent_id
+        prefix.append((CycleLayout(child_dir).ledger, cut))
+    return prefix[::-1]
+
+
+def ledger_chain(cycle_dir: CycleDir) -> list[LedgerSpan]:
+    """Each ancestor's ledger up to its child's cut, oldest first, then this cycle's whole: the one
+    walk of a fork's history, so no reader adds an inherited prefix by hand."""
+    return [
+        *(LedgerSpan(path, cut) for path, cut in _fork_prefix(cycle_dir)),
+        LedgerSpan(CycleLayout(Path(cycle_dir)).ledger),
+    ]
+
+
+def open_with_history(cycle_dir: CycleDir) -> CycleEventLog:
+    """This cycle's ledger with its :func:`ledger_chain` bound, so ``iter()`` walks the same
+    history in the run that appends to it and in any reader off disk."""
+    log = child = CycleEventLog.open(cycle_dir)
+    for path, cut in reversed(_fork_prefix(cycle_dir)):
+        parent = CycleEventLog(path)
+        child.inherit_from(parent, cut)
+        child = parent
     return log
 
 

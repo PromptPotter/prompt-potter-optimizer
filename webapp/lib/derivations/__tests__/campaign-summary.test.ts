@@ -173,9 +173,8 @@ describe("benchReading", () => {
       missing_reason: "nothing held out: the campaign's dataset_split declares no bench rows",
       lift: { accuracy: null, composite: null },
     };
-    expect(benchReading(unheld, "terminal").sub).toBe(unheld.missing_reason);
-    expect(benchReading(null, "running").sub).toBe("graded when the run ends");
-    expect(benchReading(null, "terminal").sub).toBe("not graded — the run ended first");
+    expect(benchReading(unheld, null).sub).toBe(unheld.missing_reason);
+    expect(benchReading(null, "graded when the run ends").sub).toBe("graded when the run ends");
   });
 
   // The served `headline` picks the column; the composite, a 0–1 score, never prints as a percent.
@@ -191,10 +190,10 @@ describe("benchReading", () => {
       missing_reason: null,
       lift: { accuracy: banded(0.5), composite: banded(0.42) },
     };
-    const stat = benchReading(graded, "terminal");
+    const stat = benchReading(graded, null);
     expect(stat.value).toBe("50%");
     expect(stat.sub?.startsWith("accuracy · origin 0% · lift +0.500 · composite 0.62")).toBe(true);
-    const composite = benchReading({ ...graded, headline: "composite" }, "terminal");
+    const composite = benchReading({ ...graded, headline: "composite" }, null);
     expect(composite.value).toBe("0.62");
   });
 });

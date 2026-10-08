@@ -14,6 +14,7 @@ from promptpotter.application.campaign_config import (
     CampaignConfig,
     apply_cycle_seed,
     load_campaign_config,
+    under_record,
 )
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
@@ -731,7 +732,12 @@ def _dataset_dir_of(stores: Stores, campaign: Campaign) -> Path | None:
         return None
 
 
-def _cycle_config(campaign: Campaign, seed: CycleSeed | None) -> CampaignConfig:
+def resolve_campaign_config(
+    stores: Stores, campaign: Campaign, hop: CycleHop | None
+) -> CampaignConfig:
+    """What a campaign RUNS under: the config it froze at mint — an arm's under its head-to-head's
+    record (``under_record``) — under a cycle seed (``hop=None`` reads none). Resume, ``ab`` and
+    the served pipeline all ask it; no dataset file is read."""
     try:
         frozen = load_campaign_config(campaign.config)
     except ValidationError as exc:
@@ -739,16 +745,16 @@ def _cycle_config(campaign: Campaign, seed: CycleSeed | None) -> CampaignConfig:
             path=f"campaigns/{campaign.campaign_id}/campaign.json::config",
             reason=f"{exc.error_count()} field(s) invalid — {exc.errors()[0]['msg']}",
         ) from exc
-    return apply_cycle_seed(frozen, seed)
-
-
-def resolve_campaign_config(
-    stores: Stores, campaign: Campaign, hop: CycleHop | None
-) -> CampaignConfig:
-    """What a campaign RUNS under: the config it froze at mint under a cycle seed (``hop=None``
-    reads none). Resume, ``ab`` and the served pipeline all ask it; no dataset file is read."""
+    if campaign.arm is not None:
+        record = stores.campaigns.load_head_to_head(campaign.arm.head_to_head_id)
+        if record is None:
+            raise StoredConfigInvalidError(
+                path=f"campaigns/{campaign.campaign_id}/campaign.json::arm",
+                reason=f"head-to-head {campaign.arm.head_to_head_id} has no record to run under",
+            )
+        frozen = under_record(frozen, record)
     seed = stores.campaigns.read_cycle_seed(hop) if hop is not None else None
-    return _cycle_config(campaign, seed)
+    return apply_cycle_seed(frozen, seed)
 
 
 def _authoring_draft(stores: Stores, campaign: Campaign) -> DraftCampaign | None:
@@ -840,7 +846,7 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: SubjectSpec) -> _Cam
         raw = dataset_pipeline_declaration(stores, dataset_dir, experiment_outside_run(dataset_dir))
     schema = parse_pipeline_response(raw or {"nodes": {}, "pipelines": {"default": []}})
     seed = stores.campaigns.read_cycle_seed(hop)
-    cfg = _cycle_config(campaign, seed)
+    cfg = resolve_campaign_config(stores, campaign, hop)
     active, filtered = _resolve_active_schema(
         schema,
         exclude=list(cfg.exclude_nodes),

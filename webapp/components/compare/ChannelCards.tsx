@@ -6,8 +6,6 @@ import { useCallback, useMemo, useState, type CSSProperties, type ReactNode } fr
 import { createPortal } from "react-dom";
 import { CELL_MEAN_ROWS } from "@/lib/cell-means";
 import type {
-  BenchScore,
-  CycleListEntry,
   Evidence,
   HeadToHead,
   HeadToHeadRow,
@@ -40,7 +38,6 @@ import {
   candidateObserveConfig,
   compareItems,
   descendantsOf,
-  docCandidateId,
   historicalSamplesFor,
   indexLineage,
   mainLine,
@@ -166,7 +163,7 @@ export function ChannelCards({
   ));
   return (
     <>
-      {h2h && <HeadToHeadVerdict h2h={h2h} />}
+      {h2h && <HeadToHeadVerdict h2h={h2h} scorerId={evidence.scorer_id} />}
       {/* Neutral once it holds for every item: nothing on the list then reads against another. */}
       {listNote !== null && (
         <p className="l4-note">
@@ -242,7 +239,7 @@ const ROW_LABEL: Record<ColumnRow, ReactNode> = {
 };
 
 // Every sentence is served; why a row is not controlled rides that row's badge, not this block.
-function HeadToHeadVerdict({ h2h }: { h2h: HeadToHead }) {
+function HeadToHeadVerdict({ h2h, scorerId }: { h2h: HeadToHead; scorerId: string }) {
   return (
     <div className="cmp-verdict">
       <p className={cx("cmp-verdict-line", verdictTone(h2h.verdict))}>
@@ -262,7 +259,7 @@ function HeadToHeadVerdict({ h2h }: { h2h: HeadToHead }) {
           </span>
         )}
         <span className="l4-dim">
-          graded by <code className="cmp-verdict-scorer">{h2h.scorer_id}</code>
+          graded by <code className="cmp-verdict-scorer">{scorerId}</code>
         </span>
       </p>
       {h2h.notes.length > 0 && (
@@ -340,14 +337,15 @@ function Metric({
 
 // The BENCH headline off the served head-to-head row, never the search rows; a missing one says why
 // in the sidebar's own words (`benchReading`).
-function benchLead(bench: BenchScore | null, runPhase: CycleListEntry["run_phase"] | undefined) {
+function benchLead(row: HeadToHeadRow | null) {
+  const bench = row?.bench ?? null;
   const s = bench?.selected ?? null;
   const level = s?.[s.headline] ?? null;
   const lift = bench?.lift[bench.headline] ?? null;
   return {
     score:
       bench === null || s === null
-        ? { value: "—", band: benchReading(bench, runPhase).sub ?? "" }
+        ? { value: "—", band: benchReading(bench, row?.bench_missing_reason).sub ?? "" }
         : {
             value: fmtMetricValue("level", level?.value ?? null),
             band: `${s.headline} ${fmtMetricInterval("level", level?.ci_lo ?? null, level?.ci_hi ?? null)} · ${s.n_scored}/${bench.bench_size} rows`,
@@ -366,7 +364,7 @@ function benchLead(bench: BenchScore | null, runPhase: CycleListEntry["run_phase
 // What the arm's budget counts — the sidebar's own spend stat — its buckets on a secondary line.
 function SpentReading({ metered }: { metered: MeteredSpend | null }) {
   if (metered === null) return "—";
-  const { value, sub } = spendStat(metered, "");
+  const { value, sub } = spendStat(metered);
   return (
     <span className="cmp-metric">
       {value}
@@ -449,7 +447,7 @@ function HeadlineBadges({
         </Badge>
       )}
       {row.outcome === "failed" && row.stop_reason !== null && (
-        <Badge tone="danger">{STOP_REASON_LABELS[row.stop_reason] ?? row.stop_reason}</Badge>
+        <Badge tone="danger">{STOP_REASON_LABELS[row.stop_reason]}</Badge>
       )}
     </span>
   );
@@ -559,9 +557,7 @@ function ChannelCard({
         : [],
     [index, selected],
   );
-  // The DOCUMENT's own id, via the served join key: a tree id differs after a resume re-mints C0. Key on
-  // `course_label`, never `label` — a fork-contributed attempt keeps its minting course's label in the doc.
-  const docId = selected ? docCandidateId(doc, selected.course_label) : null;
+  const docId = selected?.id ?? null;
   const pickedRow = selected
     ? scoreboardRow(doc, docId ?? "", selected.label, selected.round ?? 0, pickedIdx)
     : null;
@@ -616,7 +612,7 @@ function ChannelCard({
         }`,
   };
 
-  const lead = benchLead(headline?.bench ?? null, run?.answering.run_phase);
+  const lead = benchLead(headline);
 
   const idRow = (
     <div className="cmp-channel-row">

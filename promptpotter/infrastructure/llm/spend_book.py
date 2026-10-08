@@ -54,7 +54,13 @@ from typing import TYPE_CHECKING, NamedTuple
 import httpx
 
 from promptpotter.domain.run_records import TokenUsageRecord
-from promptpotter.domain.spend import SEARCH_KINDS, CeilingMeter, TokenAccount, TokenUsageKind
+from promptpotter.domain.spend import (
+    NESTED_NODE_PREFIX,
+    SEARCH_KINDS,
+    CeilingMeter,
+    TokenAccount,
+    TokenUsageKind,
+)
 from promptpotter.infrastructure.llm.telemetry import (
     active_cycle_ledger,
     bill_usd,
@@ -260,7 +266,7 @@ class SpendBook(Projection):
         copy = record.model_copy(
             update={
                 "kind": "backend",
-                "node": f"inner:{record.node}",
+                "node": f"{NESTED_NODE_PREFIX}{record.node}",
                 "round": self.round_now(),
                 "hold_id": hold_id,
                 "mirrored": False,

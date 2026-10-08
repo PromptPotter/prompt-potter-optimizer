@@ -164,15 +164,15 @@ def _diff_paths(
 
 
 def classify_config_diff(
-    config: CampaignConfig, frozen: dict[str, Any]
+    config: CampaignConfig, frozen: dict[str, Any], *, arm: bool
 ) -> tuple[DiffScope, list[str]]:
-    """Classify *config* vs the frozen snapshot, both whole, leaf by leaf — a leaf the table does not
-    know classifies DATA_AFFECTING."""
+    """Classify *config* vs the frozen snapshot, both frozen as the mint freezes them, leaf by leaf
+    — a leaf the table does not know classifies DATA_AFFECTING."""
     if not frozen:
         # A check-in skeleton (`mint_checkin_skeleton`) carries `config: {}` — the campaign has
         # no snapshot yet. That is "nothing to diff against", not "every leaf changed".
         return DiffScope.NONE, []
-    active = config.model_dump(mode="json")
+    active = config.frozen(arm=arm)
     table = _table(config)
     diffs = _diff_paths(table, active, frozen)
     if not diffs:

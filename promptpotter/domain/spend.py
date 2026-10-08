@@ -12,7 +12,7 @@ from collections.abc import Iterable, Mapping
 from functools import reduce
 from typing import TYPE_CHECKING, Literal, NamedTuple, NotRequired, TypedDict, get_args
 
-from pydantic import ConfigDict, Field, ValidationError
+from pydantic import ConfigDict, Field, PrivateAttr, ValidationError, field_validator
 
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.instrument import MeasurementRole
@@ -22,11 +22,12 @@ if TYPE_CHECKING:
     from promptpotter.domain.run_records import TokenUsageRecord
 
 __all__ = [
+    "NESTED_NODE_PREFIX",
     "ROLE_SPEND_KIND",
     "SEARCH_KINDS",
-    "TOKEN_KIND_BUCKET",
     "BudgetChange",
     "CeilingMeter",
+    "KindSpend",
     "MeteredSpend",
     "SpendBucket",
     "SpendCeilings",
@@ -178,7 +179,7 @@ class TokenAccount(StrictModel):
 
 TokenUsageKind = Literal["optimizer", "backend", "judge", "diagnostic", "bench"]
 """Who spent it, and therefore which bucket it lands in. ``judge`` is a third arm rather than a
-flavour of either: folded into ``loop`` an operator reads grading cost as optimizer cost, folded
+flavour of either: folded into ``optimizer`` an operator reads grading cost as optimizer cost, folded
 into ``backend`` as the measured system's (``judges/CLAUDE.md`` § Scoring, never the optimizer
 loop). ``diagnostic`` is what a `verify` / `ab` / `noise-floor` spends — it answers a question ABOUT
 the search rather than advancing it, so folding it into `backend` would report re-measuring a
@@ -194,6 +195,10 @@ budget, which a sibling arm's cache cannot stretch and its bench pass cannot eat
 ROLE_SPEND_KIND: dict[str, TokenUsageKind] = {MeasurementRole.BENCH: "bench"}
 """The scoring passes whose ROLE files their spend, whatever each call would otherwise bank as —
 keyed by the ``MeasurementRole`` that also names the pass's archive run."""
+
+NESTED_NODE_PREFIX = "inner:"
+"""What a nested run's bill is filed under on its outer ledger, before its own node's name
+(``spend_book.py::SpendBook.mirror``) — so the outer rollup can keep those nodes apart."""
 
 
 class SpendCeilings(NamedTuple):
@@ -222,8 +227,10 @@ def declare_ceiling(base: SpendCeilings, *layers: BudgetChange) -> SpendCeilings
 
 
 class SpendBucket(StrictModel):
-    """One spend sub-bucket (backend, optimizer-loop, or judge). Mutated only by
-    ``SpendRollup.bank``. ``used_usd`` is the BILL; ``incurred_usd`` prices cache hits too."""
+    """One spend sub-bucket — a spend kind's, or one node's.
+
+    Mutated only through ``SpendRollup.bank`` / ``absorb``. ``used_usd`` is the BILL;
+    ``incurred_usd`` prices cache hits too."""
 
     used_usd: float = 0.0
     input_tokens: int = 0
@@ -249,19 +256,70 @@ class SpendBucket(StrictModel):
     def metered_usd(self, meter: CeilingMeter) -> float:
         return self.used_usd if meter == "bill" else self.incurred_usd
 
+    @property
+    def cache_share(self) -> float | None:
+        """:meth:`TokenAccount.cache_share` over the bucket. It folds billed calls alone, so no
+        replay arm applies; a 0 sum reads as unreported, since a sum cannot tell the two apart."""
+        return TokenAccount(
+            input=self.input_tokens, cache_read=self.cache_read_tokens or None
+        ).cache_share(replayed=False)
+
+    def bank(self, record: TokenUsageRecord) -> None:
+        usd = record.cost_usd
+        in_tok = int(record.input_tokens)
+        out_tok = int(record.output_tokens)
+
+        if usd is not None:
+            self.incurred_usd = round(self.incurred_usd + usd, 6)
+        elif in_tok or out_tok:
+            self.incurred_unpriced_tokens += in_tok + out_tok
+
+        if not record.cached:
+            self.input_tokens += in_tok
+            self.output_tokens += out_tok
+            self.reasoning_tokens += int(record.reasoning_tokens)
+            # Only the billed side: a reuse-cache hit reached no provider, so counting its
+            # replayed cache tokens would report a prefix holding on calls never made.
+            self.cache_read_tokens += int(record.cache_read_tokens)
+            self.cache_write_tokens += int(record.cache_write_tokens)
+            if usd is not None:
+                self.used_usd = round(self.used_usd + usd, 6)
+                self.rate_known = True
+            elif in_tok or out_tok:
+                # Billed but with no resolvable cost, so the USD cap cannot see this spend.
+                # Tracked so the dashboard flags the cap as inactive.
+                self.unpriced_tokens += in_tok + out_tok
+
+    def absorb(self, other: SpendBucket) -> None:
+        for name in SpendBucket.model_fields:
+            held, added = getattr(self, name), getattr(other, name)
+            if isinstance(held, bool):
+                setattr(self, name, held or added)
+            elif isinstance(held, float):
+                setattr(self, name, round(held + added, 6))
+            else:
+                setattr(self, name, held + added)
+
+
+def _bucket_per_kind() -> dict[TokenUsageKind, SpendBucket]:
+    return {kind: SpendBucket() for kind in get_args(TokenUsageKind)}
+
+
+def _bank_into[K](buckets: dict[K, SpendBucket], key: K, record: TokenUsageRecord) -> None:
+    buckets.setdefault(key, SpendBucket()).bank(record)
+
+
+def _absorb_into[K](buckets: dict[K, SpendBucket], other: Mapping[K, SpendBucket]) -> None:
+    for key, theirs in other.items():
+        buckets.setdefault(key, SpendBucket()).absorb(theirs)
+
 
 class SpendRollup(StrictModel):
     """A cycle's spend: a bucket per spend kind, and the totals every consumer reads off them.
     ``total_used_usd`` is the BILL a budget caps; ``total_incurred_usd`` prices cache hits too."""
 
-    backend: SpendBucket = Field(default_factory=SpendBucket)
-    loop: SpendBucket = Field(default_factory=SpendBucket)
-    # Scoring's own LLM spend, kept apart from `loop` — see `TokenUsageKind`.
-    judge: SpendBucket = Field(default_factory=SpendBucket)
-    # Spend that asked a question ABOUT the search — see `TokenUsageKind`.
-    diagnostic: SpendBucket = Field(default_factory=SpendBucket)
-    # The held-out pass that grades the selection — see `TokenUsageKind`.
-    bench: SpendBucket = Field(default_factory=SpendBucket)
+    # TOTAL over `TokenUsageKind`, whatever a caller hands in — the totals fold over it.
+    by_kind: dict[TokenUsageKind, SpendBucket] = Field(default_factory=_bucket_per_kind)
     total_used_usd: float = 0.0
     total_incurred_usd: float = 0.0
     # Cumulative BILLED tokens across every bucket — the token halt probe's source. Cache hits are
@@ -275,78 +333,73 @@ class SpendRollup(StrictModel):
     # (`resolve_resume_state`) before carrying it. Serving them is also what keeps the gauge and
     # the halt gate one computation.
 
+    # The same calls again, outside every total and off the wire: only `review.md` reads them, off
+    # a ledger fold. A nested run's bill is its own table, since its nodes and roles are not ours.
+    _by_role: dict[MeasurementRole | None, SpendBucket] = PrivateAttr(default_factory=dict)
+    _by_node: dict[str, SpendBucket] = PrivateAttr(default_factory=dict)
+    _by_nested_node: dict[str, SpendBucket] = PrivateAttr(default_factory=dict)
+
+    @field_validator("by_kind")
+    @classmethod
+    def _every_kind(
+        cls, held: dict[TokenUsageKind, SpendBucket]
+    ) -> dict[TokenUsageKind, SpendBucket]:
+        return _bucket_per_kind() | held
+
     def bank(self, record: TokenUsageRecord) -> None:
         """One call, at the price it carries, into its bucket and the totals — the ONE fold, so a
         cycle's live rollup and a ledger re-read of it cannot disagree."""
-        # Through the declared mapping, never a branch here: a two-way `if kind == "optimizer"`
-        # does not fail when a third kind appears, it files it under `backend` in silence.
-        bucket: SpendBucket = getattr(self, TOKEN_KIND_BUCKET[record.kind])
-        usd = record.cost_usd
-        in_tok = int(record.input_tokens)
-        out_tok = int(record.output_tokens)
-
-        if usd is not None:
-            bucket.incurred_usd = round(bucket.incurred_usd + usd, 6)
-        elif in_tok or out_tok:
-            bucket.incurred_unpriced_tokens += in_tok + out_tok
-
-        if not record.cached:
-            bucket.input_tokens += in_tok
-            bucket.output_tokens += out_tok
-            bucket.reasoning_tokens += int(record.reasoning_tokens)
-            # Only the billed side: a reuse-cache hit reached no provider, so counting its
-            # replayed cache tokens would report a prefix holding on calls never made.
-            bucket.cache_read_tokens += int(record.cache_read_tokens)
-            bucket.cache_write_tokens += int(record.cache_write_tokens)
-            if usd is not None:
-                bucket.used_usd = round(bucket.used_usd + usd, 6)
-                bucket.rate_known = True
-            elif in_tok or out_tok:
-                # Billed but with no resolvable cost, so the USD cap cannot see this spend.
-                # Tracked so the dashboard flags the cap as inactive.
-                bucket.unpriced_tokens += in_tok + out_tok
-
+        self.by_kind[record.kind].bank(record)
+        if record.node.startswith(NESTED_NODE_PREFIX):
+            _bank_into(self._by_nested_node, record.node.removeprefix(NESTED_NODE_PREFIX), record)
+        else:
+            _bank_into(self._by_node, record.node, record)
+            _bank_into(self._by_role, record.role, record)
         self._retotal()
 
     def absorb(self, other: SpendRollup) -> None:
         """Add *other* — another ledger's whole rollup — bucket by bucket. A line's spend is the
         sum over its ledgers, each folded once."""
-        for mine, theirs in zip(self.buckets, other.buckets, strict=True):
-            for name in SpendBucket.model_fields:
-                held, added = getattr(mine, name), getattr(theirs, name)
-                if isinstance(held, bool):
-                    setattr(mine, name, held or added)
-                elif isinstance(held, float):
-                    setattr(mine, name, round(held + added, 6))
-                else:
-                    setattr(mine, name, held + added)
+        _absorb_into(self.by_kind, other.by_kind)
+        _absorb_into(self._by_role, other.by_role)
+        _absorb_into(self._by_node, other.by_node)
+        _absorb_into(self._by_nested_node, other.by_nested_node)
         self._retotal()
 
     def _retotal(self) -> None:
-        # Over `buckets`, never a hand-named pair: the budget gate reads `total_used_usd`, so a
+        # Over every kind, never a hand-named pair: the budget gate reads `total_used_usd`, so a
         # bucket left out of this fold is spend the cap cannot see.
-        buckets = self.buckets
+        buckets = self.by_kind.values()
         self.total_used_usd = round(sum(b.used_usd for b in buckets), 6)
         self.total_incurred_usd = round(sum(b.incurred_usd for b in buckets), 6)
         self.total_tokens_used = sum(b.input_tokens + b.output_tokens for b in buckets)
         self.unpriced_tokens = sum(b.unpriced_tokens for b in buckets)
 
     @property
-    def buckets(self) -> tuple[SpendBucket, ...]:
-        """Every sub-bucket, in declaration order. The ONE walk each total folds over — a caller
-        naming them by hand is how a new bucket lands on disk and is left out of the totals the
-        budget gate reads, silently, in the direction that under-reports spend."""
-        return tuple(getattr(self, attr) for attr in TOKEN_KIND_BUCKET.values())
+    def by_role(self) -> Mapping[MeasurementRole | None, SpendBucket]:
+        """This run's own calls by the scoring pass that paid them; ``None`` outside every pass."""
+        return self._by_role
+
+    @property
+    def by_node(self) -> Mapping[str, SpendBucket]:
+        """This run's own calls by the node that made them: a node whose route scatters reads as
+        a cold cache share beside its spend, which a bucket pooling nodes hides."""
+        return self._by_node
+
+    @property
+    def by_nested_node(self) -> Mapping[str, SpendBucket]:
+        """What nested runs billed onto this ledger, by THEIR node (``NESTED_NODE_PREFIX`` off)."""
+        return self._by_nested_node
 
     @property
     def incurred_unpriced_tokens(self) -> int:
         """Incurred-side twin of :attr:`unpriced_tokens`. >0 ⇒ the L4 efficiency proxy would divide by
         an understated cost and read cheapness that never happened, so such a cell is refused."""
-        return sum(b.incurred_unpriced_tokens for b in self.buckets)
+        return sum(b.incurred_unpriced_tokens for b in self.by_kind.values())
 
     def metered(self, meters: CeilingMeter) -> tuple[float, int]:
         """What a ceiling of ``meters`` has already counted: USD, then billed tokens."""
-        counted = [getattr(self, TOKEN_KIND_BUCKET[k]) for k in METER_KINDS[meters]]
+        counted = [self.by_kind[k] for k in METER_KINDS[meters]]
         return (
             round(sum(b.metered_usd(meters) for b in counted), 6),
             sum(b.input_tokens + b.output_tokens for b in counted),
@@ -356,7 +409,7 @@ class SpendRollup(StrictModel):
     def search_replay_share(self) -> float | None:
         """The share of the search's incurred USD a replay answered — billed nothing, since a
         cache another run paid into served it. ``None`` where the search incurred nothing."""
-        search = [getattr(self, TOKEN_KIND_BUCKET[k]) for k in SEARCH_KINDS]
+        search = [self.by_kind[k] for k in SEARCH_KINDS]
         incurred = sum(b.incurred_usd for b in search)
         return None if incurred <= 0.0 else 1.0 - sum(b.used_usd for b in search) / incurred
 
@@ -373,77 +426,82 @@ class SpendRollup(StrictModel):
         """What the SEARCH incurred (``SEARCH_KINDS``), replays priced — ``None`` where a search
         bucket carries tokens no rate priced, since dividing by an understated cost reads cheapness
         nobody bought."""
-        search: list[SpendBucket] = [getattr(self, TOKEN_KIND_BUCKET[k]) for k in SEARCH_KINDS]
+        search = [self.by_kind[k] for k in SEARCH_KINDS]
         if any(b.incurred_unpriced_tokens for b in search):
             return None
         return sum(b.incurred_usd for b in search)
 
 
+class KindSpend(StrictModel):
+    """One spend kind as every surface reads it: in the meter's units, beside its bill and what it
+    incurred, with its billed tokens and its provider prefix-cache reading."""
+
+    # Whether the cap's meter counts this kind; `False` ⇒ metered beside the cap, never inside it.
+    counted: bool
+    metered_usd: float
+    billed_usd: float
+    incurred_usd: float
+    tokens: int
+    cache_share: float | None
+    cache_write_tokens: int
+    rate_known: bool
+
+    @classmethod
+    def of(cls, bucket: SpendBucket, meter: CeilingMeter, *, counted: bool) -> KindSpend:
+        return cls(
+            counted=counted,
+            metered_usd=bucket.metered_usd(meter),
+            billed_usd=bucket.used_usd,
+            incurred_usd=bucket.incurred_usd,
+            tokens=bucket.input_tokens + bucket.output_tokens,
+            cache_share=bucket.cache_share,
+            cache_write_tokens=bucket.cache_write_tokens,
+            rate_known=bucket.rate_known,
+        )
+
+
 class MeteredSpend(StrictModel):
-    """What a run's spend caps have counted, in the units they meter, by bucket.
+    """What a run's spend caps have counted, in the units they meter, by kind.
     Every surface sets this beside a cap, so none picks the bill or the incurred total itself."""
 
     meter: CeilingMeter
+    # What the meter's counted kinds sum to; `tokens` are their billed tokens.
     usd: float
     tokens: int
-    # Each `SpendRollup` bucket the meter counts, in its units, summing to `usd`; `beside` holds the
-    # rest in the same units — a search meter's bench and diagnostic passes.
-    buckets: dict[str, float]
-    beside: dict[str, float]
     billed_usd: float
-    # Meter-independent, every bucket: what the provider charged beside what the same calls would
-    # have cost with every replay priced. `replay_share` is the search's, `None` where it incurred
-    # nothing.
     incurred_usd: float
-    billed_by_bucket: dict[str, float]
-    incurred_by_bucket: dict[str, float]
+    billed_tokens: int
+    # >0 ⇒ the bill is a floor the USD cap cannot see past.
+    unpriced_tokens: int
+    # Total over every kind; `replay_share` is the search's, `None` where it incurred nothing.
+    kinds: dict[TokenUsageKind, KindSpend]
     replay_share: float | None
 
     @classmethod
     def of(cls, spend: SpendRollup, meter: CeilingMeter) -> MeteredSpend:
         usd, tokens = spend.metered(meter)
-        counted = {TOKEN_KIND_BUCKET[k] for k in METER_KINDS[meter]}
-        names = list(TOKEN_KIND_BUCKET.values())
-        at = {name: getattr(spend, name).metered_usd(meter) for name in names}
+        counted = METER_KINDS[meter]
         return cls(
             meter=meter,
             usd=usd,
             tokens=tokens,
-            buckets={name: v for name, v in at.items() if name in counted},
-            beside={name: v for name, v in at.items() if name not in counted},
             billed_usd=spend.total_used_usd,
             incurred_usd=spend.total_incurred_usd,
-            billed_by_bucket={name: getattr(spend, name).used_usd for name in names},
-            incurred_by_bucket={name: getattr(spend, name).incurred_usd for name in names},
+            billed_tokens=spend.total_tokens_used,
+            unpriced_tokens=spend.unpriced_tokens,
+            kinds={
+                kind: KindSpend.of(b, meter, counted=kind in counted)
+                for kind, b in spend.by_kind.items()
+            },
             replay_share=spend.search_replay_share,
         )
 
-
-TOKEN_KIND_BUCKET: dict[TokenUsageKind, str] = {
-    "optimizer": "loop",
-    "backend": "backend",
-    "judge": "judge",
-    "diagnostic": "diagnostic",
-    "bench": "bench",
-}
-"""Which :class:`SpendRollup` bucket each :data:`TokenUsageKind` lands in — declared once.
-
-TOTAL over the Literal, asserted at import. A two-way ``if kind == "optimizer" else backend``
-at the banking site is what this replaces: it does not fail when a third kind appears, it
-silently files the new one under ``backend``."""
-
-assert set(TOKEN_KIND_BUCKET) == set(get_args(TokenUsageKind)), (
-    "TOKEN_KIND_BUCKET must be total over TokenUsageKind"
-)
-assert set(TOKEN_KIND_BUCKET.values()) <= set(SpendRollup.model_fields), (
-    "TOKEN_KIND_BUCKET names a bucket SpendRollup does not declare"
-)
 
 SEARCH_KINDS: tuple[TokenUsageKind, ...] = ("optimizer", "backend", "judge")
 """The spend that FINDS a result — what a lift is priced in. The bench's pass is the instrument
 grading the result, and a diagnostic asks a question about it; neither is the search's."""
 
 METER_KINDS: dict[CeilingMeter, tuple[TokenUsageKind, ...]] = {
-    "bill": tuple(TOKEN_KIND_BUCKET),
+    "bill": get_args(TokenUsageKind),
     "search_incurred": SEARCH_KINDS,
 }

@@ -246,9 +246,8 @@ async def screen_inner_seeds(
         if cfg_path.exists():
             file_config = read_campaign_config_file(cfg_path)
     campaign_config = load_campaign_config(file_config)
-    pipeline_params = arm_diagnostic_scoring(
-        session, campaign_config, source=RunSource.SEED_SCREEN, log=log_fn
-    )
+    arm_diagnostic_scoring(session, campaign_config, source=RunSource.SEED_SCREEN, log=log_fn)
+    pipeline_params = session.pipeline_params
     # The screen's whole concurrency story, and it reuses the shipped window rather than adding a
     # second way to run things at once: `run_walks` re-reads this at every launch boundary and
     # clamps it to the backend's ceiling, so a constant holds the depth for the entire screen.

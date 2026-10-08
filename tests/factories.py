@@ -246,7 +246,7 @@ def cycle_result(
         spend=SpendRollup(
             total_used_usd=cost if billed is None else billed,
             total_incurred_usd=cost,
-            loop=SpendBucket(incurred_unpriced_tokens=unpriced_tokens),
+            by_kind={"optimizer": SpendBucket(incurred_unpriced_tokens=unpriced_tokens)},
         ),
         **overrides,
     )

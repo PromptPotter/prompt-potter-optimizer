@@ -6,11 +6,12 @@ that silently shadowed the first, so the file's one externally-called function w
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, get_args
 
 from promptpotter.application.optimizers.nodes import CheckResult, ReviewReading, ReviewStat
 from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
+from promptpotter.application.views.render.prefix_reading import prefix_reading
 from promptpotter.domain.bench import BenchColumn, BenchColumns, BenchReading, BenchScore
 from promptpotter.domain.phases import STOP_REASON_INFO, StopReason
 from promptpotter.domain.results import (
@@ -23,7 +24,7 @@ from promptpotter.domain.results import (
     overlap_series,
     round_clocks,
 )
-from promptpotter.domain.spend import TOKEN_KIND_BUCKET, SpendRollup
+from promptpotter.domain.spend import SpendBucket, SpendRollup
 from promptpotter.infrastructure.store.campaign_store.store import cycle_ending
 
 if TYPE_CHECKING:
@@ -41,10 +42,10 @@ def render_review_md(
     accuracy_ceiling: float | None,
     optimizer: SelectedOptimizer,
     bench: BenchScore | None,
-    spend: SpendRollup | None,
+    spend: SpendRollup,
 ) -> str:
     """*bench* is the campaign's headline where this cycle answers for its result; *spend* is the
-    cycle's served rollup, ``None`` where no dashboard carries one."""
+    cycle's history folded (``ledger.py::ledger_chain``), the view its dashboard serves."""
     audits = list(round_audits or [None] * len(rounds))
     if len(audits) < len(rounds):
         audits.extend([None] * (len(rounds) - len(audits)))
@@ -259,23 +260,42 @@ def _render_bench(final: dict[str, Any], bench: BenchScore | None) -> list[str]:
     ]
 
 
-def _render_spend(spend: SpendRollup | None) -> list[str]:
-    """Billed beside incurred, total then per bucket — a replay is priced in the second column and
-    charged in neither."""
-    if spend is None:
-        return []
+def _render_spend(spend: SpendRollup) -> list[str]:
+    """Billed beside incurred, total then per kind and per scoring pass — a replay is priced in the
+    second column and charged in neither."""
     lines = [
         "## Spend",
         "",
-        f"- **{spend.billed_beside_incurred()}**",
+        f"- **{spend.billed_beside_incurred()}** (this cycle's own ledger)",
         "",
-        "| bucket | billed $ | incurred $ |",
+        "| kind | billed $ | incurred $ |",
         "|---|---:|---:|",
     ]
-    for kind, attr in TOKEN_KIND_BUCKET.items():
-        bucket = getattr(spend, attr)
+    for kind, bucket in spend.by_kind.items():
         lines.append(f"| {kind} | {bucket.used_usd:.4f} | {bucket.incurred_usd:.4f} |")
+    if spend.by_role:
+        lines += ["", "| scoring pass | billed $ | incurred $ |", "|---|---:|---:|"]
+    for role, bucket in sorted(spend.by_role.items(), key=lambda kv: -kv[1].incurred_usd):
+        name = "outside every pass" if role is None else role
+        lines.append(f"| {name} | {bucket.used_usd:.4f} | {bucket.incurred_usd:.4f} |")
+    lines += _node_spend("node", spend.by_node)
+    lines += _node_spend("nested run's node", spend.by_nested_node)
     return [*lines, ""]
+
+
+def _node_spend(header: str, by_node: Mapping[str, SpendBucket]) -> list[str]:
+    """Each node beside its provider's prefix-cache share: a cold share on a node that re-sends
+    one head is a route spread over hosts, priced in the column beside it."""
+    sent = sorted(
+        ((node, b) for node, b in by_node.items() if b.input_tokens), key=lambda kv: -kv[1].used_usd
+    )
+    if not sent:
+        return []
+    lines = ["", f"| {header} | billed $ | input tokens | prefix cache |", "|---|---:|---:|---:|"]
+    for node, bucket in sent:
+        badge = prefix_reading(bucket.cache_share, replayed=False).badge
+        lines.append(f"| {node} | {bucket.used_usd:.4f} | {bucket.input_tokens} | {badge} |")
+    return lines
 
 
 def _render_stats_block(

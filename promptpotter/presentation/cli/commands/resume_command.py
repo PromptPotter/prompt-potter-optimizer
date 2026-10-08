@@ -102,7 +102,9 @@ def _prepare_cycle_for_resume(
     if campaign.root_content_hash == current_hash:
         print(f"config: unchanged (content hash {current_hash})")
     else:
-        scope, diffed = classify_config_diff(campaign_config, campaign.config)
+        scope, diffed = classify_config_diff(
+            campaign_config, campaign.config, arm=campaign.arm is not None
+        )
         dataset_name = ctx.init_params.get("dataset_name") or "<dataset>"
         print()
         print("Config changed since the campaign was minted.")

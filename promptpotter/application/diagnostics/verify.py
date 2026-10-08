@@ -30,9 +30,9 @@ from promptpotter.application.scoring.selection import paired_fitness
 from promptpotter.domain.bench import BandedValue
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
-from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, emit_phase
 from promptpotter.domain.results import (
+    BankedSearchPointError,
     ScoredCandidate,
     VerifyPass,
     VerifyReading,
@@ -172,12 +172,12 @@ def verify_reading(
 def _round_rows(
     stores: Stores, hop: CycleHop, round_num: int, candidate_id: str | None
 ) -> list[Any]:
-    """One arm's rows off its round document; ``None`` names the round's first arm, which at
-    round 0 is the origin and the only one there is."""
+    """One arm's rows off its round document; ``None`` names round 0's origin."""
     doc = stores.campaigns.load_round_file(hop, round_num)
-    by_id = {} if doc is None else doc.all_candidate_results
-    rows = next(iter(by_id.values()), []) if candidate_id is None else by_id.get(candidate_id, [])
-    return [{**r} for r in rows]
+    if doc is None:
+        return []
+    arm = doc.origin.candidate_id if candidate_id is None else candidate_id
+    return [{**r} for r in doc.all_candidate_results[arm]]
 
 
 def read_verify(
@@ -256,24 +256,13 @@ async def verify_candidate(
     arm_diagnostic_scoring(session, campaign_config, source=RunSource.VERIFY, log=log_fn)
 
     schema = session.pipeline_schema
-    # The config the round RESOLVED and banked for this point — never the campaign's plus the
-    # proposal's sparse delta, which drops every adopted ancestor's move and a fork seed's overlay.
-    effective_pipeline_params = entry.resolved_pipeline_params
-    if effective_pipeline_params is None:
-        raise VerifyError(f"{label}'s round document carries no resolved config to re-score.")
-    jsp = OptSearchPoint.from_prompt_fields(entry.prompt_fields).to_job_search_point(
-        effective_pipeline_params,
+    # Before a cell is bought: fresh cells of another searchpoint would read as this one's.
+    jsp = entry.searchpoint(
         schema=schema,
         framing=campaign_framing(stores, campaign_config, session.dataset_name),
         demo=session.scoring.require_partition().demo,
     )
     sp_hash = jsp.sp_hash(schema)
-    if entry.sp_hash and sp_hash != entry.sp_hash:
-        # Before a cell is bought: fresh cells of another searchpoint would read as this one's.
-        raise VerifyError(
-            f"{label} rebuilds from its round document as searchpoint {sp_hash[:12]}, not the "
-            f"{entry.sp_hash[:12]} the round scored — the campaign's pipeline has moved under it."
-        )
     # Off the searchpoint itself, so it carries the rendered prompt: keyed on the round's config
     # alone, every candidate sharing a model reads as one and their cells as already measured.
     predicate: dict[str, dict[str, Any]] = dict(schema.node_configs(jsp.pipeline_params))
@@ -437,6 +426,6 @@ async def verify_on_saturation(
             seed=None,
             log=log,
         )
-    except VerifyError as exc:
+    except (VerifyError, BankedSearchPointError) as exc:
         say(f"verify skipped for {winner_id}: {exc}")
         return None

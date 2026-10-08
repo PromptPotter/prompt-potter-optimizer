@@ -367,7 +367,7 @@ function MetricLede({
   return (
     <>
       <p className="l4-lede">
-        {m.spec.label} — {m.spec.description}{" "}
+        {m.spec.label} — {m.spec.description} Graded by <code>{evidence.scorer_id}</code>.{" "}
         {view === "merged"
           ? `Each subject is merged over its own cells, counted on its row; ${shared} are shared by all of them.`
           : `Plotted over every one of the ${m.covered_cells.length} cell(s) any selected subject reached; ${shared} are shared by all of them, which is what the pairs and the variance split are over.`}

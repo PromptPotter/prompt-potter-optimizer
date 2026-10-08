@@ -234,9 +234,8 @@ def refuse_arm_below_round(
         if w.code == "spend_cap_below_round":
             raise PayloadInvalidError(
                 f"arm {arm.arm_key} of head-to-head {arm.head_to_head_id} cannot close one round: "
-                f"{w.title}. {w.detail} On an arm `set-limits --max-usd` moves the head-to-head's "
-                "declared budget and every arm with it; the round is sized down with the "
-                "optimizer's own knobs instead.",
+                f"{w.title}. {w.detail} Raise this arm's cap with `set-limits --max-usd`, which "
+                "moves this arm alone, or size the round down with the optimizer's own knobs.",
                 code="spend_cap_below_round",
             )
 

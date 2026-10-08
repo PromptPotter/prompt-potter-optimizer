@@ -14,15 +14,17 @@ from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.paths import default_jobs_dir
 from promptpotter.config.settings import settings
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.launch_limits import HeldLimits, LaunchLimits, RoundsCap
 from promptpotter.domain.spend import BudgetChange, SpendCeilings, declare_ceiling
 from promptpotter.infrastructure.identity.migration import registered_user_id
 from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.infrastructure.llm.spend_book import SpendBook, unbounded_spend_book
 from promptpotter.infrastructure.store.account_spend import (
+    ZERO_SPEND,
     UserSpend,
     account_ledgers,
+    history_spend,
     sum_user_spend,
 )
 from promptpotter.infrastructure.store.stores import Stores
@@ -136,6 +138,18 @@ class AccountWallet(NamedTuple):
     # headroom above is quoted at zero rather than quoted twice. It names WHY it is zero: a
     # contended account has money and needs a retry, an exhausted one has neither.
     contended: bool = False
+    # The excluded cycle's own history, which `headroom` makes room for: that cycle's book counts
+    # it toward its ceiling, so a ceiling reaching no further than it buys nothing new.
+    history: UserSpend = ZERO_SPEND
+
+    @property
+    def exhausted(self) -> bool:
+        """Nothing left past the excluded cycle's history, in either unit."""
+        return (
+            self.headroom.usd is not None and self.headroom.usd <= self.history.at_most_usd
+        ) or (
+            self.headroom.tokens is not None and self.headroom.tokens <= self.history.at_most_tokens
+        )
 
 
 def read_account_wallet(
@@ -144,16 +158,26 @@ def read_account_wallet(
     stores: Stores,
     job_registry: JobRegistry,
     excluding_job_id: str | None = None,
+    excluding_hop: CycleHop | None = None,
 ) -> AccountWallet:
     """A running cycle holds its whole reserve until it finishes: counting only what is on
     the ledger admits two concurrent launches against one remainder and lets the pair spend double
     the ceiling. Its spend-so-far is therefore counted twice, which errs toward refusing — the safe
     direction for a wallet the account cannot top up. A stopped run's unreported sends bind the
-    headroom as well, at their bounds: nobody learned what they cost."""
+    headroom as well, at their bounds: nobody learned what they cost.
+
+    *excluding_hop* quotes the headroom as how far THAT cycle's ceiling may reach: its history
+    (``account_spend.py::history_spend``, a fork's inherited prefix included) is in the account's
+    spend and counted again by its own book, so it is handed back once."""
     ceilings = lifetime_ceilings(user=user, spends_own_key=spends_the_hosts_own_key(stores))
     spent = sum_user_spend(ledgers=account_ledgers(stores.campaigns))
     if ceilings.usd is None and ceilings.tokens is None:
         return AccountWallet(spent, ceilings, ceilings)
+    history = (
+        ZERO_SPEND
+        if excluding_hop is None
+        else history_spend(CycleDir(stores.campaigns.cycle_dir(excluding_hop)))
+    )
     held = _outstanding_reservations(
         job_registry, user_id=user.user_id, excluding_job_id=excluding_job_id
     )
@@ -171,12 +195,13 @@ def read_account_wallet(
     headroom = SpendCeilings(
         None
         if ceilings.usd is None
-        else _grace_bounded(max(0.0, ceilings.usd - spent.at_most_usd - held_usd), spent),
+        else _grace_bounded(max(0.0, ceilings.usd - spent.at_most_usd - held_usd), spent)
+        + history.at_most_usd,
         None
         if ceilings.tokens is None
-        else max(0, ceilings.tokens - spent.at_most_tokens - held_tokens),
+        else max(0, ceilings.tokens - spent.at_most_tokens - held_tokens) + history.at_most_tokens,
     )
-    return AccountWallet(spent, ceilings, headroom)
+    return AccountWallet(spent, ceilings, headroom, history=history)
 
 
 def admit_launch(
@@ -186,6 +211,7 @@ def admit_launch(
     stores: Stores,
     job_registry: JobRegistry,
     job_id: str,
+    hop: CycleHop | None,
 ) -> tuple[SpendCeilings, SpendCeilings]:
     """**One host-wallet gate in two units** — owned by
     [`0003-spend-and-tenancy.md`](../../../docs/adr/0003-spend-and-tenancy.md) § D1; every launch
@@ -200,9 +226,14 @@ def admit_launch(
     nothing declares the headroom under whatever bounds the DECLARATION — for a metered account,
     one step of it (:func:`_launch_step`).
 
-    ``job_id`` is this launch's own reservation, which the wallet must not count against it."""
+    ``job_id`` is this launch's own reservation, which the wallet must not count against it; *hop*
+    is the cycle a resume continues, ``None`` for a fresh mint."""
     wallet = read_account_wallet(
-        user=user, stores=stores, job_registry=job_registry, excluding_job_id=job_id
+        user=user,
+        stores=stores,
+        job_registry=job_registry,
+        excluding_job_id=job_id,
+        excluding_hop=hop,
     )
     if wallet.contended:
         raise _contended("what this account has left")
@@ -214,17 +245,16 @@ def admit_launch(
             wallet.spent.unpriced_tokens,
             settings.UNPRICED_GRACE_USD,
         )
-    if (wallet.headroom.usd is not None and wallet.headroom.usd <= 0.0) or (
-        wallet.headroom.tokens is not None and wallet.headroom.tokens <= 0
-    ):
+    if wallet.exhausted:
         raise _refused(wallet, "This account has nothing left to spend.")
     delegated = _delegated_spend_ceiling(stores)
     step = _launch_step(user, wallet, delegated)
+    room = wallet.headroom
     tokens = declared.tokens
     if declared.usd is None:
         # A grant bounds what may be DECLARED, so declaring nothing declares the headroom under it
         # — never the grant itself, which would refuse an account that can still afford the run.
-        usd = _lowest(wallet.headroom.usd, delegated, step)
+        usd = _lowest(room.usd, delegated, step)
     else:
         usd = _lowest(declared.usd, delegated)
         if step is not None and usd is not None and usd > step:
@@ -233,22 +263,22 @@ def admit_launch(
                 f"A run on this account is admitted at ${step:.2f} and this one declares "
                 f"${usd:.2f}.",
             )
-        if wallet.headroom.usd is not None and usd is not None and usd > wallet.headroom.usd:
+        if room.usd is not None and usd is not None and usd > room.usd:
             raise _refused(
                 wallet,
-                f"This account has ${wallet.headroom.usd:.2f} left and the run declares "
-                f"${usd:.2f}.",
+                f"This account funds a ceiling of ${room.usd:.2f} for this cycle and the run "
+                f"declares ${usd:.2f}.",
             )
-    if wallet.headroom.tokens is not None:
-        tokens = wallet.headroom.tokens if tokens is None else tokens
-        if tokens > wallet.headroom.tokens:
+    if room.tokens is not None:
+        tokens = room.tokens if tokens is None else tokens
+        if tokens > room.tokens:
             raise _refused(
                 wallet,
-                f"This account has {wallet.headroom.tokens:,} tokens left and the run declares "
-                f"{tokens:,}.",
+                f"This account funds a ceiling of {room.tokens:,} tokens for this cycle and the "
+                f"run declares {tokens:,}.",
             )
     ceiling = SpendCeilings(usd, tokens)
-    return ceiling, _reserve(ceiling, wallet, delegated)
+    return ceiling, _reserve(ceiling, room, delegated)
 
 
 def admit_spend(*, stores: Stores, bucket: str) -> SpendBook:
@@ -279,9 +309,7 @@ def admit_spend(*, stores: Stores, bucket: str) -> SpendBook:
     if wallet.contended:
         raise _contended("what this account has left")
     headroom = wallet.headroom
-    if (headroom.usd is not None and headroom.usd <= 0.0) or (
-        headroom.tokens is not None and headroom.tokens <= 0
-    ):
+    if wallet.exhausted:
         unreported = (
             f", up to ${wallet.spent.unreported_usd:.2f} more in sends whose bill never came"
             if wallet.spent.unreported_usd
@@ -392,33 +420,33 @@ def clamp_budget_change(
         stores=stores,
         job_registry=job_registry,
         excluding_job_id=None if held is None else held.job_id,
+        excluding_hop=hop,
     )
     # Refuse rather than clamp: a contended wallet quotes zero headroom, and clamping to it would
     # write a $0 ceiling that halts the very run the operator was funding.
     if wallet.contended:
         raise _contended("this cycle's ceiling")
     delegated = _delegated_spend_ceiling(stores)
+    room = wallet.headroom
     usd = (
         None
         if requested.usd is None
-        else _lowest(
-            requested.usd, wallet.headroom.usd, delegated, _launch_step(user, wallet, delegated)
-        )
+        else _lowest(requested.usd, room.usd, delegated, _launch_step(user, wallet, delegated))
     )
     tokens = requested.tokens
-    if tokens is not None and wallet.headroom.tokens is not None:
-        tokens = min(tokens, wallet.headroom.tokens)
+    if tokens is not None and room.tokens is not None:
+        tokens = min(tokens, room.tokens)
     change = BudgetChange(usd, tokens)
-    return change, BudgetChange(*_reserve(change, wallet, delegated))
+    return change, BudgetChange(*_reserve(change, room, delegated))
 
 
 def _reserve(
-    ceiling: SpendCeilings | BudgetChange, wallet: AccountWallet, delegated: float | None
+    ceiling: SpendCeilings | BudgetChange, headroom: SpendCeilings, delegated: float | None
 ) -> SpendCeilings:
     """What a run stopping at *ceiling* may never be billed past — the ONE rule, for a launch and a
     ceiling moved mid-run. ``None`` on an arm no account bounds, or one *ceiling* leaves alone."""
-    usd = _lowest(wallet.headroom.usd, delegated)
-    tokens = wallet.headroom.tokens
+    usd = _lowest(headroom.usd, delegated)
+    tokens = headroom.tokens
     return SpendCeilings(
         None if usd is None or ceiling.usd is None else min(usd, 2 * ceiling.usd),
         None if tokens is None or ceiling.tokens is None else min(tokens, 2 * ceiling.tokens),

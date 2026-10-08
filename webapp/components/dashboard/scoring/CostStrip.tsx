@@ -3,26 +3,28 @@ import { memo, useMemo } from "react";
 import { Bar } from "react-chartjs-2";
 import { barChartDefaults, ensureChartRegistered, seriesColor, useThemeVersion } from "@/lib/theme";
 import { Badge, CardFrame } from "@/components/ui";
-import { roundCosts } from "@/lib/derivations";
+import { SPEND_BUCKETS, costSeries, prefixReading, roundCosts, spendLines } from "@/lib/derivations";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { fmtUsd } from "@/lib/format";
 
 ensureChartRegistered();
 
 // What each round COST, on the trend's x-axis — its own strip, since dollars and fitness are
-// different units. Stacked by bucket, never pooled; prefix-cache rides the tooltip (no dollars-saved is served).
+// different units. Stacked by kind, never pooled; prefix-cache rides the tooltip (no dollars-saved is served).
 export const CostStrip = memo(function CostStrip() {
   const { dash } = useDashboard();
   // Subscribe to the theme so a flip pulls fresh inks: a `<canvas>` has no cascade.
   useThemeVersion();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const rounds = useMemo(() => roundCosts(dash), [dash?.spend_by_round]);
+  const rounds = useMemo(() => roundCosts(dash), [dash?.spend_metered_by_round]);
+  const billed = dash?.spend_metered?.billed_usd ?? null;
 
   const labels = rounds.map((r) => String(r.round));
-  const datasets = (rounds[0]?.buckets ?? []).map((b, i) => ({
-    label: b.label,
-    data: rounds.map((r) => r.buckets[i]?.usd ?? 0),
-    backgroundColor: seriesColor(i),
+  // A kind keeps its ink whichever kinds a run carries.
+  const datasets = costSeries(rounds).map((s) => ({
+    label: s.label,
+    data: s.data,
+    backgroundColor: seriesColor(SPEND_BUCKETS.findIndex((b) => b.key === s.key)),
     borderWidth: 0,
   }));
 
@@ -35,12 +37,12 @@ export const CostStrip = memo(function CostStrip() {
           afterBody: (items: { dataIndex: number }[]) => {
             const r = rounds[items[0]?.dataIndex ?? -1];
             if (!r) return "";
-            return r.buckets
-              .filter((b) => b.usd > 0 || b.write > 0)
+            return spendLines(r.metered)
+              .filter((l) => l.kind.billed_usd > 0 || l.kind.cache_write_tokens > 0)
               .map(
-                (b) =>
-                  `${b.label} prefix ${b.prefix.label}` +
-                  (b.write > 0 ? ` · wrote ${b.write} tok` : ""),
+                (l) =>
+                  `${l.label} prefix ${prefixReading(l.kind.cache_share, false).label}` +
+                  (l.kind.cache_write_tokens > 0 ? ` · wrote ${l.kind.cache_write_tokens} tok` : ""),
               );
           },
         },
@@ -52,12 +54,10 @@ export const CostStrip = memo(function CostStrip() {
     },
   });
 
-  const total = rounds.reduce((acc, r) => acc + r.totalUsd, 0);
-
   return (
     <CardFrame
       title={<span>Cost by round</span>}
-      actions={<Badge>{fmtUsd(total)}</Badge>}
+      actions={billed === null ? null : <Badge>{fmtUsd(billed)}</Badge>}
     >
       <div style={{ position: "relative", height: 140 }}>
         {rounds.length === 0 ? (

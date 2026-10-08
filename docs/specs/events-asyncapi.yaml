@@ -867,6 +867,14 @@ components:
         round:
           type: [integer, 'null']
           minimum: 0
+        role:
+          type: [string, 'null']
+          enum: [origin, panel, backfill, parent, repair, overlap, bench, null]
+          description: >-
+            The `MeasurementRole` of the scoring pass this call measured for —
+            `backfill` is a PoBB catch-up, `overlap` the best-so-far line's
+            top-up. Null outside a candidate's pass: an optimizer call, the
+            origin's pass, a nested run's call carried onto its outer ledger.
         timestamp:
           type: string
           format: date-time

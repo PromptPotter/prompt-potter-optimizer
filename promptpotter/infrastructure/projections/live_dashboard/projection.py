@@ -225,27 +225,18 @@ class LiveDashboardProjection(Projection):
         display_metric: DisplayMetric,
         langfuse_trace_url: str | None = None,
         resumed_from_round: int | None = None,
-        seed_from_cycle_id: str | None = None,
         max_cells_in_flight: int | None = None,
         measured_unit: MeasuredUnit | None = None,
         stamps_theta: bool = False,
     ) -> LiveDashboardProjection | None:
-        """``seed_from_cycle_id`` names the cycle to read the prior dashboard from — a fork inherits
-        the parent's trajectory up to the cut while counting its own copied round files."""
+        """Seeded from the cycle's own history — a fork's walks its parent's ledger up to the cut
+        stamped at mint, never past it, while counting its own copied round files."""
         if not (tenant_root and session_id and hop.campaign_id and hop.cycle_id):
             return None
 
-        root = WorkspaceDir(Path(tenant_root))
-        cycle_dir = CycleDir(cycle_dir_for(root, hop))
-        seed_hop = (
-            CycleHop(campaign_id=hop.campaign_id, cycle_id=seed_from_cycle_id)
-            if seed_from_cycle_id
-            else hop
-        )
+        cycle_dir = CycleDir(cycle_dir_for(WorkspaceDir(Path(tenant_root)), hop))
         resume_from = resolve_resume_state(
-            Cut(cycle=CycleDir(cycle_dir_for(root, seed_hop)), hop=seed_hop),
-            Path(cycle_dir),
-            resumed_from_round,
+            Cut(cycle=cycle_dir, hop=hop), Path(cycle_dir), resumed_from_round
         )
         # Surfaces prior rounds' L1/L2/L3 outputs before the first new call lands.
         initial_llm_nodes = read_most_recent_round_nodes(audit_rounds_dir(Path(cycle_dir)))

@@ -26,7 +26,7 @@ the election) so nothing decides per-key at the seam what serializes.
 
 | Projection | Scope | Writes | Role |
 |---|---|---|---|
-| `LiveDashboardProjection` (`projections/live_dashboard/projection.py`) | per cycle | `dashboard.json` | **Display surface** — completed-round summaries (`dash.rounds[]`; **round 0 = the origin's round-0 score**, a one-candidate round emitted via the standard `close_round` path, no separate origin block) + in-flight `current_round` block + `spend` rollup (sole writer for every bucket via `_handle_token_usage` → `SpendRollup.bank`, which picks one through `domain/spend.py::TOKEN_KIND_BUCKET` and folds the totals over `SpendRollup.buckets` — never a hand-named pair, or a new spend kind is money the cap cannot see; a run's spend book is seeded off the `spend_metered` accessor, in the units its ceiling meters, when it is armed). Sole webapp source for the chart and trend sparkline; the lineage tree reads the ledger instead. |
+| `LiveDashboardProjection` (`projections/live_dashboard/projection.py`) | per cycle | `dashboard.json` | **Display surface** — completed-round summaries (`dash.rounds[]`; **round 0 = the origin's round-0 score**, a one-candidate round emitted via the standard `close_round` path, no separate origin block) + in-flight `current_round` block + `spend` rollup (sole writer for every bucket via `_handle_token_usage` → `SpendRollup.bank`, which keys one by the record's kind and folds the totals over `SpendRollup.by_kind` — never a hand-named pair, or a new spend kind is money the cap cannot see; a run's spend book is seeded off the `spend_metered` accessor, in the units its ceiling meters, when it is armed). Sole webapp source for the chart and trend sparkline; the lineage tree reads the ledger instead. |
 | `AuditTrailProjection` (`projections/audit_trail.py`) | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — full LLM I/O, per-sample results, scoreboard with `per_sample`. Fetched lazily by the webapp (`useRoundAudit`) only when an operator drills into a specific round; `useRoundFile` is the peer hook for the PUBLIC `rounds/` tree. |
 | `RacingStreamProjection` (`projections/racing_stream.py`) | per cycle | `.runtime/streams/round_NNNN_{member}.jsonl` | Per-sample race standing under the eliminator `member` names, for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
 | `ReadoutProjection` (`application/views/readout.py` — it renders through `views/render/`, so it sits a layer up) | per cycle / fork | `readout.log` | **The run readout** — the ledger stream as lines, ANSI-stripped, appended per launch. Bound at every entry point; one with a terminal hands in a line sink and sees the styled line too. |
@@ -107,7 +107,7 @@ Three bounds — get them wrong and the tree lies without erroring:
 
 **A round fact lands on the record that OWNS it, and the split is not cosmetic.** Everything
 `elect_round_winner` stamps rides `ElectionRecord` — the crown, each arm's θ and its matched-parent
-lift (`ElectionRecord.fit`, keyed by MINTING label because a resume re-mints ids) — so the tree
+lift (`ElectionRecord.fit`, keyed by MINTING label) — so the tree
 carries the whole verdict before the adapters run and the round closes, and `election_held` is what
 separates a round that HELD from one still scoring (`is_selected: false` reads identically for both).
 The FRONTIER θ is the exception and stays on `round:complete`: it is RESTAMPED when the ruler warms,

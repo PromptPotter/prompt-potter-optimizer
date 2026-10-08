@@ -1,17 +1,13 @@
 "use client";
 import type { MeteredSpend } from "@/lib/api";
-import {
-  METER_WORD,
-  billedIncurredBuckets,
-  labelledBuckets,
-  replayShareLine,
-} from "@/lib/derivations";
+import { METER_WORD, replayShareLine, spendLines } from "@/lib/derivations";
 import { fmtUsd } from "@/lib/format";
 
-// The breakdown every spend figure opens onto: each bucket's bill beside what it incurred, the
+// The breakdown every spend figure opens onto: each kind's bill beside what it incurred, the
 // share of the search a replay answered, and what the cap counts of it. Values are served
 // (`MeteredSpend`); this only lays them out.
 export function SpendBuckets({ metered }: { metered: MeteredSpend }) {
+  const lines = spendLines(metered);
   return (
     <div className="spend-buckets">
       <table>
@@ -23,11 +19,11 @@ export function SpendBuckets({ metered }: { metered: MeteredSpend }) {
           </tr>
         </thead>
         <tbody>
-          {billedIncurredBuckets(metered).map((b) => (
-            <tr key={b.label}>
-              <th scope="row">{b.label}</th>
-              <td>{fmtUsd(b.billedUsd)}</td>
-              <td>{fmtUsd(b.incurredUsd)}</td>
+          {lines.map((l) => (
+            <tr key={l.key}>
+              <th scope="row">{l.label}</th>
+              <td>{fmtUsd(l.kind.billed_usd)}</td>
+              <td>{fmtUsd(l.kind.incurred_usd)}</td>
             </tr>
           ))}
         </tbody>
@@ -45,18 +41,22 @@ export function SpendBuckets({ metered }: { metered: MeteredSpend }) {
           <dt>Counted against cap, {METER_WORD[metered.meter]}</dt>
           <dd>{fmtUsd(metered.usd)}</dd>
         </div>
-        {labelledBuckets(metered.buckets).map((b) => (
-          <div key={b.label}>
-            <dt>{b.label}</dt>
-            <dd>{fmtUsd(b.usd)}</dd>
-          </div>
-        ))}
-        {labelledBuckets(metered.beside).map((b) => (
-          <div key={b.label} className="spend-buckets-beside">
-            <dt>{b.label}, beside the cap</dt>
-            <dd>{fmtUsd(b.usd)}</dd>
-          </div>
-        ))}
+        {lines
+          .filter((l) => l.kind.counted)
+          .map((l) => (
+            <div key={l.key}>
+              <dt>{l.label}</dt>
+              <dd>{fmtUsd(l.kind.metered_usd)}</dd>
+            </div>
+          ))}
+        {lines
+          .filter((l) => !l.kind.counted)
+          .map((l) => (
+            <div key={l.key} className="spend-buckets-beside">
+              <dt>{l.label}, beside the cap</dt>
+              <dd>{fmtUsd(l.kind.metered_usd)}</dd>
+            </div>
+          ))}
       </dl>
     </div>
   );

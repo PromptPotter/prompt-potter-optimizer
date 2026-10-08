@@ -20,7 +20,10 @@ from promptpotter.application.campaign_config import (
     apply_config_overrides,
     apply_cycle_seed,
 )
-from promptpotter.application.initialization.loop_start import init_optimization_loop
+from promptpotter.application.initialization.loop_start import (
+    init_optimization_loop,
+    populate_session_scoring,
+)
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.exploration import parent_level_trajectory
 from promptpotter.application.optimizer_manifest import (
@@ -35,7 +38,6 @@ from promptpotter.application.origin import (
 )
 from promptpotter.application.pipeline_resolve import apply_node_overlay
 from promptpotter.application.run_observers import (
-    ForkInfo,
     RunObservers,
     build_run_observers,
     run_limits_from,
@@ -60,7 +62,6 @@ from promptpotter.application.runner.termination import (
     run_stop_reason,
 )
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
-from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.application.scoring.query_loop import FlightGauge
 from promptpotter.application.views.ingress import run_spend_view
 from promptpotter.config.settings import APP_VERSION
@@ -68,7 +69,8 @@ from promptpotter.domain.bench import BenchPasses, BenchScore, partition_bank
 from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import PromptExport, build_prompt_export
-from promptpotter.domain.launch_limits import HeldLimits, refuse_arm_limits
+from promptpotter.domain.launch_limits import HeldLimits, refuse_arm_halt
+from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.phases import STOP_REASON_INFO, RunPhase, StopOutcome, StopReason
 from promptpotter.domain.pipeline_overlay import (
     overlay_sets_model_outside_allowed,
@@ -83,7 +85,6 @@ from promptpotter.domain.run_records import (
     RebaseRequest,
 )
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import ScoringSpec
 from promptpotter.domain.spend import BudgetChange, CeilingMeter, SpendCeilings, SpendRollup
 from promptpotter.infrastructure.llm.pricing import refresh_rates_in_background
 from promptpotter.infrastructure.llm.rate_limit import get_abort_check, set_abort_check
@@ -104,7 +105,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_wall_clock,
 )
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.judges import judge_instrument
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.hashing import dataset_hash
 
@@ -229,7 +229,6 @@ class _PreparedRun:
 
     origin: CampaignOrigin
     campaign_config: CampaignConfig
-    scoring_spec: ScoringSpec
     halt_at_accuracy: float | None
 
 
@@ -292,7 +291,7 @@ async def _prepare_run(
 ) -> _PreparedRun:
     cb = observers.callbacks
     if session.controlled:
-        refuse_arm_limits(limits.operator, limits.halt_at_accuracy)
+        refuse_arm_halt(limits.halt_at_accuracy)
 
     # A fresh launch supersedes any prior run-control intent: a stale `pause.flag` would pause
     # this very resume on its first poll, so a paused cycle could never be resumed. Binding
@@ -365,6 +364,9 @@ async def _prepare_run(
     # before the origin pass, which spends without one otherwise.
     _arm_run_controls(session, observers, campaign_config)
 
+    # Once per session, under the config the seed reconciled: every origin branch hands
+    # `Cycle.start` a graded report, and every rebase reuses this scorer.
+    populate_session_scoring(session, campaign_config, source=RunSource.ORIGIN)
     # Round 0 IS a round, so it is declared like any other: `_CURRENT_ROUND` must be bound
     # for everything the origin pass spawns, or every origin measurement stamps `None`.
     cb.set_round(0)
@@ -384,9 +386,6 @@ async def _prepare_run(
     return _PreparedRun(
         origin=origin,
         campaign_config=campaign_config,
-        scoring_spec=split_scoring_block(
-            campaign_config.scoring, judge_instrument=judge_instrument(campaign_config.judges)
-        ),
         halt_at_accuracy=limits.halt_at_accuracy,
     )
 
@@ -593,9 +592,6 @@ async def _run_single_cycle(
             dataset,
             campaign_config,
             cb=cb,
-            scoring_formula=prep.scoring_spec.per_sample,
-            scoring_cell_formula=prep.scoring_spec.per_cell,
-            scorer_id=prep.scoring_spec.scorer_id,
             no_divergence_check=mode.no_divergence_check,
             fork_on_divergence=mode.fork_on_divergence,
             langfuse_session_id=langfuse_session_id,
@@ -620,7 +616,7 @@ async def _run_single_cycle(
                 campaign_config=campaign_config,
                 resumed_from_round=session.state.resumed_from_round,
                 origin_accuracy=origin.report.accuracy,
-                fork=ForkInfo(parent_cycle_id=pre_loop_cycle_id, readout=observers.readout),
+                fork_readout=observers.readout,
             )
             observers.callbacks._phase_ctx = parent_phase_ctx
             cb = observers.callbacks
@@ -760,7 +756,7 @@ def _mint_and_rebase_fork(
         campaign_config=prep.campaign_config,
         resumed_from_round=rebase_req.fork_from_round,
         origin_accuracy=prep.origin.report.accuracy,
-        fork=ForkInfo(parent_cycle_id=parent_cycle_id, readout=observers.readout),
+        fork_readout=observers.readout,
     )
     observers.callbacks._phase_ctx = parent_phase_ctx
     logger.info(

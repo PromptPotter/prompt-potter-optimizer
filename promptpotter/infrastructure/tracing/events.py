@@ -82,7 +82,7 @@ class NodeEnd:
 
 @dataclass(frozen=True, slots=True)
 class PromptVersion:
-    """``lineage_id`` is ``OptSearchPoint.lineage.id`` — a per-individual ``uuid4``, and NOT the
+    """``lineage_id`` is ``OptSearchPoint.lineage.id`` — the individual's id, and NOT the
     ``prompt_fields_id`` the archive stores under that name (which is ``sp_hash``). Two events on
     this page carry each; joining a trace to an archive row on the wrong one matches nothing and
     raises nothing. The ladder is `docs/developer/README.md` § Cross-run memory."""

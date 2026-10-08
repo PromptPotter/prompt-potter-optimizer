@@ -7,7 +7,7 @@ import type { DashboardSnapshot } from "@/lib/poll";
 const dash = {
   rounds: [{ round: 1 }, { round: 2 }, { round: 3 }],
   run_limits: { max_rounds: 6, spend_budget_usd: 10 },
-  spend_metered: { meter: "search_incurred", usd: 4 },
+  spend_metered: { meter: "search_incurred", usd: 4, kinds: {} },
 } as unknown as DashboardSnapshot;
 
 describe("forkReconcileDefaults", () => {
@@ -43,7 +43,15 @@ describe("forkReconcileDefaults", () => {
     const d = forkReconcileDefaults(null);
     expect(d.roundsConsumed).toBe(0);
     expect(d.roundsRemaining).toBeNull();
-    expect(d.spentUsd).toBe(0);
+    expect(d.spentUsd).toBeNull();
+  });
+
+  it("offers no remainder off a cap whose spend is unread", () => {
+    // Read as $0 spent, the fork would inherit the parent's WHOLE cap.
+    const unread = { run_limits: { spend_budget_usd: 10 } } as unknown as DashboardSnapshot;
+    const d = forkReconcileDefaults(unread);
+    expect(d.parentBudgetUsd).toBe(10);
+    expect(d.spendRemaining).toBeNull();
   });
 
   it("turns the shown defaults into the pre-confirm ConfigOverrides", () => {

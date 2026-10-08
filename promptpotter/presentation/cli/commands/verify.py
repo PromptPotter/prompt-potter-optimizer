@@ -12,6 +12,7 @@ from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.bench import BandedValue
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.results import BankedSearchPointError
 from promptpotter.infrastructure.store.stores import build_stores, descend_store
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
@@ -61,7 +62,7 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
             seed=args.seed,
             log=logger.info if get_verbose() else None,
         )
-    except VerifyError as exc:
+    except (VerifyError, BankedSearchPointError) as exc:
         raise SystemExit(f"ERROR: {exc}") from exc
 
     reading = outcome.reading

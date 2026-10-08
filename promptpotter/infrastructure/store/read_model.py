@@ -15,8 +15,9 @@ import re
 import threading
 from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Iterator, Sequence
+from itertools import islice
 from pathlib import Path
-from typing import Any, ClassVar, Protocol, cast
+from typing import Any, ClassVar, NamedTuple, Protocol, cast
 
 from filelock import FileLock
 
@@ -151,6 +152,14 @@ class LedgerFold[V](Protocol):
     def value(self) -> V: ...
 
 
+class LedgerSpan(NamedTuple):
+    """One ledger read as far as a history reaches into it: its first ``until`` physical lines, or
+    the whole file at ``None``. A fork's history is its ancestors' spans, then its own whole."""
+
+    path: Path
+    until: int | None = None
+
+
 LEDGER_INDEX_MAX = 256
 DERIVED_MAX = 4096
 
@@ -206,18 +215,36 @@ class LedgerIndex:
         probes = sorted({p for fold in self._folds for p in fold.probes})
         self._screens_all = any(not fold.probes for fold in self._folds)
         self._screen = re.compile(b'"(' + b"|".join(re.escape(p.encode()) for p in probes) + b')"')
+        self._prefixes: dict[tuple[Callable[[], LedgerFold[Any]], int], LedgerFold[Any]] = {}
         self._sig: Signature | None = None
         self._bytes = 0
         self._lines = 0
 
-    def view[V](self, fold: Callable[[], LedgerFold[V]]) -> V:
-        """*fold*'s value over the file as it stands now."""
+    def view[V](self, fold: Callable[[], LedgerFold[V]], until: int | None = None) -> V:
+        """*fold*'s value over the file as it stands now, or over its first *until* lines — the
+        prefix a fork inherits (:class:`LedgerSpan`). An append never moves a prefix, so each one
+        is folded once and kept until the file is replaced."""
         with self._lock:
             if fold not in self._by_type:
                 # A roster first named after this index was built: fold the file again with it.
                 self._reset()
             self._refresh()
-            return cast("LedgerFold[V]", self._by_type[cast("type[Any]", fold)]).value()
+            if until is None or until >= self._lines:
+                return cast("LedgerFold[V]", self._by_type[cast("type[Any]", fold)]).value()
+            prefix = self._prefixes.get((fold, until))
+            if prefix is None:
+                prefix = self._prefixes[(fold, until)] = self._fold_prefix(fold, until)
+            return cast("LedgerFold[V]", prefix).value()
+
+    def _fold_prefix(self, fold: Callable[[], LedgerFold[Any]], until: int) -> LedgerFold[Any]:
+        made = fold()
+        probes = tuple(f'"{p}"'.encode() for p in made.probes)
+        for line, raw in enumerate(islice(_complete_lines(self._path, 0), until)):
+            if probes and not any(p in raw for p in probes):
+                continue
+            if (rec := _record_of(raw)) is not None:
+                made.feed(line, rec)
+        return made
 
     def _refresh(self) -> None:
         sig = file_sig(self._path)
@@ -329,6 +356,7 @@ __all__ = [
     "HOLD_TRAIL",
     "LedgerFold",
     "LedgerIndex",
+    "LedgerSpan",
     "Signature",
     "append_row",
     "compact",

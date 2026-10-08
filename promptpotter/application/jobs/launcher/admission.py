@@ -278,6 +278,7 @@ async def admit_and_hold(
             stores=stores,
             job_registry=job_registry,
             job_id=job.job_id,
+            hop=hop,
         )
         held = HeldLimits.admitted(requested, ceiling, operator, reserve=reserve)
         # Before the caller's first await, so a concurrent launch on this account reads a stamped

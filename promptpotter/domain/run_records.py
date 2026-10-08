@@ -13,6 +13,7 @@ from promptpotter.domain.ruler import AbilityReading, DeltaRuler, ThetaCaveat
 from promptpotter.domain.spend import BudgetChange, TokenUsageKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.instrument import MeasurementRole
 
 __all__ = [
     "BenchCheckpointKind",
@@ -145,9 +146,8 @@ class TokenUsageRecord(StrictModel):
 
     record_type: Literal["token_usage"] = "token_usage"
     kind: TokenUsageKind
-    """Which spend bucket this lands in — ``domain/spend.py::TOKEN_KIND_BUCKET`` is the mapping,
-    and it is the only place that decides. ``judge`` is scoring's own LLM spend and is deliberately
-    neither of the other two."""
+    """Which spend bucket this lands in — ``domain/spend.py::SpendRollup.by_kind`` is keyed by it.
+    ``judge`` is scoring's own LLM spend and is deliberately neither of the other two."""
     node: str
     model: str | None = None
     provider: str | None = None
@@ -189,6 +189,10 @@ class TokenUsageRecord(StrictModel):
     the nested run's own view of what it spent."""
     cached: bool = False
     round: int | None = None
+    role: MeasurementRole | None = None
+    """The scoring pass this call measured for (``shared/instrument.py::measured_candidate``);
+    ``None`` outside a candidate's pass — an optimizer call, the origin's pass. A nested run's copy
+    keeps ITS pass, so ``SpendRollup.by_role`` leaves it out."""
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -653,8 +657,8 @@ class WallClock(StrictModel):
     # Keyed by ``CampaignPhase`` value — a phase that never fired, or whose exit never landed, is
     # ABSENT rather than 0.0: an unclosed bracket measured nothing.
     phase_s: dict[str, float] = Field(default_factory=dict)
-    # ``TOKEN_KIND_BUCKET``'s bucket → the node that billed the call → summed call seconds. Cached
-    # calls are excluded, as they are from the BILL: a replay occupied no clock.
+    # The call's ``TokenUsageKind`` → the node that billed it → summed call seconds. Cached calls
+    # are excluded, as they are from the BILL: a replay occupied no clock.
     worked_s: dict[str, dict[str, float]] = Field(default_factory=dict)
     # Same keys, in CLOCK: the seconds a node's calls held while no phase bracket and no gate was
     # open — an optimizer call the round runs between brackets. Concurrent calls split an instant.

@@ -10,6 +10,7 @@ from promptpotter.application.diagnostics.noise_floor import NoiseFloorError, me
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.results import BankedSearchPointError
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
@@ -40,7 +41,7 @@ async def cmd_noise_floor(args: argparse.Namespace) -> CommandResult:
             k=args.k,
             log=logger.info if get_verbose() else None,
         )
-    except NoiseFloorError as exc:
+    except (NoiseFloorError, BankedSearchPointError) as exc:
         raise SystemExit(f"ERROR: {exc}") from exc
 
     record = outcome.record

@@ -20,7 +20,7 @@ from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.bench import BandedValue, BenchColumn, BenchScore, DatasetSplit
 from promptpotter.domain.campaign import ArmBudget, Instrument
-from promptpotter.domain.spend import TOKEN_KIND_BUCKET
+from promptpotter.domain.spend import TokenUsageKind
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
@@ -52,15 +52,15 @@ if _unformatted:
     raise RuntimeError(f"MetricUnit members with no terminal format: {_unformatted}")
 del _unformatted
 
-# Each `SpendRollup` bucket in the operator's word for it; the webapp's `SPEND_BUCKETS` says the same.
-_BUCKET_WORD = {
-    "loop": "optimizer",
+# Each spend kind in the operator's word for it; the webapp's `SPEND_BUCKETS` says the same.
+_BUCKET_WORD: dict[TokenUsageKind, str] = {
+    "optimizer": "optimizer",
     "backend": "connector",
     "judge": "judge",
     "diagnostic": "diagnostic",
     "bench": "bench",
 }
-assert set(_BUCKET_WORD) == set(TOKEN_KIND_BUCKET.values()), "a spend bucket has no operator word"
+assert set(_BUCKET_WORD) == set(get_args(TokenUsageKind)), "a spend kind has no operator word"
 
 
 def _roster_lines(ev: Evidence) -> list[str]:
@@ -181,7 +181,7 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
     beside = next(c for c in get_args(BenchColumn) if c != h2h.headline)
     lines = [
         f"Head-to-head on the held-out bench, oldest first, every row graded by "
-        f"`{h2h.scorer_id}` and read in {h2h.headline}. {h2h.verdict_line}",
+        f"`{ev.scorer_id}` and read in {h2h.headline}. {h2h.verdict_line}",
         *(f"  {note}" for note in h2h.notes),
     ]
     if h2h.uncontrolled_note is not None:
@@ -254,7 +254,7 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
             + f"{'—' if r.worked_s is None else f'{r.worked_s:.0f}':>7}  {r.rounds:>6}  "
             + "  ".join(
                 f"{'—' if x is None else f'{x:.2f}':>8}"
-                for x in (r.incurred_usd_ratio, r.loop_incurred_usd_ratio, r.worked_ratio)
+                for x in (r.incurred_usd_ratio, r.optimizer_incurred_usd_ratio, r.worked_ratio)
             )
             + f"  {'—' if per_usd is None else f'{per_usd:+.2f}':>7}"
             + f"  {'—' if r.bench_reads is None else r.bench_reads:>5}"
@@ -271,8 +271,8 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
             lines.append(
                 f"  {r.campaign_id[:24]:<24}"
                 + "".join(
-                    f"  {'—' if spend is None else f'{getattr(getattr(spend, b), field):.4f}':>10}"
-                    for b in _BUCKET_WORD
+                    f"  {'—' if spend is None else f'{getattr(spend.by_kind[k], field):.4f}':>10}"
+                    for k in _BUCKET_WORD
                 )
             )
     if h2h.pairs:

@@ -66,6 +66,7 @@ from promptpotter.shared.instrument import (
     enter_instrument_mode,
     instrument_depth,
     measured_candidate,
+    measured_candidate_context,
 )
 
 if TYPE_CHECKING:
@@ -586,8 +587,11 @@ async def _measure_inner_cell(
     # `asyncio.wait`, both of which orphan it to keep calling the optimizer and billing tokens
     # against a sample nobody will read. The bound itself is the measure seam's
     # (`application/scoring/cell_envelope.py`), off what this module declares per cell.
+    # The inner campaign measures no OUTER candidate: unbound, its own optimizer calls would bill
+    # under the outer cell's role.
     inner_task = asyncio.create_task(
-        _run_inner_campaign(ctx, spec, overrides, cycle_dir_box, spawned_by, spawn_role)
+        _run_inner_campaign(ctx, spec, overrides, cycle_dir_box, spawned_by, spawn_role),
+        context=measured_candidate_context(None),
     )
 
     heartbeat_task = asyncio.create_task(

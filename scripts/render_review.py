@@ -14,11 +14,12 @@ from promptpotter.application.campaign_config import load_campaign_config
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.runner.campaign_result import read_cycle_bench
-from promptpotter.application.runner.output import read_cycle_spend
 from promptpotter.application.runner.review_md import render_review_md
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.results import RoundResult
+from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_spend
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.shared.identity import default_identity
@@ -64,7 +65,7 @@ def main(argv: list[str]) -> int:
         bench=read_cycle_bench(
             stores, CycleHop(campaign_id=cycle_dir.parent.parent.name, cycle_id=cycle_dir.name)
         ),
-        spend=read_cycle_spend(CycleLayout(cycle_dir)),
+        spend=scan_ledger_spend(ledger_chain(CycleDir(cycle_dir)))[0],
     )
     out_path = cycle_dir / "review.md"
     out_path.write_text(content, encoding="utf-8")

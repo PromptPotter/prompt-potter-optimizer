@@ -20,7 +20,6 @@ from promptpotter.application.runner.inner.spawn_context import publish_inner_sp
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
-from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import (
     DiagnosticRunRecord,
     candidate_label,
@@ -70,18 +69,17 @@ async def measure_noise_floor(
         raise NoiseFloorError(
             f"round_0000.json missing in {hop.campaign_id}/{hop.cycle_id} — the origin was never scored."
         )
-    if not round_file.all_candidate_results:
+    if not round_file.candidate_scores:
         raise NoiseFloorError(
             f"round_0000.json in {hop.campaign_id}/{hop.cycle_id} carries no origin arm."
         )
-    origin_id = next(iter(round_file.all_candidate_results))
-    origin_rows = round_file.all_candidate_results[origin_id]
+    origin = round_file.origin
+    origin_rows = round_file.all_candidate_results[origin.candidate_id]
     sample_ids = {int(r["sample_id"]) for r in origin_rows if r.get("sample_id") is not None}
     if not sample_ids:
         raise NoiseFloorError(
             f"origin arm in {hop.campaign_id}/{hop.cycle_id} round 0 carries no scored samples."
         )
-    opt_sp = OptSearchPoint.from_prompt_fields(round_file.prompt_fields)
 
     session = await init_services(
         backend_id=campaign.backend_id,
@@ -99,13 +97,10 @@ async def measure_noise_floor(
     publish_inner_spawn_context(session, campaign_config)
 
     log_fn = log or (lambda *_a, **_k: None)
-    pipeline_params = arm_diagnostic_scoring(
-        session, campaign_config, source=RunSource.NOISE_FLOOR, log=log_fn
-    )
+    arm_diagnostic_scoring(session, campaign_config, source=RunSource.NOISE_FLOOR, log=log_fn)
 
     schema = session.pipeline_schema
-    jsp = opt_sp.to_job_search_point(
-        pipeline_params,
+    jsp = origin.searchpoint(
         schema=schema,
         framing=campaign_framing(stores, campaign_config, campaign.dataset_name),
         demo=session.scoring.require_partition().demo,
@@ -116,7 +111,7 @@ async def measure_noise_floor(
             f"none of round 0's {len(sample_ids)} scored sample id(s) resolve against "
             f"the current {campaign.dataset_name} bank."
         )
-    config_hash = schema.sp_hash(pipeline_params or {})
+    config_hash = jsp.sp_hash(schema)
 
     logger.info(
         "noise-floor %s/%s: re-scoring origin C0 %dx (force_fresh) on %d samples",
@@ -164,7 +159,7 @@ async def measure_noise_floor(
         source_campaign=hop.campaign_id,
         source_cycle=hop.cycle_id,
         source_label=candidate_label(0, 0),
-        source_candidate_id=origin_id,
+        source_candidate_id=origin.candidate_id,
         config_hash=config_hash[:12],
         samples_requested=len(scoring_set),
         samples_added=0,

@@ -29,7 +29,7 @@ from typing import Any, NamedTuple, Union, get_args, get_origin
 import yaml
 from pydantic import BaseModel, ValidationError
 
-from promptpotter.application.campaign_config import CampaignConfig, freeze_campaign_config
+from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.maintenance.archive_maintenance import (
     archive_writers,
     iter_cycle_ledgers,
@@ -39,7 +39,7 @@ from promptpotter.application.optimizers import runtimes
 from promptpotter.application.views.view_models import OptimizerStepExitView, ViewContext
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
 from promptpotter.domain.backend import BackendConnection
-from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.campaign import Campaign, CampaignResult
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results import DiagnosticRunRecord, RoundResult
 from promptpotter.domain.run_records import CycleRecord
@@ -78,15 +78,16 @@ def _iter_round_documents() -> list[pathlib.Path]:
 # the validated model so no row has to narrow a type the table already fixed — the alternative
 # was a runtime `isinstance` inside otherwise model-agnostic code, which is a table pretending
 # to be a parameter.
-_Rewrite = Callable[[dict[str, Any]], dict[str, Any]]
+_Rewrite = Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]
 
 
-def _as_frozen(pruned: dict[str, Any]) -> dict[str, Any]:
-    """The minted snapshot's rewrite — whole, as the mint freezes it today."""
-    return freeze_campaign_config(CampaignConfig.model_validate(pruned))
+def _as_frozen(pruned: dict[str, Any], doc: dict[str, Any]) -> dict[str, Any]:
+    """The minted snapshot's rewrite — whole, as the mint freezes it today, so an arm's drops what
+    its head-to-head's record owns."""
+    return CampaignConfig.model_validate(pruned).frozen(arm=doc.get("arm") is not None)
 
 
-def _as_pruned(pruned: dict[str, Any]) -> dict[str, Any]:
+def _as_pruned(pruned: dict[str, Any], doc: dict[str, Any]) -> dict[str, Any]:
     """Write back exactly what validated: stale keys gone, every surviving value untouched."""
     return pruned
 
@@ -125,6 +126,14 @@ _SURFACES: tuple[_Surface, ...] = (
         workspace_globs=("*/campaigns/*/campaign.json",),
         key_path=(),
         model_cls=Campaign,
+        rewrite=_as_pruned,
+    ),
+    _Surface(
+        title="Campaign results (campaigns/*/result.json) — pruned only",
+        verb="pruned",
+        workspace_globs=("*/campaigns/*/result.json",),
+        key_path=(),
+        model_cls=CampaignResult,
         rewrite=_as_pruned,
     ),
     _Surface(
@@ -245,7 +254,7 @@ def _process(path: pathlib.Path, surface: _Surface, *, apply: bool, tally: _Tall
             print(f"          {'.'.join(map(str, err['loc']))}: {err['type']}")
         return
 
-    new = surface.rewrite(pruned)
+    new = surface.rewrite(pruned, doc)
     if new == raw:
         tally.unchanged += 1
         return

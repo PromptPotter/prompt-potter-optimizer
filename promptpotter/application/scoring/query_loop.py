@@ -31,6 +31,7 @@ from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.phases import (
     REFUSAL_STOPS,
     STOP_REASON_INFO,
+    StopCategory,
     StopLoop,
     StopReason,
 )
@@ -75,7 +76,9 @@ __all__ = [
 
 
 # The stops that still wait out the calls already sent — see :func:`run_walks`.
-_BUDGET_STOPS = frozenset({StopReason.SPEND_BUDGET, StopReason.TOKEN_BUDGET})
+_BUDGET_STOPS = frozenset(
+    reason for reason, info in STOP_REASON_INFO.items() if info.category is StopCategory.BUDGET
+)
 
 
 def _budget_refusal(category: ErrorCategory | None) -> StopReason | None:

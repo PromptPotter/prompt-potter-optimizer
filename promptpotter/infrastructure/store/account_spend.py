@@ -8,10 +8,10 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
 
-from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.run_records import SpendTombstoneRecord
-from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import HOLD_TRAIL, LedgerIndex, track_hold
@@ -228,6 +228,17 @@ def billed_spend(ledgers: Iterable[Path]) -> UserSpend:
     return total
 
 
+def history_spend(cycle_dir: CycleDir) -> UserSpend:
+    """What :func:`sum_user_spend` counted from one cycle's ``ledger_chain``. A hold in the prefix
+    is its owner's: a bill past the cut may close it (``spend_book.py::unreported_on``)."""
+    *prefix, own = ledger_chain(cycle_dir)
+    total = billed_spend([own.path])
+    for span in prefix:
+        billed, _ = LedgerIndex.of(span.path, _SPEND_FOLDS).view(_Billed, span.until)
+        total = total.plus(billed)
+    return total
+
+
 def _tombstone_of(rec: dict[str, Any]) -> UserSpend:
     """A banked subject's spend — whole, never re-priced: its rows are gone."""
     return UserSpend(
@@ -317,6 +328,7 @@ __all__ = [
     "bank_spend",
     "billed_spend",
     "campaign_spend",
+    "history_spend",
     "iter_user_token_usage",
     "record_cost_usd",
     "sandbox_cycle_dirs",

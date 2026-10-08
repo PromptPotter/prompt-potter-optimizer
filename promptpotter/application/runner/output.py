@@ -23,10 +23,12 @@ from promptpotter.application.views.view_models import (
     LogMdView,
     RoundDigestView,
 )
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.results import HardSampleOrder, RoundResult
 from promptpotter.domain.spend import SpendRollup
+from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_spend
 from promptpotter.infrastructure.store.campaign_store.store import (
     cycle_ending,
     origin_accuracy_of,
@@ -47,7 +49,6 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 __all__ = [
-    "read_cycle_spend",
     "write_hard_samples_artifacts",
     "write_log_md",
     "write_review_md",
@@ -302,17 +303,6 @@ def _spend_by_round(layout: CycleLayout) -> dict[str, SpendRollup]:
     return out
 
 
-def read_cycle_spend(layout: CycleLayout) -> SpendRollup | None:
-    """The cycle's whole rollup off ``dashboard.json``, READ for the same reason as the per-round
-    split. ``None`` where no dashboard carries a readable one."""
-    raw = (read_json_tolerant(layout.dashboard, {}) or {}).get("spend")
-    if not isinstance(raw, dict):
-        return None
-    with graceful("unreadable dashboard spend"):
-        return SpendRollup.model_validate(raw)
-    return None
-
-
 def _render_cycle_log_md(store: CampaignStore, hop: CycleHop, config: CampaignConfig) -> None:
     index = store.load(hop)
     if not index:
@@ -411,6 +401,6 @@ def write_review_md(session: Session, cycle: Cycle) -> None:
             optimizer=cycle.optimizer,
             # Read only once the cycle has ended: nothing renders the headline before then.
             bench=read_cycle_bench(session.store, session.hop) if "final" in index else None,
-            spend=read_cycle_spend(CycleLayout(cycle_dir)),
+            spend=scan_ledger_spend(ledger_chain(CycleDir(cycle_dir)))[0],
         )
         write_text(CycleLayout(cycle_dir).review_md, content)

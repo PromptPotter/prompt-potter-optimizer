@@ -90,6 +90,7 @@ export type {
   VerifyReading,
   SpendBucket,
   SpendRollup,
+  KindSpend,
   MeteredSpend,
   ActivityBucket,
   ActivityResponse,

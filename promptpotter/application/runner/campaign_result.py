@@ -24,6 +24,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_wall_clock,
 )
 from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.read_model import LedgerSpan
 from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
@@ -70,7 +71,7 @@ def bank_campaign_result(
         return
     ledgers = [CycleLayout(stores.campaigns.cycle_dir(h)).ledger for h in line]
     prior = stores.campaigns.load_result(hop.campaign_id)
-    spend, calls = scan_ledger_spend(ledgers)
+    _, calls = scan_ledger_spend(LedgerSpan(ledger) for ledger in ledgers)
     launch = Launch(
         started_at=started_at,
         finished_at=finished_at,
@@ -89,13 +90,13 @@ def bank_campaign_result(
         CampaignResult(
             cycle_id=hop.cycle_id,
             bench=bench if bench is not None or prior is None else prior.bench,
-            cost=ArmCost(spend=spend, calls=calls, launches=[*earlier, launch]),
+            cost=ArmCost(calls=calls, launches=[*earlier, launch]),
         ),
     )
 
 
 def _bench_counted(spend: SpendRollup) -> tuple[float, int]:
-    bench = spend.bench
+    bench = spend.by_kind["bench"]
     return bench.incurred_usd, bench.input_tokens + bench.output_tokens
 
 
@@ -156,9 +157,10 @@ async def bench_origin(
 
 
 def read_line_spend(stores: Stores, campaign: Campaign) -> SpendRollup:
-    """The line's spend as ``bank_campaign_result`` folds it, live."""
+    """The line's spend as ``bank_campaign_result`` folds it, live: every cycle on it read whole,
+    so what a superseded cycle paid past its cut is the line's cost too."""
     spend, _ = scan_ledger_spend(
-        CycleLayout(stores.campaigns.cycle_dir(h)).ledger
+        LedgerSpan(CycleLayout(stores.campaigns.cycle_dir(h)).ledger)
         for h in stores.campaigns.line(campaign.root_hop)
     )
     return spend

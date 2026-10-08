@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, ClassVar, NamedTuple
+from typing import Any, ClassVar, NamedTuple, get_args
 
 from pydantic import ValidationError
 
@@ -37,8 +37,13 @@ from promptpotter.domain.run_records import (
     TokenUsageRecord,
     WallClock,
 )
-from promptpotter.domain.spend import TOKEN_KIND_BUCKET, SpendRollup
-from promptpotter.infrastructure.store.read_model import LedgerFold, LedgerIndex, iter_jsonl
+from promptpotter.domain.spend import SpendRollup, TokenUsageKind
+from promptpotter.infrastructure.store.read_model import (
+    LedgerFold,
+    LedgerIndex,
+    LedgerSpan,
+    iter_jsonl,
+)
 from promptpotter.shared.clock import epoch_seconds
 
 # The `ScoredCandidate` keys the fold copies verbatim — `LedgerCandidate`'s own field list
@@ -459,22 +464,24 @@ def _gate_spans(rows: list[dict[str, Any]], *, until: float | None) -> list[_Spa
 
 
 def _call_spans(rows: list[dict[str, Any]], *, opened: float | None) -> list[_CallSpan]:
-    """Every fresh call as ``(bucket, node, start, end)`` — a replay reached no wire and held no
+    """Every fresh call as ``(kind, node, start, end)`` — a replay reached no wire and held no
     clock. A bill is stamped when it LANDS, so a span ends at its record: a cell's nodes at its
     reply."""
     out: list[_CallSpan] = []
     for rec in rows:
         if rec.get("record_type") != "token_usage" or rec.get("cached"):
             continue
-        bucket = TOKEN_KIND_BUCKET.get(rec.get("kind"))  # type: ignore[arg-type]
+        kind = rec.get("kind")
         seconds = rec.get("duration_s")
-        if bucket is None or not isinstance(seconds, (int, float)) or isinstance(seconds, bool):
+        if kind not in get_args(TokenUsageKind):
+            continue
+        if not isinstance(seconds, (int, float)) or isinstance(seconds, bool):
             continue
         if (at := epoch_seconds(rec.get("timestamp"))) is None:
             continue
         start = at - float(seconds) if opened is None else max(at - float(seconds), opened)
         if start < at:
-            out.append((bucket, str(rec.get("node")), start, at))
+            out.append((str(kind), str(rec.get("node")), start, at))
     return out
 
 
@@ -584,13 +591,14 @@ def scan_ledger_priced_keys(ledger_paths: Iterable[Path]) -> set[str]:
     return found
 
 
-def scan_ledger_spend(ledger_paths: Iterable[Path]) -> tuple[SpendRollup, int]:
-    """The spend these ledgers' own rows record, folded as a cycle's dashboard folds its own, and
-    how many of those calls reached a provider. Physical, so a fork never re-counts its parent."""
+def scan_ledger_spend(spans: Iterable[LedgerSpan]) -> tuple[SpendRollup, int]:
+    """The spend these spans' rows record, folded as a cycle's dashboard folds its own, and how
+    many of those calls reached a provider. A cycle's ``ledger_chain`` reads its history as the
+    dashboard does; whole files read what each ledger itself paid, so no row counts twice."""
     spend = SpendRollup()
     calls = 0
-    for ledger_path in ledger_paths:
-        own, sent = _view(ledger_path, _Spend)
+    for span in spans:
+        own, sent = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_Spend, span.until)
         spend.absorb(own)
         calls += sent
     return spend, calls

@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.campaign_config import freeze_campaign_config
 from promptpotter.application.pipeline_resolve import resolved_dataset_name
 from promptpotter.application.run_observers import build_campaign_emitter
 from promptpotter.application.runner.campaign_ids import mint_campaign_id, mint_checkin_cycle_id
@@ -298,7 +297,7 @@ def auto_mint_session(
             owner_user_id=str(session.identity.user_id),
             lifecycle_status="active",
             lifecycle_changed_at=now,
-            config=freeze_campaign_config(campaign_config),
+            config=campaign_config.frozen(arm=arm is not None),
         )
     )
 
@@ -420,7 +419,7 @@ def finalize_checkin_to_active(
             # `pipeline.yaml` between the two, and the operator may have picked a different
             # connector in the meantime. This is the mint that freezes it for good.
             "backend_type": backend_type_of_dataset(session.store, session.dataset_name or ""),
-            "config": freeze_campaign_config(campaign_config),
+            "config": campaign_config.frozen(arm=False),
         },
     )
     session.store.campaigns.create(

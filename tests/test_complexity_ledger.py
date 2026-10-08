@@ -398,7 +398,9 @@ LEDGER_BASELINE = {
     # panel. `RoundResult.separable` reads it in place of one round's interval over its parent,
     # which spanned 0 on almost every round and stalled them all alike; it needs the rows the
     # overlap pass holds, so no reader can derive it from the member rates beside it.
-    "cycle_result_fields": 238,
+    # -40: `SpendRollup.by_kind` holds the five kind buckets as one map, and the per-node, per-role
+    # and nested-run splits are private folds `review.md` reads off the ledger, never the record.
+    "cycle_result_fields": 198,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
@@ -774,6 +776,8 @@ LEDGER_BASELINE = {
     # it ends, and the origin's reading lands before the round row it belongs on (test_integrity).
     # +1: a block's provenance moves nothing potter's treatment hashes, while its text, its source
     # and its place each do (test_integrity § 1).
+    # +1: a dial on an unbounded term summed raw, so the clamp floors every candidate at 0.000 and
+    # the election falls to its tie-break (test_numerics § 1).
     # +1: a fire zeroing the stall depth `exploration_budget` widens on tells L1 `tight` on every
     # stalled round (test_numerics § 10).
     # +1: a heal fire setting L3's patience reading, so the first real L3 gate stops the cycle
@@ -783,11 +787,11 @@ LEDGER_BASELINE = {
     # +1: a fire's layout, overrides and plan lost to a pause before the next round closes, while
     # the ladder's counters are restored (test_resume).
     # +1: an LLM-authored slot value echoed into the unfenced breach panel (test_security).
-    # +1: a dial on an unbounded term summed raw, so the clamp floors every candidate at 0.000 and
-    # the election falls to its tie-break (test_numerics § 1).
     # +1: a verify pooling its fresh cells into the round's reads as the old level with a wider n,
     # and a lift left unpaired differences two exams (test_numerics § 1).
-    "test_functions": 249,
+    # +1: a running cycle's ceiling clamped below what the account can fund, its own spend counted
+    # against it twice (test_security).
+    "test_functions": 250,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -957,7 +961,15 @@ LEDGER_BASELINE = {
     # and how long its prompt is, served so two searchpoints read side by side under any metric.
     # +1: `LineageNode.lens_criterion` — the `per_cell` a lens was realized to, so the fork applying
     # a `dials:` lens carries the server's formula and the browser assembles none.
-    "served_fields": 782,
+    # +1: `HeadToHeadRow.bench_missing_reason`, why an arm holds no bench yet, so no surface decides
+    # running / ended / failed off a stop reason. `HeadToHead.scorer_id` moves to `Evidence`: the
+    # comparison owns its one scorer, which grades the bench and every `fitness` cell alike.
+    # -4: `SpendRollup.by_kind` replaces five named buckets on the wire, and no per-node split is
+    # served — only `review.md` reads one.
+    # +7: `MeteredSpend.kinds` (`KindSpend`) folds its four parallel per-bucket maps into one
+    # reading per kind, with `billed_tokens` / `unpriced_tokens` and `spend_metered_by_round` beside
+    # it, so no surface sums, zero-fills or index-joins spend in the browser.
+    "served_fields": 786,
 }
 
 

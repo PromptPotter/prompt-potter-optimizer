@@ -15,7 +15,7 @@ import { CycleStreamProvider } from "@/lib/poll";
 import { ConnectorProvider } from "@/lib/hooks/useConnector";
 import { useWorkspace } from "@/lib/workspace";
 import { HardSamplesProvider } from "@/lib/hard-samples";
-import { useLeafCycleIndex } from "@/lib/hooks/useLeafCycleIndex";
+import { useLeafDatasetName } from "@/lib/hooks/useLeafDatasetName";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { decodeCyclePath, encodeCyclePath, type CyclePath } from "@/lib/ids";
 import { applyChartDefaults } from "@/lib/theme";
@@ -155,11 +155,7 @@ function AppShellInner() {
     },
     [campaignId, viewFor, cycles],
   );
-  const { datasetName: leafDatasetName, createdAt: cycleStartedAt } = useLeafCycleIndex(
-    viewedPath,
-    datasetName,
-    cycles,
-  );
+  const leafDatasetName = useLeafDatasetName(viewedPath, datasetName);
   // The sandbox chain is the hops ABOVE the leaf, so an L4 inner run resolves its OWN pipeline
   // rather than the outer campaign's (`frontend-surface-contract.md::I9`).
   const leafHop = viewedPath?.length ? viewedPath[viewedPath.length - 1] : null;
@@ -369,7 +365,7 @@ function AppShellInner() {
         )}
       </main>
       {/* It acts on the viewed run, so a workspace view carries none. */}
-      {!isWorkspaceTab(tab) && <RemoteControl cycleStartedAt={cycleStartedAt} />}
+      {!isWorkspaceTab(tab) && <RemoteControl />}
       {/* Mounted only while open so its chunk stays off first paint. */}
       {newCampaignOpen && <IngestPane open onClose={() => setNewCampaignOpen(false)} />}
       {/* A `.shell` child, not a sidebar one: the phone hides the sidebar off its list

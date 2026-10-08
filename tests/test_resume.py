@@ -243,7 +243,8 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
         try_inherit_fork_origin,
     )
     from promptpotter.domain.opt_search_point import OptSearchPoint
-    from promptpotter.domain.search_point import TaskDecomposition
+    from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 
     stores = built_stores
     parent = "cycle_inherit_parent"
@@ -292,6 +293,7 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
         hop=CycleHop(campaign_id=_CAMPAIGN, cycle_id=fork),
         experiment_extract={},
         dataset_config_dir=None,
+        pipeline_schema=PipelineSchema(),
     )
 
     # Resolve the origin OSP exactly as ``establish_campaign_origin`` does (fork-seed wins).
@@ -301,6 +303,7 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
         session,  # type: ignore[arg-type]
         unmodified_seed,
         resolved_origin=unmodified_osp,
+        sp=JobSearchPoint(),
         framing=TaskDecomposition(),
     )
     assert inherited is not None
@@ -320,6 +323,7 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
         session,  # type: ignore[arg-type]
         edited_seed,
         resolved_origin=resolve_origin_opt_search_point({}, seed=edited_seed),
+        sp=JobSearchPoint(),
         framing=TaskDecomposition(),
     )
     assert edited is None

@@ -23,23 +23,7 @@ const SKIP_ICON = (
   </svg>
 );
 
-// Module-level, not a hook, so the wallclock read is allowed (as for the two helpers below).
-function etaToBudget(
-  usedUsd: number | null,
-  budgetUsd: number | null,
-  cycleStartedAt: string | null,
-): string {
-  if (usedUsd == null || budgetUsd == null || !cycleStartedAt) return "—";
-  const startedMs = Date.parse(cycleStartedAt);
-  if (!Number.isFinite(startedMs)) return "—";
-  const ageSec = (Date.now() - startedMs) / 1000;
-  if (ageSec <= 0 || usedUsd <= 0) return "—";
-  if (usedUsd >= budgetUsd) return "spent";
-  const burn = usedUsd / ageSec;
-  const remainingSec = (budgetUsd - usedUsd) / burn;
-  return fmtDuration(remainingSec);
-}
-
+// Module-level, not hooks, so the wallclock reads are allowed.
 // Calls are taken in walk order, so one slow call at a candidate's head holds every call behind it.
 function heldBy(waitingOn: string | null, waitingSince: number | null): string | null {
   if (waitingOn === null || waitingSince === null) return null;
@@ -57,7 +41,7 @@ function providerHold(held: BackpressureReading): string {
   return `rate-limited ${fmtDuration(now - held.since)} · ${next}${pace}`;
 }
 
-// A bucket holds billed calls only (`readSpend`), so `replayed` is false by construction.
+// A kind's share folds billed calls only (`SpendBucket.cache_share`), so `replayed` is false.
 function cacheTag(share: number | null, write: number): ReactNode {
   const prefix = prefixReading(share, false);
   // Writes with no reads is paying a premium to fill a prefix nothing collects.
@@ -69,11 +53,7 @@ function cacheTag(share: number | null, write: number): ReactNode {
   );
 }
 
-interface Props {
-  cycleStartedAt?: string | null;
-}
-
-export function RemoteControl({ cycleStartedAt = null }: Props) {
+export function RemoteControl() {
   const {
     campaignId,
     cycleId,
@@ -118,31 +98,12 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
     (c) => c.campaign_id === leafCampaignId && c.cycle_id === leafCycleId,
   );
   const babysat = Boolean(leafEntry?.human_intervened);
-  const {
-    backendUsd,
-    loopUsd,
-    judgeUsd,
-    usedUsd,
-    metered,
-    budgetUsd,
-    budgetTokens,
-    rateKnown,
-    backendTokens,
-    loopTokens,
-    judgeTokens,
-    totalTokens,
-    unpricedTokens,
-    backendCacheShare,
-    loopCacheShare,
-    judgeCacheShare,
-    backendCacheWrite,
-    loopCacheWrite,
-    judgeCacheWrite,
-  } = readSpend(dash);
+  const { metered, lines, budgetUsd, budgetTokens } = readSpend(dash);
+  // False ⇒ USD is unreliable; each row reads its token count instead.
+  const rateKnown = lines.some((l) => l.kind.rate_known);
 
   // The lift itself is the masthead's BENCH chip; the strip carries its price.
   const { benchLiftPerUsd } = headlineStats(dash);
-  const etaChip = etaToBudget(metered?.usd ?? null, budgetUsd, cycleStartedAt);
   // SERVER state (I6): the depth clears itself at the round boundary, and the walk re-reads it
   // at every launch, so a press applies to a walk already running.
   const lookahead = dash?.sample_lookahead ?? 1;
@@ -154,17 +115,18 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
   // `open_sample_ids`. Between rounds `most` is the next round's.
   const inFlight = dash?.in_flight ?? 0;
   const allowed = dash?.lookahead_allowed ?? 0;
-  const most = dash?.lookahead_most ?? 0;
+  // `null`: an optimizer declaring no `arms_per_round` has no next-round bound to quote.
+  const most = dash?.lookahead_most ?? null;
   const scoringNow = inFlight > 0 || allowed > 0;
-  // What a call out holds against the limit that binds is served; where that is its worst case
-  // (an account's reserve) a tight one holds the walk at one call while the depth reads armed.
+  // Whether money holds the walk at fewer calls than the armed depth, and the deepest press the
+  // next walk can take, are both decided on the server beside the depth they read.
   const affordable = dash?.lookahead_affordable ?? null;
   const cellReserve = dash?.cell_reserve_usd ?? null;
-  const moneyPinned = affordable !== null && inFlight + affordable < Math.min(lookahead, allowed);
+  const moneyPinned = dash?.lookahead_money_pinned ?? false;
+  const pickMax = dash?.lookahead_pick_max ?? maxCells;
   const waitNote = heldBy(dash?.waiting_on ?? null, dash?.waiting_since ?? null);
   // Guarded, not annotated: `dashboard.json` is served verbatim and may lack the key.
   const providerHeld = dash?.backpressure ?? null;
-  const pickMax = most > 0 ? Math.max(1, Math.min(maxCells, most)) : maxCells;
   // Unlike Skip, this follows the VIEWED path; the outer's arming is not inherited
   // (`runner/entry.py`), so each layer is armed by looking at it.
   const concurrencyReason =
@@ -226,33 +188,33 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
             <div className="row"><span className="lbl">Session</span><span className="val">{fmtText(dash?.session_id)}</span></div>
             <div className="row"><span className="lbl">Project</span><span className="val">{fmtText(leafEntry?.dataset_name)}</span></div>
             <div className="row"><span className="lbl">Updated</span><span className="val">{fmtText(dash?.wallclock_serialized_at)}</span></div>
-            <div className="section-title">Spend</div>
-            {/* Cache share per bucket, never pooled: the buckets hit different providers, and a
-                pooled ratio would drown the judge's. */}
-            <div className="row"><span className="lbl">Connector</span><span className="val">{rateKnown ? fmtUsd(backendUsd) : `${backendTokens} tok`}{cacheTag(backendCacheShare, backendCacheWrite)}</span></div>
-            <div className="row"><span className="lbl">Optimizer</span><span className="val">{rateKnown ? fmtUsd(loopUsd) : `${loopTokens} tok`}{cacheTag(loopCacheShare, loopCacheWrite)}</span></div>
-            <div className="row"><span className="lbl">Judge</span><span className="val">{rateKnown ? fmtUsd(judgeUsd) : `${judgeTokens} tok`}{cacheTag(judgeCacheShare, judgeCacheWrite)}</span></div>
-            <div className="row"><span className="lbl">Billed</span><span className="val">{usedUsd != null ? fmtUsd(usedUsd) : "—"}</span></div>
-            <div className="row"><span className="lbl">Tokens</span><span className="val">{fmtTokens(totalTokens)}</span></div>
-            {unpricedTokens > 0 ? (
-              <div className="row">
-                <span className="lbl">USD cap</span>
-                <Term className="val remote-spend-warn" content="USD cost couldn't be resolved for some calls (e.g. Groq returns no wire cost and the model isn't in the rate table). The $ figure undercounts real spend and the USD cap can't see it — the token cap is the backstop.">
-                  <span aria-hidden="true">⚠</span> inactive
-                </Term>
-              </div>
-            ) : null}
-            <div className="section-title">Outcome</div>
-            {!terminal && (
-              <Term className="row" content={TERMS.remote_eta}>
-                <span className="lbl">ETA</span><span className="val">{etaChip}</span>
-              </Term>
-            )}
             {babysat ? (
               <div className="row">
                 <span className="lbl">Provenance</span>
                 <Term className="val remote-babysat" content="An operator manually intervened (skip) — this cycle is no longer purely reproducible.">
                   <span aria-hidden="true">✎</span> babysat
+                </Term>
+              </div>
+            ) : null}
+            <div className="section-title">Spend</div>
+            {/* Cache share per bucket, never pooled: the buckets hit different providers, and a
+                pooled ratio would drown the judge's. */}
+            {lines.map((l) => (
+              <div key={l.key} className="row">
+                <span className="lbl">{l.label}</span>
+                <span className="val">
+                  {rateKnown ? fmtUsd(l.kind.billed_usd) : fmtTokens(l.kind.tokens)}
+                  {cacheTag(l.kind.cache_share, l.kind.cache_write_tokens)}
+                </span>
+              </div>
+            ))}
+            <div className="row"><span className="lbl">Billed</span><span className="val">{metered ? fmtUsd(metered.billed_usd) : "—"}</span></div>
+            <div className="row"><span className="lbl">Tokens</span><span className="val">{metered ? fmtTokens(metered.billed_tokens) : "—"}</span></div>
+            {metered && metered.unpriced_tokens > 0 ? (
+              <div className="row">
+                <span className="lbl">USD cap</span>
+                <Term className="val remote-spend-warn" content="USD cost couldn't be resolved for some calls (e.g. Groq returns no wire cost and the model isn't in the rate table). The $ figure undercounts real spend and the USD cap can't see it — the token cap is the backstop.">
+                  <span aria-hidden="true">⚠</span> inactive
                 </Term>
               </div>
             ) : null}
@@ -263,8 +225,8 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
               <span className="lbl">{scoringNow ? "Now" : "Next round"}</span>
               <span className="val">
                 {scoringNow
-                  ? `${inFlight} out · ${allowed} allowed · ${most} at most`
-                  : `${most} at most`}
+                  ? `${inFlight} out · ${allowed} allowed · ${most ?? "—"} at most`
+                  : `${most ?? "—"} at most`}
               </span>
             </Term>
             {waitNote ? (

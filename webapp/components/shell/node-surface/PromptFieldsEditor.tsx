@@ -82,7 +82,7 @@ export function PromptFieldsEditor({
 
   return (
     <section className={cx("prompt-editor", compact && "is-compact")}>
-      <span className="prompt-editor-title">Starting prompt</span>
+      <span className="prompt-editor-title">{readOnly ? "Prompt, as banked" : "Starting prompt"}</span>
       <div className="prompt-editor-grid">
         {shown.map((f) => {
           const locked = locks?.[f.key];

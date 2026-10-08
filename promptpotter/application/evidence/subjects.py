@@ -295,7 +295,7 @@ class SubjectReading(StrictModel):
     # depth is the misreading these names exist to refuse.
     cycle_spend_usd: float | None
     cycle_rounds_scored: int
-    # `round -> USD spent by the end of it`, cumulative, for THIS cycle's own ledger. What lets a
+    # `round -> USD spent by the end of it`, cumulative, over the cycle's history. What lets a
     # surface answer "what had it cost to get to the point I am looking at" as the operator walks
     # the branch, which no single scalar can: the pick moves in the browser and the read does not.
     spend_to_round: dict[str, float]

@@ -167,10 +167,12 @@ What controlled switches, one site each: the SEARCH is the prompt's own fields
 no arm is graded on a sampling or reasoning setting a rival could not move); MEMORY is the arm's own line
 (`store/archive_queries.py`'s fence — the δ ruler at `RulerScope` `campaign`, the sample and axis
 indexes, the fold), while the CACHE still replays any cell, priced; the check-in never re-runs;
-fork, skip and limit commands are refused 409 (`commands/dispatcher.py`); the ceiling meters the
-search's incurred USD, the bench pass beside it (`domain/spend.py::CeilingMeter`). The evidence
-head-to-head reads arms of one record under its declared scorer, pairs only arms equal on it with
-distinct treatments, and marks every other row NOT CONTROLLED.
+fork and skip commands are refused 409 (`commands/dispatcher.py`); the ceiling meters the
+search's incurred USD, the bench pass beside it (`domain/spend.py::CeilingMeter`). The declared
+budget is each arm's STARTING ceiling only: a cap an operator moves binds that arm alone, and the
+read compares the ceiling the arm holds. The evidence head-to-head reads arms of one record under
+its declared scorer, pairs only arms equal on it with distinct treatments, and marks every other
+row NOT CONTROLLED.
 
 ### Central loop
 

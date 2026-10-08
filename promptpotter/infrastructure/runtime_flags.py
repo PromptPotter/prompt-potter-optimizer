@@ -236,11 +236,10 @@ def overlay_armed_controls(body: dict[str, Any], cycle_dir: Path) -> None:
     # is already in the body being corrected. Unclamped, an out-of-range request rendered as fact —
     # a served 8 against a ceiling of 2 claimed a depth nothing was running — and an `auto` arming,
     # which asks for no bound at all, would serve a number no backend holds.
-    ceiling = body.get("max_cells_in_flight")
-    body["sample_lookahead"] = effective_lookahead(
-        read_sample_lookahead(cycle_dir),
-        ceiling if isinstance(ceiling, int) and not isinstance(ceiling, bool) else 1,
-    )
+    served = body.get("max_cells_in_flight")
+    ceiling = served if isinstance(served, int) and not isinstance(served, bool) else 1
+    depth = effective_lookahead(read_sample_lookahead(cycle_dir), ceiling)
+    body["sample_lookahead"] = depth
     body["sample_lookahead_auto"] = sample_lookahead_auto(cycle_dir)
     # The flight gauge is the one FOLDED value that goes stale the same way: a killed or crashed
     # run never publishes its closing zero, so a dead producer would go on reporting calls out.
@@ -248,6 +247,14 @@ def overlay_armed_controls(body: dict[str, Any], cycle_dir: Path) -> None:
         body.update(
             in_flight=0, lookahead_allowed=0, waiting_on=None, waiting_since=None, backpressure=None
         )
+    # Both verdicts read the depth and the gauge as just corrected, so they are decided here.
+    affordable, most = body["lookahead_affordable"], body["lookahead_most"]
+    body["lookahead_money_pinned"] = affordable is not None and (
+        body["in_flight"] + affordable < min(depth, body["lookahead_allowed"])
+    )
+    body["lookahead_pick_max"] = (
+        max(1, min(ceiling, most)) if most is not None and most > 0 else ceiling
+    )
 
 
 # dashboard.json untouched for longer than this ⇒ an active cycle's producer is

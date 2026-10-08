@@ -3111,6 +3111,10 @@
             "title": "Replicates",
             "type": "array"
           },
+          "scorer_id": {
+            "title": "Scorer Id",
+            "type": "string"
+          },
           "spread": {
             "$ref": "#/components/schemas/EditSpread"
           },
@@ -3141,6 +3145,7 @@
         },
         "required": [
           "generated_at",
+          "scorer_id",
           "subjects",
           "comparability",
           "metric"
@@ -3735,10 +3740,6 @@
             "title": "Rows",
             "type": "array"
           },
-          "scorer_id": {
-            "title": "Scorer Id",
-            "type": "string"
-          },
           "uncontrolled_note": {
             "anyOf": [
               {
@@ -3769,7 +3770,6 @@
         "required": [
           "rows",
           "head_to_head_id",
-          "scorer_id",
           "headline",
           "verdict",
           "differs_on",
@@ -3805,6 +3805,17 @@
                 "type": "null"
               }
             ]
+          },
+          "bench_missing_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bench Missing Reason"
           },
           "bench_reads": {
             "anyOf": [
@@ -3893,7 +3904,11 @@
             ],
             "title": "Lift Per Incurred Usd"
           },
-          "loop_incurred_usd_ratio": {
+          "optimizer": {
+            "title": "Optimizer",
+            "type": "string"
+          },
+          "optimizer_incurred_usd_ratio": {
             "anyOf": [
               {
                 "type": "number"
@@ -3902,11 +3917,7 @@
                 "type": "null"
               }
             ],
-            "title": "Loop Incurred Usd Ratio"
-          },
-          "optimizer": {
-            "title": "Optimizer",
-            "type": "string"
+            "title": "Optimizer Incurred Usd Ratio"
           },
           "optimizer_models": {
             "items": {
@@ -4011,6 +4022,7 @@
           "stop_reason",
           "outcome",
           "bench",
+          "bench_missing_reason",
           "bench_set",
           "comparable",
           "spend",
@@ -4018,7 +4030,7 @@
           "worked_s",
           "rounds",
           "incurred_usd_ratio",
-          "loop_incurred_usd_ratio",
+          "optimizer_incurred_usd_ratio",
           "worked_ratio",
           "lift_per_incurred_usd",
           "concurrent_with",
@@ -4086,6 +4098,63 @@
           "origin"
         ],
         "title": "Instrument",
+        "type": "object"
+      },
+      "KindSpend": {
+        "additionalProperties": false,
+        "description": "One spend kind as every surface reads it: in the meter's units, beside its bill and what it\nincurred, with its billed tokens and its provider prefix-cache reading.",
+        "properties": {
+          "billed_usd": {
+            "title": "Billed Usd",
+            "type": "number"
+          },
+          "cache_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Share"
+          },
+          "cache_write_tokens": {
+            "title": "Cache Write Tokens",
+            "type": "integer"
+          },
+          "counted": {
+            "title": "Counted",
+            "type": "boolean"
+          },
+          "incurred_usd": {
+            "title": "Incurred Usd",
+            "type": "number"
+          },
+          "metered_usd": {
+            "title": "Metered Usd",
+            "type": "number"
+          },
+          "rate_known": {
+            "title": "Rate Known",
+            "type": "boolean"
+          },
+          "tokens": {
+            "title": "Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "counted",
+          "metered_usd",
+          "billed_usd",
+          "incurred_usd",
+          "tokens",
+          "cache_share",
+          "cache_write_tokens",
+          "rate_known"
+        ],
+        "title": "KindSpend",
         "type": "object"
       },
       "KnobRow": {
@@ -4578,7 +4647,7 @@
           },
           "sp_hash": {
             "default": "",
-            "description": "THE address of this candidate's measurements — the searchpoint id the archive stores on every row it wrote, under its own spelling `prompt_fields_id`. Neither `id` (a per-individual `uuid4`) nor `label` joins to a row; this does. Served rather than derived: it hashes the node configs INCLUDING the rendered prompt, which no served field carries, so a client recomputing it would match nothing and see no error. Empty on a course and on a candidate that measured nothing. NOT unique — one searchpoint scored on two subsets is one `sp_hash` over two runs, and a re-proposed configuration shares it across rounds.",
+            "description": "THE address of this candidate's measurements — the searchpoint id the archive stores on every row it wrote, under its own spelling `prompt_fields_id`. Neither `id` (the individual's lineage id) nor `label` joins to a row; this does. Served rather than derived: it hashes the node configs INCLUDING the rendered prompt, which no served field carries, so a client recomputing it would match nothing and see no error. Empty on a course and on a candidate that measured nothing. NOT unique — one searchpoint scored on two subsets is one `sp_hash` over two runs, and a re-proposed configuration shares it across rounds.",
             "title": "Sp Hash",
             "type": "string"
           },
@@ -4936,43 +5005,35 @@
       },
       "MeteredSpend": {
         "additionalProperties": false,
-        "description": "What a run's spend caps have counted, in the units they meter, by bucket.\nEvery surface sets this beside a cap, so none picks the bill or the incurred total itself.",
+        "description": "What a run's spend caps have counted, in the units they meter, by kind.\nEvery surface sets this beside a cap, so none picks the bill or the incurred total itself.",
         "properties": {
-          "beside": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "title": "Beside",
-            "type": "object"
-          },
-          "billed_by_bucket": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "title": "Billed By Bucket",
-            "type": "object"
+          "billed_tokens": {
+            "title": "Billed Tokens",
+            "type": "integer"
           },
           "billed_usd": {
             "title": "Billed Usd",
             "type": "number"
           },
-          "buckets": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "title": "Buckets",
-            "type": "object"
-          },
-          "incurred_by_bucket": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "title": "Incurred By Bucket",
-            "type": "object"
-          },
           "incurred_usd": {
             "title": "Incurred Usd",
             "type": "number"
+          },
+          "kinds": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/KindSpend"
+            },
+            "propertyNames": {
+              "enum": [
+                "optimizer",
+                "backend",
+                "judge",
+                "diagnostic",
+                "bench"
+              ]
+            },
+            "title": "Kinds",
+            "type": "object"
           },
           "meter": {
             "enum": [
@@ -4997,6 +5058,10 @@
             "title": "Tokens",
             "type": "integer"
           },
+          "unpriced_tokens": {
+            "title": "Unpriced Tokens",
+            "type": "integer"
+          },
           "usd": {
             "title": "Usd",
             "type": "number"
@@ -5006,12 +5071,11 @@
           "meter",
           "usd",
           "tokens",
-          "buckets",
-          "beside",
           "billed_usd",
           "incurred_usd",
-          "billed_by_bucket",
-          "incurred_by_bucket",
+          "billed_tokens",
+          "unpriced_tokens",
+          "kinds",
           "replay_share"
         ],
         "title": "MeteredSpend",
@@ -6547,7 +6611,7 @@
       },
       "SpendBucket": {
         "additionalProperties": false,
-        "description": "One spend sub-bucket (backend, optimizer-loop, or judge). Mutated only by\n``SpendRollup.bank``. ``used_usd`` is the BILL; ``incurred_usd`` prices cache hits too.",
+        "description": "One spend sub-bucket — a spend kind's, or one node's.\n\nMutated only through ``SpendRollup.bank`` / ``absorb``. ``used_usd`` is the BILL;\n``incurred_usd`` prices cache hits too.",
         "properties": {
           "cache_read_tokens": {
             "default": 0,
@@ -6607,20 +6671,21 @@
         "additionalProperties": false,
         "description": "A cycle's spend: a bucket per spend kind, and the totals every consumer reads off them.\n``total_used_usd`` is the BILL a budget caps; ``total_incurred_usd`` prices cache hits too.",
         "properties": {
-          "backend": {
-            "$ref": "#/components/schemas/SpendBucket"
-          },
-          "bench": {
-            "$ref": "#/components/schemas/SpendBucket"
-          },
-          "diagnostic": {
-            "$ref": "#/components/schemas/SpendBucket"
-          },
-          "judge": {
-            "$ref": "#/components/schemas/SpendBucket"
-          },
-          "loop": {
-            "$ref": "#/components/schemas/SpendBucket"
+          "by_kind": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SpendBucket"
+            },
+            "propertyNames": {
+              "enum": [
+                "optimizer",
+                "backend",
+                "judge",
+                "diagnostic",
+                "bench"
+              ]
+            },
+            "title": "By Kind",
+            "type": "object"
           },
           "total_incurred_usd": {
             "default": 0.0,

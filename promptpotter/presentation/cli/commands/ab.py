@@ -11,6 +11,7 @@ from promptpotter.application.diagnostics.ab import ab_replay_campaign
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.results import BankedSearchPointError
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.presentation.cli.commands._shared import (
@@ -60,7 +61,7 @@ async def cmd_ab(args: argparse.Namespace) -> CommandResult:
             hop=_target(args, stores),
             log=logger.info if get_verbose() else None,
         )
-    except AbReplayError as exc:
+    except (AbReplayError, BankedSearchPointError) as exc:
         raise SystemExit(f"ERROR: {exc}") from exc
 
     scope = (

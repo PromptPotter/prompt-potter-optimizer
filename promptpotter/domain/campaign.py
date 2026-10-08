@@ -14,7 +14,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.run_records import WallClock
-from promptpotter.domain.spend import CeilingMeter, SpendRollup
+from promptpotter.domain.spend import CeilingMeter
 from promptpotter.domain.strict_model import StrictModel
 
 
@@ -97,7 +97,8 @@ class ArmBudget(StrictModel):
 
 class HeadToHeadRecord(StrictModel):
     """``head_to_heads/{id}.json``: one declared comparison — the instrument every arm is graded
-    under and the budget each may spend. Its arms are the campaigns whose ``arm`` names it."""
+    under and the budget each may spend. Its arms are the campaigns whose ``arm`` names it, and
+    this is the one copy of the split and budget they run under: their snapshots carry neither."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -147,8 +148,6 @@ class ArmCost(StrictModel):
 
     model_config = ConfigDict(frozen=True)
 
-    # The line's own ledgers folded as a dashboard folds one: each call once, whichever cycle sent it.
-    spend: SpendRollup
     # Calls that reached a provider; a replay reached no wire.
     calls: int
     launches: list[Launch]

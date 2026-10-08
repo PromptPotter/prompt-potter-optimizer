@@ -7,10 +7,10 @@ import time
 from pathlib import Path
 from typing import Any, ClassVar
 
-from pydantic import ConfigDict, Field, ValidationError
+from pydantic import ConfigDict, Field, ValidationError, computed_field
 
 from promptpotter.domain.backend import BackpressureReading
-from promptpotter.domain.bench import BenchScore, BenchSubject
+from promptpotter.domain.bench import BenchScore, BenchSubject, bench_missing_reason
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import (
@@ -68,9 +68,13 @@ def overlay_spend_metered(body: dict[str, Any], meter: CeilingMeter) -> None:
     """A ``spend`` block this build cannot parse serves none, rather than failing the poll."""
     try:
         spend = SpendRollup.model_validate(body["spend"])
+        by_round = {k: SpendRollup.model_validate(v) for k, v in body["spend_by_round"].items()}
     except ValidationError:
         return
     body["spend_metered"] = MeteredSpend.of(spend, meter).model_dump()
+    body["spend_metered_by_round"] = {
+        k: MeteredSpend.of(r, meter).model_dump() for k, r in by_round.items()
+    }
 
 
 def overlay_criterion_dials(body: dict[str, Any]) -> None:
@@ -378,6 +382,11 @@ class LiveDashboardState(StrictModel):
     # cases wide pins the walk at one call while the depth reads armed. ``None``: no book binds.
     lookahead_affordable: int | None = None
     cell_reserve_usd: float | None = None
+    # Whether money, not the armed depth, holds the walk; and the deepest press the next walk can
+    # take. WIRE-ONLY like ``run_phase``: both read the ARMED depth, so ``overlay_armed_controls``
+    # sets them beside it on the way out.
+    lookahead_money_pinned: bool = Field(default=False, exclude=True)
+    lookahead_pick_max: int = Field(default=1, exclude=True)
     # The call the round's next decision waits on — calls are taken in walk order, so one slow cell
     # at a candidate's head holds every call behind it — and when it was launched (epoch seconds).
     waiting_on: str | None = None
@@ -423,6 +432,8 @@ class LiveDashboardState(StrictModel):
     # `rounds[]`: a re-measured round cost money both times, and the sum over this map is what
     # reconciles against `spend`.
     spend_by_round: dict[str, SpendRollup] = Field(default_factory=dict)
+    # WIRE-ONLY, `spend_metered` per round off `spend_by_round`, so a bar is read like the cap.
+    spend_metered_by_round: dict[str, MeteredSpend] | None = Field(default=None, exclude=True)
 
     catch_up_log: list[CatchUpLogEntry] = Field(default_factory=list)
 
@@ -444,6 +455,12 @@ class LiveDashboardState(StrictModel):
         "measured_unit",
         "run_limits",
     )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def bench_missing_reason(self) -> str | None:
+        """Why ``bench_score`` is null; null beside one."""
+        return None if self.bench_score is not None else bench_missing_reason(self.stop_reason)
 
     @classmethod
     def for_run(

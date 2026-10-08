@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.datasets.authored import config_cell_scorer
 from promptpotter.application.evidence.subjects import SubjectReading
+from promptpotter.application.jobs.quota import declare_run_ceiling
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.runner.bench import bench_rows
@@ -20,6 +21,7 @@ from promptpotter.domain.bench import (
     BenchReading,
     BenchScore,
     DatasetSplit,
+    bench_missing_reason,
 )
 from promptpotter.domain.campaign import (
     Arm,
@@ -31,6 +33,7 @@ from promptpotter.domain.campaign import (
     ceiling_meter,
 )
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.spend import MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import StrictModel
@@ -60,7 +63,7 @@ class HeadToHeadRow(StrictModel):
     # An arm of THIS table's declared head-to-head, read against that declaration.
     controlled: bool
     treatment_digest: str | None
-    # The budget the campaign ran under: its head-to-head's for an arm, else its own config's.
+    # The budget the line's cycle runs under — its config's, with any cap an operator set on it.
     budget: ArmBudget
     # What that budget counts of `spend`; `None` beside a `None` spend.
     spend_metered: MeteredSpend | None
@@ -73,6 +76,8 @@ class HeadToHeadRow(StrictModel):
     # `None` until the line banks an origin's pass; `missing_reason` where it holds nothing out.
     # Its `selected` is `None` until the line grades its selection.
     bench: BenchScore | None
+    # Why `bench` is `None`; `None` beside one.
+    bench_missing_reason: str | None
     bench_set: Instrument | None
     # Against the declared instrument, else the row most others share one with; `None` for a row
     # with no headline.
@@ -87,8 +92,8 @@ class HeadToHeadRow(StrictModel):
     # Each over `HeadToHead.ratio_reference`'s, `None` where either lacks it. INCURRED, never the
     # bill: an arm replaying a sibling's cells is billed nothing for them.
     incurred_usd_ratio: float | None
-    # The `loop` bucket alone — the optimizer's own calls, the spend arms differ on by manifest.
-    loop_incurred_usd_ratio: float | None
+    # The `optimizer` kind alone — the optimizer's own calls, the spend arms differ on by manifest.
+    optimizer_incurred_usd_ratio: float | None
     worked_ratio: float | None
     # Bench lift per USD the SEARCH incurred (`BenchScore.lift_per_usd`); `None` without a lift,
     # or where the search carries tokens no rate priced.
@@ -123,9 +128,6 @@ class HeadToHead(StrictModel):
     rows: list[HeadToHeadRow]
     # The head-to-head whose declaration this table reads: the one most arms in it name.
     head_to_head_id: str | None
-    # The one grader every row's bench is read under — the declared one, else the oldest
-    # campaign's formula — so no two headlines differ by the function that graded them.
-    scorer_id: str
     # The column every row's headline, its lift per USD and every pair is read in.
     headline: BenchColumn
     # `None` below two graded rows, and while an arm of the declared head-to-head is ungraded: the
@@ -155,6 +157,15 @@ class HeadToHeadEntry(NamedTuple):
     stores: Stores
 
 
+class Grader(NamedTuple):
+    """The ONE scorer a read grades every row under, the search rows and the bench passes alike."""
+
+    scorer: CellScorer
+    scorer_id: str
+    # The head-to-head whose declared scorer it is; `None` where no campaign read is an arm.
+    record: HeadToHeadRecord | None
+
+
 class _Graded(NamedTuple):
     row: HeadToHeadRow
     # Each pass's graded rows; `None` where the pass read nothing.
@@ -168,25 +179,47 @@ _ORIGIN_READING = "origin_reading"
 _OPTIMIZER_MODELS = "optimizer_models"
 
 
-def _declared(
-    entries: list[HeadToHeadEntry], campaigns: list[Campaign]
-) -> tuple[HeadToHeadRecord, int] | None:
-    """The record most arms here name, ties to the oldest arm's, and its first arm's slot —
-    ``None`` where no arm is here. An arm of another record is a foreign row, never a veto."""
-    named = [c.arm.head_to_head_id for c in campaigns if c.arm is not None]
+def _declared(campaigns: list[tuple[Stores, Campaign]]) -> HeadToHeadRecord | None:
+    """The record most arms here name, ties to the oldest arm's; ``None`` where no arm is here. An
+    arm of another record is a foreign row, never a veto."""
+    named = [c.arm.head_to_head_id for _, c in campaigns if c.arm is not None]
     if not named:
         return None
     h2h_id = max(dict.fromkeys(named), key=named.count)
-    slot = next(
-        i for i, c in enumerate(campaigns) if c.arm is not None and c.arm.head_to_head_id == h2h_id
-    )
-    record = entries[slot].stores.campaigns.load_head_to_head(h2h_id)
-    return None if record is None else (record, slot)
+    stores = next(s for s, c in campaigns if c.arm is not None and c.arm.head_to_head_id == h2h_id)
+    return stores.campaigns.load_head_to_head(h2h_id)
 
 
-def head_to_head(entries: list[HeadToHeadEntry]) -> HeadToHead | None:
-    """Entries arrive oldest first. Arms of one declared head-to-head are read under its declared
-    scorer and against its instrument; with none declared, the oldest names the formula."""
+def comparison_grader(campaigns: list[tuple[Stores, Campaign]]) -> Grader:
+    """*campaigns* oldest first. The comparison's one scorer is the one every campaign declares,
+    and a head-to-head they are arms of declares it too; campaigns declaring different ones share
+    none, and the read refuses rather than grade one under another's formula."""
+    graders = {
+        scorer_id: scorer
+        for scorer, scorer_id in (
+            config_cell_scorer(resolve_campaign_config(stores, c, c.root_hop))
+            for stores, c in campaigns
+        )
+    }
+    if len(graders) > 1:
+        raise ValueError(
+            f"These subjects are graded under {len(graders)} scorers ({', '.join(sorted(graders))}) "
+            "and share none, so no column reads them as one quantity. Compare subjects one "
+            "formula grades."
+        )
+    ((scorer_id, scorer),) = graders.items()
+    record = _declared(campaigns)
+    if record is not None and scorer_id != record.instrument.scorer_id:
+        raise ValueError(
+            f"head-to-head {record.head_to_head_id} declares scorer {record.instrument.scorer_id}; "
+            f"its arm's config grades as {scorer_id}"
+        )
+    return Grader(scorer, scorer_id, record)
+
+
+def head_to_head(entries: list[HeadToHeadEntry], grader: Grader) -> HeadToHead | None:
+    """Entries arrive oldest first, read under the read's one *grader* and against the instrument
+    of the head-to-head it declares."""
     if not entries:
         return None
     campaigns = [_campaign(entry) for entry in entries]
@@ -194,14 +227,7 @@ def head_to_head(entries: list[HeadToHeadEntry]) -> HeadToHead | None:
         resolve_campaign_config(e.stores, c, c.root_hop)
         for e, c in zip(entries, campaigns, strict=True)
     ]
-    declared = _declared(entries, campaigns)
-    scorer, scorer_id = config_cell_scorer(configs[0 if declared is None else declared[1]])
-    record = None if declared is None else declared[0]
-    if record is not None and scorer_id != record.instrument.scorer_id:
-        raise ValueError(
-            f"head-to-head {record.head_to_head_id} declares scorer {record.instrument.scorer_id}; "
-            f"its arm's config grades as {scorer_id}"
-        )
+    scorer, scorer_id, record = grader
     read = [
         _read(e, c, config, scorer, scorer_id, record)
         for e, c, config in zip(entries, campaigns, configs, strict=True)
@@ -254,7 +280,6 @@ def head_to_head(entries: list[HeadToHeadEntry]) -> HeadToHead | None:
             for g in read
         ],
         head_to_head_id=None if record is None else record.head_to_head_id,
-        scorer_id=scorer_id,
         headline=BENCH_HEADLINE,
         verdict=verdict,
         differs_on=differs_on,
@@ -284,8 +309,8 @@ def _ratios(row: HeadToHeadRow, base: HeadToHeadRow | None) -> dict[str, float |
         "incurred_usd_ratio": over(
             lambda r: None if r.spend is None else r.spend.total_incurred_usd
         ),
-        "loop_incurred_usd_ratio": over(
-            lambda r: None if r.spend is None else r.spend.loop.incurred_usd
+        "optimizer_incurred_usd_ratio": over(
+            lambda r: None if r.spend is None else r.spend.by_kind["optimizer"].incurred_usd
         ),
         "worked_ratio": over(lambda r: r.worked_s),
     }
@@ -356,6 +381,19 @@ def _ending(stores: Stores, campaign: Campaign) -> tuple[StopReason | None, Stop
     return reason, None if reason is None else stop_reason_outcome(reason)
 
 
+def _held_budget(stores: Stores, config: CampaignConfig, hop: CycleHop) -> ArmBudget:
+    """The line's knobs (an arm's are its record's, ``campaign_config.py::under_record``) under the
+    standing ceiling its launch declares. An arm whose cap was moved is off its budget."""
+    ceiling, _ = declare_run_ceiling(config, stores=stores, hop=hop, requested=LaunchLimits())
+    rounds = stores.campaigns.read_run_limits(hop).rounds
+    return config.optimization.arm_budget.model_copy(
+        update={
+            "usd": ceiling.usd,
+            "max_rounds": config.optimization.max_rounds if rounds is None else rounds.max_rounds,
+        }
+    )
+
+
 def _read(
     entry: HeadToHeadEntry,
     campaign: Campaign,
@@ -402,6 +440,7 @@ def _read(
         else None
     )
     cost = None if result is None else result.cost
+    budget = _held_budget(stores, config, hop)
     stop_reason, outcome = _ending(stores, campaign)
     # Live off the line's ledgers, the fold the campaign card's bill reads: the banked cost is the
     # last ended launch's, so a running arm's would lag its own bill.
@@ -424,10 +463,10 @@ def _read(
             controlled=record is not None
             and campaign.arm is not None
             and campaign.arm.head_to_head_id == record.head_to_head_id
-            and config.optimization.arm_budget == record.budget
+            and budget == record.budget
             and (bench_set is None or bench_set == record.instrument),
             treatment_digest=None if campaign.treatment is None else campaign.treatment.digest,
-            budget=config.optimization.arm_budget,
+            budget=budget,
             spend_metered=None
             if spend is None
             else MeteredSpend.of(spend, ceiling_meter(campaign.arm)),
@@ -435,6 +474,7 @@ def _read(
             stop_reason=stop_reason,
             outcome=outcome,
             bench=bench,
+            bench_missing_reason=None if bench is not None else bench_missing_reason(stop_reason),
             bench_set=bench_set,
             comparable=None,
             spend=spend,
@@ -442,7 +482,7 @@ def _read(
             worked_s=None if cost is None else cost.worked_s,
             rounds=reading.cycle_rounds_scored,
             incurred_usd_ratio=None,
-            loop_incurred_usd_ratio=None,
+            optimizer_incurred_usd_ratio=None,
             worked_ratio=None,
             lift_per_incurred_usd=None
             if bench is None or spend is None
@@ -550,9 +590,11 @@ def _notes(
 
 
 __all__ = [
+    "Grader",
     "HeadToHead",
     "HeadToHeadEntry",
     "HeadToHeadRow",
     "SelectionPair",
+    "comparison_grader",
     "head_to_head",
 ]

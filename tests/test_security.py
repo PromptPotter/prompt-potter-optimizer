@@ -534,6 +534,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
             stores=_oidc_stores({"spend_ceiling_usd": 2.0}),
             job_registry=idle_registry,
             job_id="job-a",
+            hop=None,
         )[0].usd
         == 2.0
     )
@@ -544,6 +545,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
             stores=_oidc_stores({}),
             job_registry=idle_registry,
             job_id="job-a",
+            hop=None,
         )[0].usd
         == 10.0
     )
@@ -566,6 +568,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
             stores=_oidc_stores({"spend_ceiling_usd": 2.0}),
             job_registry=idle_registry,
             job_id="job-a",
+            hop=None,
         )[0].usd
         == 1.0
     )
@@ -778,6 +781,7 @@ async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
     from promptpotter.application.commands.dispatcher import CommandDispatcher
     from promptpotter.application.jobs.quota import clamp_budget_change
     from promptpotter.application.jobs.registry import JobRegistry
+    from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.launch_limits import RoundsCap
     from promptpotter.domain.spend import BudgetChange
@@ -802,6 +806,10 @@ async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
         benchmarks_root=built_stores.benchmarks_root,
     )
     hop = CycleHop(campaign_id="camp-3", cycle_id="cycle_budget0000")
+    campaign = Campaign(
+        campaign_id="camp-3", dataset_name="ds1", created_at="", root_cycle_id=hop.cycle_id
+    )
+    stores.campaigns.create_campaign(campaign)
     registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
     job = registry.request_slot(user_id="sub-9", dataset_name="ds1", hop=hop)
     assert job.status == "pending", "an empty box must hand out a slot, not a place in line"
@@ -832,7 +840,12 @@ async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
             tenant_id="sub-9",
             claims={"spend_ceiling_usd": 2.0},
         ),
-        campaigns=types.SimpleNamespace(iter_cycle_ledgers=lambda: [], workspace=tmp_path / "ws-d"),
+        campaigns=types.SimpleNamespace(
+            iter_cycle_ledgers=lambda: [],
+            workspace=tmp_path / "ws-d",
+            load_campaign=lambda _id: campaign,
+            cycle_dir=lambda _hop: tmp_path / "cycle-d",
+        ),
     )
     caps, _ = clamp_budget_change(
         requested=BudgetChange(None, 1_000),
@@ -845,6 +858,89 @@ async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
     )
     assert caps.usd is None, "a grant became a ceiling on an arm the caller left alone"
     assert caps.tokens == 1_000
+
+
+def test_a_moved_ceiling_counts_the_cycles_own_spend_once(
+    built_stores: Any, tmp_path: Path
+) -> None:
+    """A cycle's ceiling counts every call in its history — a fork's inherited prefix included —
+    and the account's spend already holds those calls. Clamped against the bare headroom, its own
+    spend is subtracted twice and the raise silently lands short; clamped past it, the account
+    overspends. What the parent billed past the cut is not the fork's, and binds it as spend."""
+    from promptpotter.application.jobs.quota import admit_launch, clamp_budget_change
+    from promptpotter.application.jobs.registry import JobRegistry
+    from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+    from promptpotter.domain.run_records import TokenUsageRecord
+    from promptpotter.domain.spend import BudgetChange, SpendCeilings
+    from promptpotter.infrastructure.ledger import CycleEventLog
+    from promptpotter.infrastructure.store.stores import build_stores
+    from promptpotter.infrastructure.store.user_store import User
+    from promptpotter.shared.identity import IdentityContext, Issuer, TenantId, UserId
+
+    stores = build_stores(
+        IdentityContext(
+            user_id=UserId("sub-7"),
+            tenant_id=TenantId("sub-7"),
+            issuer=Issuer("https://accounts.google.com"),
+            claims={},
+            capabilities=frozenset(),
+        ),
+        projects_root=built_stores.projects_root,
+        benchmarks_root=built_stores.benchmarks_root,
+    )
+    root = CycleHop(campaign_id="camp-7", cycle_id="cycle_budget0007")
+    hop = CycleHop(campaign_id="camp-7", cycle_id="cycle_budget0007_fork_r1")
+    stores.campaigns.create_campaign(
+        Campaign(
+            campaign_id="camp-7", dataset_name="ds1", created_at="", root_cycle_id=root.cycle_id
+        )
+    )
+    stores.campaigns.create(root, {})
+    stores.campaigns.create(hop, {"parent_cycle_id": root.cycle_id, "forked_at_offset": 1})
+
+    def bill(at: CycleHop, usd: float) -> None:
+        CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(at))).append(
+            TokenUsageRecord(
+                kind="optimizer",
+                node="l1_generate",
+                input_tokens=1_000,
+                output_tokens=0,
+                cost_usd=usd,
+            )
+        )
+
+    # $0.10 inherited, $0.10 the parent billed after the cut, $0.30 the fork's own.
+    bill(root, 0.1)
+    bill(root, 0.1)
+    bill(hop, 0.3)
+    registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    job = registry.request_slot(user_id="sub-7", dataset_name="ds1", hop=hop)
+    registry.set_caps(job.job_id, cap_usd=0.8, cap_tokens=None)
+
+    caps, reserve = clamp_budget_change(
+        requested=BudgetChange(5.0, None),
+        user=User(
+            user_id="sub-7", tenant_id="sub-7", created_at="2026-01-01", spend_budget_usd_total=1.0
+        ),
+        stores=stores,
+        job_registry=registry,
+        hop=hop,
+    )
+    resumed, _ = admit_launch(
+        declared=SpendCeilings(None, None),
+        user=User(
+            user_id="sub-7", tenant_id="sub-7", created_at="2026-01-01", spend_budget_usd_total=1.0
+        ),
+        stores=stores,
+        job_registry=registry,
+        job_id=job.job_id,
+        hop=hop,
+    )
+    # $1.00 allowance, $0.40 in this cycle's history and $0.10 beside it: it may reach $0.90,
+    # whether the ceiling is moved mid-run or declared by a resume.
+    assert caps.usd == resumed.usd == pytest.approx(0.9)
+    assert reserve.usd == pytest.approx(0.9)
 
 
 async def test_moving_one_ceiling_leaves_the_other_at_its_launch_cap(
@@ -870,12 +966,11 @@ async def test_moving_one_ceiling_leaves_the_other_at_its_launch_cap(
         meter="bill",
         usd=0.10,
         tokens=210_000,
-        buckets={},
-        beside={},
         billed_usd=0.10,
         incurred_usd=0.10,
-        billed_by_bucket={},
-        incurred_by_bucket={},
+        billed_tokens=0,
+        unpriced_tokens=0,
+        kinds={},
         replay_share=None,
     )
     observers = types.SimpleNamespace(
@@ -1020,12 +1115,11 @@ def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path)
         meter="bill",
         usd=1.0,
         tokens=9_000,
-        buckets={},
-        beside={},
         billed_usd=1.0,
         incurred_usd=1.0,
-        billed_by_bucket={},
-        incurred_by_bucket={},
+        billed_tokens=0,
+        unpriced_tokens=0,
+        kinds={},
         replay_share=None,
     )
     observers = types.SimpleNamespace(
@@ -1625,10 +1719,11 @@ def test_a_run_holds_the_budget_it_declared_and_admission_is_the_only_bound(
             stores=_stores(issuer="https://accounts.google.com"),
             job_registry=idle,
             job_id="job-a",
+            hop=None,
         )
     # The operator of the box spends their own money: held exactly as declared.
     assert admit_launch(
-        declared=declared, user=free_tier, stores=host, job_registry=idle, job_id="job-a"
+        declared=declared, user=free_tier, stores=host, job_registry=idle, job_id="job-a", hop=None
     )[0] == SpendCeilings(pytest.approx(5.0), 210_000)
 
 
@@ -1748,6 +1843,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
         stores=_stores(issuer=web, ledgers=[]),
         job_registry=idle,
         job_id="job-a",
+        hop=None,
     )
     assert fresh.usd == pytest.approx(settings.FREE_TIER_LAUNCH_STEP_USD)
     assert fresh.usd < settings.FREE_TIER_SPEND_CAP_USD
@@ -1762,6 +1858,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
             stores=_stores(issuer=web, ledgers=[]),
             job_registry=idle,
             job_id="job-a",
+            hop=None,
         )
 
     # A cycle already in flight holds its whole declared ceiling, or two concurrent launches are
@@ -1780,6 +1877,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
                 cap_tokens=settings.FREE_TIER_TOKEN_CAP,
             ),
             job_id="job-a",
+            hop=None,
         )
 
     # ...and one admitted but not yet STAMPED holds an amount nothing can read. Counted as zero,
@@ -1792,6 +1890,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
             stores=_stores(issuer=web, ledgers=[]),
             job_registry=_sibling(cap_usd=None, cap_tokens=None),
             job_id="job-a",
+            hop=None,
         )
 
     # `:nitro` is a route selector, so the call is unpriceable BY DESIGN and the account's USD
@@ -1805,6 +1904,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
         ),
         job_registry=idle,
         job_id="job-a",
+        hop=None,
     )
     assert blind.usd <= settings.UNPRICED_GRACE_USD
     assert blind.usd == pytest.approx(settings.FREE_TIER_LAUNCH_STEP_USD)
@@ -1849,6 +1949,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
         stores=_stores(issuer=None, ledgers=[]),
         job_registry=idle,
         job_id="job-a",
+        hop=None,
     ) == ((None, None), (None, None))
 
 

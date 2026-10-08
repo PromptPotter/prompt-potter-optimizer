@@ -17,7 +17,6 @@ from promptpotter.application.views.view_models import (
 )
 from promptpotter.domain.phases import STOP_REASON_INFO, StopReason
 from promptpotter.domain.results import overlap_series
-from promptpotter.domain.spend import TOKEN_KIND_BUCKET, TokenAccount
 from promptpotter.shared.composite import render_composite_fitness_block
 
 
@@ -104,16 +103,12 @@ def _render_round_cost(rd: RoundDigestView) -> str:
     if rd.spend is None:
         return ""
     bits: list[str] = []
-    for kind, attr in TOKEN_KIND_BUCKET.items():
-        bucket = getattr(rd.spend, attr)
+    for kind, bucket in rd.spend.by_kind.items():
         if bucket.used_usd <= 0 and bucket.input_tokens <= 0:
             if bucket.incurred_usd > 0:
                 bits.append(f"{kind} $0.0000 (${bucket.incurred_usd:.4f} replayed)")
             continue
-        share = TokenAccount(
-            input=bucket.input_tokens, output=0, cache_read=bucket.cache_read_tokens or None
-        ).cache_share(replayed=False)
-        badge = prefix_reading(share, replayed=False).badge
+        badge = prefix_reading(bucket.cache_share, replayed=False).badge
         # Writes with no reads is the one shape worth calling out inline: it is paying a premium
         # to fill a prefix nothing ever collects (`run_records.py::cache_write_tokens`).
         wrote = f" ·w{bucket.cache_write_tokens}" if bucket.cache_write_tokens else ""

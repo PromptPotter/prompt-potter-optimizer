@@ -10,9 +10,10 @@ export interface ForkReconcileDefaults {
   // null ⇒ uncapped or unknown, and the rounds input starts blank (inherit).
   parentMaxRounds: number | null;
   roundsRemaining: number | null;
-  spentUsd: number;
+  // null ⇒ the parent's spend is unread, so no remainder is offered.
+  spentUsd: number | null;
   parentBudgetUsd: number | null;
-  // null ⇒ the parent is uncapped, and so is the fork.
+  // null ⇒ the parent is uncapped or its spend unread, and the spend input starts blank (inherit).
   spendRemaining: number | null;
 }
 
@@ -30,10 +31,10 @@ export function forkReconcileDefaults(dash: DashboardSnapshot | null): ForkRecon
 
   const spend = readSpend(dash);
   // In the cap's own units: what is left of it is what the fork inherits.
-  const spentUsd = spend.metered?.usd ?? 0;
+  const spentUsd = spend.metered?.usd ?? null;
   const parentBudgetUsd = spend.budgetUsd;
   const spendRemaining =
-    parentBudgetUsd != null ? Math.max(0, parentBudgetUsd - spentUsd) : null;
+    parentBudgetUsd != null && spentUsd != null ? Math.max(0, parentBudgetUsd - spentUsd) : null;
 
   return {
     roundsConsumed,

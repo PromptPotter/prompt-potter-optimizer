@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Collection, Mapping, Sequence
 from enum import StrEnum
-from typing import Any, Literal, NamedTuple, NotRequired, TypedDict, overload
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, NotRequired, TypedDict, overload
 
 from pydantic import ConfigDict, Field, computed_field
 
@@ -16,7 +16,11 @@ from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
 from promptpotter.domain.run_records import ErrorRecord
 from promptpotter.domain.scoring import is_answer_collapsed, is_graded, is_hit
-from promptpotter.domain.search_point import strip_rendered_prompt
+from promptpotter.domain.search_point import (
+    JobSearchPoint,
+    TaskDecomposition,
+    strip_rendered_prompt,
+)
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.wounds import (
@@ -24,12 +28,17 @@ from promptpotter.domain.wounds import (
     RuntimeFailure,
     ValidationFailure,
 )
-from promptpotter.shared.errors import is_error_result
+from promptpotter.shared.errors import ConflictError, is_error_result
 from promptpotter.shared.hashing import shapes_optimizer_prompt
+
+if TYPE_CHECKING:
+    from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.sample import Sample
 
 __all__ = [
     "CEILING_FRACTION",
     "ArmOutcome",
+    "BankedSearchPointError",
     "CandidateProposal",
     "CellDelta",
     "CycleResult",
@@ -222,7 +231,7 @@ class ScoredCandidate(StrictModel):
     # THE join to the archive, stored there on every row as ``prompt_fields_id``. Stamped, never
     # recomputed downstream: it covers each node's rendered ``prompt`` and the field above has
     # that stripped, so a re-derivation addresses no row and nothing raises. ``""`` where no
-    # schema was in scope (the unmeasured origin) or the searchpoint configures no node.
+    # schema was in scope or the searchpoint configures no node.
     sp_hash: str = ""
     # The archive RUN this report's rows were filed under — ``sp_hash`` names the configuration,
     # this names the one reading of it on this subset, so ``(run_id, sample_id)`` addresses each
@@ -281,6 +290,32 @@ class ScoredCandidate(StrictModel):
     # unlike ``theta_se``; the blocked ``reference_lift_ci_*`` above is sharper on these rows.
     mean_fitness_ci_lo: float | None = None
     mean_fitness_ci_hi: float | None = None
+
+    def searchpoint(
+        self, *, schema: PipelineSchema, framing: TaskDecomposition, demo: Sequence[Sample]
+    ) -> JobSearchPoint:
+        """This arm as its round measured it: its banked fields over its RESOLVED params, which
+        carry the seed overlay and every adopted ancestor's move that the campaign's config drops."""
+        if self.resolved_pipeline_params is None:
+            raise BankedSearchPointError(
+                f"{self.label}'s round document carries no resolved config."
+            )
+        sp = OptSearchPoint.from_prompt_fields(self.prompt_fields).to_job_search_point(
+            self.resolved_pipeline_params, schema=schema, framing=framing, demo=demo
+        )
+        if self.sp_hash and sp.sp_hash(schema) != self.sp_hash:
+            raise BankedSearchPointError(
+                f"{self.label} rebuilds from its round document as searchpoint "
+                f"{sp.sp_hash(schema)[:12]}, not the {self.sp_hash[:12]} its rows were measured "
+                "under: the pipeline schema, framing or demo pool has moved under it."
+            )
+        return sp
+
+
+class BankedSearchPointError(ConflictError):
+    """A banked arm cannot rebuild as the searchpoint its rows were measured under."""
+
+    code = "banked_searchpoint_moved"
 
 
 def is_leader_eligible(cs: ScoredCandidate) -> bool:
@@ -908,6 +943,12 @@ class RoundResult(StrictModel):
     @property
     def round_id(self) -> str:
         return f"round_{self.round}"
+
+    @property
+    def origin(self) -> ScoredCandidate:
+        """Round 0's arm, addressed by the individual the round ended on, never by position."""
+        assert self.round == 0 and self.opt_sp is not None, "round 0 ends on the origin"
+        return {c.candidate_id: c for c in self.candidate_scores}[self.opt_sp.lineage.id]
 
     @property
     def selected_scores(self) -> list[ScoredCandidate]:

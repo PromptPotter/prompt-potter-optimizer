@@ -71,14 +71,15 @@ export function RunMasthead({ onFollowed }: { onFollowed: () => void }) {
   );
 
   const { best } = headlineStats(dash);
-  const bench = benchReading(dash?.bench_score, dash?.run_phase);
+  const bench = benchReading(dash?.bench_score, dash?.bench_missing_reason);
   // `dash.candidate` goes stale between rounds, so it stands in only while the measurement works.
   const scoringCand = dash && isMeasuring(dash) ? String(dash.candidate || "").split("/")[0] : "";
   const roundsCap = dash?.run_limits?.max_rounds ?? null;
   const position = scoringCand || (dashRound != null ? `R${dashRound}` : "—");
 
-  const { metered, budgetUsd, unpricedTokens } = readSpend(dash);
-  const spendFloor = unpricedTokens > 0 ? "≥" : "";
+  const { metered, budgetUsd } = readSpend(dash);
+  const unpriced = metered !== null && metered.unpriced_tokens > 0;
+  const spendFloor = unpriced ? "≥" : "";
 
   return (
     <header className="run-header">
@@ -167,7 +168,7 @@ export function RunMasthead({ onFollowed }: { onFollowed: () => void }) {
             {position}
             {roundsCap != null && <span className="chip-of"> / {roundsCap}</span>}
           </span>
-          <span className={cx("chip", unpricedTokens > 0 && "chip-warn")}>
+          <span className={cx("chip", unpriced && "chip-warn")}>
             <span className="chip-lbl">Spend</span>
             {metered ? (
               <Term content={<SpendBuckets metered={metered} />}>

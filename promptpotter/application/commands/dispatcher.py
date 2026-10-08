@@ -59,7 +59,6 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     mint_campaign_command,
     start_run_command,
 )
-from promptpotter.application.jobs.mint import move_arm_budget
 from promptpotter.application.jobs.quota import (
     admit_spend,
     clamp_budget_change,
@@ -546,18 +545,6 @@ class CommandDispatcher:
         # Every launch this dispatcher starts runs the campaign's own dataset; the queue entry has
         # to name it, and this is the one place the manifest is already open.
         dataset_name = campaign.dataset_name if campaign else ""
-        if campaign.arm is not None and isinstance(payload, ChangeRunLimitsPayload):
-            # An arm's ceiling is its head-to-head's, so set-limits moves the declaration's.
-            h2h_id, usd, rounds = campaign.arm.head_to_head_id, payload.max_usd, payload.rounds_cap
-            tokens = payload.max_tokens
-
-            def _move() -> None:
-                if tokens is not None:
-                    raise _RejectedError(f"head-to-head {h2h_id} budgets USD and rounds only")
-                registry = self._require_job_registry()
-                move_arm_budget(self._stores, registry, h2h_id, usd=usd, rounds=rounds)
-
-            return Applier(_move)
         if campaign.arm is not None and isinstance(
             payload, ForkCyclePayload | SkipSearchpointPayload
         ):

@@ -18,6 +18,7 @@ from pydantic import ConfigDict, Field
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.pipeline_overlay import fold_output_contract
+from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.search_point import JobSearchPoint, SearchPoint, TaskDecomposition
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -283,6 +284,16 @@ class OptSearchPoint(PromptTemplate):
             pipeline_params=pp,
             prompt_fields=pf,
         )
+
+    def as_origin(self, *, changes_description: str) -> OptSearchPoint:
+        """This point as a cycle's C0, its id derived from its own fields: every launch re-resolves
+        the origin, and must name the individual its round documents and ledger already carry."""
+        lineage = IndividualLineage(
+            id=stable_hash([ORIGIN_SOURCE, self.prompt_field_dict()]),
+            changes_description=changes_description,
+            source=ORIGIN_SOURCE,
+        )
+        return self.model_copy(update={"lineage": lineage})
 
     @classmethod
     def derive(

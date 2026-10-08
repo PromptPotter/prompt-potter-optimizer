@@ -104,9 +104,11 @@ export function LimitReconcile({
           />
         </span>
         <small className="limit-note">
-          {defaults.parentBudgetUsd != null
-            ? `${fmtUsd(defaults.spentUsd)} of ${fmtUsd(defaults.parentBudgetUsd)} spent — fork starts fresh`
-            : "parent uncapped — leave blank to inherit"}
+          {defaults.parentBudgetUsd == null
+            ? "parent uncapped — leave blank to inherit"
+            : defaults.spentUsd == null
+              ? "parent's spend unread — leave blank to inherit its cap"
+              : `${fmtUsd(defaults.spentUsd)} of ${fmtUsd(defaults.parentBudgetUsd)} spent — fork starts fresh`}
         </small>
       </label>
 

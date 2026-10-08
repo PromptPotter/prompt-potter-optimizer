@@ -38,14 +38,13 @@ from promptpotter.application.scoring.formula import (
     parse_dials,
     realize_dials,
     rescore_results,
-    split_scoring_block,
 )
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
-from promptpotter.domain.opt_search_point import ORIGIN_SOURCE, IndividualLineage, OptSearchPoint
+from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, emit_phase
 from promptpotter.domain.pipeline_overlay import overlay_is_locked_axis_only
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
@@ -57,9 +56,8 @@ from promptpotter.domain.results import (
 )
 from promptpotter.domain.run_records import CandidateMintedRecord, CycleSeed
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.judges import judge_instrument
 from promptpotter.shared.errors import (
     NotFoundError,
     PayloadInvalidError,
@@ -149,6 +147,7 @@ async def rescore_parent(
             sp_hash=tr.current_sp.sp_hash(session.pipeline_schema),
             run_id=scored.run_id,
             outcome=walk_outcome(scored),
+            resolved_pipeline_params=tr.current_sp.config_params,
         ),
     )
 
@@ -196,6 +195,7 @@ def try_inherit_fork_origin(
     seed: CycleSeed | None,
     *,
     resolved_origin: OptSearchPoint,
+    sp: JobSearchPoint,
     framing: TaskDecomposition,
 ) -> CampaignOrigin | None:
     """Inherit an operator fork's C0 from its branch-point candidate — a no-edit fork or a
@@ -261,9 +261,14 @@ def try_inherit_fork_origin(
         resolved_origin=resolved_origin,
         # The branch-point candidate's whole report, re-identified onto this fork's C0:
         # composite, evaluators, counts and whisker are the parent's measurement or they
-        # are a new one.
+        # are a new one. A model steer moves the searchpoint those rows now stand for.
         report=cand.model_copy(
-            update={"candidate_id": resolved_origin.lineage.id, "label": candidate_label(0, 0)}
+            update={
+                "candidate_id": resolved_origin.lineage.id,
+                "label": candidate_label(0, 0),
+                "sp_hash": sp.sp_hash(session.pipeline_schema),
+                "resolved_pipeline_params": sp.config_params,
+            }
         ),
         origin_results=inherited_results,
         framing=framing,
@@ -289,12 +294,8 @@ def resolve_origin_opt_search_point(
     origin: OptSearchPoint | None = None
 
     if seed is not None and seed.origin_prompt_fields:
-        origin = OptSearchPoint.from_prompt_fields(
-            seed.origin_prompt_fields,
-            lineage=IndividualLineage(
-                changes_description=_SEED_ORIGIN_LINEAGE[seed.origin_source],
-                source=ORIGIN_SOURCE,
-            ),
+        origin = OptSearchPoint.from_prompt_fields(seed.origin_prompt_fields).as_origin(
+            changes_description=_SEED_ORIGIN_LINEAGE[seed.origin_source]
         )
     elif dataset_dir is not None and names and has_dataset_prompts(dataset_dir):
         for node_name in names:
@@ -302,21 +303,14 @@ def resolve_origin_opt_search_point(
                 template = load_node_prompt(dataset_dir, node_name, "default")
             except FileNotFoundError:
                 continue
-            origin = OptSearchPoint.from_prompt_fields(
-                template.prompt_fields(),
-                lineage=IndividualLineage(
-                    changes_description=(f"Origin from {dataset_dir}/prompts/ ({node_name})"),
-                    source=ORIGIN_SOURCE,
-                ),
+            origin = OptSearchPoint.from_prompt_fields(template.prompt_fields()).as_origin(
+                changes_description=f"Origin from {dataset_dir}/prompts/ ({node_name})"
             )
             break
 
     if origin is None:
-        origin = OptSearchPoint(
-            lineage=IndividualLineage(
-                changes_description="Origin (no prompt node active — param-only optimization)",
-                source=ORIGIN_SOURCE,
-            ),
+        origin = OptSearchPoint().as_origin(
+            changes_description="Origin (no prompt node active — param-only optimization)"
         )
 
     return origin
@@ -341,8 +335,15 @@ async def establish_campaign_origin(
     # The SAME read identity uses. Handed the framing instead, this seam could be given a value
     # the cycle id never saw.
     framing = campaign_framing(session.store, campaign_config, session.dataset_name)
+    pipeline_schema = session.pipeline_schema
+    sp = resolved_origin.to_job_search_point(
+        base_pipeline_params=session.pipeline_params,
+        schema=pipeline_schema,
+        framing=framing,
+        demo=session.scoring.require_partition().demo,
+    )
     inherited = try_inherit_fork_origin(
-        session, seed, resolved_origin=resolved_origin, framing=framing
+        session, seed, resolved_origin=resolved_origin, sp=sp, framing=framing
     )
     if inherited is not None:
         return inherited
@@ -372,20 +373,16 @@ async def establish_campaign_origin(
                 [],
                 [],
                 label=candidate_label(0, 0),
-                # No rows for an id to address.
-                sp_hash="",
+                sp_hash=sp.sp_hash(pipeline_schema),
                 run_id=None,
                 outcome=ArmOutcome.MEASURED,
+                resolved_pipeline_params=sp.config_params,
             ),
             origin_results=None,
             framing=framing,
         )
 
-    pipeline_schema = session.pipeline_schema
     scoring_set = sample_dataset(dataset, campaign_config.sp_budget_origin)
-    spec = split_scoring_block(
-        campaign_config.scoring, judge_instrument=judge_instrument(campaign_config.judges)
-    )
 
     if session.index_terms:
         await session.backend_client.init_session(session.index_terms)
@@ -393,24 +390,6 @@ async def establish_campaign_origin(
         # Only a wired backend can be broken by an empty term index; an `in_process` one has no
         # `/matches` to fail.
         logger.warning("No session terms available — /matches calls will fail.")
-
-    sp = resolved_origin.to_job_search_point(
-        base_pipeline_params=session.pipeline_params,
-        schema=pipeline_schema,
-        framing=framing,
-        demo=session.scoring.require_partition().demo,
-    )
-    # populate_session_scoring overwrites scoring/source; loop repopulates before round 1.
-    populate_session_scoring(
-        session,
-        obs=None,
-        scoring_formula=spec.per_sample,
-        scoring_cell_formula=spec.per_cell,
-        scorer_id=spec.scorer_id,
-        display_metric=campaign_config.display_metric,
-        judge_specs=campaign_config.judges,
-        source=RunSource.ORIGIN,
-    )
 
     # ci=0/ct=1 ⇒ dashboard ticks per-sample during origin like L1.
     emit_phase(listener.on_phase, CampaignPhase.ORIGIN, "enter", round=0)
@@ -469,17 +448,9 @@ async def establish_campaign_origin(
         if locked_scoring is not None:
             # The rows were graded on correctness alone, the only criterion an unmeasured origin
             # has. Re-grade them under the one they just anchored — nothing is re-measured.
-            spec = split_scoring_block(
-                locked_scoring, judge_instrument=judge_instrument(campaign_config.judges)
-            )
             populate_session_scoring(
                 session,
-                obs=None,
-                scoring_formula=spec.per_sample,
-                scoring_cell_formula=spec.per_cell,
-                scorer_id=spec.scorer_id,
-                display_metric=campaign_config.display_metric,
-                judge_specs=campaign_config.judges,
+                campaign_config.model_copy(update={"scoring": locked_scoring}),
                 source=RunSource.ORIGIN,
             )
             rescore_results(

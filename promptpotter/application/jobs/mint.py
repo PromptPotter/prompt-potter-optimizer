@@ -15,6 +15,7 @@ from promptpotter.application.bench.task_context import (
     commit_task_framing,
     committed_task_context,
 )
+from promptpotter.application.campaign_config import under_record
 from promptpotter.application.datasets.authored import config_cell_scorer
 from promptpotter.application.initialization.session import auto_mint_session
 from promptpotter.application.jobs.quota import admit_spend
@@ -33,7 +34,6 @@ from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import (
     Arm,
-    ArmBudget,
     ArmRequest,
     HeadToHeadRecord,
     Instrument,
@@ -42,7 +42,7 @@ from promptpotter.domain.campaign import (
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.l4.inner_origin import instrument_of
-from promptpotter.domain.launch_limits import LaunchLimits, refuse_arm_limits
+from promptpotter.domain.launch_limits import LaunchLimits, refuse_arm_halt
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -57,11 +57,8 @@ if TYPE_CHECKING:
 
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.jobs.registry import JobRegistry
-    from promptpotter.domain.launch_limits import RoundsCap
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.sample import Sample
-    from promptpotter.infrastructure.store.stores import Stores
 
 
 logger = logging.getLogger(__name__)
@@ -100,7 +97,7 @@ class MintedCycle:
     cycle_id: str
     session_id: str
     campaign_id: str
-    # What the campaign froze and runs: an arm's carries its head-to-head's declared budget.
+    # What the campaign runs: an arm's under its head-to-head's record (`under_record`).
     campaign_config: CampaignConfig
 
 
@@ -299,8 +296,8 @@ def _prompt_axes_only(
 def _under_declaration(
     session: Session, campaign_config: CampaignConfig, arm: ArmRequest | None
 ) -> CampaignConfig:
-    """The config an arm runs. It searches the prompt alone; and a later arm adopts the split and
-    the budget the declaration owns rather than repeating them — before its origin resolves,
+    """The config an arm runs. It searches the prompt alone; and a later arm runs under the split
+    and budget its head-to-head's record owns (``under_record``) — before its origin resolves,
     whose id the split moves."""
     if arm is None:
         return campaign_config
@@ -308,64 +305,7 @@ def _under_declaration(
         update={"optimizer_narrowing": _prompt_axes_only(session, campaign_config)}
     )
     declared = session.store.campaigns.load_head_to_head(arm.head_to_head_id)
-    if declared is None:
-        return campaign_config
-    optimization = campaign_config.optimization
-    budget = declared.budget
-    adopted = type(optimization).model_validate(
-        {
-            **optimization.model_dump(),
-            "spend_budget_usd": budget.usd,
-            "max_rounds": budget.max_rounds,
-            "determinism": budget.determinism,
-        }
-    )
-    return campaign_config.model_copy(
-        update={"optimization": adopted, "dataset_split": declared.instrument.split}
-    )
-
-
-def move_arm_budget(
-    stores: Stores,
-    registry: JobRegistry,
-    head_to_head_id: str,
-    *,
-    usd: float | None,
-    rounds: RoundsCap | None,
-) -> ArmBudget:
-    """Move a head-to-head's declared budget and every arm's frozen knob with it, so the arms
-    stay equal and controlled. Refused while an arm runs: it would finish under the old one."""
-    campaigns = stores.campaigns
-    declared = campaigns.load_head_to_head(head_to_head_id)
-    if declared is None:
-        raise ConflictError(f"head-to-head {head_to_head_id} is not declared", code="not_declared")
-    arms = [
-        campaign
-        for campaign_dir in campaigns.iter_campaign_dirs()
-        if (campaign := campaigns.load_campaign(campaign_dir.name)) is not None
-        and campaign.arm is not None
-        and campaign.arm.head_to_head_id == head_to_head_id
-    ]
-    running = {job.hop.campaign_id for job in registry.list_running()}
-    if busy := [arm.campaign_id for arm in arms if arm.campaign_id in running]:
-        raise ConflictError(
-            f"arm {busy[0]} of {head_to_head_id} is running: pause its arms first",
-            code="arm_running",
-        )
-    moved: dict[str, float | int | None] = {"usd": usd} if usd is not None else {}
-    if rounds is not None:
-        moved["max_rounds"] = rounds.max_rounds
-    budget = declared.budget.model_copy(update=moved)
-    campaigns.declare_head_to_head(declared.model_copy(update={"budget": budget}))
-    for arm in arms:
-        config = dict(arm.config)
-        config["optimization"] = {
-            **config["optimization"],
-            "spend_budget_usd": budget.usd,
-            "max_rounds": budget.max_rounds,
-        }
-        campaigns.update_campaign(arm.campaign_id, {"config": config})
-    return budget
+    return campaign_config if declared is None else under_record(campaign_config, declared)
 
 
 def fresh_campaign_id(session: Session, campaign_config: CampaignConfig) -> str:
@@ -458,7 +398,7 @@ async def mint_framed_cycle(
             raise PayloadInvalidError(
                 "an arm runs the head-to-head's origin and framing: no task text, no origin override"
             )
-        refuse_arm_limits(limits.budgets, limits.halt_at_accuracy)
+        refuse_arm_halt(limits.halt_at_accuracy)
     # Before the check-in below bills: the plan that refuses the same things needs its framing.
     _refuse_unrunnable(_under_declaration(session, campaign_config, arm), dataset)
     description = _description_to_decompose(session, campaign_config, task_text)
@@ -502,7 +442,6 @@ __all__ = [
     "CyclePlan",
     "fresh_campaign_id",
     "mint_framed_cycle",
-    "move_arm_budget",
     "prepare_fresh_cycle",
     "resolve_cycle_plan",
 ]

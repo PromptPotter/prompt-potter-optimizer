@@ -20,6 +20,7 @@ __all__ = [
     "DashboardState",
     "PhaseEvent",
     "RunPhase",
+    "StopCategory",
     "StopLoop",
     "StopOutcome",
     "StopReason",
@@ -154,6 +155,23 @@ class StopOutcome(enum.StrEnum):
     PAUSED = "paused"
 
 
+class StopCategory(enum.StrEnum):
+    """WHAT ended a run, beside ``StopOutcome``'s whether it succeeded."""
+
+    # The search ended itself: a stop rule fired, or the optimizer decided.
+    SEARCH = "search"
+    # A declared bound on rounds, arms, a panel's cells or the machine's admission.
+    LIMIT = "limit"
+    # A spend or token ceiling.
+    BUDGET = "budget"
+    # A person's decision: a pause, or the origin gate.
+    OPERATOR = "operator"
+    # Something outside the run refused it: the backend, or a provider's credit or rate limit.
+    EXTERNAL = "external"
+    # The run broke.
+    FAILURE = "failure"
+
+
 class StopReasonInfo(NamedTuple):
     """``halts_mid_round`` means a round this reason CUTS is left on disk PARTIAL — read as complete,
     its fitness is a handful of samples passing for the whole bank. Whether a round was open when
@@ -166,6 +184,7 @@ class StopReasonInfo(NamedTuple):
 
     label: str
     outcome: StopOutcome
+    category: StopCategory
     halts_mid_round: bool
     has_traceback: bool
     next_step: str
@@ -197,6 +216,7 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
     StopReason.PERFECT: StopReasonInfo(
         "Perfect score",
         StopOutcome.SUCCESS,
+        StopCategory.SEARCH,
         False,
         False,
         "`verify` the winner on more cells — this is one round's panel, not the dataset.",
@@ -205,6 +225,7 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
     StopReason.MAX_ROUNDS: StopReasonInfo(
         "Max rounds",
         StopOutcome.SUCCESS,
+        StopCategory.LIMIT,
         False,
         False,
         "`set-limits --max-rounds <more>` then `resume` if the curve was still moving; else read "
@@ -212,24 +233,27 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
         True,
     ),
     StopReason.TARGET_HIT: StopReasonInfo(
-        "Target reached", StopOutcome.SUCCESS, False, False, "", True
+        "Target reached", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", True
     ),
     StopReason.LIVES_EXHAUSTED: StopReasonInfo(
-        "Out of lives", StopOutcome.SUCCESS, False, False, "", True
+        "Out of lives", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", True
     ),
-    StopReason.HARD_CAP: StopReasonInfo("Arm cap", StopOutcome.SUCCESS, False, False, "", True),
+    StopReason.HARD_CAP: StopReasonInfo(
+        "Arm cap", StopOutcome.SUCCESS, StopCategory.LIMIT, False, False, "", True
+    ),
     StopReason.DIAG_COMPLETE: StopReasonInfo(
-        "Diagnostic complete", StopOutcome.SUCCESS, False, False, "", True
+        "Diagnostic complete", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", True
     ),
     StopReason.CONVERGED: StopReasonInfo(
-        "Optimizer converged", StopOutcome.SUCCESS, False, False, "", True
+        "Optimizer converged", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", True
     ),
     StopReason.REBASED: StopReasonInfo(
-        "Rebased to fork", StopOutcome.SUCCESS, False, False, "", False
+        "Rebased to fork", StopOutcome.SUCCESS, StopCategory.SEARCH, False, False, "", False
     ),
     StopReason.PAUSED: StopReasonInfo(
         "Paused",
         StopOutcome.PAUSED,
+        StopCategory.OPERATOR,
         True,
         False,
         "`resume` picks it up at the next checkpoint.",
@@ -242,6 +266,7 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
     StopReason.PANEL_CUT: StopReasonInfo(
         "Panel cut by a declared bound",
         StopOutcome.PAUSED,
+        StopCategory.LIMIT,
         False,
         False,
         "Give the cut cells room (`Connector.cell_envelope_s`, or the backend deadline their "
@@ -250,7 +275,7 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
         False,
     ),
     StopReason.OPTIMIZER_ABORT: StopReasonInfo(
-        "Optimizer abort", StopOutcome.HALTED, False, False, "", True
+        "Optimizer abort", StopOutcome.HALTED, StopCategory.SEARCH, False, False, "", True
     ),
     # The budget gate stops INSIDE the sample loop as well as at the boundary, so the round it
     # cut is partial unless the selector elected on it. The counter is CUMULATIVE across resume,
@@ -259,6 +284,7 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
     StopReason.SPEND_BUDGET: StopReasonInfo(
         "Spend budget reached",
         StopOutcome.HALTED,
+        StopCategory.BUDGET,
         True,
         False,
         "`set-limits --max-usd <above what is already spent>` then `resume`.",
@@ -267,17 +293,25 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
     StopReason.TOKEN_BUDGET: StopReasonInfo(
         "Token budget reached",
         StopOutcome.HALTED,
+        StopCategory.BUDGET,
         True,
         False,
         "`set-limits --max-tokens <above what is already spent>` then `resume`.",
         True,
     ),
     StopReason.ORIGIN_GATE: StopReasonInfo(
-        "Origin gate (unhealthy origin)", StopOutcome.HALTED, False, False, "", True
+        "Origin gate (unhealthy origin)",
+        StopOutcome.HALTED,
+        StopCategory.OPERATOR,
+        False,
+        False,
+        "",
+        True,
     ),
     StopReason.BACKEND_UNREACHABLE: StopReasonInfo(
         "Backend unreachable",
         StopOutcome.HALTED,
+        StopCategory.EXTERNAL,
         True,
         False,
         "The unreached cell is a hole, not a score: restore the backend or the network it "
@@ -288,6 +322,7 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
     StopReason.PROVIDER_CREDIT: StopReasonInfo(
         "Provider out of credit",
         StopOutcome.HALTED,
+        StopCategory.EXTERNAL,
         True,
         False,
         "Raise the provider key's limit or top up its credit, then `resume`; a refused cell is a "
@@ -299,6 +334,7 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
     StopReason.PROVIDER_THROTTLED: StopReasonInfo(
         "Provider rate-limited",
         StopOutcome.HALTED,
+        StopCategory.EXTERNAL,
         True,
         False,
         "Use your own key for that provider (OpenRouter BYOK) or route to another host "
@@ -309,6 +345,7 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
     StopReason.CRASHED: StopReasonInfo(
         "Crashed",
         StopOutcome.FAILED,
+        StopCategory.FAILURE,
         True,
         True,
         "Read `index.json::crash_traceback` for the cause; `python -m promptpotter resume` "
@@ -321,40 +358,41 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
     StopReason.INPUT_REFUSED: StopReasonInfo(
         "Input refused",
         StopOutcome.FAILED,
+        StopCategory.FAILURE,
         True,
         False,
         "`dashboard.json::error` names the input the run declined; refused at run init, nothing "
-        "was searched. A spend cap under one round is raised with `set-limits --max-usd` (on a "
-        "head-to-head arm that moves every arm's budget) or met by narrowing the round in "
-        "`optimization.nodes`; then `resume`.",
+        "was searched. A spend cap under one round is raised with `set-limits --max-usd` or met "
+        "by narrowing the round in `optimization.nodes`; then `resume`.",
         False,
     ),
     # A JOB's ending, never a cycle's: the launch left before it held a run — refused at admission,
     # or withdrawn from the queue by its owner or the wait bound. Nothing ran, nothing was spent.
     StopReason.NOT_ADMITTED: StopReasonInfo(
-        "Not admitted", StopOutcome.HALTED, False, False, "", False
+        "Not admitted", StopOutcome.HALTED, StopCategory.LIMIT, False, False, "", False
     ),
     # Written by the REAPER straight onto index.json — the producer is already gone, so
     # `_finalize_run` never runs and never reads this row. True is the honest value: a
     # vanished process died at an arbitrary point, so whatever round was open is partial.
     StopReason.PRODUCER_VANISHED: StopReasonInfo(
-        "Producer vanished", StopOutcome.FAILED, True, False, "", False
+        "Producer vanished", StopOutcome.FAILED, StopCategory.FAILURE, True, False, "", False
     ),
     # This and OPTIMIZER_TIMEOUT are caught by TYPE at the round loop, and the round they cut is
     # never absorbed: the selection the closed rounds left stands, as no untyped crash can promise.
     StopReason.RENDER_ERROR: StopReasonInfo(
-        "Render error", StopOutcome.FAILED, True, True, "", True
+        "Render error", StopOutcome.FAILED, StopCategory.FAILURE, True, True, "", True
     ),
     StopReason.DIVERGED: StopReasonInfo(
         "Diverged",
         StopOutcome.FAILED,
+        StopCategory.FAILURE,
         False,
         False,
         "`resume --fork-on-divergence` to branch here, or revert the config edit to continue.",
         False,
     ),
     StopReason.OPTIMIZER_TIMEOUT: StopReasonInfo(
-        "Optimizer timeout", StopOutcome.FAILED, True, False, "", True
+        "Optimizer timeout", StopOutcome.FAILED, StopCategory.FAILURE, True, False, "", True
     ),
 }
 

@@ -35,6 +35,7 @@ from promptpotter.application.evidence.grid import (
 from promptpotter.application.evidence.head_to_head import (
     HeadToHead,
     HeadToHeadEntry,
+    comparison_grader,
     head_to_head,
 )
 from promptpotter.application.evidence.metric_catalogue import (
@@ -75,6 +76,7 @@ from promptpotter.shared.statistics import exact_paired_reading, paired_diff_pos
 
 if TYPE_CHECKING:
     from promptpotter.application.scoring.formula.compiler import CompiledExpression
+    from promptpotter.domain.campaign import Campaign
     from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -150,6 +152,9 @@ class Evidence(StrictModel):
     """The whole read for one selection of subjects — recomputed on every fetch."""
 
     generated_at: str
+    # The comparison's ONE scorer, which grades its bench headlines and every cell's `fitness`:
+    # the one each subject's campaign declares, and a selection declaring two is refused.
+    scorer_id: str
     # Oldest first — the confound reads off this order. Identity AND the metric reading in one
     # row, so nothing downstream joins two lists on `key`.
     subjects: list[SubjectReading]
@@ -293,13 +298,34 @@ def subject_evidence(
     no two numbers on the page can be about different quantities.
     """
     wanted: dict[str, SubjectSpec] = {s.key: s for s in specs}
+    located = {key: at for key, spec in wanted.items() if (at := _at(stores, spec)) is not None}
+    # Only a subject with rows declares the comparison's scorer: one that measured nothing has no
+    # cell to read under it.
+    answering = {
+        key: (leaf_stores, campaign_dir)
+        for key, (leaf_stores, campaign_dir) in located.items()
+        if derived(
+            ("evidence_answers", campaign_dir, key),
+            sig=_files_read(wanted[key], campaign_dir),
+            compute=partial(_answers, leaf_stores, wanted[key], campaign_dir),
+        )
+    }
+    owners: dict[tuple[tuple[tuple[str, str], ...], str], tuple[Stores, Campaign]] = {}
+    for key, (leaf_stores, _) in answering.items():
+        spec = wanted[key]
+        campaign = leaf_stores.campaigns.load_campaign(spec.campaign_id)
+        if campaign is not None:
+            inside = tuple((h.campaign_id, h.cycle_id) for h in spec.inside)
+            owners.setdefault((inside, spec.campaign_id), (leaf_stores, campaign))
+    grader = (
+        comparison_grader(sorted(owners.values(), key=lambda o: o[1].created_at))
+        if owners
+        else None
+    )
     reads: dict[str, _SubjectRead] = {}
     leaves: dict[str, Stores] = {}
-    for key, spec in wanted.items():
-        resolved = _at(stores, spec)
-        if resolved is None:
-            continue
-        leaf_stores, campaign_dir = resolved
+    for key, (leaf_stores, campaign_dir) in answering.items():
+        spec = wanted[key]
         read = partial(_read_subject, leaf_stores, spec, campaign_dir)
         # A lens grades through the campaign's resolved config, which no signature here covers.
         found = (
@@ -321,7 +347,7 @@ def subject_evidence(
     # An unmeasured selection is not a metric problem, so it may not be answered as one: two
     # ordinary actions reach here — ticking a campaign whose origin has not run, mistyping an id
     # — and neither has a vocabulary to be wrong about.
-    if not heads:
+    if grader is None or not heads:
         raise ValueError(
             f"None of {', '.join(sorted(wanted)) or 'the subjects named'} has scored rows to read. "
             "A campaign answers here once its origin has run, a course once its branch has, a "
@@ -387,10 +413,11 @@ def subject_evidence(
     reading = metric_reading(spec_metric, rows, available)
     return Evidence(
         generated_at=utcnow_iso(),
+        scorer_id=grader.scorer_id,
         subjects=rows,
         comparability=comparability(rows),
         head_to_head=head_to_head(
-            [HeadToHeadEntry(r, leaves[r.key]) for r in _campaign_channels(rows)]
+            [HeadToHeadEntry(r, leaves[r.key]) for r in _campaign_channels(rows)], grader
         ),
         metric=reading,
         unread_subjects=sorted(set(wanted) - set(heads)),
@@ -455,6 +482,11 @@ def _files_read(spec: SubjectSpec, campaign_dir: Path) -> Hashable:
         rounds = []
     signed = (manifest, layout.manifest, layout.ledger, layout.dashboard)
     return (*(file_sig(path) for path in signed), *rounds)
+
+
+def _answers(stores: Stores, spec: SubjectSpec, campaign_dir: Path) -> bool:
+    head = _resolve_head(stores, spec, campaign_dir)
+    return head is not None and bool(head.point.rows)
 
 
 def _read_subject(stores: Stores, spec: SubjectSpec, campaign_dir: Path) -> _SubjectRead | None:
@@ -534,13 +566,11 @@ def _resolve_head(stores: Stores, spec: SubjectSpec, campaign_dir: Path) -> _Hea
 
 
 def _authorship(cycle_dir: Path, point: _ChainPoint, index: dict[str, Any]) -> str:
-    """Joined on ``(round, label)``, never on ``candidate_id``: a resume re-mints every id while the
-    round document already on disk keeps the old one, so an id join answers for nobody."""
     source = next(
         (
             c.source
             for c in scan_ledger_candidates(CycleLayout(cycle_dir).ledger)
-            if c.round == point.round and c.label == point.label
+            if c.candidate_id == point.candidate_id
         ),
         "",
     )
@@ -808,10 +838,9 @@ def _spend_to_round(dash: dict[str, Any]) -> dict[str, float]:
     cost-to-here, and leaving it out would make a lookup miss where the honest answer is "the same
     as the round before".
 
-    THIS CYCLE'S OWN spend, so on a fork it answers what the BRANCH has spent since it cut, not
-    what the line cost from the origin — the inherited prefix lives in the parent's file and the
-    read side cannot follow that link. ``cycle_spend_usd`` beside it is the roll-up that does
-    include it, which is why both are served.
+    The cycle's HISTORY, as its dashboard folds it (``ledger.py::ledger_chain``), so on a fork the
+    rounds before the cut carry what the parent spent on them — the same roll-up as
+    ``cycle_spend_usd`` beside it, read per round.
     """
     per_round: dict[int, float] = {}
     for key, rollup in (dash.get("spend_by_round") or {}).items():

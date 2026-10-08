@@ -58,16 +58,6 @@ interface RawHistoricalSample {
   error_category?: unknown;
 }
 
-// The document's own id is NOT the tree's: a resume re-scores C0 under a new lineage id. Resolve
-// it once by `courseLabel` (the minting course's, never the renumbered timeline `label`).
-export function docCandidateId(doc: RoundResult | null, courseLabel: string): string | null {
-  if (!doc || !courseLabel) return null;
-  const scores = doc.candidate_scores as { label?: string; candidate_id?: string }[] | undefined;
-  const row = Array.isArray(scores) ? scores.find((c) => c.label === courseLabel) : undefined;
-  return row?.candidate_id || null;
-}
-
-// `candidate_id` is the DOCUMENT's, via `docCandidateId`.
 export function historicalSamplesFor(
   roundDoc: RoundResult | null,
   round: number,

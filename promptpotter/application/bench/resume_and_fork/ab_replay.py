@@ -23,7 +23,6 @@ from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.record import MaskRound
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.opt_search_point import OptSearchPoint
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
@@ -150,7 +149,7 @@ def ab_replay_cycle(
     assert scorer is not None, "session.scoring.scorer required for A/B replay"
 
     record = load_mask_record(session.store, hop.campaign_id, lens=None, with_replay=True)
-    origin = next(
+    round_0 = next(
         (
             rnd.round_data
             for cyc in record.cycles
@@ -160,7 +159,7 @@ def ab_replay_cycle(
         ),
         None,
     )
-    if origin is None:
+    if round_0 is None:
         raise AbReplayError(
             f"{hop.campaign_id}/{hop.cycle_id} has no scored round 0, so there is no origin to "
             "calibrate the δ ruler on and every replayed decision would be read against nothing."
@@ -169,19 +168,12 @@ def ab_replay_cycle(
     # including its searchpoint identity, which folds the archive's copies of the origin into the
     # one ``ORIGIN_ABILITY_ID`` candidate the live ruler saw. Rescored first: the ruler is fitted
     # on the grades the CURRENT scorer gives, or arm B is measured against arm A's δ.
-    rescore_results(origin.results, scorer)
-    # Through the OSP, as `Cycle.start` builds it: the round's `pipeline_params` has each node's
-    # rendered `prompt` stripped, and `sp_hash` keys on the whole node config.
-    origin_sp_hash = (
-        OptSearchPoint.from_prompt_fields(origin.prompt_fields)
-        .to_job_search_point(
-            base_pipeline_params=origin.pipeline_params,
-            schema=session.pipeline_schema,
-            framing=campaign_framing(session.store, campaign_config, session.dataset_name),
-            demo=sc.require_partition().demo,
-        )
-        .sp_hash(session.pipeline_schema)
-    )
+    rescore_results(round_0.results, scorer)
+    origin_sp_hash = round_0.origin.searchpoint(
+        schema=session.pipeline_schema,
+        framing=campaign_framing(session.store, campaign_config, session.dataset_name),
+        demo=sc.require_partition().demo,
+    ).sp_hash(session.pipeline_schema)
     view = DifficultyView(
         session=session,
         n_min=campaign_config.optimization.elimination_n_min,
@@ -189,7 +181,7 @@ def ab_replay_cycle(
         origin_sp_hash=origin_sp_hash,
     )
     ruler, _ = _calibrate_delta_ruler(
-        origin.results, view.n_min, enable_2pl=view.enable_2pl, archive_obs=view.archive()
+        round_0.results, view.n_min, enable_2pl=view.enable_2pl, archive_obs=view.archive()
     )
 
     mismatches: list[ReplayMismatch] = []

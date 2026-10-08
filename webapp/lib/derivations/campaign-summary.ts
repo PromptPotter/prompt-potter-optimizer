@@ -8,7 +8,6 @@ import type {
   ConfigKnob,
   ConfigMapResponse,
   LineageNode,
-  LiveDashboardState,
   MeteredSpend,
   RunsWithParam,
 } from "@/lib/api";
@@ -66,24 +65,24 @@ function settingValue(v: unknown): string {
   return Array.isArray(v) ? v.map((x) => fmtValue(x)).join(",") : fmtValue(v);
 }
 
-// A price-less model makes the spend a FLOOR, and the `≥` says so on the row itself.
-function spendFloor(c: CampaignSummary): string {
-  return c.spend_unpriced_tokens > 0 ? "≥" : "";
+// A price-less model makes the spend a FLOOR, and the `≥` says so on the figure it bounds.
+function spendFloor(unpricedTokens: number): string {
+  return unpricedTokens > 0 ? "≥" : "";
 }
 
 // The bill, the figure the row's own card leads with: no cap sits beside a row to read a meter by.
 export function spendLabel(c: CampaignSummary): string {
-  return `${spendFloor(c)}${fmtUsd(c.spend_metered.billed_usd)}`;
+  return `${spendFloor(c.spend_metered.unpriced_tokens)}${fmtUsd(c.spend_metered.billed_usd)}`;
 }
 
 export const SPEND_STAT_LABEL = "Billed";
 
 // The bill leads; what the same calls would have cost with every replay priced, and what the cap
 // counts of either, sit beside it — an arm replaying a sibling's cells bills $0 for them.
-export function spendStat(metered: MeteredSpend, floor: string): RowStat {
+export function spendStat(metered: MeteredSpend): RowStat {
   return {
     label: SPEND_STAT_LABEL,
-    value: `${floor}${fmtUsd(metered.billed_usd)}`,
+    value: `${spendFloor(metered.unpriced_tokens)}${fmtUsd(metered.billed_usd)}`,
     sub:
       `Incurred ${fmtUsd(metered.incurred_usd)} · Counted against cap ` +
       `${fmtUsd(metered.usd)} ${METER_WORD[metered.meter]}: ${meteredBucketsLine(metered)}`,
@@ -116,17 +115,15 @@ export function benchStat(bench: BenchScore): RowStat {
   };
 }
 
-// A split holding nothing out is served as a score with its `missing_reason`, so a null one is
-// only ever a pass not taken: still to come, or skipped by the way the run ended.
+// A split holding nothing out is served as a score with its `missing_reason`; a null score comes
+// with the served reason no pass was taken (`bench_missing_reason`).
 export function benchReading(
   bench: BenchScore | null | undefined,
-  runPhase: LiveDashboardState["run_phase"] | undefined,
+  missingReason: string | null | undefined,
 ): RowStat {
   // Guarded: `dashboard.json` is served verbatim, and a file an older build wrote names no column.
   if (bench?.headline) return benchStat(bench);
-  const sub =
-    runPhase === "terminal" ? "not graded — the run ended first" : "graded when the run ends";
-  return { label: BENCH_STAT_LABEL, value: "—", sub };
+  return { label: BENCH_STAT_LABEL, value: "—", sub: missingReason ?? undefined };
 }
 
 // The θ clause only where the served node elects on θ: a peer optimizer's rounds are not.
@@ -262,10 +259,10 @@ export function campaignCard(
   const cap = runsWith ? runsWith.max_rounds : null;
   const stats: RowStat[] = [
     ...(campaign.bench ? [benchStat(campaign.bench)] : []),
-    spendStat(campaign.spend_metered, spendFloor(campaign)),
+    spendStat(campaign.spend_metered),
     {
       label: "Lifetime bill",
-      value: `${spendFloor(campaign)}${fmtUsd(campaign.spend_used_usd)}`,
+      value: `${spendFloor(campaign.spend_unpriced_tokens)}${fmtUsd(campaign.spend_used_usd)}`,
       sub:
         campaign.spend_unpriced_tokens > 0
           ? `floor — ${fmtTokens(campaign.spend_unpriced_tokens)} unpriced`

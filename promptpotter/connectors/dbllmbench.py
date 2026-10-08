@@ -13,7 +13,6 @@ unchanged.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import shutil
@@ -224,10 +223,6 @@ def _model_entry(cfg: Mapping[str, Any], prompt: str) -> tuple[dict[str, Any], d
     if route := cfg.get("route_order"):
         extra["provider"] = {"order": list(route), "allow_fallbacks": False}
     if spec.gateway:
-        # Every run, retry and question of one candidate re-sends the same head — the candidate,
-        # the schema, the examples — and a host's prompt cache is its own. Naming the candidate as
-        # the session keeps the gateway on the host that already holds that head.
-        extra["session_id"] = hashlib.sha256(prompt.encode()).hexdigest()[:32]
         # Asked for, as our own client asks: the cache breakdown `_spent` bills the cell off.
         extra["usage"] = {"include": True}
     if effort is not None:

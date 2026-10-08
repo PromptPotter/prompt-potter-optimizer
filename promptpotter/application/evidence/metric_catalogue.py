@@ -229,8 +229,7 @@ _COMPOSITE_FITNESS = MetricSpec(
     unit="level",
     higher_is_better=True,
     description=(
-        "What each campaign's own scoring formula made of the measurand. Pooling on it averages "
-        "numbers produced by different formulas."
+        "What the one scoring formula every campaign here declares makes of the measurand."
     ),
 )
 
@@ -257,8 +256,9 @@ def catalogue_for(available: frozenset[str]) -> tuple[MetricSpec, ...]:
                     "How far each seed's own inner campaign moved off its own origin, averaged "
                     "over its round budget. This is the number the outer loop scores."
                     if seed_lift
-                    else "The value each cell was scored at. A cell here is a sample, which has "
-                    "no origin of its own to lift over."
+                    else "The value each cell was scored at, under the one formula every campaign "
+                    "here declares. A cell here is a sample, which has no origin of its own to "
+                    "lift over."
                 ),
             )
         )

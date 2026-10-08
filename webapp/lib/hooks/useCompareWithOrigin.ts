@@ -51,12 +51,6 @@ export function useCompareWithOrigin(
       if (!parent || seen.has(parent.id)) break;
       origin = parent;
     }
-    // A resume re-mints C0, so a round-1 parent id can name no node on the tree. The chain then
-    // ends on its own course, whose round-0 point IS the origin it was mutated from.
-    if ((origin.round ?? 0) > 0) {
-      const course = index.get(encodeCyclePath(pathOf(origin)))?.candidates ?? [];
-      origin = course.find((c) => (c.round ?? 0) === 0) ?? origin;
-    }
     const originKey = candidateSubject(pathOf(origin), origin.id);
     const second =
       candidateId === null

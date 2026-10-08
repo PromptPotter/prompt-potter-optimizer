@@ -169,7 +169,9 @@ async def resume_with_divergence_check(
         stale = _stale_generation(campaign_store, hop, prior, resumed_from_round)
         campaign = campaign_store.load_campaign(hop.campaign_id)
         frozen = campaign.config if campaign is not None else {}
-        scope, diffed = classify_config_diff(cycle.config, frozen)
+        scope, diffed = classify_config_diff(
+            cycle.config, frozen, arm=campaign is not None and campaign.arm is not None
+        )
         if (
             not optimizer_mismatches
             and stale is None
