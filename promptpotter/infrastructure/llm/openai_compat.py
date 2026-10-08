@@ -29,6 +29,7 @@ from promptpotter.infrastructure.llm.rate_limit import (
     apply_discovered_caps,
     raise_if_request_too_large,
 )
+from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.spend_book import Billed, CallLabel
 from promptpotter.shared import truncate
@@ -185,6 +186,21 @@ def _llm_response(landed: _ParsedReply) -> LLMResponse:
 
 
 class OpenAICompatibleClient(LLMClientBase):
+    SENDS = frozenset(
+        {
+            "messages",
+            "model",
+            "temperature",
+            "max_tokens",
+            "response_model",
+            "response_schema",
+            "reasoning_effort",
+            "top_p",
+            "seed",
+            "route_order",
+        }
+    )
+
     def __init__(
         self,
         api_key: str,
@@ -224,36 +240,10 @@ class OpenAICompatibleClient(LLMClientBase):
             self._client = AsyncOpenAI(**kwargs)
         return self._client
 
-    async def chat(
-        self,
-        messages: list[dict[str, str]],
-        model: str,
-        *,
-        label: CallLabel,
-        temperature: float = 0.0,
-        max_tokens: int | None = None,
-        response_model: type[BaseModel] | None = None,
-        response_schema: dict[str, Any] | None = None,
-        reasoning_effort: str | None = None,
-        top_p: float | None = None,
-        seed: int | None = None,
-        route_order: list[str] | None = None,
-        **kwargs: Any,
-    ) -> LLMResponse:
+    async def _chat(self, request: ChatRequest, label: CallLabel) -> LLMResponse:
         client = self._ensure_client()
-        request_params = await self._request_params(
-            messages,
-            model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            response_model=response_model,
-            response_schema=response_schema,
-            reasoning_effort=reasoning_effort,
-            top_p=top_p,
-            seed=seed,
-            route_order=route_order,
-            kwargs=kwargs,
-        )
+        response_model, response_schema = request.response_model, request.response_schema
+        request_params = await self._request_params(request)
         result = await self._one_attempt(
             client, request_params, response_model, response_schema, label
         )
@@ -275,28 +265,16 @@ class OpenAICompatibleClient(LLMClientBase):
         )
         return landed if isinstance(landed, LLMResponse) else _llm_response(landed)
 
-    async def _request_params(
-        self,
-        messages: list[dict[str, str]],
-        model: str,
-        *,
-        temperature: float,
-        max_tokens: int | None,
-        response_model: type[BaseModel] | None,
-        response_schema: dict[str, Any] | None,
-        reasoning_effort: str | None,
-        top_p: float | None,
-        seed: int | None,
-        route_order: list[str] | None,
-        kwargs: dict[str, Any],
-    ) -> dict[str, Any]:
+    async def _request_params(self, request: ChatRequest) -> dict[str, Any]:
+        reasoning_effort, seed, top_p = request.reasoning_effort, request.seed, request.top_p
+        response_model, response_schema = request.response_model, request.response_schema
         request_params: dict[str, Any] = {
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
+            "model": request.model,
+            "messages": request.messages,
+            "temperature": request.temperature,
         }
-        if max_tokens is not None:
-            request_params["max_tokens"] = max_tokens
+        if request.max_tokens is not None:
+            request_params["max_tokens"] = request.max_tokens
         # Bounded reasoning is a survival guard (the openrouter/gpt-oss optimizer nodes blow the
         # call deadline at unbounded effort); the OpenAI-compatible field is top-level. Omitted
         # when unset so a provider that doesn't accept it never sees a null — and on
@@ -309,7 +287,7 @@ class OpenAICompatibleClient(LLMClientBase):
             request_params["seed"] = seed
         if top_p is not None:
             request_params["top_p"] = top_p
-        extra_body = await self._extra_body(model, route_order)
+        extra_body = await self._extra_body(request.model, request.route_order)
         if extra_body:
             request_params["extra_body"] = extra_body
 
@@ -328,13 +306,6 @@ class OpenAICompatibleClient(LLMClientBase):
                     "strict": False,
                 },
             }
-
-        # `extra_body` MERGES; everything else overrides: replacing it would drop `usage` (every
-        # ledger row's price) and `provider` (the route pin a prefix cache depends on).
-        if caller_extra := kwargs.pop("extra_body", None):
-            merged = {**extra_body, **caller_extra}
-            request_params["extra_body"] = merged
-        request_params.update(kwargs)
         return request_params
 
     async def _extra_body(self, model: str, route_order: list[str] | None) -> dict[str, Any]:

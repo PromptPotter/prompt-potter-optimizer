@@ -119,14 +119,15 @@ async def test_the_determinism_clamp_outranks_every_other_layer_and_keys_the_ban
     from promptpotter.application.bench import llm_call as call_mod
     from promptpotter.application.campaign_config import DeterminismClamp
     from promptpotter.application.optimizer_manifest import set_determinism_clamp
+    from promptpotter.infrastructure.llm.request import ChatRequest
     from promptpotter.infrastructure.llm.response import LLMResponse
     from promptpotter.infrastructure.store.stores import LLMReuseCache
 
-    sent: list[dict[str, Any]] = []
+    sent: list[ChatRequest] = []
 
     class _Recorder:
-        async def chat(self, **kwargs: Any) -> LLMResponse:
-            sent.append(kwargs)
+        async def chat(self, request: ChatRequest, **_: Any) -> LLMResponse:
+            sent.append(request)
             return LLMResponse(content="ok", model="m")
 
     monkeypatch.setattr(call_mod, "get_llm_client", lambda _provider: _Recorder())
@@ -145,12 +146,12 @@ async def test_the_determinism_clamp_outranks_every_other_layer_and_keys_the_ban
     try:
         pinned = DeterminismClamp(temperature=0.0, seed=7, route_order=["Alibaba"])
         await ask(pinned)
-        assert sent[0]["temperature"] == 0.0, (
+        assert sent[0].temperature == 0.0, (
             "the node's file value or the per-call override beat the clamp — the campaign "
             "reports itself pinned and runs unpinned"
         )
-        assert sent[0]["seed"] == 7
-        assert sent[0]["route_order"] == ["Alibaba"]
+        assert sent[0].seed == 7
+        assert sent[0].route_order == ["Alibaba"]
 
         # Same prompt, same model, a different host: a second measurement, so a second entry.
         await ask(pinned.model_copy(update={"route_order": ["Baidu"]}))
@@ -159,9 +160,9 @@ async def test_the_determinism_clamp_outranks_every_other_layer_and_keys_the_ban
 
         # And an unpinned campaign is left alone rather than handed a `None` for every key.
         await ask(None)
-        assert sent[2]["temperature"] == 0.7
-        assert sent[2]["seed"] is None
-        assert "route_order" not in sent[2]
+        assert sent[2].temperature == 0.7
+        assert sent[2].seed is None
+        assert sent[2].route_order is None
     finally:
         set_determinism_clamp(None)
 

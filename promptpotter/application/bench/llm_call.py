@@ -34,6 +34,7 @@ from promptpotter.infrastructure.llm.json_parse import (
 )
 from promptpotter.infrastructure.llm.rate_limit import throttle_stall_given_to
 from promptpotter.infrastructure.llm.registry import get_llm_client
+from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.spend_book import CallLabel
 from promptpotter.infrastructure.llm.telemetry import call_priced, emit_token_usage
@@ -109,10 +110,7 @@ def _ledger_reasoning(text: str) -> str:
 
 
 async def _chat_under_deadline(
-    llm_client: LLMClientBase,
-    *,
-    node_label: str,
-    **chat_kwargs: Any,
+    llm_client: LLMClientBase, request: ChatRequest, *, node_label: str
 ) -> LLMResponse:
     """The provider SDK's ``timeout`` is a per-read-gap bound, so a slowly streaming reasoning model
     never trips it; this is the wall clock. A call past it is not sent again — the provider may
@@ -134,7 +132,7 @@ async def _chat_under_deadline(
                     deadline.reschedule(when + seconds)
 
             with throttle_stall_given_to(give_back):
-                return await llm_client.chat(**chat_kwargs)
+                return await llm_client.chat(request, label=CallLabel(node_label, "optimizer"))
     except TimeoutError as exc:
         raise OptimizerTimeoutError(
             f"optimizer call {node_label} exceeded the {budget_s:.0f}s deadline"
@@ -286,10 +284,6 @@ def _announce(call: _Call) -> None:
 
 async def _provider_reply(call: _Call) -> LLMResponse:
     context, label, merged = call.context, call.label, call.merged
-    # Passed ONLY when set. A client with no routing concept (Anthropic) takes an unknown named
-    # arg into `**kwargs`, and a key it cannot use is a key it may forward to its own SDK — so the
-    # absence has to be an absent argument, not a `None` one.
-    route_kwargs: dict[str, Any] = {"route_order": ro} if (ro := merged.get("route_order")) else {}
     # Created unconditionally: `on_suspend` guards a deadline, not telemetry, so a ledger-less
     # call still needs it. Cancelled on every path by the `finally` below.
     heartbeat_task: asyncio.Task[None] = asyncio.create_task(
@@ -311,18 +305,20 @@ async def _provider_reply(call: _Call) -> LLMResponse:
     try:
         return await _chat_under_deadline(
             call.client,
+            ChatRequest(
+                messages=call.messages,
+                model=merged["model"],
+                temperature=merged["temperature"],
+                max_tokens=merged.get("max_tokens"),
+                response_model=call.response_model,
+                response_schema=call.response_schema,
+                reasoning_effort=merged.get("reasoning_effort"),
+                top_p=merged.get("top_p"),
+                seed=merged.get("seed"),
+                # An empty route pins nothing, so it is no request for one.
+                route_order=merged.get("route_order") or None,
+            ),
             node_label=label,
-            messages=call.messages,
-            model=merged.get("model"),
-            label=CallLabel(label, "optimizer"),
-            temperature=merged["temperature"],
-            max_tokens=merged.get("max_tokens"),
-            response_model=call.response_model,
-            response_schema=call.response_schema,
-            reasoning_effort=merged.get("reasoning_effort"),
-            top_p=merged.get("top_p"),
-            seed=merged.get("seed"),
-            **route_kwargs,
         )
     except OptimizerPromptParseError as parse_err:
         logger.error(

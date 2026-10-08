@@ -9,7 +9,7 @@ from promptpotter.complexity_ledger import compute_ledger
 
 LEDGER_BASELINE = {
     # Every `.py` under the package.
-    "modules": 398,
+    "modules": 399,
     # Every `__init__.py` among them.
     "init_files": 55,
     # The `__init__.py` files that re-export names instead of staying empty.
@@ -43,7 +43,7 @@ LEDGER_BASELINE = {
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 7,
     # Test functions across them, each admitted through the charter's three axes.
-    "test_functions": 97,
+    "test_functions": 98,
     # Every property of every schema the generated contract offers the browser.
     "served_fields": 843,
 }

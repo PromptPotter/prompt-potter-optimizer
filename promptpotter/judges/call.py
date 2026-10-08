@@ -40,6 +40,7 @@ from typing import Any
 from promptpotter.config.settings import NO_RESULT
 from promptpotter.infrastructure.llm.heartbeat import heartbeat, waiting_on
 from promptpotter.infrastructure.llm.registry import get_llm_client
+from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.spend_book import CallLabel
 from promptpotter.infrastructure.llm.telemetry import (
@@ -220,11 +221,13 @@ async def _sample(stage: JudgeStage, prompt: str, *, judge: str, started: float)
     )
     try:
         return await client.chat(
-            messages=[{"role": "user", "content": prompt}],
-            model=stage.model,
+            ChatRequest(
+                messages=[{"role": "user", "content": prompt}],
+                model=stage.model,
+                temperature=stage.temperature,
+                max_tokens=stage.max_tokens,
+            ),
             label=CallLabel(label, "judge"),
-            temperature=stage.temperature,
-            max_tokens=stage.max_tokens,
         )
     finally:
         # Cancel whether the call returned or raised — an in-flight task survives the function exit

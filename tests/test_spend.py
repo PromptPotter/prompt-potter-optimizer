@@ -26,6 +26,7 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.validators import StopSignal
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import inner_sandbox_dir, sandbox_owner_path
@@ -358,6 +359,124 @@ async def test_a_second_grading_of_one_comparison_is_not_re_billed(
     blank_calls, _, blank = await _grade_twice(tmp_path / "blank", monkeypatch, reply="   ")
     assert blank is None, "an unreadable grading is an absent verdict, never a zero"
     assert len(blank_calls) == 2, "an empty reply was cached and replayed as if it were a verdict"
+
+
+def test_a_field_a_client_cannot_send_is_refused_and_the_gateway_wire_holds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A request field a client cannot carry must refuse, never evaporate: dropped, a `seed` or
+    `reasoning_effort` arm scores against an identical call and the round credits the axis.
+
+    A banked reply is keyed on the node's config (`hash_call`), never the wire, so a wire that
+    moved under an unchanged key replays the old request's answer — the gateway body is pinned
+    whole, order included."""
+    from pydantic import BaseModel, Field
+
+    from promptpotter.infrastructure.llm import base, openai_compat
+    from promptpotter.infrastructure.llm.anthropic import AnthropicClient
+    from promptpotter.infrastructure.llm.pricing import PriceTier, RateCeiling
+    from promptpotter.infrastructure.llm.spend_book import (
+        CallLabel,
+        bind_spend_book,
+        unbounded_spend_book,
+    )
+
+    class _Reply(BaseModel):
+        answer: str = Field(description="The answer.")
+
+    class _SentError(Exception):
+        pass
+
+    wire: list[dict[str, Any]] = []
+
+    async def create(**params: Any) -> None:
+        wire.append(params)
+        raise _SentError
+
+    async def ceiling(*_: Any, **__: Any) -> RateCeiling:
+        return RateCeiling(tiers=(PriceTier(0, 0.5, 0.25),))
+
+    monkeypatch.setattr(base, "rate_ceiling", ceiling)
+    monkeypatch.setattr(openai_compat, "rate_ceiling", ceiling)
+    raw = types.SimpleNamespace(with_raw_response=types.SimpleNamespace(create=create))
+    messages = [{"role": "user", "content": "q"}]
+
+    def send(client: Any, request: ChatRequest) -> None:
+        async def _send() -> None:
+            bind_spend_book(unbounded_spend_book())
+            await client.chat(request, label=CallLabel("l1", "optimizer"))
+
+        asyncio.run(_send())
+
+    claude = AnthropicClient(api_key="k")
+    claude._client = types.SimpleNamespace(messages=raw)  # type: ignore[assignment]
+    with pytest.raises(_SentError):
+        send(claude, ChatRequest(messages, "m", response_model=_Reply, top_p=0.9))
+    assert len(wire) == 1
+    for unsendable in ({"seed": 7}, {"reasoning_effort": "low"}, {"route_order": ["Alibaba"]}):
+        with pytest.raises(ValueError, match=next(iter(unsendable))):
+            send(claude, ChatRequest(messages, "m", **unsendable))
+    assert len(wire) == 1, "a refused request reached the provider"
+
+    gateway = openai_compat.OpenAICompatibleClient(
+        api_key="k", provider="openrouter", display_name="OpenRouter", gateway=True
+    )
+    gateway._client = types.SimpleNamespace(  # type: ignore[assignment]
+        chat=types.SimpleNamespace(completions=raw)
+    )
+    priced = {"max_price": {"prompt": 500000.0, "completion": 250000.0}}
+    with pytest.raises(_SentError):
+        send(gateway, ChatRequest(messages, "m"))
+    assert json.dumps(wire[1]) == json.dumps(
+        {
+            "model": "m",
+            "messages": messages,
+            "temperature": 0.0,
+            "extra_body": {"usage": {"include": True}, "provider": priced},
+        }
+    )
+    with pytest.raises(_SentError):
+        send(
+            gateway,
+            ChatRequest(
+                messages,
+                "m",
+                temperature=0.3,
+                max_tokens=64,
+                response_model=_Reply,
+                reasoning_effort="low",
+                top_p=0.9,
+                seed=7,
+                route_order=["Alibaba"],
+            ),
+        )
+    assert json.dumps(wire[2]) == json.dumps(
+        {
+            "model": "m",
+            "messages": messages,
+            "temperature": 0.3,
+            "max_tokens": 64,
+            "reasoning_effort": "low",
+            "seed": 7,
+            "top_p": 0.9,
+            "extra_body": {
+                "usage": {"include": True},
+                "provider": {**priced, "order": ["Alibaba"], "allow_fallbacks": True},
+            },
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "_Reply",
+                    "schema": {
+                        "properties": {"answer": {"description": "The answer.", "type": "string"}},
+                        "required": ["answer"],
+                        "type": "object",
+                    },
+                    "strict": False,
+                },
+            },
+        }
+    )
 
 
 # 2. What a run is billed
@@ -878,7 +997,7 @@ async def test_a_resumed_arm_re_reads_its_cells_and_still_reaches_its_bench(
     from promptpotter.judges.protocol import JudgeStage
 
     class _Provider:
-        async def chat(self, **_kw: Any) -> LLMResponse:
+        async def chat(self, *_a: Any, **_kw: Any) -> LLMResponse:
             return LLMResponse(content="ok", model="m", cost_usd=0.01)
 
     monkeypatch.setattr(call_mod, "get_llm_client", lambda _p: _Provider())
@@ -1433,10 +1552,12 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     async def burst() -> list[Any]:
         async def one(i: int) -> Any:
             return await client.chat(
-                [{"role": "user", "content": "x" * rng.randint(10, 400)}],
-                model="gpt-x",
+                ChatRequest(
+                    [{"role": "user", "content": "x" * rng.randint(10, 400)}],
+                    model="gpt-x",
+                    max_tokens=1500,
+                ),
                 label=CallLabel(f"n{i}", "optimizer"),
-                max_tokens=1500,
             )
 
         tasks = [asyncio.ensure_future(one(i)) for i in range(40)]
@@ -1526,10 +1647,8 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
         with spending_under(book):
             asyncio.run(
                 client.chat(
-                    [{"role": "user", "content": "nested"}],
-                    model="gpt-x",
+                    ChatRequest([{"role": "user", "content": "nested"}], "gpt-x", max_tokens=10),
                     label=CallLabel("inner", "optimizer"),
-                    max_tokens=10,
                 )
             )
     finally:
@@ -1577,10 +1696,8 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
         with spending_under(book):
             asyncio.run(
                 client.chat(
-                    [{"role": "user", "content": "x"}],
-                    model="gpt-x",
+                    ChatRequest([{"role": "user", "content": "x"}], "gpt-x", max_tokens=10),
                     label=CallLabel("tls", "optimizer"),
-                    max_tokens=10,
                 )
             )
     finally:
@@ -1669,10 +1786,10 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
             hang[0] = n == 3
             turns.append(
                 await client.chat(
-                    [{"role": "user", "content": f"turn {n}"}],
-                    model="gpt-x",
+                    ChatRequest(
+                        [{"role": "user", "content": f"turn {n}"}], "gpt-x", max_tokens=100
+                    ),
                     label=CallLabel("agent", "backend"),
-                    max_tokens=100,
                 )
             )
         return {"data": {"terminal_node": "agent"}}

@@ -4,9 +4,7 @@ import json
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any, TypeVar
-
-from pydantic import BaseModel
+from typing import TYPE_CHECKING, ClassVar, TypeVar
 
 from promptpotter.infrastructure.llm.pricing import RateCeiling, rate_ceiling
 from promptpotter.infrastructure.llm.rate_limit import (
@@ -16,6 +14,7 @@ from promptpotter.infrastructure.llm.rate_limit import (
     acquire_reservation,
     wait_with_countdown,
 )
+from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.spend_book import (
     FRAMING_TOKENS,
@@ -90,6 +89,9 @@ class LLMClientBase(ABC):
     the run's spend book, throttled, sent, retried, settled with its bill — so no call reaches a
     provider unadmitted and none is billed without a record."""
 
+    SENDS: ClassVar[frozenset[str]]
+    """The ``ChatRequest`` fields this client carries to its provider."""
+
     def __init__(self, *, provider: str, display_name: str, rate_limiter: RateLimiter | None):
         self._provider = provider
         self._provider_name = display_name
@@ -104,23 +106,19 @@ class LLMClientBase(ABC):
         held = self._backpressure.get(model)
         return None if held is None else held.reading()
 
+    async def chat(self, request: ChatRequest, *, label: CallLabel) -> LLMResponse:
+        """``label`` names whose call it is on its usage record."""
+        # A field that evaporates is worse than one that refuses: it reaches no wire, the round
+        # still scores, and the difference is credited to a mutation nothing carried.
+        if unsent := sorted(request.asked() - self.SENDS):
+            raise ValueError(
+                f"{self._provider_name} cannot send {', '.join(unsent)}. Close the axis on the "
+                "node (`optimizer.param_keys`) or unset the field, so it never reads as searched."
+            )
+        return await self._chat(request, label)
+
     @abstractmethod
-    async def chat(
-        self,
-        messages: list[dict[str, str]],
-        model: str,
-        *,
-        label: CallLabel,
-        temperature: float = 0.0,
-        max_tokens: int | None = None,
-        response_model: type[BaseModel] | None = None,
-        response_schema: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> LLMResponse:
-        """``model`` is mandatory and concrete — no model fallback lives below this seam. ``label``
-        names whose call it is on its usage record. ``response_schema`` overrides
-        ``response_model``'s wire schema; passed alone it means untyped JSON mode."""
-        ...
+    async def _chat(self, request: ChatRequest, label: CallLabel) -> LLMResponse: ...
 
     async def _admitted_send(
         self,

@@ -4,19 +4,18 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 import httpx
-from pydantic import BaseModel
 
 from promptpotter.config.settings import settings
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.llm.base import LLMClientBase
 from promptpotter.infrastructure.llm.json_parse import parse_response_content
-from promptpotter.infrastructure.llm.openai_compat import PROVIDER_REQUEST_PARAMS
 from promptpotter.infrastructure.llm.rate_limit import (
     ANTHROPIC_RPM_HEADER,
     ANTHROPIC_TPM_HEADER,
     RateLimiter,
     apply_discovered_caps,
 )
+from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.spend_book import Billed, CallLabel
 from promptpotter.shared.errors import (
@@ -30,13 +29,6 @@ if TYPE_CHECKING:
     from anthropic.types import Message
 
 logger = logging.getLogger(__name__)
-
-# Request fields the OpenAI-compat client puts on the wire that have no Anthropic equivalent.
-# Derived from that set rather than hand-listed, minus the ones this client does send, so a key
-# added to `chat` over there cannot quietly become a silent no-op over here.
-_UNSENDABLE_HERE: frozenset[str] = (
-    PROVIDER_REQUEST_PARAMS - {"temperature", "max_tokens", "response_format", "top_p"}
-) | {"route_order"}
 
 # Anthropic's `stop_reason` in the OpenAI spelling `LLMResponse.finish_reason` declares; a reason
 # with no counterpart rides through under its own name.
@@ -64,6 +56,18 @@ def _usage(response: Message) -> TokenAccount:
 
 
 class AnthropicClient(LLMClientBase):
+    # The two schema fields are honoured by a client-side parse, never sent (`_chat`).
+    SENDS = frozenset(
+        {
+            "messages",
+            "model",
+            "temperature",
+            "max_tokens",
+            "top_p",
+            "response_model",
+            "response_schema",
+        }
+    )
     _schema_warned = False
 
     def __init__(
@@ -88,19 +92,9 @@ class AnthropicClient(LLMClientBase):
             self._client = AsyncAnthropic(api_key=self._api_key, max_retries=0)
         return self._client
 
-    async def chat(
-        self,
-        messages: list[dict[str, str]],
-        model: str,
-        *,
-        label: CallLabel,
-        temperature: float = 0.0,
-        max_tokens: int | None = None,
-        response_model: type[BaseModel] | None = None,
-        response_schema: dict[str, Any] | None = None,
-        top_p: float | None = None,
-        **kwargs: Any,
-    ) -> LLMResponse:
+    async def _chat(self, request: ChatRequest, label: CallLabel) -> LLMResponse:
+        messages, model, max_tokens = request.messages, request.model, request.max_tokens
+        response_model, response_schema = request.response_model, request.response_schema
         # Anthropic has no wire ``response_format``: JSON is contractual via the prompt;
         # ``response_model``/``response_schema`` parse + validate client-side, never sent.
         # So the schema's two free levers — field ORDER and per-field ``description``
@@ -113,15 +107,6 @@ class AnthropicClient(LLMClientBase):
                 "AnthropicClient: response schema is parsed client-side and never sent — "
                 "field order and `description` strings reach no model on this provider. "
                 "Schema-axis optimization against Anthropic measures nothing."
-            )
-        # A search axis that EVAPORATES is worse than one that refuses: taken into `**kwargs` it
-        # reaches no wire, the round still scores, and the difference is credited to a mutation
-        # nothing carried.
-        if unsent := sorted(k for k in kwargs if k in _UNSENDABLE_HERE):
-            raise ValueError(
-                f"AnthropicClient cannot send {', '.join(unsent)} — these are OpenAI-compat "
-                "request fields with no Anthropic equivalent. Close the axis on the node "
-                "(`optimizer.param_keys`) rather than letting it read as searched."
             )
         client = self._ensure_client()
 
@@ -141,12 +126,12 @@ class AnthropicClient(LLMClientBase):
             "model": model,
             "messages": anthropic_messages,
             "max_tokens": anthropic_max_tokens,
-            "temperature": temperature,
+            "temperature": request.temperature,
         }
         if system_message:
             request_params["system"] = system_message
-        if top_p is not None:
-            request_params["top_p"] = top_p
+        if request.top_p is not None:
+            request_params["top_p"] = request.top_p
 
         async def send() -> tuple[httpx.Headers, Message]:
             try:
