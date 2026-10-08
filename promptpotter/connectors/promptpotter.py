@@ -51,7 +51,7 @@ def measurement_modules() -> tuple[ModuleType, ...]:
     the election and its intervals, the ability fit the levels are expressed in, the SCALE that
     fit is read on, and the law that reads a finished inner cycle. Unlike its prompt-side twin
     ``facade.fingerprinted_modules``, this roster is a CHOICE within the layer rather than a
-    package, so it is listed and pinned by ``tests/test_integrity.py`` instead of walked.
+    package, so it is listed here instead of walked.
     """
     return (exploration, metrics, selection, proxies, ruler)
 

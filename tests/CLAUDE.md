@@ -34,25 +34,25 @@ too few axes, applied faithfully, *is* the mechanism of organic growth. The coro
   a path is dead. A test whose assertion is a number and whose *setup* happens to load a fixture
   off disk is merely badly wired: build the input from `factories.py` and keep the assertion.
 
-## What each file is for
+## You touched X — run Y
 
-A file states its subject and holds only that. A test that fits no section does not belong.
+A file is named for the production code it owns, so the one to run is the one whose row names what
+you edited. Each file's docstring lists its packages; its `# N.` headers are the sections.
 
-| File | Its subject |
-|------|-------------|
-| `test_numerics.py` | A wrong score or a wrong selection. The run completes, the dashboard looks fine, every result is subtly wrong. Ten sections: scorer formulas · composite fitness · the δ ruler · electing a round winner · candidate elimination · which cells a round buys · paired readings · the L4 outer proxy · L1 proposal validators · escalation and spend. |
-| `test_integrity.py` | A wrong identity or a quiet cross-contamination. Eight sections: measurement identity · replay eligibility · contamination of a scored prompt · the searchpoint's param surface · the dispatch frame · L4 steering · money · where the package reads and writes. |
-| `test_security.py` | A leak, or money. A key reaching the logs, dataset content reaching the optimizer LLM unfenced, a path segment escaping its tenant dir, a spend ceiling that stops binding. Irreversible in a multi-tenant product. |
-| `test_resume.py` | Lost or corrupted measurement. A rescore that corrupts prior fitness, a replay that misses a flipped outcome, a fork that inherits the wrong origin, a compaction that drops a paid row. |
-| `test_reaper.py` | The unattended recursive delete, and spend banked before an rmtree. Not the phase label: a wrong terminal stamp neither blocks resume nor survives `_finalize_run`, so it is loud and self-healing. |
-| `test_complexity_ledger.py` | Conceptual-surface creep and its quieter twin, a win nobody recorded. The ratchet asserts EQUALITY, so the surface never moves unexamined in either direction. |
+| You touched | Run | Sections |
+|-------------|-----|----------|
+| `application/scoring/`, `shared/statistics.py`, potter's `pobb/` and `escalation/`, the runner's election, `diagnostics/verify.py`, `evidence/` | `test_scoring.py` | scorer formulas · composite fitness and coverage · electing a round winner · elimination · escalation and stop, live and folded back on resume · paired readings over shared cells |
+| `intelligence/exploration.py` and `adaptive_queue_mechanism.py`, `bench/difficulty.py`, `domain/ruler.py`, `domain/l4/proxies.py` | `test_ruler.py` | the estimator · the δ ruler and the cells a round reads it on · the L4 outer proxy |
+| The hashes a measurement is filed under, `application/pipeline_resolve.py`, `domain/pipeline_overlay.py`, the held-out partition, anything a scored prompt is composed from | `test_identity.py` | what a measurement is filed under · the config a campaign runs · contamination of a scored prompt |
+| `infrastructure/store/measurement_archive.py` and `archive_queries.py`, `application/maintenance/`, `bench/resume_and_fork/`, `application/origin.py` | `test_archive.py` | replay eligibility · the archive on disk · replayed decisions and forks |
+| `infrastructure/llm/` (pricing, the spend book, wire cost), `infrastructure/identity/quota.py`, `account_spend.py`, the runner's budget gate, judge billing | `test_spend.py` | what a call costs · what a run is billed · ceilings · spend outlives what spent it |
+| `infrastructure/store/layout.py` path builders, `config/log_redaction.py`, the dispatch fence, `infrastructure/identity/grants.py`, `application/jobs/reaper.py` | `test_security.py` | leaks · delegation · unattended deletes |
+| Anything that adds or removes a module, a knob, a served field, a test | `test_complexity_ledger.py` | the ratchet, which asserts EQUALITY in both directions |
 
-**Six files, and the roster is that list** — a subject with no row is a SECTION in the file that owns
-its harm, never a seventh file. A campaign answering with another campaign's config, an origin
-seeded from the shared file, an axis narrowing that cannot be undone: all three are wrong identity,
-so they ride `test_integrity.py` § 4. A migration inventing history is lost measurement, so it rides
-`test_resume.py`. `test_files` is a ledger dimension, which is what makes the count binding rather
-than advisory.
+**Seven files, and the roster is that table** — a test is filed under the production code whose
+change should break it, never under the harm it prevents, and a subject with no row is a SECTION in
+its owner's file, never an eighth file. `test_files` is a ledger dimension, which is what makes the
+count binding rather than advisory.
 
 ## Structural invariants live in production, not tests
 
@@ -71,10 +71,13 @@ the thing they validate, never as a repo-wide structure scan.
 
 **"This change moves no decision" is not a test** — prove it once with the offline run
 ([`../docs/developer/offline-run.md`](../docs/developer/offline-run.md)) and put the diff in the
-commit body. Answer the three axes in order. The first "no" ends it. If all three are yes, it rides an
-existing file's existing section by adding a function — **never a new file**, and never a new
-section invented to house it. Both counts are ledger rows (`test_files`, `test_functions`), so the
-function costs a baseline edit naming its invariant, and a file goes red.
+commit body. Answer the three axes in order. The first "no" ends it. Then ask whether the CODE can
+carry it instead — an import-time assert, a raise at the seam, a type that cannot hold the wrong
+value — and prefer that. If a test it is, it rides its owner's existing section by adding a
+function, or a row to a sibling that already builds the same input — **never a new file**, and
+never a new section invented to house it. Both counts are ledger rows (`test_files`,
+`test_functions`), so the function costs a baseline edit, its invariant named in the commit body,
+and a file goes red.
 
 ## Mock strategy
 
@@ -91,11 +94,11 @@ is not a validated document — a `Stores`-shaped stub, a session object.
 
 | Fixture | Purpose |
 |---------|---------|
-| `built_stores` | A real `Stores` rooted in `tmp_path` (default identity), used by the resume data-integrity tests. |
+| `built_stores` | A real `Stores` rooted in `tmp_path` (default identity), used by the archive tests. |
 
 `factories.py` is not a test file (no `test_` prefix, collects nothing). It holds builders that
-return REAL models — `round_result`, `cycle_result`, `scored_candidate`, `degradation_health`,
-`lost_history`, plus `measurement` / `measurements`, the one
+return REAL models — `round_result`, `cycle_result`, `scored_candidate`, plus `measurement` /
+`measurements`, the one
 MEASURED-CELL row (`QueryMeasurement` is a `TypedDict`, so the dict *is* the model). Domain models
 and the few application models the dispatch seam needs.
 

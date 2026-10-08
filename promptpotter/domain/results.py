@@ -1012,7 +1012,7 @@ class CycleResult(StrictModel):
     # `origin_level_se` has NO production reader BY DESIGN — do not delete it as dead. It is the
     # term `l4/proxies.py::mean_parent_level_se` must not fold in (the origin cancels in
     # `variant - origin`, and counting it twice once read out as "100% noise"), and supplying it is
-    # what makes that negative control discriminating in `test_numerics.py`. Delete the field and
+    # what makes that negative control discriminating in `test_ruler.py`. Delete the field and
     # the guarantee stops being proven and starts being merely unreachable.
     origin_level_se: float | None = None
     round_level_ses: list[float] = Field(default_factory=list)

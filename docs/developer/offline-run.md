@@ -17,8 +17,8 @@ PROMPTPOTTER_HOME=.scratch/offline-home .venv/Scripts/python.exe scripts/offline
 .venv/Scripts/python.exe scripts/offline_run.py --digests
 ```
 
-`--rounds` (each campaign's `max_rounds`) and `--rows` (the synthetic bank) size it; the test in
-`tests/test_numerics.py` § 4 runs every optimizer at the smallest size that still reaches the bench.
+`--rounds` (each campaign's `max_rounds`) and `--rows` (the synthetic bank) size it. No standing
+test runs it — it is the proof a change is run against once, by hand.
 Run it from the tree under test with that tree's own venv — a worktree probe run through another
 tree's interpreter answers for that other tree.
 
@@ -100,5 +100,5 @@ re-key an inner cell leaves equal.
   unseeded, draws follow the campaign's id, which every run mints anew, so two runs of one tree
   would differ.
 
-**Adding an optimizer** needs nothing here: it runs as its manifest declares. `tests/test_numerics.py`
-§ 4 runs one installed through its entry points alone, from `examples/optimizer-plugin/`.
+**Adding an optimizer** needs nothing here: it runs as its manifest declares, one installed through
+its entry points alone included — `examples/optimizer-plugin/` is that case.

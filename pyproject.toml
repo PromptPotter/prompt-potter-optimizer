@@ -218,8 +218,8 @@ promptpotter = [
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["tests"]
-# Test files carry their reason-to-exist in the name (test_numerics, test_security,
-# test_resume) under the standard `test_` prefix, so default discovery picks them up;
+# Test files are named for the code they own (test_scoring, test_spend, test_archive)
+# under the standard `test_` prefix, so default discovery picks them up;
 # `conftest.py` (fixtures, not test fns) is excluded by the underscore prefix.
 addopts = "-q --tb=short --no-header"
 filterwarnings = ["ignore::RuntimeWarning"]

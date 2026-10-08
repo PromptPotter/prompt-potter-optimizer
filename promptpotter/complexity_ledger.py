@@ -27,7 +27,7 @@ assert _PACKAGE_ROOT.name == "promptpotter", f"ledger root is not the package: {
 # the package and the ratchet goes red on a file nobody wrote.
 _ASSETS_ROOT = _PACKAGE_ROOT / "assets"
 
-# The suite beside the package. `tests/CLAUDE.md` fixes it at six files and admits a function
+# The suite beside the package. `tests/CLAUDE.md` fixes it at seven files and admits a function
 # only through three axes, and a rule that is prose alone is the mechanism of organic growth —
 # four files landed in one arc against it. A raise costs the same written reason as any other
 # row: name the invariant and the axis it clears.

@@ -498,8 +498,8 @@ describe("permittedModels", () => {
   });
 });
 
-// The ladder joins the MENU, never the ticks: the engine's intersection is `param_options`
-// (`tests/test_numerics.py`), and folding it in would emit a model's refusals as narrowing.
+// The ladder joins the MENU, never the ticks: the engine's intersection is `param_options`,
+// and folding it in would emit a model's refusals as narrowing.
 describe("effortLadder", () => {
   const caps = (over: Partial<ModelCapability>): ModelCapability => ({
     model: "m",

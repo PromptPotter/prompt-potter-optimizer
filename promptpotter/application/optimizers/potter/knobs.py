@@ -193,8 +193,8 @@ class PoBBKnobs(StrictModel):
             "Off → the rule never fires and candidates run their full budget."
         ),
     )
-    # Not dead though off everywhere: `LEADER_LOCKED`, the `abort:lock_in_off` lens and
-    # `tests/test_numerics.py` exercise lock-in, so deleting it removes a shipped analysis feature.
+    # Not dead though off everywhere: `LEADER_LOCKED` and the `abort:lock_in_off` lens exercise
+    # lock-in, so deleting it removes a shipped analysis feature.
     leader_lock_in: Annotated[bool, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
         description=(
             "Crown a decisive leader EARLY: stop measuring a candidate as the winner "

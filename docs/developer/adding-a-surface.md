@@ -296,7 +296,7 @@ and `RUNTIME` (a plugin ships them through the two entry-point groups instead), 
 `manifest_dir` holds its `pipeline.yaml`, its payload is a `RoundPayload` registered under the
 manifest's name and its decision kinds a `CheckpointKind` its runtime gates.
 [`examples/optimizer-plugin/`](../../examples/optimizer-plugin/) is that package, installable as it
-stands, and `tests/test_numerics.py` § 4 runs it as the proof.
+stands, and the [offline run](offline-run.md) runs it as the proof.
 
 ---
 
@@ -315,7 +315,7 @@ directory per verb bought a reader a hop to learn there was nothing to choose.
 (`new` / `resume`, which mint or extend a cycle), **lifecycle** (`archive` / `delete` /
 `unarchive` / `reset`), **manifest-edit** (`rename`, which rewrites `campaign.json` in place
 and leaves the tree and every measurement where they are), **diagnostic** (`ab` / `verify` /
-`noise-floor` / `seed-screen`, which must not perturb an existing cycle's measurements), or
+`noise-floor` / `seed-screen` / `decision-bank`, which must not perturb an existing cycle's measurements), or
 **maintenance** (`reindex` / `restamp` / `compact-archive`, which rewrite stored artifacts on
 purpose). A maintenance verb owes two things a diagnostic does not: it is dry-run by default,
 and it refuses while a producer could still be writing what it rewrites

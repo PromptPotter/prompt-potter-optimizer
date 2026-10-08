@@ -4,10 +4,8 @@ The wheel is a shape the repo ships and never runs. In a source tree every path
 function takes its checkout branch — ``benchmark_datasets_root()`` is ``<repo>/datasets``,
 ``webapp_static_root()`` is ``<repo>/webapp/out`` — so the two trees the wheel actually
 serves (``assets/benchmarks/``, ``assets/webapp/``) are gitignored, staged by
-``build_release.py``, and read by no dev run and no test. ``test_integrity.py``
-monkeypatches ``PACKAGE_ROOT`` to cover ``paths.py``'s own functions and asserts ``Path``
-VALUES; no consumer is ever constructed under the wheel shape — not ``Stores``, not the
-FastAPI mount, not the optimizer manifest.
+``build_release.py``, and read by no dev run and no test: no consumer is ever constructed
+under the wheel shape — not ``Stores``, not the FastAPI mount, not the optimizer manifest.
 
 So this runs as the installed package, with the CWD somewhere else entirely, and asks the
 questions a dev run structurally cannot. Failures are ``AssertionError`` with the measured

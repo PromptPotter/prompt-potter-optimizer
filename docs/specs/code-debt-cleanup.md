@@ -382,8 +382,7 @@ an entry point, in-process, so it never touches the inbound credential.
   reads the CYCLE SEED's `pipeline_overlay` for it — one field name, three carriers, distinguished
   by the `source` each layer stamps (`campaign` / `seed` / `evolved`). Candidates move node
   params, so the `evolved` layer has live rows; no cycle seed on this workspace carries an overlay,
-  so the seed feed is still dead here and only the merge primitive beneath it is covered
-  (`tests/test_integrity.py`). A fork steered with `resume --steer NODE.PARAM=VALUE` exercises it.
+  so the seed feed is still dead here. A fork steered with `resume --steer NODE.PARAM=VALUE` exercises it.
   **Re-test**, from the checkout root where `.promptpotter/` lives and never from a worktree:
   `grep -rh cycle_seed .promptpotter/projects/*/campaigns/*/cycles/*/.runtime/ledger.jsonl | grep -c '"pipeline_overlay": *{'`
   — `0` means no live seed has reached the layer.
