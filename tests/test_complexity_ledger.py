@@ -195,7 +195,10 @@ LEDGER_BASELINE = {
     # `config/prompt_blocks.py` so a provenance field added to it re-keys no banked cell.
     # +1: `infrastructure/docker_host.py` — the docker CLI, daemon probe, package cache and
     # dead-producer sweep `harbor` and `dbllmbench` each carried a copy of.
-    "modules": 392,
+    # +1: `infrastructure/llm/request.py` — `ChatRequest`, the one typed request both clients take.
+    # It replaces `chat(**kwargs)` and two per-client signatures, under which Anthropic derived what
+    # it could not send from the other client's param set; `base.py` and both clients import it.
+    "modules": 393,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     # +2: `application/optimizers/__init__.py` (the member registry) and its `potter/`, empty.
@@ -791,7 +794,10 @@ LEDGER_BASELINE = {
     # and a lift left unpaired differences two exams (test_numerics § 1).
     # +1: a running cycle's ceiling clamped below what the account can fund, its own spend counted
     # against it twice (test_security).
-    "test_functions": 250,
+    # +1: a request field a client cannot carry dropped instead of refused scores a `seed` or
+    # effort arm against an identical call, and a gateway wire that moved under an unchanged
+    # `hash_call` key replays the old request's reply for the new one (test_integrity § 1).
+    "test_functions": 251,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

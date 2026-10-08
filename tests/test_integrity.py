@@ -283,14 +283,15 @@ async def test_the_determinism_clamp_outranks_every_other_layer_and_keys_the_ban
     from promptpotter.application.bench import llm_call as call_mod
     from promptpotter.application.campaign_config import DeterminismClamp
     from promptpotter.application.optimizer_manifest import set_determinism_clamp
+    from promptpotter.infrastructure.llm.request import ChatRequest
     from promptpotter.infrastructure.llm.response import LLMResponse
     from promptpotter.infrastructure.store.stores import LLMReuseCache
 
-    sent: list[dict[str, Any]] = []
+    sent: list[ChatRequest] = []
 
     class _Recorder:
-        async def chat(self, **kwargs: Any) -> LLMResponse:
-            sent.append(kwargs)
+        async def chat(self, request: ChatRequest, **_: Any) -> LLMResponse:
+            sent.append(request)
             return LLMResponse(content="ok", model="m")
 
     monkeypatch.setattr(call_mod, "get_llm_client", lambda _provider: _Recorder())
@@ -309,12 +310,12 @@ async def test_the_determinism_clamp_outranks_every_other_layer_and_keys_the_ban
     try:
         pinned = DeterminismClamp(temperature=0.0, seed=7, route_order=["Alibaba"])
         await ask(pinned)
-        assert sent[0]["temperature"] == 0.0, (
+        assert sent[0].temperature == 0.0, (
             "the node's file value or the per-call override beat the clamp — the campaign "
             "reports itself pinned and runs unpinned"
         )
-        assert sent[0]["seed"] == 7
-        assert sent[0]["route_order"] == ["Alibaba"]
+        assert sent[0].seed == 7
+        assert sent[0].route_order == ["Alibaba"]
 
         # Same prompt, same model, a different host: a second measurement, so a second entry.
         await ask(pinned.model_copy(update={"route_order": ["Baidu"]}))
@@ -323,11 +324,135 @@ async def test_the_determinism_clamp_outranks_every_other_layer_and_keys_the_ban
 
         # And an unpinned campaign is left alone rather than handed a `None` for every key.
         await ask(None)
-        assert sent[2]["temperature"] == 0.7
-        assert sent[2]["seed"] is None
-        assert "route_order" not in sent[2]
+        assert sent[2].temperature == 0.7
+        assert sent[2].seed is None
+        assert sent[2].route_order is None
     finally:
         set_determinism_clamp(None)
+
+
+def test_a_field_a_client_cannot_send_is_refused_and_the_gateway_wire_holds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A request field a client cannot carry must refuse, never evaporate: dropped, an optimizer
+    node on Anthropic scores a `seed` or `reasoning_effort` arm against an identical call and the
+    round credits the difference to the axis. A field left unset is no request for one, so that
+    node still sends.
+
+    And a banked reply is keyed on the request it answered (`hash_call`), which reads the node's
+    config and never the wire. A wire that moved under an unchanged key replays the old request's
+    answer for the new one, and no field on the row tells the two apart — so the gateway body is
+    pinned whole, order included."""
+    import json
+
+    from pydantic import BaseModel, Field
+
+    from promptpotter.infrastructure.llm import base, openai_compat
+    from promptpotter.infrastructure.llm.anthropic import AnthropicClient
+    from promptpotter.infrastructure.llm.pricing import PriceTier, RateCeiling
+    from promptpotter.infrastructure.llm.request import ChatRequest
+    from promptpotter.infrastructure.llm.spend_book import (
+        CallLabel,
+        bind_spend_book,
+        unbounded_spend_book,
+    )
+
+    class _Reply(BaseModel):
+        answer: str = Field(description="The answer.")
+
+    class _SentError(Exception):
+        pass
+
+    wire: list[dict[str, Any]] = []
+
+    async def create(**params: Any) -> None:
+        wire.append(params)
+        raise _SentError
+
+    async def ceiling(*_: Any, **__: Any) -> RateCeiling:
+        return RateCeiling(tiers=(PriceTier(0, 0.5, 0.25),))
+
+    monkeypatch.setattr(base, "rate_ceiling", ceiling)
+    monkeypatch.setattr(openai_compat, "rate_ceiling", ceiling)
+    raw = types.SimpleNamespace(with_raw_response=types.SimpleNamespace(create=create))
+    messages = [{"role": "user", "content": "q"}]
+
+    def send(client: Any, request: ChatRequest) -> None:
+        async def _send() -> None:
+            bind_spend_book(unbounded_spend_book())
+            await client.chat(request, label=CallLabel("l1", "optimizer"))
+
+        asyncio.run(_send())
+
+    claude = AnthropicClient(api_key="k")
+    claude._client = types.SimpleNamespace(messages=raw)  # type: ignore[assignment]
+    with pytest.raises(_SentError):
+        send(claude, ChatRequest(messages, "m", response_model=_Reply, top_p=0.9))
+    assert len(wire) == 1
+    for unsendable in ({"seed": 7}, {"reasoning_effort": "low"}, {"route_order": ["Alibaba"]}):
+        with pytest.raises(ValueError, match=next(iter(unsendable))):
+            send(claude, ChatRequest(messages, "m", **unsendable))
+    assert len(wire) == 1, "a refused request reached the provider"
+
+    gateway = openai_compat.OpenAICompatibleClient(
+        api_key="k", provider="openrouter", display_name="OpenRouter", gateway=True
+    )
+    gateway._client = types.SimpleNamespace(  # type: ignore[assignment]
+        chat=types.SimpleNamespace(completions=raw)
+    )
+    priced = {"max_price": {"prompt": 500000.0, "completion": 250000.0}}
+    with pytest.raises(_SentError):
+        send(gateway, ChatRequest(messages, "m"))
+    assert json.dumps(wire[1]) == json.dumps(
+        {
+            "model": "m",
+            "messages": messages,
+            "temperature": 0.0,
+            "extra_body": {"usage": {"include": True}, "provider": priced},
+        }
+    )
+    with pytest.raises(_SentError):
+        send(
+            gateway,
+            ChatRequest(
+                messages,
+                "m",
+                temperature=0.3,
+                max_tokens=64,
+                response_model=_Reply,
+                reasoning_effort="low",
+                top_p=0.9,
+                seed=7,
+                route_order=["Alibaba"],
+            ),
+        )
+    assert json.dumps(wire[2]) == json.dumps(
+        {
+            "model": "m",
+            "messages": messages,
+            "temperature": 0.3,
+            "max_tokens": 64,
+            "reasoning_effort": "low",
+            "seed": 7,
+            "top_p": 0.9,
+            "extra_body": {
+                "usage": {"include": True},
+                "provider": {**priced, "order": ["Alibaba"], "allow_fallbacks": True},
+            },
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "_Reply",
+                    "schema": {
+                        "properties": {"answer": {"description": "The answer.", "type": "string"}},
+                        "required": ["answer"],
+                        "type": "object",
+                    },
+                    "strict": False,
+                },
+            },
+        }
+    )
 
 
 def test_inner_campaign_id_separates_two_candidates_and_is_stable() -> None:
@@ -696,6 +821,7 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
     from promptpotter.domain.phases import StopReason
     from promptpotter.infrastructure.llm.anthropic import AnthropicClient
     from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
+    from promptpotter.infrastructure.llm.request import ChatRequest
     from promptpotter.infrastructure.llm.spend_book import (
         CallLabel,
         bind_spend_book,
@@ -775,7 +901,8 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
         async def _optimizer_call() -> None:
             bind_spend_book(unbounded_spend_book())
             await client.chat(
-                [{"role": "user", "content": "q"}], model="m", label=CallLabel("l1", "optimizer")
+                ChatRequest([{"role": "user", "content": "q"}], "m"),
+                label=CallLabel("l1", "optimizer"),
             )
 
         with pytest.raises(SendRefusedError) as credit, graceful("best-effort step"):
@@ -800,7 +927,8 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
     async def _refused() -> None:
         bind_spend_book(unbounded_spend_book())
         await claude.chat(
-            [{"role": "user", "content": "q"}], model="m", label=CallLabel("probe", "optimizer")
+            ChatRequest([{"role": "user", "content": "q"}], "m"),
+            label=CallLabel("probe", "optimizer"),
         )
 
     with pytest.raises(SendRefusedError), graceful("best-effort step"):
@@ -813,7 +941,7 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
     spec = JudgeSpec(name="answer_grounding", stages=[JudgeStage(model="m", provider="p")])
 
     def grade_under(failure: Exception) -> float | None:
-        async def _chat(**_: Any) -> None:
+        async def _chat(*_: Any, **__: Any) -> None:
             raise failure
 
         monkeypatch.setattr(judge_call, "get_llm_client", lambda _p: SimpleNamespace(chat=_chat))
@@ -4688,7 +4816,7 @@ async def test_a_resumed_arm_re_reads_its_cells_and_still_reaches_its_bench(
     from promptpotter.judges.protocol import JudgeStage
 
     class _Provider:
-        async def chat(self, **_kw: Any) -> LLMResponse:
+        async def chat(self, *_a: Any, **_kw: Any) -> LLMResponse:
             return LLMResponse(content="ok", model="m", cost_usd=0.01)
 
     monkeypatch.setattr(call_mod, "get_llm_client", lambda _p: _Provider())

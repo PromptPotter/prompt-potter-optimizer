@@ -1205,6 +1205,7 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
     from promptpotter.infrastructure.llm.pricing import Rate
+    from promptpotter.infrastructure.llm.request import ChatRequest
     from promptpotter.infrastructure.llm.spend_book import (
         Admission,
         CallLabel,
@@ -1276,10 +1277,12 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     async def burst() -> list[Any]:
         async def one(i: int) -> Any:
             return await client.chat(
-                [{"role": "user", "content": "x" * rng.randint(10, 400)}],
-                model="gpt-x",
+                ChatRequest(
+                    [{"role": "user", "content": "x" * rng.randint(10, 400)}],
+                    model="gpt-x",
+                    max_tokens=1500,
+                ),
                 label=CallLabel(f"n{i}", "optimizer"),
-                max_tokens=1500,
             )
 
         tasks = [asyncio.ensure_future(one(i)) for i in range(40)]
@@ -1369,10 +1372,8 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
         with spending_under(book):
             asyncio.run(
                 client.chat(
-                    [{"role": "user", "content": "nested"}],
-                    model="gpt-x",
+                    ChatRequest([{"role": "user", "content": "nested"}], "gpt-x", max_tokens=10),
                     label=CallLabel("inner", "optimizer"),
-                    max_tokens=10,
                 )
             )
     finally:
@@ -1420,10 +1421,8 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
         with spending_under(book):
             asyncio.run(
                 client.chat(
-                    [{"role": "user", "content": "x"}],
-                    model="gpt-x",
+                    ChatRequest([{"role": "user", "content": "x"}], "gpt-x", max_tokens=10),
                     label=CallLabel("tls", "optimizer"),
-                    max_tokens=10,
                 )
             )
     finally:
@@ -1511,10 +1510,10 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
             hang[0] = n == 3
             turns.append(
                 await client.chat(
-                    [{"role": "user", "content": f"turn {n}"}],
-                    model="gpt-x",
+                    ChatRequest(
+                        [{"role": "user", "content": f"turn {n}"}], "gpt-x", max_tokens=100
+                    ),
                     label=CallLabel("agent", "backend"),
-                    max_tokens=100,
                 )
             )
         return {"data": {}}

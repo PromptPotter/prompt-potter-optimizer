@@ -19,6 +19,7 @@ from promptpotter.application.initialization.loop_start import diagnostic_trace
 from promptpotter.infrastructure.llm.capabilities import STANDARD_EFFORT_LADDER
 from promptpotter.infrastructure.llm.openai_compat import PROVIDER_DEFAULT_EFFORT
 from promptpotter.infrastructure.llm.registry import get_llm_client, normalize_model_id
+from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.spend_book import (
     CallLabel,
     bind_spend_book,
@@ -27,6 +28,7 @@ from promptpotter.infrastructure.llm.spend_book import (
 )
 
 if TYPE_CHECKING:
+    from promptpotter.infrastructure.llm.base import LLMClientBase
     from promptpotter.infrastructure.store.stores import Stores
 
 # One terse-answer task. The measurand is the reasoning token COUNT, not the answer, so the prompt
@@ -61,16 +63,16 @@ class RungReading:
         return not self.refused
 
 
-async def _one(client: object, model: str, rung: str | None) -> RungReading:
-    kwargs = {} if rung is None else {"reasoning_effort": rung}
+async def _one(client: LLMClientBase, model: str, rung: str | None) -> RungReading:
     try:
-        resp = await client.chat(  # type: ignore[attr-defined]
-            messages=[{"role": "user", "content": _PROMPT}],
-            model=model,
+        resp = await client.chat(
+            ChatRequest(
+                messages=[{"role": "user", "content": _PROMPT}],
+                model=model,
+                max_tokens=_MAX_TOKENS,
+                reasoning_effort=rung,
+            ),
             label=CallLabel("probe_reasoning", "diagnostic"),
-            temperature=0.0,
-            max_tokens=_MAX_TOKENS,
-            **kwargs,
         )
     except Exception as exc:
         return RungReading(rung or "(unset)", None, None, refused=str(exc)[:160])

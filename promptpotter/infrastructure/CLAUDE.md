@@ -207,7 +207,7 @@ unrecoverable from the config that declared it.
 
 **`provider` is the GATEWAY; `route_order` is the HOST behind it, and they are two decisions.**
 A per-replica prefix cache pays only where one route is hit repeatedly, and a host that does not
-cache is indistinguishable from a cold one until you read `served_by`. `chat(route_order=[...])`
+cache is indistinguishable from a cold one until you read `served_by`. `ChatRequest.route_order`
 names the hosts to try in order, with fallbacks on. It is in `hash_call` because it changes WHO answers, not what is
 asked, and hosts of one model disagree systematically; and in `PARAM_FORBIDDEN_KEYS` because that
 makes it an operator cost lever and never a search axis.
