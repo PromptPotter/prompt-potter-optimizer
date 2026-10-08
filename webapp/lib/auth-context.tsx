@@ -117,12 +117,6 @@ export function useAuth(): AuthCtx {
   return ctx;
 }
 
-// One spelling for who steered a fork: two panels naming the same operator differently is a
-// lineage that cannot be joined on.
-export function steeredBy(me: MeResponse | null): string | undefined {
-  return me?.name || me?.email || me?.user_id || undefined;
-}
-
 // `authed` gates a poll's `enabled`; `onAuthError`, from a tick's catch, re-probes on a 401 so a
 // session that died mid-run halts the loop instead of 401-storming until the next focus.
 export function useAuthGate(): {

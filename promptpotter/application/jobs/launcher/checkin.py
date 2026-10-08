@@ -128,7 +128,7 @@ async def prepare_checkin_run(
         bank = stores.checkin.load_bank(hop.campaign_id)
         if bank is None:
             raise LaunchError(f"campaign {hop.campaign_id} has no sample bank to materialize")
-        materialize_and_write_origin(stores, draft, bank_items=list(bank.get("items", [])))
+        materialize_and_write_origin(stores, draft, bank_items=list(bank["items"]))
         dataset_name = draft.slug
         pipeline_overlay: dict[str, Any] = {}
         # A fresh upload COMMITS its own `pipeline.yaml`, whose `pipelines.default` already IS the

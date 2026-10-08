@@ -118,6 +118,5 @@ class CellEnvelope:
                 # A cancelled call hands back no bill: our own LLM calls are on the ledger already,
                 # but an agent that spends outside our client is lost with it.
                 spent={},
-                step_timings={},
             )
         return False

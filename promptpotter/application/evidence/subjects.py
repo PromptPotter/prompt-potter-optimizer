@@ -12,7 +12,7 @@ from promptpotter.domain.cycle_paths import (
     encode_cycle_path,
 )
 from promptpotter.domain.ruler import AbilityReading
-from promptpotter.domain.run_records import OPERATOR_ORIGIN_SOURCES, UNATTRIBUTED_OPERATOR
+from promptpotter.domain.run_records import OPERATOR_ORIGIN_SOURCES
 from promptpotter.domain.strict_model import StrictModel
 
 SubjectKind = Literal["campaign", "course", "candidate"]
@@ -118,7 +118,7 @@ def authorship_of(source: str, issued_by: str) -> str:
     forks of one campaign share an arm. A non-human source names its LAYER and passes through verbatim."""
     if source not in OPERATOR_ORIGIN_SOURCES:
         return source
-    return f"operator:{issued_by or UNATTRIBUTED_OPERATOR}"
+    return f"operator:{issued_by}"
 
 
 class SubjectMask(StrictModel):

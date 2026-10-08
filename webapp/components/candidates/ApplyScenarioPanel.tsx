@@ -5,7 +5,6 @@
 import { useState } from "react";
 import { postSteerFork } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
-import { steeredBy, useAuth } from "@/lib/auth-context";
 
 export function ApplyScenarioPanel({
   campaignId,
@@ -25,7 +24,6 @@ export function ApplyScenarioPanel({
   divergentRound: number | null;
   nextRound: number;
 }) {
-  const { me } = useAuth();
   const cmd = useCommand<"apply-scenario">("apply-scenario");
   const [done, setDone] = useState(false);
 
@@ -41,7 +39,6 @@ export function ApplyScenarioPanel({
           // No `origin_prompt_fields`: the lifted round 0 IS the origin, and the server refuses the pair.
           // A map lays onto the parent's scoring block, so the fork keeps its correctness formula.
           seed: { config_overrides: { scoring: { per_cell: criterion } } },
-          steeredBy: steeredBy(me),
           keepRounds: true,
           pauseFirst: isLive,
         }),

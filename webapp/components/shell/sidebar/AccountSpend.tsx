@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Term } from "@/components/ui";
 import { fetchQuotaStatus } from "@/lib/api";
 import { cx } from "@/lib/cx";
+import { billText } from "@/lib/derivations";
 import { fmtTokens, fmtUsd } from "@/lib/format";
 import { useRead } from "@/lib/hooks/useRead";
 import { useRevalidation } from "@/lib/revalidate";
@@ -17,7 +18,7 @@ export function AccountSpend() {
   const { campaigns } = useWorkspace();
   const generation = useRevalidation();
 
-  const signature = campaigns.map((c) => c.spend_used_usd).join(",");
+  const signature = campaigns.map((c) => c.spend_lifetime.billed_usd).join(",");
   const [moved, setMoved] = useState({ signature, count: 0 });
   if (signature !== moved.signature) setMoved({ signature, count: moved.count + 1 });
 
@@ -46,10 +47,11 @@ export function AccountSpend() {
   }
 
   const cap = data.spend_budget_usd_total;
-  const floor = data.spend_unpriced_tokens > 0;
-  const spent = fmtUsd(data.spend_used_total_usd);
-  const exhausted = cap !== null && data.spend_used_total_usd >= cap;
-  const fill = cap === null || cap <= 0 ? null : Math.min(1, data.spend_used_total_usd / cap);
+  const lifetime = data.spend_lifetime;
+  const floor = lifetime.bill_is_floor;
+  const spent = fmtUsd(lifetime.billed_usd);
+  const exhausted = data.allowance_spent;
+  const fill = cap === null || cap <= 0 ? null : Math.min(1, lifetime.billed_usd / cap);
 
   const explain = (
     <div className="account-spend-explain">
@@ -64,13 +66,13 @@ export function AccountSpend() {
       </p>
       {floor ? (
         <p>
-          {fmtTokens(data.spend_unpriced_tokens)} were billed by a model with no known price, so
+          {fmtTokens(lifetime.unpriced_tokens)} were billed by a model with no known price, so
           the dollar figure undercounts and the token allowance is the one holding.
         </p>
       ) : null}
-      {data.spend_unreported_usd > 0 ? (
+      {lifetime.unreported_usd > 0 ? (
         <p>
-          Up to {fmtUsd(data.spend_unreported_usd)} more is unreported — sends that ended with no
+          Up to {fmtUsd(lifetime.unreported_usd)} more is unreported — sends that ended with no
           bill (cancelled, timed out, killed). Not spent, unknown; the allowance holds it anyway.
         </p>
       ) : null}
@@ -85,8 +87,7 @@ export function AccountSpend() {
       </span>
       <Term className="account-spend-reading" content={explain}>
         <span className="account-spend-value">
-          {floor ? "≥" : ""}
-          {spent}
+          {billText(lifetime.billed_usd, floor)}
         </span>
       </Term>
       {fill !== null ? (

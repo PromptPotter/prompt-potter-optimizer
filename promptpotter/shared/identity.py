@@ -166,6 +166,15 @@ def acting_principal_id(identity: IdentityContext) -> str:
     return str(identity.user_id)
 
 
+def display_name(email: str | None) -> str | None:
+    """How a signed-in account is NAMED on screen: its email's local part, the session carrying no
+    OIDC ``name`` claim. ``None`` for the terminal identity, which signed in nowhere."""
+    if not email or "@" not in email:
+        return None
+    local = email.split("@", 1)[0]
+    return local.replace(".", " ").replace("_", " ").title() or None
+
+
 __all__ = [
     "CAMPAIGN_BABYSIT_CAP",
     "CAMPAIGN_BUDGET_CAP",
@@ -186,6 +195,7 @@ __all__ = [
     "acting_principal_id",
     "capabilities_from_names",
     "default_identity",
+    "display_name",
     "has_capability",
     "require_capability",
     "safe_name",

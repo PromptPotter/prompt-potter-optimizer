@@ -22,11 +22,7 @@ from promptpotter.domain.search_point import (
 )
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.domain.wounds import (
-    RuntimeFailure,
-    ValidationFailure,
-    collapse_counts,
-)
+from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 from promptpotter.shared.errors import ConflictError, is_error_result
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 
@@ -66,7 +62,6 @@ __all__ = [
     "candidate_label",
     "degradation_reading",
     "diagnostic_held",
-    "invariant_collapses",
     "is_electable",
     "is_floor_pinned",
     "is_leader_eligible",
@@ -77,7 +72,6 @@ __all__ = [
     "overlap_series",
     "parent_key",
     "parse_candidate_label",
-    "proposal_collapses",
     "round_clocks",
     "scoreboard_rank_key",
     "unscoreable_cells",
@@ -131,9 +125,9 @@ def degradation_reading(
     fatal: bool = False,
 ) -> DegradationContext:
     """The reading EVERY rule that breaks a walk hands over, with the rate derived here so the
-    report and the wound read one number."""
+    report and the wound read one number. A broken walk holds at least the row that broke it."""
     return {
-        "degraded_rate": degraded_count / total_scored if total_scored else 0.0,
+        "degraded_rate": degraded_count / total_scored,
         "degraded_count": degraded_count,
         "total_scored": total_scored,
         "dominant_warning": dominant_warning,
@@ -297,9 +291,9 @@ class ScoredCandidate(StrictModel):
     # ``FLOOR_PINNED``, or ``UNMEASURED_DELTA`` where the ruler does not carry a cell the arm
     # answered — the rest are facts about the round's scale and ride ``RoundResult.ability``.
     theta_caveat: ThetaCaveat | None = None
-    # Normal-CLT CI on the mean per-cell FITNESS (``scoring/selection.py::mean_fitness_ci``) —
+    # Student-t CI on the mean per-cell FITNESS (``scoring/selection.py::mean_fitness_ci``) —
     # accuracy's own fold, so it brackets accuracy whatever the active composite formula is, which
-    # is why it is not named for the composite. Present for any candidate with ≥1 scored cell,
+    # is why it is not named for the composite. Present for any candidate with ≥2 scored cells,
     # unlike ``theta_se``; the blocked ``reference_lift_ci_*`` above is sharper on these rows.
     mean_fitness_ci_lo: float | None = None
     mean_fitness_ci_hi: float | None = None
@@ -469,11 +463,6 @@ class CandidateProposal(StrictModel):
     pipeline_overlay: dict[str, dict[str, Any]] = Field(default_factory=dict)
     validation_failures: list[ValidationFailure] = Field(default_factory=list)
     runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
-
-
-def proposal_collapses(proposals: Sequence[CandidateProposal]) -> dict[str, int]:
-    """``invariant_collapses`` as the round is proposed, off each proposal's own failures."""
-    return collapse_counts(cp.validation_failures for cp in proposals)
 
 
 class ReferenceReading(StrictModel):
@@ -753,15 +742,6 @@ def round_clocks(rounds: Sequence[RoundResult], *, accuracy_ceiling: float | Non
         rounds_to_improved=first(lambda r: r.improved),
         rounds_to_ceiling=to_ceiling,
         accuracy_ceiling=accuracy_ceiling,
-    )
-
-
-@shapes_optimizer_prompt
-def invariant_collapses(candidate_scores: Sequence[ScoredCandidate]) -> dict[str, int]:
-    """How many proposals each ``INVARIANT_REASONS`` member collapsed — DERIVED from the arms: a
-    collapsed candidate rides them as ``ArmOutcome.INVALID``, never dropped."""
-    return collapse_counts(
-        c.validation_failures for c in candidate_scores if c.outcome is ArmOutcome.INVALID
     )
 
 

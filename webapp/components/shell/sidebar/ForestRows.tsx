@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { cx } from "@/lib/cx";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
 import { campaignDisplayName } from "@/lib/names";
-import { effectTone, fmtPct0, fmtSigned, fmtThetaSe } from "@/lib/format";
+import { fmtPct0, fmtSigned, fmtThetaSe, sideTone } from "@/lib/format";
 import { CAVEAT_COPY } from "@/components/candidates/AbilityInfo";
 import {
   accuracyStat,
@@ -21,7 +21,7 @@ import {
   panelCellLabel,
   pathOf,
   phaseStatus,
-  spendLabel,
+  spendHeadline,
   splitRetired,
   type NodeKind,
   type OriginGroup,
@@ -254,7 +254,7 @@ function CourseRow({
           <CampaignRowLabel
             name={label}
             status={status}
-            spend={spendLabel(run.campaign)}
+            spend={spendHeadline(run.campaign.spend_metered)}
             parts={campaignLineParts(run)}
             vendors={campaignVendors(run)}
           />
@@ -452,7 +452,7 @@ function CandidateRow({
       label: "Lift vs parent",
       value: fmtSigned(lift),
       sub: liftLo != null && liftHi != null ? `[${fmtSigned(liftLo)}, ${fmtSigned(liftHi)}]` : "no interval",
-      className: effectTone(liftLo, liftHi),
+      className: sideTone(cand.reference_lift_side),
     });
   }
   const facts: [string, string][] = [["Round", String(cand.round ?? 0)], ["Cycle", cycleId]];

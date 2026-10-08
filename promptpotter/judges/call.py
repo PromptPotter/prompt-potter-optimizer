@@ -102,9 +102,7 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
         except SendRefusedError as exc:
             # `spent` is empty because `measure_sample` bills the cell's backend spend before any
             # judge runs; its catch banks the hole and the walk halts on it.
-            raise CellSendRefusedError(
-                str(exc), category=exc.category, spent={}, step_timings={}
-            ) from exc
+            raise CellSendRefusedError(str(exc), category=exc.category, spent={}) from exc
         except Exception as exc:
             logger.warning("judge %s stage %s failed: %s", judge, stage.role, exc)
             return "", f"{type(exc).__name__}: {exc}"

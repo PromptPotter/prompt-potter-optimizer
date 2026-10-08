@@ -15,6 +15,7 @@ from promptpotter.infrastructure.projections.live_dashboard.projection import fo
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     LiveDashboardState,
     overlay_criterion_dials,
+    overlay_fork_remainder,
     overlay_round_readings,
     overlay_spend_metered,
     overlay_verify,
@@ -30,7 +31,8 @@ __all__ = ["served_dashboard"]
 
 def served_dashboard(stores: Stores, hop: CycleHop, *, at: int | None = None) -> dict[str, Any]:
     """The dashboard of the cycle at *hop*. ``at`` replays the same state to that ledger offset: it
-    keeps the live ``run_phase`` and takes NEITHER the armed controls nor the next-launch ceilings."""
+    keeps the live ``run_phase`` and takes NONE of the armed controls, the next-launch ceilings or
+    the fork remainder."""
     cycle_path = cycle_dir_for(stores.base_dir, hop)
     stored: Any = None
     unreadable = False
@@ -80,4 +82,5 @@ def served_dashboard(stores: Stores, hop: CycleHop, *, at: int | None = None) ->
     overlay_verify(body, cycle_path)
     if meter is not None:
         overlay_spend_metered(body, meter)
+    overlay_fork_remainder(body)
     return body

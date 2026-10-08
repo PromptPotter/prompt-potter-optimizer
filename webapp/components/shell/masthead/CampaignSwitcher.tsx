@@ -7,7 +7,7 @@ import {
   campaignStatus,
   campaignVendors,
   phaseStatus,
-  spendLabel,
+  spendHeadline,
   type OriginGroup,
   type RunGroup,
 } from "@/lib/derivations";
@@ -87,7 +87,7 @@ export function CampaignSwitcher({ origins }: { origins: OriginGroup[] }) {
                       <CampaignRowLabel
                         name={campaignDisplayName(run.campaign)}
                         status={campaignStatus(run)}
-                        spend={spendLabel(run.campaign)}
+                        spend={spendHeadline(run.campaign.spend_metered)}
                         parts={campaignLineParts(run)}
                         vendors={campaignVendors(run)}
                       />

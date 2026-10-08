@@ -2,7 +2,7 @@
 
 import type { MeasuredUnit, MetricSpec } from "@/lib/api/types";
 import { RECENT_STEP_S } from "@/lib/api/types.generated";
-import { liftSide, type LiftSide } from "@/lib/fitness";
+import type { LiftSide } from "@/lib/fitness";
 
 // The browser's half of the engine's one noun for a measured row
 // (`dashboard.json::measured_unit`): never pick it off a local flag, never pluralise inline.
@@ -50,10 +50,6 @@ export function fmtGap(seconds: number): string {
 
 export function fmtUsd(n: number): string {
   return n < 1 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
-}
-
-export function fmtUsdCents(n: number): string {
-  return n > 0 && n < 0.005 ? "<$0.01" : `$${n.toFixed(2)}`;
 }
 
 // Keeps the `:suffix`: it routes and bills differently, so it names a different run.
@@ -136,13 +132,12 @@ export function fmtThetaSe(v: number | null | undefined, se: number | null | und
   return theta !== "—" && typeof se === "number" ? `${theta} ± ${se.toFixed(2)}` : theta;
 }
 
-// The one rule every effect table colours on. A missing bound is flat: nothing was tested.
-export function effectTone(lo: number | null, hi: number | null): string {
-  if (lo == null || hi == null) return "l4-eff-flat";
-  return EFFECT_TONE[liftSide(lo, hi)];
+// The ink of a SERVED interval side (`lift_side`). `null` is flat: nothing was tested.
+export function sideTone(side: LiftSide | null): string {
+  return side === null ? "l4-eff-flat" : SIDE_TONE[side];
 }
 
-const EFFECT_TONE: Record<LiftSide, string> = {
+const SIDE_TONE: Record<LiftSide, string> = {
   above: "l4-eff-pos",
   below: "l4-eff-neg",
   spans: "l4-eff-flat",

@@ -120,7 +120,7 @@ export function RunLimitsControl({
           {metered ? (
             <span className="run-limits-control-used">
               {" "}
-              · {fmtUsd(metered.usd)} {METER_WORD[metered.meter]}
+              · {fmtUsd(metered.metered_usd)} {METER_WORD[metered.meter]}
             </span>
           ) : null}
         </span>
@@ -148,7 +148,7 @@ export function RunLimitsControl({
         <span className="val">
           {currentBudgetTokens != null ? fmtTokens(currentBudgetTokens) : "Uncapped"}
           {metered ? (
-            <span className="run-limits-control-used"> · {fmtTokens(metered.tokens)} used</span>
+            <span className="run-limits-control-used"> · {fmtTokens(metered.metered_tokens)} used</span>
           ) : null}
         </span>
       </div>

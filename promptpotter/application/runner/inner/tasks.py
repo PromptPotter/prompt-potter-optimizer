@@ -273,13 +273,12 @@ def load_inner_tasks(path: Path) -> InnerTasks:
             f"{path} is missing — the inner benchmark, its sample count and its round cap are "
             "all declared there. There is no default to run.",
             spent={},
-            step_timings={},
         )
     try:
         return InnerTasks.model_validate(raw)
     except ValidationError as exc:
         raise CellUnscoreableError(
-            f"{path} does not declare a runnable panel: {exc}", spent={}, step_timings={}
+            f"{path} does not declare a runnable panel: {exc}", spent={}
         ) from exc
 
 
@@ -440,7 +439,7 @@ def resolve_inner_task(cells: InnerCells, sample: Sample) -> InnerTaskSpec:
         cell = InnerTask.model_validate(sample.source_pin)
     except ValidationError as exc:
         raise CellUnscoreableError(
-            f"{sample.query!r} is no cell of an inner panel: {exc}", spent={}, step_timings={}
+            f"{sample.query!r} is no cell of an inner panel: {exc}", spent={}
         ) from exc
     return InnerTaskSpec(
         inner_dataset=panel.dataset_for(cell),

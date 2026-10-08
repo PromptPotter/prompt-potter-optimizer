@@ -55,7 +55,6 @@ from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.domain import ruler
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
 from promptpotter.domain.results import merge_known_outcomes
-from promptpotter.domain.results_health import compute_node_failure_rates
 from promptpotter.infrastructure.llm.telemetry import (
     emit_round_warning,
     reset_cycle_ledger,
@@ -392,7 +391,9 @@ def build_bundle(
             critique=latest_crit,
             l1_yield=latest_state.l1_yield if latest_state else 1.0,
             node_failure_rates=(
-                compute_node_failure_rates(latest_round.results) if latest_round else {}
+                latest_round.health.node_failure_rates
+                if latest_round and latest_round.health
+                else {}
             ),
             latest_sample_ids=frozenset(
                 sid for r in latest_results if (sid := r.get("sample_id")) is not None

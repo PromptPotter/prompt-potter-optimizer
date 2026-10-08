@@ -620,9 +620,7 @@ async def _reuse_task_image(
                 timeout=600,
             )  # fmt: skip
             if code != 0:
-                raise CellInfrastructureError(
-                    f"building {ready} failed: {out[-300:]}", spent={}, step_timings={}
-                )
+                raise CellInfrastructureError(f"building {ready} failed: {out[-300:]}", spent={})
         image = ready
     environment.task_env_config.docker_image = image
     environment._env_vars.prebuilt_image_name = image
@@ -1215,7 +1213,6 @@ def _episode(workload: InProcessWorkload, sample: Sample, payload: dict[str, Any
         raise CellUnscoreableError(
             f"harbor task {sample.query!r} carries no pin, so it is no row of a {TASKS_FILE}.",
             spent={},
-            step_timings={},
         )
     panel = workload.experiment or {}
     agent_cfg = panel.get("agent") or {}
@@ -1367,7 +1364,6 @@ async def _run_episode(episode: _Episode) -> tuple[TrialResult, float, dict[str,
                 raise CellThrottledError(
                     f"harbor task {query!r} was throttled by its model provider: {throttle}",
                     spent=_sum_spend(attempts),
-                    step_timings={},
                 )
             if (failure := _infrastructure_failure(result)) is None:
                 break
@@ -1390,9 +1386,7 @@ def _reward(result: TrialResult, episode: _Episode, bill: dict[str, StepTokenUsa
     # denominator, so the number below would describe fewer steps than the task declared, and
     # describe it as a success.
     if unscoreable := _unscoreable_step(result):
-        raise CellUnscoreableError(
-            f"harbor task {query!r}: {unscoreable}.", spent=bill, step_timings={}
-        )
+        raise CellUnscoreableError(f"harbor task {query!r}: {unscoreable}.", spent=bill)
 
     rewards = result.verifier_result.rewards if result.verifier_result else None
     reward = (rewards or {}).get(episode.reward_key)
@@ -1403,7 +1397,6 @@ def _reward(result: TrialResult, episode: _Episode, bill: dict[str, StepTokenUsa
             f"harbor task {query!r} produced no reward under key {episode.reward_key!r} "
             f"(rewards={rewards}); the episode is unscoreable, not a zero.",
             spent=bill,
-            step_timings={},
         )
     return cast("float | int", reward)
 

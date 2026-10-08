@@ -121,7 +121,6 @@ async def _in_process_run(
             f"dspy connector: sample {sample.id} is no row of the trainset this run opened with "
             "— PromptPotterOpt.acompile hands the student and its rows to open_session(program=...).",
             spent={},
-            step_timings={},
         )
     example = program.examples[sample.id]
 

@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { AccountEmpty, AccountFailure, AccountLoading } from "./AccountSection";
-import { fmtCompact, fmtUsd } from "@/lib/format";
+import { billText } from "@/lib/derivations";
+import { fmtCompact } from "@/lib/format";
 import { seriesVar } from "@/lib/theme";
 import { useRead } from "@/lib/hooks/useRead";
 import {
@@ -98,7 +99,7 @@ function ActivityCharts({ data }: { data: ActivityResponse }) {
       </ul>
       <ActivityBarChart
         title="Spend"
-        valueLabel={fmtUsd(data.total_spend_usd)}
+        valueLabel={billText(data.total_spend_usd, data.bill_is_floor)}
         buckets={data.buckets}
         labels={labels}
         palette={palette}

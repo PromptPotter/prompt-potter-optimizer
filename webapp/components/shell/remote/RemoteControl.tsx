@@ -5,7 +5,14 @@ import { SegmentedControl, Switch, Term } from "@/components/ui";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { cx } from "@/lib/cx";
 import { TERMS } from "@/lib/terms";
-import { headlineStats, pathOf, prefixReading, readSpend, runningInnerRun } from "@/lib/derivations";
+import {
+  headlineStats,
+  pathOf,
+  prefixReading,
+  readSpend,
+  runningInnerRun,
+  spendHeadline,
+} from "@/lib/derivations";
 import { fmtText, fmtDuration, fmtSigned, fmtUsd, fmtTokens } from "@/lib/format";
 import { useCycleStream } from "@/lib/poll";
 import { useLineageTree } from "@/lib/lineage";
@@ -208,9 +215,9 @@ export function RemoteControl() {
                 </span>
               </div>
             ))}
-            <div className="row"><span className="lbl">Billed</span><span className="val">{metered ? fmtUsd(metered.billed_usd) : "—"}</span></div>
+            <div className="row"><span className="lbl">Billed</span><span className="val">{metered ? spendHeadline(metered) : "—"}</span></div>
             <div className="row"><span className="lbl">Tokens</span><span className="val">{metered ? fmtTokens(metered.billed_tokens) : "—"}</span></div>
-            {metered && metered.unpriced_tokens > 0 ? (
+            {metered?.bill_is_floor ? (
               <div className="row">
                 <span className="lbl">USD cap</span>
                 <Term className="val remote-spend-warn" content="USD cost couldn't be resolved for some calls (e.g. Groq returns no wire cost and the model isn't in the rate table). The $ figure undercounts real spend and the USD cap can't see it — the token cap is the backstop.">

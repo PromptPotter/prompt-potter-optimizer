@@ -125,10 +125,6 @@ def _reply_data(resp: httpx.Response) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _spent_data(exc: CellUnscoreableError) -> dict[str, Any]:
-    return {"step_tokens": dict(exc.spent), "step_timings": dict(exc.step_timings)}
-
-
 def _settle(admission: Admission, reported: list[Billed] | None) -> None:
     if reported is None:
         admission.unreported()
@@ -540,7 +536,7 @@ class BackendClient:
         wait: float | None = None
         code = resp.status_code
         if 500 <= code < 600 and (refused := self._guard.resend_refused(resp)) is not None:
-            raise CellHaltedError(f"HTTP {code} {refused}", spent={}, step_timings={})
+            raise CellHaltedError(f"HTTP {code} {refused}", spent={})
         if 500 <= code < 600 and sends.attempt + 1 < MAX_SEND_ATTEMPTS:
             wait = float(2**sends.attempt)
             logger.warning(
@@ -583,35 +579,29 @@ class BackendClient:
         bound: SendBound | None,
         billed: CellBilling,
     ) -> dict[str, Any]:
-        if bound is None:
-            return await self._clocked(run, sample, payload)
-        if self.holds_own_sends:
-            # Every send it makes is billed where it is made, so the cell is no send of its own.
-            with reserved(CELL, bound):
-                return await self._clocked(run, sample, payload)
-        with admitted(CELL, bound, model=None, provider=None) as admission:
+        """The arm's reply under its hold, with the cell's ONE clock on it: every second ``run``
+        took, retries it made on its own included, on a reply and on a cell with no verdict alike."""
+        with contextlib.ExitStack() as hold:
+            admission: Admission | None = None
+            if bound is not None and self.holds_own_sends:
+                # Every send it makes is billed where it is made, so the cell is no send of its own.
+                hold.enter_context(reserved(CELL, bound))
+            elif bound is not None:
+                admission = hold.enter_context(admitted(CELL, bound, model=None, provider=None))
+            started = time.monotonic()
             try:
-                result = await self._clocked(run, sample, payload)
+                result = await run(self.workload, sample, payload)
             except CellUnscoreableError as exc:
                 # It ran to no verdict — a throttle included — and says what it paid for doing so.
-                _settle(admission, billed(_spent_data(exc)))
+                if admission is not None:
+                    timings = dict.fromkeys(exc.spent, time.monotonic() - started)
+                    spent = {"step_tokens": dict(exc.spent), "step_timings": timings}
+                    _settle(admission, billed(spent))
                 raise
-            _settle(admission, billed(result["data"]))
+            spent_s = time.monotonic() - started
+            data: dict[str, Any] = result["data"]
+            data["total_time"] = spent_s
+            data["step_timings"] = {data["terminal_node"]: spent_s}
+            if admission is not None:
+                _settle(admission, billed(data))
             return result
-
-    async def _clocked(
-        self, run: InProcessRun, sample: Sample, payload: dict[str, Any]
-    ) -> dict[str, Any]:
-        """The arm's reply with the cell's clock on it: every second ``run`` took, retries it made
-        on its own included, on a reply and on a cell that reached no verdict alike."""
-        started = time.monotonic()
-        try:
-            result = await run(self.workload, sample, payload)
-        except CellUnscoreableError as exc:
-            exc.step_timings = dict.fromkeys(exc.spent, time.monotonic() - started)
-            raise
-        spent_s = time.monotonic() - started
-        data = result["data"]
-        data["total_time"] = spent_s
-        data["step_timings"] = {data["terminal_node"]: spent_s}
-        return result

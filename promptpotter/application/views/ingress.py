@@ -234,8 +234,8 @@ def run_spend_view(
         billed_usd=spent.billed_usd,
         incurred_usd=spent.incurred_usd,
         meter=spent.meter,
-        metered_usd=spent.usd,
-        metered_tokens=spent.tokens,
+        metered_usd=spent.metered_usd,
+        metered_tokens=spent.metered_tokens,
         usd_cap=usd_cap,
         token_cap=token_cap,
     )

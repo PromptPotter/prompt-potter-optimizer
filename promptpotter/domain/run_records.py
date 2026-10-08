@@ -29,6 +29,7 @@ __all__ = [
     "CycleSeedRecord",
     "ElectionRecord",
     "ErrorRecord",
+    "ForkRemainder",
     "ForkSpec",
     "ForkTrigger",
     "LLMCallProgressRecord",
@@ -514,6 +515,60 @@ class ConfigOverrides(StrictModel):
     scoring: str | dict[str, str] | None = None
 
 
+class ForkRemainder(StrictModel):
+    """What a cycle's rounds cap and spend cap have left. An offshoot numbers its rounds from 1 and
+    meters its own spend, so it takes these as its caps wherever its seed names none. A ``None``
+    cap is one the cycle does not carry, or whose spend is unread: the offshoot inherits it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    rounds_closed: int = Field(
+        description="Rounds closed AFTER the origin — what `max_rounds` counts"
+    )
+    parent_max_rounds: int | None
+    max_rounds: int | None = Field(
+        description="`parent_max_rounds` less `rounds_closed`, never under 1"
+    )
+    metered_usd: float | None = Field(description="What the cycle's spend cap has counted")
+    parent_spend_budget_usd: float | None
+    spend_budget_usd: float | None = Field(
+        description="`parent_spend_budget_usd` less `metered_usd`, never under 0"
+    )
+
+    @classmethod
+    def of(
+        cls,
+        *,
+        rounds_closed: int,
+        max_rounds: int | None,
+        metered_usd: float | None,
+        spend_budget_usd: float | None,
+    ) -> ForkRemainder:
+        return cls(
+            rounds_closed=rounds_closed,
+            parent_max_rounds=max_rounds,
+            max_rounds=None if max_rounds is None else max(1, max_rounds - rounds_closed),
+            metered_usd=metered_usd,
+            parent_spend_budget_usd=spend_budget_usd,
+            spend_budget_usd=None
+            if spend_budget_usd is None or metered_usd is None
+            else max(0.0, round(spend_budget_usd - metered_usd, 6)),
+        )
+
+    def under(self, overrides: ConfigOverrides) -> ConfigOverrides:
+        """*overrides* with each cap it leaves unset taken from the remainder. ``0`` is a cap."""
+        return overrides.model_copy(
+            update={
+                "max_rounds": self.max_rounds
+                if overrides.max_rounds is None
+                else overrides.max_rounds,
+                "spend_budget_usd": self.spend_budget_usd
+                if overrides.spend_budget_usd is None
+                else overrides.spend_budget_usd,
+            }
+        )
+
+
 class OriginSource(enum.StrEnum):
     """Which act seeded a cycle's C0. The two human acts are the members an ``evidence`` row files
     under the operator (``OPERATOR_ORIGIN_SOURCES``)."""
@@ -829,12 +884,6 @@ CycleRecord = Annotated[
     | TokenUsageRecord,
     Field(discriminator="record_type"),
 ]
-
-
-# The `issued_by` an operator fork carries when the client sent no identity. One SoT for the
-# stamp site (`mint_operator_fork`) and the lineage suppression that turns it into a *no*
-# "edited by" badge — they must agree on the literal or the badge silently breaks.
-UNATTRIBUTED_OPERATOR = "operator"
 
 
 class ForkSpec(StrictModel):

@@ -30,7 +30,7 @@ export interface AbilityReading {
   ruler_span: number | null;
   round_span: number | null;
   calibration_model: '1PL' | '2PL' | null;
-  caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
+  caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | 'floor_pinned' | null;
 }
 
 /** One candidate as `dashboard.json` serves it, in ANY round state — the live rows under */
@@ -53,7 +53,7 @@ export interface DashboardCandidate {
   theta_se: number | null;
   bench: BenchReading | null;
   verify: VerifyReading | null;
-  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
+  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | 'floor_pinned' | null;
   mean_fitness_ci_lo: number | null;
   mean_fitness_ci_hi: number | null;
   reference_accuracy: number | null;
@@ -134,7 +134,7 @@ export interface RoundSummaryCandidate {
   theta_se: number | null;
   bench: BenchReading | null;
   verify: VerifyReading | null;
-  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
+  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | 'floor_pinned' | null;
   mean_fitness_ci_lo: number | null;
   mean_fitness_ci_hi: number | null;
   reference_accuracy: number | null;
@@ -362,7 +362,7 @@ export interface ScoredCandidate {
   reference_lift_ci_hi: number | null;
   theta: number | null;
   theta_se: number | null;
-  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
+  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | 'floor_pinned' | null;
   mean_fitness_ci_lo: number | null;
   mean_fitness_ci_hi: number | null;
 }
@@ -382,7 +382,7 @@ export interface ScoreboardRow {
   mean_fitness_ci_hi: number | null;
   theta: number | null;
   theta_se: number | null;
-  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
+  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | 'floor_pinned' | null;
   reference_lift: number | null;
   reference_lift_ci_lo: number | null;
   reference_lift_ci_hi: number | null;
@@ -516,14 +516,47 @@ export interface KindSpend {
 /** What a run's spend caps have counted, in the units they meter, by kind. */
 export interface MeteredSpend {
   meter: 'bill' | 'search_incurred';
-  usd: number;
-  tokens: number;
+  metered_usd: number;
+  metered_tokens: number;
   billed_usd: number;
+  bill_is_floor: boolean;
+  metered_is_bill: boolean;
   incurred_usd: number;
   billed_tokens: number;
   unpriced_tokens: number;
   kinds: Record<string, KindSpend>;
   replay_share: number | null;
+}
+
+/** What an account, or one campaign's share of it, was billed over its whole life. */
+export interface LifetimeSpend {
+  /** What the providers BILLED, over every cycle, fork and forwarded inner run,
+   * plus what a deleted cycle banked. Never an estimate: a send whose bill
+   * never came is `unreported_usd`, not this. */
+  billed_usd: number;
+  /** `billed_usd` understates, by what `unpriced_tokens` cost; the token ceiling is
+   * then the binding one. */
+  bill_is_floor: boolean;
+  /** Billed tokens with no resolvable rate. */
+  unpriced_tokens: number;
+  /** The most that sends which ended with no bill (cancelled, timed out, killed
+   * with a run) may have cost, at the bounds they were admitted on. Not spent
+   * — unknown. It binds the ceiling beside `billed_usd`. */
+  unreported_usd: number;
+}
+
+/** What a cycle's rounds cap and spend cap have left. An offshoot numbers its rounds from 1 and */
+export interface ForkRemainder {
+  /** Rounds closed AFTER the origin — what `max_rounds` counts */
+  rounds_closed: number;
+  parent_max_rounds: number | null;
+  /** `parent_max_rounds` less `rounds_closed`, never under 1 */
+  max_rounds: number | null;
+  /** What the cycle's spend cap has counted */
+  metered_usd: number | null;
+  parent_spend_budget_usd: number | null;
+  /** `parent_spend_budget_usd` less `metered_usd`, never under 0 */
+  spend_budget_usd: number | null;
 }
 
 /** A provider holding a sender's sends (`infrastructure/llm/rate_limit.py::Backpressure`). */
@@ -635,7 +668,7 @@ export interface LiveCandidate {
   theta_se: number | null;
   bench: BenchReading | null;
   verify: VerifyReading | null;
-  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
+  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | 'floor_pinned' | null;
   mean_fitness_ci_lo: number | null;
   mean_fitness_ci_hi: number | null;
   reference_accuracy: number | null;
@@ -789,6 +822,7 @@ export interface LiveDashboardState {
   run_limits: RunLimits | null;
   spend: SpendRollup;
   spend_metered: MeteredSpend | null;
+  fork_remainder: ForkRemainder | null;
   spend_by_round: Record<string, SpendRollup>;
   spend_metered_by_round: Record<string, MeteredSpend> | null;
   catch_up_log: CatchUpLogEntry[];
@@ -1291,19 +1325,11 @@ export interface CampaignSummary {
   lifecycle_changed_at: string;
   /** Optional operator-supplied reason for the last lifecycle transition */
   lifecycle_reason: string;
-  /** What this campaign has billed over its whole life — every cycle's ledger,
+  /** This campaign's share of `QuotaStatus.spend_lifetime`: every cycle's ledger,
    * forks and forwarded L4 inner spend included, plus spend banked when one
-   * of its cycles was deleted. Its share of
-   * `QuotaStatus.spend_used_total_usd`. A FLOOR while `spend_unpriced_tokens`
-   * is non-zero. */
-  spend_used_usd: number;
-  /** Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them.
-   * Zero means the dollar figure is complete. */
-  spend_unpriced_tokens: number;
-  /** The most that this campaign's sends which ended with no bill may have cost, at
-   * the bounds they were admitted on — unknown, never spent. Its share of
-   * `QuotaStatus.spend_unreported_usd`. */
-  spend_unreported_usd: number;
+   * of its cycles was deleted. A wider scope than `spend_metered`, which
+   * reads the campaign's line alone. */
+  spend_lifetime: LifetimeSpend;
   /** What the campaign's spend cap counts along its LINE — the root and every cycle
    * a rebase handed it to — by bucket: the bill, or the search's incurred USD
    * for a controlled arm. The number a surface sets beside a cap, live. */
@@ -1403,6 +1429,7 @@ export interface RankedEdit {
   anchor_effect: number;
   ci_lo: number | null;
   ci_hi: number | null;
+  effect_side: 'above' | 'below' | 'spans' | null;
   n_cells: number;
   n_measurements: number;
 }
@@ -1592,6 +1619,7 @@ export interface PairwiseComparison {
   median_shift: number;
   ci_lo: number | null;
   ci_hi: number | null;
+  shift_side: 'above' | 'below' | 'spans' | null;
   p_value: number | null;
   p_adjusted: number | null;
   n_cells: number;
@@ -1645,6 +1673,16 @@ export interface ArmBudget {
   determinism: Record<string, unknown> | null;
 }
 
+/** A bench's lift in its headline column, with the side of 0 its band sits on: the one lift a */
+export interface HeadlineLift {
+  value: number;
+  /** The 95% band on `value`, drawn from the same per-row values; `None` where one
+   * pass was read twice, which has no spread. */
+  ci_lo: number | null;
+  ci_hi: number | null;
+  side: 'above' | 'below' | 'spans' | null;
+}
+
 /** One campaign's bench headline beside what it cost to reach. */
 export interface HeadToHeadRow {
   subject: string;
@@ -1660,6 +1698,7 @@ export interface HeadToHeadRow {
   stop_reason: 'perfect_score' | 'max_rounds' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   outcome: 'success' | 'halted' | 'failed' | 'paused' | null;
   bench: BenchScore | null;
+  headline_lift: HeadlineLift | null;
   bench_missing_reason: string | null;
   bench_set: Instrument | null;
   comparable: boolean | null;
@@ -1850,12 +1889,9 @@ export interface LineageNode {
    * lower-accuracy winner. Null outside the round's election fit. */
   theta: number | null;
   theta_se: number | null;
-  /** Why the theta above is not this arm's ability. Only ever `floor_pinned` — the
-   * arm scored 0.0 on every cell it answered, so the fit had no response to
-   * separate ability from the prior and every lift against it reads 0.000.
-   * The other three caveats are properties of the round's scale and ride the
-   * round's own reading. */
-  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
+  /** Why the theta above is not this arm's ability: a `ThetaCaveat` of the ARM's
+   * own scope. The round's scale states ride the round's own reading. */
+  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | 'floor_pinned' | null;
   /** Whether the optimizer fits theta per arm at all. Candidate: the declaration
    * its round's election carried (`RoundResult.stamps_theta`), false on a
    * round that never elected. Course: the declaration its own elections
@@ -1953,7 +1989,9 @@ export interface LineageNode {
    * anything. Served, never derived in the client — the two read identically
    * on disk and only this says them apart. */
   fork_direction: 'offshoot' | 'supersede' | 'equivalent' | null;
-  /** Operator who cut this fork. */
+  /** Who cut this fork, as its fork record names them: an account or delegate id,
+   * `system`, or the layer and round that proposed it. An id, never a display
+   * name. */
   steered_by: string | null;
   /** An inner run's benchmark task. Load-bearing: every task runs for every
    * candidate, so the candidate edge alone does not identify an inner run. */
@@ -2053,18 +2091,12 @@ export interface MeResponse {
 
 /** An account's usage against the limits its next launch is gated on. */
 export interface QuotaStatus {
-  /** What the providers BILLED this account, over its whole life. Never an
-   * estimate: a send whose bill never came is `spend_unreported_usd`, not
-   * this. */
-  spend_used_total_usd: number;
+  spend_lifetime: LifetimeSpend;
   spend_budget_usd_total: number | null;
-  /** Billed tokens with no resolvable rate. Non-zero makes `spend_used_total_usd` a
-   * floor and leaves the token pair as the binding one. */
-  spend_unpriced_tokens: number;
-  /** The most that sends which ended with no bill (cancelled, timed out, killed
-   * with a run) may have cost, at the bounds they were admitted on. Not spent
-   * — unknown. It binds the ceiling beside `spend_used_total_usd`. */
-  spend_unreported_usd: number;
+  /** Admission's own answer: the next launch is refused for want of allowance.
+   * Headroom in either unit, after what running launches hold, the unreported
+   * sends and the unpriced grace. False on an account no ceiling bounds. */
+  allowance_spent: boolean;
   tokens_used_total: number;
   token_budget_total: number | null;
   concurrent_running: number;
@@ -2089,10 +2121,13 @@ export interface ActivityBucket {
   /** Epoch seconds at the bucket's leading edge */
   ts: number;
   spend_usd: number;
+  /** A call in this bucket was billed at no resolvable rate, so `spend_usd` and its
+   * series understate. */
+  bill_is_floor: boolean;
   tokens: number;
   requests: number;
-  /** Billed USD per `series_labels` entry. An unpriced call adds nothing here and
-   * still counts in the other two. */
+  /** Billed USD per `series_labels` entry. An unpriced call adds nothing here, sets
+   * `bill_is_floor`, and still counts in the other two. */
   series_spend: Record<string, number>;
   series_tokens: Record<string, number>;
   series_requests: Record<string, number>;
@@ -2111,6 +2146,8 @@ export interface ActivityResponse {
    * across the buckets. A call outside the optimizer's own carries its kind. */
   series_labels: string[];
   total_spend_usd: number;
+  /** `total_spend_usd` understates: a bucket's `bill_is_floor`, over the window. */
+  bill_is_floor: boolean;
   total_tokens: number;
   total_requests: number;
 }

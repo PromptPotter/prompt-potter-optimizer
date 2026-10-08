@@ -21,7 +21,12 @@ from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes
 from promptpotter.application.scoring import query_loop
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.results import ArmOutcome
-from promptpotter.domain.run_records import SnapshotRecord, TokenUsageRecord
+from promptpotter.domain.run_records import (
+    ConfigOverrides,
+    ForkRemainder,
+    SnapshotRecord,
+    TokenUsageRecord,
+)
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.validators import StopSignal
@@ -200,7 +205,7 @@ async def test_a_cell_that_ran_without_a_grade_still_bills_what_it_spent() -> No
     spent = {"agent": {"input": 1200, "output": 300, "estimated": False, "cost_usd": 0.0076}}
 
     async def _ran_ungraded(*_args: Any) -> dict[str, Any]:
-        raise CellUnscoreableError("verifier timed out", spent=spent, step_timings={})
+        raise CellUnscoreableError("verifier timed out", spent=spent)
 
     client = BackendClient(
         "http://unused",
@@ -1389,9 +1394,11 @@ def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path)
     cycle_dir = tmp_path / "cyc"
     spent = MeteredSpend(
         meter="bill",
-        usd=1.0,
-        tokens=9_000,
+        metered_usd=1.0,
+        metered_tokens=9_000,
         billed_usd=1.0,
+        bill_is_floor=False,
+        metered_is_bill=True,
         incurred_usd=1.0,
         billed_tokens=0,
         unpriced_tokens=0,
@@ -2031,9 +2038,11 @@ async def test_moving_one_ceiling_leaves_the_other_at_its_launch_cap(
     registry.set_caps(job.job_id, cap_usd=0.30, cap_tokens=5_000_000)
     spent = MeteredSpend(
         meter="bill",
-        usd=0.10,
-        tokens=210_000,
+        metered_usd=0.10,
+        metered_tokens=210_000,
         billed_usd=0.10,
+        bill_is_floor=False,
+        metered_is_bill=True,
         incurred_usd=0.10,
         billed_tokens=0,
         unpriced_tokens=0,
@@ -2368,6 +2377,23 @@ def test_host_wallet_ceilings_hold_in_both_units(
     with pytest.raises(QuotaExceededError):
         admit_spend(stores=_stores(issuer=web, ledgers=[spent]), bucket="turn")
     admit_spend(stores=_stores(issuer=None, ledgers=[spent]), bucket="turn")
+
+
+def test_an_offshoot_is_capped_at_what_its_parent_has_left() -> None:
+    """A fork numbers its rounds from 1 and meters its own spend, so one minted under its parent's
+    whole caps is handed a second budget. A cap its seed names is the operator's, ``0`` included."""
+    left = ForkRemainder.of(rounds_closed=3, max_rounds=5, metered_usd=0.75, spend_budget_usd=2.0)
+    inherited = left.under(ConfigOverrides())
+    assert (inherited.max_rounds, inherited.spend_budget_usd) == (2, 1.25)
+    own = left.under(ConfigOverrides(max_rounds=9, spend_budget_usd=0.0))
+    assert (own.max_rounds, own.spend_budget_usd) == (9, 0.0)
+
+    spent = ForkRemainder.of(rounds_closed=7, max_rounds=5, metered_usd=3.0, spend_budget_usd=2.0)
+    assert (spent.max_rounds, spent.spend_budget_usd) == (1, 0.0)
+    unread = ForkRemainder.of(
+        rounds_closed=1, max_rounds=None, metered_usd=None, spend_budget_usd=2.0
+    )
+    assert (unread.max_rounds, unread.spend_budget_usd) == (None, None)
 
 
 # 4. Spend outlives what spent it

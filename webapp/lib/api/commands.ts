@@ -58,7 +58,6 @@ export async function postSteerFork(
   candidateId: string,
   opts: {
     seed: ForkSeed;
-    steeredBy?: string;
     keepRounds?: boolean;
     pauseFirst: boolean;
   },
@@ -72,7 +71,6 @@ export async function postSteerFork(
     candidate_id: candidateId,
     seed: opts.seed,
   };
-  if (opts.steeredBy) payload.steered_by = opts.steeredBy;
   if (opts.keepRounds) payload.keep_rounds = true;
   return postCommand("fork-cycle", payload);
 }

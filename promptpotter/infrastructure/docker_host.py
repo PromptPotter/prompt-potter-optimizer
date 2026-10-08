@@ -101,7 +101,7 @@ def machine_step() -> Iterator[None]:
     try:
         yield
     except (OSError, TimeoutError) as exc:
-        raise CellInfrastructureError(str(exc), spent={}, step_timings={}) from exc
+        raise CellInfrastructureError(str(exc), spent={}) from exc
 
 
 async def run_cell_container(
@@ -137,7 +137,7 @@ async def ensure_package_cache() -> None:
             )  # fmt: skip
             if code != 0:
                 raise CellInfrastructureError(
-                    f"building {PACKAGE_CACHE} failed: {out[-300:]}", spent={}, step_timings={}
+                    f"building {PACKAGE_CACHE} failed: {out[-300:]}", spent={}
                 )
         await docker(
             "run", "--detach", "--name", PACKAGE_CACHE, "--restart", "unless-stopped",
@@ -149,9 +149,7 @@ async def ensure_package_cache() -> None:
         await docker("start", PACKAGE_CACHE)
     code, state = await docker(*running)
     if state != "true":
-        raise CellInfrastructureError(
-            f"{PACKAGE_CACHE} is not running: {state[-300:]}", spent={}, step_timings={}
-        )
+        raise CellInfrastructureError(f"{PACKAGE_CACHE} is not running: {state[-300:]}", spent={})
     _package_cache_running = True
 
 

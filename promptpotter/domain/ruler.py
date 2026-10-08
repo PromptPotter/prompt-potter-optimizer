@@ -49,22 +49,8 @@ BAND_COLLAPSE_LOGITS = 1.0
 
 
 class ThetaCaveat(StrEnum):
-    """A state in which θ is NOT ability — decided beside the ruler, never in a view.
-
-    All five render every number and raise nothing, so the reading looks identical to a sound one.
-    WHICH one fired is the whole value, because the fix differs: one is an instrument, one is an
-    acquisition, one is the absence of a scale, one is the ruler's prior standing in for a
-    measurement, one is the arm itself. The ABSENCE of a caveat is the sixth state, and the only
-    one where θ is ability.
-
-    **Two SCOPES, one vocabulary.** The first four are facts about the ROUND's scale, decided by
-    :func:`theta_caveat` and stamped on its ``AbilityReading``; ``FLOOR_PINNED`` is a fact about
-    ONE ARM, decided by ``results.py::is_floor_pinned`` where that arm is scored, and an arm whose
-    own cells the ruler does not carry takes ``UNMEASURED_DELTA`` on its row too. One enum because
-    the question a reader asks is identical — *may I read this θ as ability?* — and a second
-    vocabulary for it would be a synonym, not a channel.
-
-    `docs/methods/verdict-resolution.md` § Reading a round."""
+    """A state in which θ is NOT ability — decided beside the ruler, never in a view. Each renders
+    every number, so WHICH one fired is the value: `docs/methods/verdict-resolution.md` § Reading a round."""
 
     # No δ scale at all — θ is plain logit-accuracy on whatever subset this arm answered, so two
     # readings are comparable to each other and to nothing else.
@@ -80,10 +66,11 @@ class ThetaCaveat(StrEnum):
     # difficulty nobody measured, and the pin MOVES as the ruler grows — so an unchanged prompt
     # drifts upward round on round. Silent like COLLAPSED_BAND: the ruler id matches, the cell
     # count is healthy, every number renders.
-    # ...or NO δ at all: a cell the ruler does not carry, because no arm holding an anchored
-    # ability answered it (`intelligence/exploration.py::extend_ruler`). θ skips that cell, so it
-    # is read on fewer cells than the accuracy beside it. The one member with BOTH scopes: the
-    # round's reading carries it for the frontier's cells, an arm's row for that arm's own.
+    PRIOR_PINNED = "prior_pinned"
+    # NO δ at all: a cell the ruler does not carry, because no arm holding an anchored ability
+    # answered it (`intelligence/exploration.py::extend_ruler`). θ skips that cell, so it is read
+    # on fewer cells than the accuracy beside it. The one member with BOTH scopes: the round's
+    # reading carries it for the frontier's cells, an arm's row for that arm's own.
     UNMEASURED_DELTA = "unmeasured_delta"
     # The ARM: it scored 0.0 on every cell it answered, so the fit has no response to separate
     # ability from the prior and θ settles on the floor the δ vector and n imply. Per-CANDIDATE,
@@ -101,24 +88,8 @@ def theta_caveat(
     unlinked: int,
     pinned_share: float | None = None,
 ) -> ThetaCaveat | None:
-    """Which of the four SCALE states this reading is in, or ``None`` where θ is genuinely
-    ability on the evidence this function can see.
-
-    The SOLE decision for those four: the served reading and the optimizer's ``confounds`` panel
-    both call here, or the screen and the generator disagree about whether a number means anything.
-    Spans below two cells arrive as ``None`` and are not a verdict — an unmeasurable band is not a
-    narrow one, and an absent *pinned_share* is likewise no verdict rather than a clean one.
-
-    ``unlinked`` is ``DeltaRuler.unlinked`` over the cells this reading was taken on. It needs no
-    span to be a verdict: one measured cell the θ skipped is already a θ that is not the reading
-    of what was measured.
-
-    **Order is severity, and the band wins.** Inside a collapsed band θ is logit-accuracy plus a
-    constant whatever the δ were fit from, so naming the pin there would name the smaller fault.
-
-    Never returns ``FLOOR_PINNED``: that one is a property of ONE ARM's responses, which are not an
-    input here. A round can be sound by this function and still carry a floor-pinned arm.
-    """
+    """The SOLE decision for the SCALE states, which the served reading and the optimizer's
+    ``confounds`` panel both call. A ``None`` span or share is no verdict; order is severity."""
     if calibration_model is None:
         return ThetaCaveat.COLD_RULER
     if round_span is not None and ruler_span is not None:
@@ -127,7 +98,7 @@ def theta_caveat(
         if round_span <= max(BAND_COLLAPSE_LOGITS, BAND_COLLAPSE_RATIO * ruler_span):
             return ThetaCaveat.COLLAPSED_BAND
         if pinned_share is not None and pinned_share >= PRIOR_PINNED_RATIO:
-            return ThetaCaveat.UNMEASURED_DELTA
+            return ThetaCaveat.PRIOR_PINNED
     return ThetaCaveat.UNMEASURED_DELTA if unlinked else None
 
 
@@ -304,7 +275,7 @@ class AbilityReading(StrictModel):
     round_span: float | None
     # ``None`` = the ruler is cold (flat δ) and θ is plain logit-accuracy — neither model.
     calibration_model: CalibrationModel | None
-    # SERVED, never re-derived: which of the three states this θ is in, or ``None`` where it is
+    # SERVED, never re-derived: which scale state this θ is in, or ``None`` where it is
     # genuinely ability. Stamped from `theta_caveat` at the one minting site, so the browser and
     # the optimizer's `confounds` panel cannot disagree about whether a number means anything.
     caveat: ThetaCaveat | None

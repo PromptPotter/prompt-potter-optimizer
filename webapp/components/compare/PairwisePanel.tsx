@@ -5,7 +5,7 @@
 import { CardFrame } from "@/components/ui";
 import type { MetricReading, MetricSpec, PairwiseComparison } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
-import { effectTone, fmtMetricInterval, fmtMetricValue, fmtPValue, shortId } from "@/lib/format";
+import { fmtMetricInterval, fmtMetricValue, fmtPValue, shortId, sideTone } from "@/lib/format";
 
 // `nRead` is subjects the read opened: it tells "only one subject" from "two that share no cell".
 export function PairwisePanel({
@@ -86,7 +86,7 @@ function Row({
         <code title={row.subject_a}>{names.get(row.subject_a) ?? shortId(row.subject_a)}</code> →{" "}
         <code title={row.subject_b}>{names.get(row.subject_b) ?? shortId(row.subject_b)}</code>
       </td>
-      <td className={cx("l4-effect", effectTone(row.ci_lo, row.ci_hi))}>
+      <td className={cx("l4-effect", sideTone(row.shift_side))}>
         <span className="l4-effect-mean">{fmtMetricValue(unit, row.median_shift)}</span>
         <span className="l4-effect-ci">{fmtMetricInterval(unit, row.ci_lo, row.ci_hi)}</span>
       </td>

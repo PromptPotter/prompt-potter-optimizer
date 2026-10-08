@@ -9,7 +9,7 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_fork
+from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_diag_sibling
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.payloads import ForkCyclePayload
 from promptpotter.application.jobs.launcher.admission import probe_backend
@@ -23,7 +23,6 @@ from promptpotter.domain.pipeline_overlay import (
     permitted_models_for_campaign,
     steers_disallowed_model,
 )
-from promptpotter.domain.run_records import ForkSpec, ForkTrigger
 from promptpotter.infrastructure.runtime_flags import is_checkin
 from promptpotter.infrastructure.store.campaign_store.store import cycle_final
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
@@ -44,7 +43,6 @@ from promptpotter.presentation.cli.commands._shared import (
 from promptpotter.presentation.cli.commands.new import cmd_new
 from promptpotter.presentation.cli.session import load_session, no_dataset_hint
 from promptpotter.shared.errors import PotterError, ResumeDivergenceError
-from promptpotter.shared.identity import acting_principal_id
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
@@ -180,17 +178,7 @@ def _maybe_fork_diag_sibling(args: argparse.Namespace, ctx: SessionCtx, session:
     if final is None or final.mode != "diag":
         return
 
-    new_cycle_id = mint_fork(
-        session.store.campaigns,
-        ctx.hop,
-        ctx.session_id,
-        0,
-        ForkSpec(
-            trigger=ForkTrigger.OPERATOR_DIAG,
-            reason="diag-sibling BFS exploration",
-            issued_by=acting_principal_id(session.identity),
-        ),
-    )
+    new_cycle_id = mint_diag_sibling(stores=session.store, hop=ctx.hop)
     ctx.cycle_id = new_cycle_id
     session.state.cycle_id = new_cycle_id
 
@@ -220,7 +208,6 @@ async def _dispatch_fork(
                     cycle_id=parent.cycle_id,
                     round=from_round,
                     seed=seed,
-                    steered_by=acting_principal_id(session.identity),
                     keep_rounds=keep_rounds,
                     reason=reason,
                 ),

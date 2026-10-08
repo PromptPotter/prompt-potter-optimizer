@@ -33,6 +33,17 @@ export function spendLines(m: MeteredSpend): SpendLine[] {
   });
 }
 
+// A bill as text, `≥` where the server says it is a floor (`domain/spend.py::bill_is_floor`).
+export function billText(usd: number, isFloor: boolean): string {
+  return `${isFloor ? "≥" : ""}${fmtUsd(usd)}`;
+}
+
+// THE spend figure, wherever one leads: the served bill. `metered_usd` is read only beside a cap;
+// everything else is the breakdown under this.
+export function spendHeadline(m: MeteredSpend): string {
+  return billText(m.billed_usd, m.bill_is_floor);
+}
+
 export const METER_WORD: Record<MeteredSpend["meter"], string> = {
   bill: "billed",
   search_incurred: "search incurred",

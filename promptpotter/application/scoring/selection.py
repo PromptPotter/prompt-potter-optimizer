@@ -68,15 +68,12 @@ def mean_fitness_ci(
     point estimate must bracket the population that estimate came from — hence the filter here and
     deliberately not inside ``_mean_fitness_by_cell``."""
     per_cell = list(_mean_fitness_by_cell(scoreable_rows(results), grade=grade).values())
-    if not per_cell:
+    band = mean_ci(per_cell)
+    if band is None:
         return (None, None)
-    _, ci_lo, ci_hi = mean_ci(per_cell)
-    # Clipped to the metric's own support. ``mean_ci`` is a normal-CLT band carrying PoBB's
-    # ``1/(4n)`` SE floor, so a candidate whose cells all scored 0.0 came out at ±0.0817 on six
-    # samples — an interval claiming negative accuracy, which the webapp then clamped at paint
-    # time to keep the whisker inside its own axis. The band stays deliberately optimistic at
-    # the boundary (it is the posterior PoBB eliminated on, drawn as the loop believed it), but
-    # it may not claim support the quantity does not have.
+    _, ci_lo, ci_hi = band
+    # Clipped to the metric's own support: PoBB's ``1/(4n)`` SE floor gives an arm whose cells
+    # all scored 0.0 a band reaching below zero, which the quantity cannot hold.
     return (min(max(ci_lo, 0.0), 1.0), min(max(ci_hi, 0.0), 1.0))
 
 

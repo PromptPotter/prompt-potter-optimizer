@@ -155,7 +155,6 @@ def _upstream_question(workload: InProcessWorkload, sample: Sample) -> dict[str,
             f"dbllmbench question {sample.query[:80]!r} is not row {sample.id} of the "
             f"{QUESTIONS_FILE} this run opened with.",
             spent={},
-            step_timings={},
         )
     return dict(questions[sample.id])
 
@@ -425,7 +424,6 @@ async def _check_image(image: str) -> None:
         raise CellInfrastructureError(
             f"dbllmbench: the runner image {image!r} is not on this Docker host. {built}",
             spent={},
-            step_timings={},
         )
     named = image.rpartition(":")[2].partition("-")[0]
     if not named or not out.startswith(named):
@@ -433,7 +431,6 @@ async def _check_image(image: str) -> None:
             f"dbllmbench: the runner image {image!r} was built from upstream commit "
             f"{out or 'unknown'!r}, not the one its tag names. {built}",
             spent={},
-            step_timings={},
         )
     _IMAGES_CHECKED.add(image)
 
@@ -445,7 +442,7 @@ def _failure(query: str, log: str, spent: dict[str, StepTokenUsage]) -> CellUnsc
     message = f"dbllmbench question {query[:80]!r} ended without a verdict: {tail}"
     if "transient provider error" in log or "provider timeout" in log:
         # The provider's load, outlasting the harness's own backoff.
-        return CellThrottledError(message, spent=spent, step_timings={})
+        return CellThrottledError(message, spent=spent)
     refused = "fatal provider error" in log and is_provider_credit_refusal(log)
     return cell_failure(
         message,
@@ -514,15 +511,13 @@ async def _in_process_run(
     if code != 0:
         raise _failure(query, log, spent)
     if stall := next((s for r in top if (s := _stalled(r)) is not None), None):
-        raise CellThrottledError(
-            f"dbllmbench question {query[:80]!r}: {stall}", spent=spent, step_timings={}
-        )
+        raise CellThrottledError(f"dbllmbench question {query[:80]!r}: {stall}", spent=spent)
     try:
         observed = project_records(records, levels, repetitions(cfg))
     except ValueError as exc:
         # Nothing to grade, and a 0.0 here would read as three runs that all missed.
         raise CellUnscoreableError(
-            f"dbllmbench question {query[:80]!r}: {exc}.", spent=spent, step_timings={}
+            f"dbllmbench question {query[:80]!r}: {exc}.", spent=spent
         ) from exc
 
     first = [r for r in records if r.get("maxRetries") == levels[0]]

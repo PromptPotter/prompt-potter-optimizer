@@ -22,6 +22,7 @@ from promptpotter.domain.results import (
     ScoredCandidate,
     merge_known_outcomes,
 )
+from promptpotter.domain.results_health import compute_round_health
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_records import ResumeCheckpointRecord
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
@@ -50,6 +51,8 @@ def _origin_round(
     add: its θ on the cycle's δ ruler where the selector stamps one, and a reference that is
     itself. Nothing re-derived."""
     deprecated = fold_cells(cast("list[QueryMeasurement]", results))["deprecated"]
+    # What the walk never sent — an abort pads no error rows onto the tail.
+    not_attempted = max(0, report.expected_samples - report.scored_samples)
     arm = ability if stamps_theta else None
     row = report.model_copy(
         update={
@@ -66,8 +69,11 @@ def _origin_round(
         accuracy=row.accuracy,
         composite_fitness=row.composite_fitness,
         total=row.total,
-        # What the walk never sent — an abort pads no error rows onto the tail.
-        not_attempted=max(0, row.expected_samples - row.scored_samples),
+        not_attempted=not_attempted,
+        # Graded as a fresh floor: a round 0 has no track record behind it.
+        health=compute_round_health(
+            results=results, prior_healths=[], is_origin=True, not_attempted=not_attempted
+        ),
         improved=False,
         stamps_theta=stamps_theta,
         prompt_fields=row.prompt_fields,

@@ -113,8 +113,8 @@ def validate_template(name: str, template: PromptTemplate) -> None:
 def citable_fields(
     layout: L1Layout,
     *,
-    exploration_budget: str | None = None,
-    rendered: Mapping[str, str] | None = None,
+    exploration_budget: str | None,
+    rendered: Mapping[str, str],
 ) -> tuple[str, ...]:
     """Narrowed to what actually RENDERED — offering a panel that said nothing is the phantom
     citation one level down. Never empty: an empty ``evidence_grounding.field`` enum is unsatisfiable.
@@ -129,11 +129,7 @@ def citable_fields(
     ``evidence_grounding_present``. A citable panel that never renders
     invites a fabricated citation; deriving one from the other is the only defence that holds."""
     table = injection_table()
-    names = [
-        n
-        for n in layout.all_placeholders()
-        if table[n].citable and (rendered is None or rendered.get(n))
-    ]
+    names = [n for n in layout.all_placeholders() if table[n].citable and rendered.get(n)]
     if not names or exploration_budget != ExplorationBudget.TIGHT:
         names.append(STALL_EXPLORATION)
     return tuple(sorted(names))

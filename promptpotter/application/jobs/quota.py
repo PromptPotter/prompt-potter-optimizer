@@ -16,13 +16,14 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.launch_limits import HeldLimits, LaunchLimits, RoundsCap
-from promptpotter.domain.spend import BudgetChange, SpendCeilings, declare_ceiling
+from promptpotter.domain.spend import BudgetChange, SpendCeilings, bill_is_floor, declare_ceiling
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.migration import registered_user_id
 from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.infrastructure.llm.spend_book import SpendBook, unbounded_spend_book
 from promptpotter.infrastructure.store.account_spend import (
     ZERO_SPEND,
+    LifetimeSpend,
     UserSpend,
     account_ledgers,
     history_spend,
@@ -144,11 +145,14 @@ class AccountWallet(NamedTuple):
 
     @property
     def exhausted(self) -> bool:
-        """Nothing left past the excluded cycle's history, in either unit."""
-        return (
-            self.headroom.usd is not None and self.headroom.usd <= self.history.at_most_usd
-        ) or (
-            self.headroom.tokens is not None and self.headroom.tokens <= self.history.at_most_tokens
+        """Nothing left past the excluded cycle's history, in either unit. A contended wallet quotes
+        zero and is not this: its money is held by a launch still being admitted."""
+        return not self.contended and (
+            (self.headroom.usd is not None and self.headroom.usd <= self.history.at_most_usd)
+            or (
+                self.headroom.tokens is not None
+                and self.headroom.tokens <= self.history.at_most_tokens
+            )
         )
 
 
@@ -211,19 +215,12 @@ class QuotaStatus(StrictModel):
     campaign pair is per-day, because one is an allowance and the other an abuse limit.
     """
 
-    spend_used_total_usd: float = Field(
-        description="What the providers BILLED this account, over its whole life. Never an "
-        "estimate: a send whose bill never came is `spend_unreported_usd`, not this."
-    )
+    spend_lifetime: LifetimeSpend
     spend_budget_usd_total: float | None
-    spend_unpriced_tokens: int = Field(
-        description="Billed tokens with no resolvable rate. Non-zero makes "
-        "`spend_used_total_usd` a floor and leaves the token pair as the binding one."
-    )
-    spend_unreported_usd: float = Field(
-        description="The most that sends which ended with no bill (cancelled, timed out, killed "
-        "with a run) may have cost, at the bounds they were admitted on. Not spent — unknown. It "
-        "binds the ceiling beside `spend_used_total_usd`."
+    allowance_spent: bool = Field(
+        description="Admission's own answer: the next launch is refused for want of allowance. "
+        "Headroom in either unit, after what running launches hold, the unreported sends and the "
+        "unpriced grace. False on an account no ceiling bounds."
     )
     tokens_used_total: int
     token_budget_total: int | None
@@ -249,13 +246,12 @@ def quota_status(*, stores: Stores, job_registry: JobRegistry) -> QuotaStatus:
         tenant_id=str(stores.identity.tenant_id),
         email=stores.identity.email,
     )
-    spent = sum_user_spend(ledgers=account_ledgers(stores.campaigns))
-    ceilings = lifetime_ceilings(user=user, spends_own_key=spends_the_hosts_own_key(stores))
+    wallet = read_account_wallet(user=user, stores=stores, job_registry=job_registry)
+    spent, ceilings = wallet.spent, wallet.ceilings
     return QuotaStatus(
-        spend_used_total_usd=round(spent.used_usd, 6),
+        spend_lifetime=LifetimeSpend.of(spent),
         spend_budget_usd_total=ceilings.usd,
-        spend_unpriced_tokens=spent.unpriced_tokens,
-        spend_unreported_usd=round(spent.unreported_usd, 6),
+        allowance_spent=wallet.exhausted,
         tokens_used_total=spent.used_tokens,
         token_budget_total=ceilings.tokens,
         concurrent_running=len(job_registry.list_running(user_id=user.user_id)),
@@ -300,7 +296,7 @@ def admit_launch(
     )
     if wallet.contended:
         raise _contended("what this account has left")
-    if wallet.spent.unpriced_tokens and wallet.headroom.usd is not None:
+    if bill_is_floor(wallet.spent.unpriced_tokens) and wallet.headroom.usd is not None:
         logger.warning(
             "spend: account %s has %d unpriced tokens, so its USD total is a floor; admitting "
             "against the $%.2f grace and leaning on the token ceiling",
@@ -611,7 +607,9 @@ def _outstanding_reservations(
 def _grace_bounded(remaining: float, spent: UserSpend) -> float:
     """An account whose USD total is known to be understated may still declare the grace and never
     more — a CEILING on the remainder, so an already-exhausted one gets nothing."""
-    return min(remaining, settings.UNPRICED_GRACE_USD) if spent.unpriced_tokens else remaining
+    if bill_is_floor(spent.unpriced_tokens):
+        return min(remaining, settings.UNPRICED_GRACE_USD)
+    return remaining
 
 
 def _lowest(*values: float | None) -> float | None:

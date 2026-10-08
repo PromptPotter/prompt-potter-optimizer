@@ -1272,16 +1272,16 @@ def _r_confounds(b: InjectionBundle) -> list[Item]:
                 f"band that narrow every {b.measured_unit} is equally hard, "
                 "so θ is logit-accuracy plus a constant and ranking on it ranks on accuracy."
             )
-        elif caveat is ThetaCaveat.UNMEASURED_DELTA and unlinked:
+        elif caveat is ThetaCaveat.UNMEASURED_DELTA:
             rows.append(
                 f"UNMEASURED DIFFICULTY — {unlinked} of this round's "
                 f"{unit_plural(b.measured_unit)} carry no δ: no arm already on the ruler answered "
                 "them, so θ leaves them out and each arm's θ is read on the rest. Read the lift, "
                 "never the level."
             )
-        elif caveat is ThetaCaveat.UNMEASURED_DELTA and pinned is not None:
+        elif caveat is ThetaCaveat.PRIOR_PINNED and pinned is not None:
             rows.append(
-                f"UNMEASURED DIFFICULTY — {pinned:.0%} of this round's "
+                f"PRIOR-PINNED DIFFICULTY — {pinned:.0%} of this round's "
                 f"{unit_plural(b.measured_unit)} sit on a δ the ruler hands to several cells at "
                 "once. That is the prior, not a reading: every arm that ever saw them answered "
                 "the same way, so nothing measured how hard they are. θ still counts them, and "

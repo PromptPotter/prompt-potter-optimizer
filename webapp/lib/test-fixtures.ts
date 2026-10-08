@@ -270,6 +270,7 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
       unpriced_tokens: 0,
     },
     spend_metered: null,
+    fork_remainder: null,
     spend_metered_by_round: null,
     spend_by_round: {},
     catch_up_log: [],

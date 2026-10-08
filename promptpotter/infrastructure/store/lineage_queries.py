@@ -181,10 +181,8 @@ class LineageNode(StrictModel):
     theta_se: float | None = None
     theta_caveat: ThetaCaveat | None = Field(
         default=None,
-        description="Why the theta above is not this arm's ability. Only ever `floor_pinned` — "
-        "the arm scored 0.0 on every cell it answered, so the fit had no response to separate "
-        "ability from the prior and every lift against it reads 0.000. The other three caveats "
-        "are properties of the round's scale and ride the round's own reading.",
+        description="Why the theta above is not this arm's ability: a `ThetaCaveat` of the ARM's "
+        "own scope. The round's scale states ride the round's own reading.",
     )
     stamps_theta: bool = Field(
         default=False,
@@ -313,7 +311,11 @@ class LineageNode(StrictModel):
         "for roots and inner runs, which were not cut from anything. Served, never derived "
         "in the client — the two read identically on disk and only this says them apart.",
     )
-    steered_by: str | None = Field(default=None, description="Operator who cut this fork.")
+    steered_by: str | None = Field(
+        default=None,
+        description="Who cut this fork, as its fork record names them: an account or delegate "
+        "id, `system`, or the layer and round that proposed it. An id, never a display name.",
+    )
     task: str | None = Field(
         default=None,
         description="An inner run's benchmark task. Load-bearing: every task runs for every "
@@ -868,9 +870,9 @@ def rank_siblings(
 def _panel_cuts(kids: list[LineageNode]) -> list[bool]:
     """``panel_cuts`` across one timeline, a cohort per round — and per side of a supersede cut,
     so a retired tail is never the fuller panel a live arm is found short of."""
-    cohorts: dict[tuple[int, str | None], list[int]] = {}
+    cohorts: dict[tuple[int | None, str | None], list[int]] = {}
     for i, kid in enumerate(kids):
-        cohorts.setdefault((kid.round or 0, kid.superseded_by), []).append(i)
+        cohorts.setdefault((kid.round, kid.superseded_by), []).append(i)
     out = [False] * len(kids)
     for members in cohorts.values():
         cuts = panel_cuts([(kids[i].scored_samples, kids[i].expected_samples) for i in members])

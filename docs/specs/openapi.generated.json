@@ -170,6 +170,11 @@
         "additionalProperties": false,
         "description": "One time bucket of the Activity pane's three stacked bar charts.",
         "properties": {
+          "bill_is_floor": {
+            "description": "A call in this bucket was billed at no resolvable rate, so `spend_usd` and its series understate.",
+            "title": "Bill Is Floor",
+            "type": "boolean"
+          },
           "requests": {
             "title": "Requests",
             "type": "integer"
@@ -185,7 +190,7 @@
             "additionalProperties": {
               "type": "number"
             },
-            "description": "Billed USD per `series_labels` entry. An unpriced call adds nothing here and still counts in the other two.",
+            "description": "Billed USD per `series_labels` entry. An unpriced call adds nothing here, sets `bill_is_floor`, and still counts in the other two.",
             "title": "Series Spend",
             "type": "object"
           },
@@ -213,6 +218,7 @@
         "required": [
           "ts",
           "spend_usd",
+          "bill_is_floor",
           "tokens",
           "requests",
           "series_spend",
@@ -226,6 +232,11 @@
         "additionalProperties": false,
         "description": "Time-bucketed spend / requests / tokens over the requested window.",
         "properties": {
+          "bill_is_floor": {
+            "description": "`total_spend_usd` understates: a bucket's `bill_is_floor`, over the window.",
+            "title": "Bill Is Floor",
+            "type": "boolean"
+          },
           "buckets": {
             "items": {
               "$ref": "#/components/schemas/ActivityBucket"
@@ -294,6 +305,7 @@
           "buckets",
           "series_labels",
           "total_spend_usd",
+          "bill_is_floor",
           "total_tokens",
           "total_requests"
         ],
@@ -1076,24 +1088,13 @@
             "title": "Self Optimization",
             "type": "boolean"
           },
+          "spend_lifetime": {
+            "$ref": "#/components/schemas/LifetimeSpend",
+            "description": "This campaign's share of `QuotaStatus.spend_lifetime`: every cycle's ledger, forks and forwarded L4 inner spend included, plus spend banked when one of its cycles was deleted. A wider scope than `spend_metered`, which reads the campaign's line alone."
+          },
           "spend_metered": {
             "$ref": "#/components/schemas/MeteredSpend",
             "description": "What the campaign's spend cap counts along its LINE — the root and every cycle a rebase handed it to — by bucket: the bill, or the search's incurred USD for a controlled arm. The number a surface sets beside a cap, live."
-          },
-          "spend_unpriced_tokens": {
-            "description": "Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them. Zero means the dollar figure is complete.",
-            "title": "Spend Unpriced Tokens",
-            "type": "integer"
-          },
-          "spend_unreported_usd": {
-            "description": "The most that this campaign's sends which ended with no bill may have cost, at the bounds they were admitted on — unknown, never spent. Its share of `QuotaStatus.spend_unreported_usd`.",
-            "title": "Spend Unreported Usd",
-            "type": "number"
-          },
-          "spend_used_usd": {
-            "description": "What this campaign has billed over its whole life — every cycle's ledger, forks and forwarded L4 inner spend included, plus spend banked when one of its cycles was deleted. Its share of `QuotaStatus.spend_used_total_usd`. A FLOOR while `spend_unpriced_tokens` is non-zero.",
-            "title": "Spend Used Usd",
-            "type": "number"
           }
         },
         "required": [
@@ -1102,9 +1103,7 @@
           "created_at",
           "root_cycle_id",
           "self_optimization",
-          "spend_used_usd",
-          "spend_unpriced_tokens",
-          "spend_unreported_usd",
+          "spend_lifetime",
           "spend_metered",
           "bench",
           "runs_with",
@@ -1479,24 +1478,13 @@
             "title": "Self Optimization",
             "type": "boolean"
           },
+          "spend_lifetime": {
+            "$ref": "#/components/schemas/LifetimeSpend",
+            "description": "This campaign's share of `QuotaStatus.spend_lifetime`: every cycle's ledger, forks and forwarded L4 inner spend included, plus spend banked when one of its cycles was deleted. A wider scope than `spend_metered`, which reads the campaign's line alone."
+          },
           "spend_metered": {
             "$ref": "#/components/schemas/MeteredSpend",
             "description": "What the campaign's spend cap counts along its LINE — the root and every cycle a rebase handed it to — by bucket: the bill, or the search's incurred USD for a controlled arm. The number a surface sets beside a cap, live."
-          },
-          "spend_unpriced_tokens": {
-            "description": "Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them. Zero means the dollar figure is complete.",
-            "title": "Spend Unpriced Tokens",
-            "type": "integer"
-          },
-          "spend_unreported_usd": {
-            "description": "The most that this campaign's sends which ended with no bill may have cost, at the bounds they were admitted on — unknown, never spent. Its share of `QuotaStatus.spend_unreported_usd`.",
-            "title": "Spend Unreported Usd",
-            "type": "number"
-          },
-          "spend_used_usd": {
-            "description": "What this campaign has billed over its whole life — every cycle's ledger, forks and forwarded L4 inner spend included, plus spend banked when one of its cycles was deleted. Its share of `QuotaStatus.spend_used_total_usd`. A FLOOR while `spend_unpriced_tokens` is non-zero.",
-            "title": "Spend Used Usd",
-            "type": "number"
           }
         },
         "required": [
@@ -1505,9 +1493,7 @@
           "created_at",
           "root_cycle_id",
           "self_optimization",
-          "spend_used_usd",
-          "spend_unpriced_tokens",
-          "spend_unreported_usd",
+          "spend_lifetime",
           "spend_metered",
           "bench",
           "runs_with",
@@ -4120,6 +4106,16 @@
             "title": "Controlled",
             "type": "boolean"
           },
+          "headline_lift": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HeadlineLift"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "human_intervened": {
             "title": "Human Intervened",
             "type": "boolean"
@@ -4264,6 +4260,7 @@
           "stop_reason",
           "outcome",
           "bench",
+          "headline_lift",
           "bench_missing_reason",
           "bench_set",
           "comparable",
@@ -4279,6 +4276,63 @@
           "bench_reads"
         ],
         "title": "HeadToHeadRow",
+        "type": "object"
+      },
+      "HeadlineLift": {
+        "additionalProperties": false,
+        "description": "A bench's lift in its headline column, with the side of 0 its band sits on: the one lift a\nsurface leads with, so none picks the column or reads the sign.",
+        "properties": {
+          "ci_hi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Hi"
+          },
+          "ci_lo": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The 95% band on `value`, drawn from the same per-row values; `None` where one pass was read twice, which has no spread.",
+            "title": "Ci Lo"
+          },
+          "side": {
+            "anyOf": [
+              {
+                "enum": [
+                  "above",
+                  "below",
+                  "spans"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Side"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "value",
+          "ci_lo",
+          "ci_hi",
+          "side"
+        ],
+        "title": "HeadlineLift",
         "type": "object"
       },
       "HealthResponse": {
@@ -4625,6 +4679,40 @@
           "deleted"
         ],
         "type": "string"
+      },
+      "LifetimeSpend": {
+        "additionalProperties": false,
+        "description": "What an account, or one campaign's share of it, was billed over its whole life.",
+        "properties": {
+          "bill_is_floor": {
+            "description": "`billed_usd` understates, by what `unpriced_tokens` cost; the token ceiling is then the binding one.",
+            "title": "Bill Is Floor",
+            "type": "boolean"
+          },
+          "billed_usd": {
+            "description": "What the providers BILLED, over every cycle, fork and forwarded inner run, plus what a deleted cycle banked. Never an estimate: a send whose bill never came is `unreported_usd`, not this.",
+            "title": "Billed Usd",
+            "type": "number"
+          },
+          "unpriced_tokens": {
+            "description": "Billed tokens with no resolvable rate.",
+            "title": "Unpriced Tokens",
+            "type": "integer"
+          },
+          "unreported_usd": {
+            "description": "The most that sends which ended with no bill (cancelled, timed out, killed with a run) may have cost, at the bounds they were admitted on. Not spent — unknown. It binds the ceiling beside `billed_usd`.",
+            "title": "Unreported Usd",
+            "type": "number"
+          }
+        },
+        "required": [
+          "billed_usd",
+          "bill_is_floor",
+          "unpriced_tokens",
+          "unreported_usd"
+        ],
+        "title": "LifetimeSpend",
+        "type": "object"
       },
       "LineageDivergence": {
         "additionalProperties": false,
@@ -5102,7 +5190,7 @@
                 "type": "null"
               }
             ],
-            "description": "Operator who cut this fork.",
+            "description": "Who cut this fork, as its fork record names them: an account or delegate id, `system`, or the layer and round that proposed it. An id, never a display name.",
             "title": "Steered By"
           },
           "stop_reason": {
@@ -5161,7 +5249,7 @@
                 "type": "null"
               }
             ],
-            "description": "Why the theta above is not this arm's ability. Only ever `floor_pinned` — the arm scored 0.0 on every cell it answered, so the fit had no response to separate ability from the prior and every lift against it reads 0.000. The other three caveats are properties of the round's scale and ride the round's own reading."
+            "description": "Why the theta above is not this arm's ability: a `ThetaCaveat` of the ARM's own scope. The round's scale states ride the round's own reading."
           },
           "theta_se": {
             "anyOf": [
@@ -5450,6 +5538,10 @@
         "additionalProperties": false,
         "description": "What a run's spend caps have counted, in the units they meter, by kind.\nEvery surface sets this beside a cap, so none picks the bill or the incurred total itself.",
         "properties": {
+          "bill_is_floor": {
+            "title": "Bill Is Floor",
+            "type": "boolean"
+          },
           "billed_tokens": {
             "title": "Billed Tokens",
             "type": "integer"
@@ -5486,6 +5578,18 @@
             "title": "Meter",
             "type": "string"
           },
+          "metered_is_bill": {
+            "title": "Metered Is Bill",
+            "type": "boolean"
+          },
+          "metered_tokens": {
+            "title": "Metered Tokens",
+            "type": "integer"
+          },
+          "metered_usd": {
+            "title": "Metered Usd",
+            "type": "number"
+          },
           "replay_share": {
             "anyOf": [
               {
@@ -5497,24 +5601,18 @@
             ],
             "title": "Replay Share"
           },
-          "tokens": {
-            "title": "Tokens",
-            "type": "integer"
-          },
           "unpriced_tokens": {
             "title": "Unpriced Tokens",
             "type": "integer"
-          },
-          "usd": {
-            "title": "Usd",
-            "type": "number"
           }
         },
         "required": [
           "meter",
-          "usd",
-          "tokens",
+          "metered_usd",
+          "metered_tokens",
           "billed_usd",
+          "bill_is_floor",
+          "metered_is_bill",
           "incurred_usd",
           "billed_tokens",
           "unpriced_tokens",
@@ -6557,6 +6655,22 @@
             ],
             "title": "P Value"
           },
+          "shift_side": {
+            "anyOf": [
+              {
+                "enum": [
+                  "above",
+                  "below",
+                  "spans"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shift Side"
+          },
           "subject_a": {
             "title": "Subject A",
             "type": "string"
@@ -6572,6 +6686,7 @@
           "median_shift",
           "ci_lo",
           "ci_hi",
+          "shift_side",
           "p_value",
           "p_adjusted",
           "n_cells"
@@ -6683,6 +6798,11 @@
         "additionalProperties": false,
         "description": "An account's usage against the limits its next launch is gated on.\n\nThe spend and token pairs are LIFETIME, used-ever against the account's total ceilings; the\ncampaign pair is per-day, because one is an allowance and the other an abuse limit.",
         "properties": {
+          "allowance_spent": {
+            "description": "Admission's own answer: the next launch is refused for want of allowance. Headroom in either unit, after what running launches hold, the unreported sends and the unpriced grace. False on an account no ceiling bounds.",
+            "title": "Allowance Spent",
+            "type": "boolean"
+          },
           "campaigns_today": {
             "title": "Campaigns Today",
             "type": "integer"
@@ -6720,20 +6840,8 @@
             ],
             "title": "Spend Budget Usd Total"
           },
-          "spend_unpriced_tokens": {
-            "description": "Billed tokens with no resolvable rate. Non-zero makes `spend_used_total_usd` a floor and leaves the token pair as the binding one.",
-            "title": "Spend Unpriced Tokens",
-            "type": "integer"
-          },
-          "spend_unreported_usd": {
-            "description": "The most that sends which ended with no bill (cancelled, timed out, killed with a run) may have cost, at the bounds they were admitted on. Not spent — unknown. It binds the ceiling beside `spend_used_total_usd`.",
-            "title": "Spend Unreported Usd",
-            "type": "number"
-          },
-          "spend_used_total_usd": {
-            "description": "What the providers BILLED this account, over its whole life. Never an estimate: a send whose bill never came is `spend_unreported_usd`, not this.",
-            "title": "Spend Used Total Usd",
-            "type": "number"
+          "spend_lifetime": {
+            "$ref": "#/components/schemas/LifetimeSpend"
           },
           "token_budget_total": {
             "anyOf": [
@@ -6752,10 +6860,9 @@
           }
         },
         "required": [
-          "spend_used_total_usd",
+          "spend_lifetime",
           "spend_budget_usd_total",
-          "spend_unpriced_tokens",
-          "spend_unreported_usd",
+          "allowance_spent",
           "tokens_used_total",
           "token_budget_total",
           "concurrent_running",
@@ -6802,6 +6909,22 @@
             ],
             "title": "Ci Lo"
           },
+          "effect_side": {
+            "anyOf": [
+              {
+                "enum": [
+                  "above",
+                  "below",
+                  "spans"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effect Side"
+          },
           "label": {
             "title": "Label",
             "type": "string"
@@ -6834,6 +6957,7 @@
           "anchor_effect",
           "ci_lo",
           "ci_hi",
+          "effect_side",
           "n_cells",
           "n_measurements"
         ],
@@ -7751,11 +7875,12 @@
         "type": "object"
       },
       "ThetaCaveat": {
-        "description": "A state in which θ is NOT ability — decided beside the ruler, never in a view.\n\nAll five render every number and raise nothing, so the reading looks identical to a sound one.\nWHICH one fired is the whole value, because the fix differs: one is an instrument, one is an\nacquisition, one is the absence of a scale, one is the ruler's prior standing in for a\nmeasurement, one is the arm itself. The ABSENCE of a caveat is the sixth state, and the only\none where θ is ability.\n\n**Two SCOPES, one vocabulary.** The first four are facts about the ROUND's scale, decided by\n:func:`theta_caveat` and stamped on its ``AbilityReading``; ``FLOOR_PINNED`` is a fact about\nONE ARM, decided by ``results.py::is_floor_pinned`` where that arm is scored, and an arm whose\nown cells the ruler does not carry takes ``UNMEASURED_DELTA`` on its row too. One enum because\nthe question a reader asks is identical — *may I read this θ as ability?* — and a second\nvocabulary for it would be a synonym, not a channel.\n\n`docs/methods/verdict-resolution.md` § Reading a round.",
+        "description": "A state in which θ is NOT ability — decided beside the ruler, never in a view. Each renders\nevery number, so WHICH one fired is the value: `docs/methods/verdict-resolution.md` § Reading a round.",
         "enum": [
           "cold_ruler",
           "flat_ruler",
           "collapsed_band",
+          "prior_pinned",
           "unmeasured_delta",
           "floor_pinned"
         ],

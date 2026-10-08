@@ -1,31 +1,31 @@
 import { describe, it, expect } from "vitest";
-import { isLiveRound } from "@/lib/hooks/useRoundSource";
+import { isRoundUnfiled } from "@/lib/hooks/useRoundSource";
 import type { DashboardSnapshot } from "@/lib/poll";
 
-// `current_round.round` lingers on a closed round until the next one scores, so the guard keys
-// off closure into `rounds[]`.
+// `current_round.round` lingers on a filed round until the next one scores, so the guard keys
+// off the round's presence in `rounds[]`.
 
-function dash(currentRoundNum: number, closedRounds: number[]): DashboardSnapshot {
+function dash(currentRoundNum: number, filedRounds: number[]): DashboardSnapshot {
   return {
     current_round: { round: currentRoundNum },
-    rounds: closedRounds.map((round) => ({ round, candidates: [] })),
+    rounds: filedRounds.map((round) => ({ round, candidates: [] })),
   } as unknown as DashboardSnapshot;
 }
 
-describe("isLiveRound closure guard", () => {
-  it("treats a closed round as historical even when it equals current_round.round", () => {
-    expect(isLiveRound(dash(3, [1, 2, 3]), 3)).toBe(false);
+describe("isRoundUnfiled", () => {
+  it("reads a round in rounds[] as filed even when it equals current_round.round", () => {
+    expect(isRoundUnfiled(dash(3, [1, 2, 3]), 3)).toBe(false);
   });
 
-  it("treats the genuine in-flight round (not yet in rounds[]) as live", () => {
-    expect(isLiveRound(dash(4, [1, 2, 3]), 4)).toBe(true);
+  it("reads the in-flight round (not yet in rounds[]) as unfiled", () => {
+    expect(isRoundUnfiled(dash(4, [1, 2, 3]), 4)).toBe(true);
   });
 
-  it("treats an explicitly selected earlier completed round as historical", () => {
-    expect(isLiveRound(dash(4, [1, 2, 3]), 2)).toBe(false);
+  it("reads an explicitly selected earlier round as filed", () => {
+    expect(isRoundUnfiled(dash(4, [1, 2, 3]), 2)).toBe(false);
   });
 
-  it("is never live for a null round", () => {
-    expect(isLiveRound(dash(4, [1, 2, 3]), null)).toBe(false);
+  it("is never unfiled for a null round", () => {
+    expect(isRoundUnfiled(dash(4, [1, 2, 3]), null)).toBe(false);
   });
 });

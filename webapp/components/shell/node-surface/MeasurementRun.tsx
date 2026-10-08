@@ -65,7 +65,7 @@ export function MeasurementRun({
         : null,
     );
   const {
-    live: isLiveView,
+    unfiled: isLiveView,
     doc: roundDoc,
     loading: roundLoading,
     failure: roundFailure,

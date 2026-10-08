@@ -15,8 +15,9 @@ import {
   fitnessTrend,
   headlineStats,
   readSpend,
+  spendHeadline,
 } from "@/lib/derivations";
-import { fmtPct0, fmtUsdCents, shortModel } from "@/lib/format";
+import { fmtPct0, fmtUsd, shortModel } from "@/lib/format";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { pathLeaf } from "@/lib/ids";
 import { isMeasuring, roundOf, useCycleStream } from "@/lib/poll";
@@ -78,8 +79,6 @@ export function RunMasthead({ onFollowed }: { onFollowed: () => void }) {
   const position = scoringCand || (dashRound != null ? `R${dashRound}` : "—");
 
   const { metered, budgetUsd } = readSpend(dash);
-  const unpriced = metered !== null && metered.unpriced_tokens > 0;
-  const spendFloor = unpriced ? "≥" : "";
 
   return (
     <header className="run-header">
@@ -168,19 +167,26 @@ export function RunMasthead({ onFollowed }: { onFollowed: () => void }) {
             {position}
             {roundsCap != null && <span className="chip-of"> / {roundsCap}</span>}
           </span>
-          <span className={cx("chip", unpriced && "chip-warn")}>
+          <span className={cx("chip", metered?.bill_is_floor && "chip-warn")}>
             <span className="chip-lbl">Spend</span>
             {metered ? (
               <Term content={<SpendBuckets metered={metered} />}>
-                {`${spendFloor}${fmtUsdCents(metered.usd)}`}
+                {spendHeadline(metered)}
               </Term>
             ) : (
               "—"
             )}
-            {budgetUsd != null && (
-              <span className="chip-of"> / {fmtUsdCents(budgetUsd)} cap</span>
-            )}
-            {metered && <span className="chip-of"> {METER_WORD[metered.meter]}</span>}
+            {/* Where the cap counts something other than the headline, its own figure sits beside it. */}
+            {budgetUsd != null &&
+              (metered && !metered.metered_is_bill ? (
+                <span className="chip-of">
+                  {" "}
+                  · {fmtUsd(metered.metered_usd)} / {fmtUsd(budgetUsd)} cap{" "}
+                  {METER_WORD[metered.meter]}
+                </span>
+              ) : (
+                <span className="chip-of"> / {fmtUsd(budgetUsd)} cap</span>
+              ))}
           </span>
         </div>
       </div>

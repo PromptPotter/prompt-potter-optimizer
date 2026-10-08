@@ -37,7 +37,7 @@ export function ScoringInspector({ selected, onClose }: Props) {
 
   const cfg = !selected
     ? null
-    : round.live
+    : round.unfiled
       ? liveCandidateObserveConfig(dash, selected.label)
       : candidateObserveConfig(round.doc, selected.label, selected.label);
 
@@ -79,7 +79,7 @@ export function ScoringInspector({ selected, onClose }: Props) {
         schemaStatus={cv.pipelineStatus}
         outputSchema={cv.nodeOutputSchema}
         pending={
-          round.live
+          round.unfiled
             ? `Scoring in progress for R${selected.round} — the spec and its numbers appear as this candidate's samples land.`
             : `Round file not yet on disk for R${selected.round}.`
         }

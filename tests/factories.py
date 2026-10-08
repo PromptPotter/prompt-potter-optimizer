@@ -174,7 +174,7 @@ def round_result(
 
     ``no_op`` / ``dup`` add COLLAPSED candidates: they ride ``candidate_scores`` beside the
     measured ones but are absent from ``candidates_scored`` and from
-    ``all_candidate_results``, so ``invariant_collapses`` derives them and the mode-collapse
+    ``all_candidate_results``, so ``collapse_counts`` derives them and the mode-collapse
     denominator (collapsed + scored) comes out right.
 
     ``collapsed`` makes that many measured candidates answer ONE label to every sample —

@@ -52,7 +52,6 @@ from promptpotter.domain.results import (
     candidate_label,
     is_leader_eligible,
     overlap_series,
-    proposal_collapses,
     unscoreable_cells,
 )
 from promptpotter.domain.results_health import (
@@ -67,6 +66,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.scoring import is_unscored
 from promptpotter.domain.search_point import strip_rendered_prompt
+from promptpotter.domain.wounds import collapse_counts
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 from promptpotter.infrastructure.tracing.bridge import observed_node
 from promptpotter.infrastructure.tracing.events import PromptVersion, RoundEnd, RoundStart
@@ -255,20 +255,28 @@ def _round_result(
             best_results, measured.references[winner_reference], grade="fitness"
         )
         p_value = paired.p_value if paired else None
+    # Cells of the winner's panel never sent. An eliminator stop is one legitimate reason for it,
+    # so this is REPORTED here and graded only on the origin.
+    not_attempted = max(0, elected.expected_samples - elected.scored_samples) if winner_id else 0
+    # Counted off the rows: an ungraded cell WAS sent and WAS measured, so it is already inside
+    # `scored_samples` and no subtraction can find it.
+    unscored = sum(1 for r in best_results if is_unscored(r))
+    results = cast("list[dict[str, Any]]", best_results)
     return RoundResult(
         round=ctx.round_num,
         label=elected.label,
         accuracy=elected.accuracy,
         composite_fitness=elected.composite_fitness,
         total=elected.total,
-        # Cells of the winner's panel never sent. An eliminator stop is one legitimate reason for
-        # it, so this is REPORTED here and graded only on the origin.
-        not_attempted=(
-            max(0, elected.expected_samples - elected.scored_samples) if winner_id else 0
+        not_attempted=not_attempted,
+        unscored=unscored,
+        # Graded HERE, with the rows it grades: no reader meets a round whose verdict is pending.
+        health=compute_round_health(
+            results=results,
+            prior_healths=assemble_prior_healths(ctx.cycle.rounds, ctx.round_num),
+            not_attempted=not_attempted,
+            unscored=unscored,
         ),
-        # Counted off the rows: an ungraded cell WAS sent and WAS measured, so it is already
-        # inside `scored_samples` and no subtraction can find it.
-        unscored=sum(1 for r in best_results if is_unscored(r)),
         improved=bool(winner_id),
         p_value=p_value,
         verdict_reason=selection.verdict_reason,
@@ -277,7 +285,7 @@ def _round_result(
         # Stripped, because the round's incoming params carry the PREVIOUS winner's render and
         # nothing re-renders at this write; every reader rebuilds the render from `prompt_fields`.
         pipeline_params=strip_rendered_prompt(best_params),
-        results=cast("list[dict[str, Any]]", best_results),
+        results=results,
         all_candidate_results=cast("dict[str, list[dict[str, Any]]]", dict(measured.rows)),
         # Banked with the arms read against them: every scalar this round stamps about a
         # reference is read off exactly these rows.
@@ -433,7 +441,7 @@ def announce_population(
         opening=opening,
         n_scoring_samples=n_cells,
         candidates=proposal_summaries(proposals, ctx.round_num),
-        collapses=proposal_collapses(proposals),
+        collapses=collapse_counts(cp.validation_failures for cp in proposals),
     )
 
 
@@ -694,21 +702,12 @@ async def close_round(
     session: Session,
     cb: RunCallbacks,
 ) -> None:
-    """Round-completion bookkeeping, and the SINGLE degradation-verdict compute site (origin and
-    every later round funnel here): ``health`` is stamped BEFORE the dashboard emit and the
-    round-file write."""
+    """Round-completion bookkeeping: the optimizer's facts, the emit, the round file, the index."""
     if cycle.origin_restamped:
         # A ruler that warmed this round gave round 0 the θ it could not have had at its own
         # close; unsaved, every non-live reader shows a θ-less C0 beside candidates that have one.
         cycle.origin_restamped = False
         persist_round(cycle, cycle.origin_round, session, cb)
-    round_result.health = compute_round_health(
-        results=round_result.results,
-        prior_healths=assemble_prior_healths(cycle.rounds, round_num),
-        is_origin=round_num == 0,
-        not_attempted=round_result.not_attempted,
-        unscored=round_result.unscored,
-    )
     round_result.optimizer_facts = cycle.optimizer.runtime.round_facts(
         cycle.optimizer, round_result
     )

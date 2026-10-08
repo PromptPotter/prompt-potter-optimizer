@@ -168,8 +168,8 @@ def _build_budget_gate(
         usd_reserve=lambda: _reserve().usd,
         tokens_reserve=lambda: _reserve().tokens,
         meters=meters,
-        usd_spent=spent.usd,
-        tokens_spent=spent.tokens,
+        usd_spent=spent.metered_usd,
+        tokens_spent=spent.metered_tokens,
     )
     observers.arm_spend_book(book)
     return BudgetGate(book=book)

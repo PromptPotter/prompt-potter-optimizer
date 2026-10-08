@@ -305,6 +305,14 @@ def test_a_child_read_on_cells_its_parent_skipped_this_round_stays_off_the_ruler
         for n in (0, 3)
     }
     assert served == {0: None, 3: ThetaCaveat.UNMEASURED_DELTA}
+    # A prior-pinned round is its own state: the pin cancels inside a lift, a skipped cell does not.
+    pinned = {
+        n: theta_caveat(
+            calibration_model="1PL", round_span=span, ruler_span=span, unlinked=n, pinned_share=0.5
+        )
+        for n in (0, 3)
+    }
+    assert pinned == {0: ThetaCaveat.PRIOR_PINNED, 3: ThetaCaveat.PRIOR_PINNED}
 
     # The parent answered them in an EARLIER round of this cycle: its ability, anchored on every
     # cell it has, carries them onto the scale without moving a δ already there.

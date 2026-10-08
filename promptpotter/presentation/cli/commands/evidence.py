@@ -66,10 +66,8 @@ def _roster_lines(ev: Evidence) -> list[str]:
     lines = [
         f"{len(ev.subjects)} subject(s), oldest first, read under {m.spec.axis_label}.",
         m.spec.description,
-        # The value column brackets that subject's OWN cells — its `cells` count — because that
-        # is what `mean_ci_t` was handed. Calling it "merged over the cells every subject
-        # scored" put the shared axis's denominator on a number that never used it, and the two
-        # differ exactly when a subject came up short.
+        # The value column brackets that subject's OWN cells — its `cells` count, what `mean_ci`
+        # is handed. The shared count is the pairs' denominator, never this number's.
         f"Each value merges that subject's own cells (the `cells` column); "
         f"{len(m.scored_cells)} cell(s) are shared by all of them, which is what the pairs and "
         "the variance split are over.",
@@ -220,7 +218,7 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
         spend = r.spend
         per_usd = r.lift_per_incurred_usd
         metered = r.spend_metered
-        cap = "—" if metered is None else f"{metered.usd:.4f}"
+        cap = "—" if metered is None else f"{metered.metered_usd:.4f}"
         replay = (
             "—"
             if metered is None or metered.replay_share is None

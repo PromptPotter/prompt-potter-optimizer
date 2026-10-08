@@ -12,7 +12,7 @@ from promptpotter.application.scoring.formula.compiler import (
     compile_expression,
 )
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.shared.statistics import mean_ci_t
+from promptpotter.shared.statistics import mean_ci
 
 # What a number IS, which decides how it reads. `delta` is a signed difference and `level` an
 # absolute value, so only the first earns a leading `+`; `composed` is a hand-typed expression whose
@@ -107,9 +107,9 @@ def merge_cells(values: dict[str, float]) -> tuple[float | None, float | None, f
     """``(value, ci_lo, ci_hi, n_cells)`` for one set of per-cell readings. Below two cells there is
     no spread, and a bracket drawn from one reading would claim certainty nothing measured."""
     ordered = [values[c] for c in sorted(values)]
-    bracketed = mean_ci_t(ordered)
-    if bracketed:
-        return (bracketed[0], bracketed[1], bracketed[2], len(ordered))
+    bracketed = mean_ci(ordered)
+    if bracketed is not None:
+        return (*bracketed, len(ordered))
     return (ordered[0] if ordered else None, None, None, len(ordered))
 
 

@@ -18,6 +18,7 @@ from promptpotter.application.scoring.selection import paired_fitness
 from promptpotter.domain.bench import (
     BENCH_HEADLINE,
     COLUMN_GRADE,
+    BandedValue,
     BenchColumn,
     BenchReading,
     BenchScore,
@@ -34,6 +35,7 @@ from promptpotter.domain.campaign import (
     ceiling_meter,
 )
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.dashboard_rows import LiftSide, lift_side
 from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.spend import MeteredSpend, SpendRollup
@@ -49,6 +51,19 @@ if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.domain.scoring import CellScorer, QueryMeasurement
     from promptpotter.infrastructure.store.stores import Stores
+
+
+class HeadlineLift(BandedValue):
+    """A bench's lift in its headline column, with the side of 0 its band sits on: the one lift a
+    surface leads with, so none picks the column or reads the sign."""
+
+    side: LiftSide | None
+
+    @classmethod
+    def of(cls, bench: BenchScore | None) -> HeadlineLift | None:
+        if bench is None or (lift := bench.headline_lift) is None:
+            return None
+        return cls(**lift.model_dump(), side=lift_side(lift.ci_lo, lift.ci_hi))
 
 
 class HeadToHeadRow(StrictModel):
@@ -77,6 +92,8 @@ class HeadToHeadRow(StrictModel):
     # `None` until the line banks an origin's pass; `missing_reason` where it holds nothing out.
     # Its `selected` is `None` until the line grades its selection.
     bench: BenchScore | None
+    # `None` where `bench` carries no lift in its headline column.
+    headline_lift: HeadlineLift | None
     # Why `bench` is `None`; `None` beside one.
     bench_missing_reason: str | None
     bench_set: Instrument | None
@@ -482,6 +499,7 @@ def _read(
             stop_reason=stop_reason,
             outcome=outcome,
             bench=bench,
+            headline_lift=HeadlineLift.of(bench),
             bench_missing_reason=None if bench is not None else bench_missing_reason(stop_reason),
             bench_set=bench_set,
             comparable=None,
@@ -602,6 +620,7 @@ __all__ = [
     "HeadToHead",
     "HeadToHeadEntry",
     "HeadToHeadRow",
+    "HeadlineLift",
     "SelectionPair",
     "comparison_grader",
     "head_to_head",

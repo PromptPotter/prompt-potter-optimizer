@@ -1325,7 +1325,7 @@ paths:
         (`routers/campaigns/manifests.py::CampaignListResponse`, generated into
         `webapp/lib/api/types.generated.ts::CampaignSummary`) — not duplicated
         here. Each summary carries the campaign's lifetime billed spend
-        (`spend_used_usd`, a floor while `spend_unpriced_tokens > 0`), summed
+        (`spend_lifetime`, whose `bill_is_floor` says where it understates), summed
         server-side over its cycle ledgers and banked tombstones — the
         per-campaign split of `GET /auth/quota-status`'s account total. Beside
         it, `spend_metered` is what the campaign's cap counts along its line —
@@ -1574,8 +1574,9 @@ paths:
         alone, since the phase turns `detached` on the clock with nothing written.
         `spend_metered` (`MeteredSpend`) is set at read time too, head and replay
         alike: `spend` read under the campaign's `ceiling_meter` — the bill, or a
-        controlled arm's search incurred — by bucket, the number every
-        surface sets beside `run_limits`' spend cap.
+        controlled arm's search incurred — by bucket. Its `billed_usd` is the one
+        spend every surface leads with; `metered_usd` is read only beside `run_limits`'
+        spend cap, and the kinds are the breakdown under the bill.
         `rounds[]` arrives in round order, and the readings decided off it are set at
         read time, head and replay alike: `ability_on_series_ruler` and
         `panel_precision_verdict` per round, `reference_lift_side` and `panel_cut` per
@@ -3663,12 +3664,6 @@ components:
               description: |
                 Candidate the operator steered from — the point the edits in
                 `seed` are rooted on (`operator_steered`).
-            steered_by:
-              type: string
-              maxLength: 256
-              description: |
-                Operator identity stamped into lineage as the human who steered
-                this fork. Recorded, not gated — operators may act; we record it.
             reason:
               type: string
               maxLength: 512

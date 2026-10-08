@@ -24,12 +24,9 @@ export function AllowanceSpent() {
     }
   });
 
-  // No ceiling = the box's operator; a null USD cap is metered by its token arm instead.
-  const cap = quota?.spend_budget_usd_total ?? null;
-  const spent = quota != null && cap !== null && quota.spend_used_total_usd >= cap;
-  const open = status === "authed" && !!me && spent && !dismissed;
+  const open = status === "authed" && !!me && quota?.allowance_spent === true && !dismissed;
 
-  if (!open || quota == null || cap === null) return null;
+  if (!open || quota == null) return null;
 
   const onDismiss = () => {
     try {
@@ -50,7 +47,7 @@ export function AllowanceSpent() {
         <div className="account-pane-body">
           <p className="auth-note">
             You ran PromptPotter to the end of what I set aside for it &mdash;{" "}
-            <strong>{fmtUsd(quota.spend_used_total_usd)}</strong> of real model spend, on my key.
+            <strong>{fmtUsd(quota.spend_lifetime.billed_usd)}</strong> of real model spend, on my key.
             Nothing here is taken away: every campaign you ran, every round it scored and every
             prompt it wrote stays yours to read and export.
           </p>

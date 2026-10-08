@@ -69,7 +69,7 @@ touch one side, fix both. Debugging →
 `in_process`), never on the connector name** — so a new backend's transport is a capability it
 declares, not a branch in the core loop. `__init__.py::_validate` enforces the pairing with
 `in_process_run`, whose reply is the `{"data": {…}}` shape the scorer parses from a `/matches`
-body. **It is handed the `Sample`, and core clocks it** (`BackendClient._clocked`): the row is
+body. **It is handed the `Sample`, and core clocks it** (`BackendClient._in_process_cell`): the row is
 `sample.source_pin`, never a search of the panel, and no connector stamps `total_time` /
 `step_timings`. **`in_process` is a statement about TRANSPORT — there is no HTTP — and about nothing else:**
 a `harbor` cell holds a container, spends real money and takes minutes.

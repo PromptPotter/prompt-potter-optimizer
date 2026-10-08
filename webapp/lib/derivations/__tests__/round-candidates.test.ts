@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { loadCycleFixture } from "@/lib/test-utils/fixtures";
 import { currentRound, dash as dashboard, liveRow } from "@/lib/test-fixtures";
 import {
-  closedRoundNumbers,
+  measuredRoundNumbers,
   groupByRound,
   roundCandidates,
 } from "../round-candidates";
@@ -60,9 +60,9 @@ describe("roundCandidates — l2_terminal fixture", () => {
     expect(axis.live).toBeNull();
   });
 
-  it("closedRoundNumbers is the shared 'closed with fitness data' set — excludes the empty round 4", () => {
-    // Excludes the empty round, unlike `useRoundSource`'s on-disk presence check.
-    expect(closedRoundNumbers(dash)).toEqual(new Set([0, 1, 2, 3]));
+  it("measuredRoundNumbers is the rounds that closed WITH measurements — excludes the empty round 4", () => {
+    // Excludes the empty round, unlike `useRoundSource::isRoundUnfiled`, which asks for a file.
+    expect(measuredRoundNumbers(dash)).toEqual(new Set([0, 1, 2, 3]));
   });
 
   it("groupByRound buckets the same spine rows without recomputing the merge", () => {

@@ -153,32 +153,15 @@ def paired_diff_posterior(
     return (mean_d, se_d, n)
 
 
-def mean_ci(values: list[float], alpha: float = 0.05) -> tuple[float, float, float]:
-    """Normal-CLT interval on the mean of *values* — the same posterior PoBB gets, expressed on the values' own scale rather
-    than as a difference. ``n=0`` is degenerate."""
-    if not values:
-        return (0.0, 0.0, 0.0)
-    mean, se = _normal_posterior(values)
-    z = NormalDist().inv_cdf(1 - alpha / 2)
-    return (mean, mean - z * se, mean + z * se)
-
-
-def mean_ci_t(values: list[float], alpha: float = 0.05) -> tuple[float, float, float, int] | None:
-    """``(mean, lo, hi, n)`` on the SAME posterior as :func:`mean_ci`, bracketed with Student-t instead of the normal quantile.
-
-    Not a second spelling of ``mean_ci``, which stays z because it is pinned to the persisted ``noise_floor_ci_*`` fields. This
-    is for a READ that brackets a handful of cells, where the two quantiles are not interchangeable: at 6 cells t is 2.571
-    against z's 1.96, so the normal understates the interval by a third. It is the bracket ``reference_lift`` and the
-    edit ranking already use, so a campaign interval and a paired difference beside it cannot disagree about zero.
-
-    ``None`` below two values: one reading has no spread, and a bracket drawn from it is a fiction."""
+def mean_ci(values: list[float], alpha: float = 0.05) -> tuple[float, float, float] | None:
+    """``(mean, lo, hi)`` on PoBB's posterior, Student-t bracketed — the quantile :func:`paired_reading` uses, so a level
+    and a paired difference beside it agree about zero. ``None`` below two values: one reading has no spread."""
     n = len(values)
     if n < 2:
         return None
-
     mean, se = _normal_posterior(values)
     half = t_critical(n - 1, alpha) * se
-    return (mean, mean - half, mean + half, n)
+    return (mean, mean - half, mean + half)
 
 
 @shapes_optimizer_prompt
@@ -473,7 +456,6 @@ __all__ = [
     "greedy_column_subset",
     "holm_adjusted",
     "mean_ci",
-    "mean_ci_t",
     "min_detectable_effect",
     "paired_diff_posterior",
     "paired_reading",

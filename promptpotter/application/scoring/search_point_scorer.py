@@ -95,10 +95,9 @@ SCORING_ERROR_ABORT = "scoring_error_abort"
 _UNSIGNALLED_ENDS = frozenset({WalkEnd.SKIP, WalkEnd.BUDGET})
 
 
-def _build_scoring_error_signal(
-    *, results: list[QueryMeasurement], ended_on: WalkEnd
-) -> BrokenSignal:
-    # Every error row here is a cell that was actually SENT: an abort pads no synthetic tail.
+def _build_scoring_error_signal(results: list[QueryMeasurement]) -> BrokenSignal:
+    # Every error row here is a cell that was actually SENT: an abort pads no synthetic tail, and
+    # the row that aborted the walk is the last of them.
     real_errors = [r for r in results if is_error_result(r)]
     warning_types = Counter(str(error_category(r) or "unknown") for r in real_errors)
     return BrokenSignal(
@@ -109,9 +108,7 @@ def _build_scoring_error_signal(
             degraded_count=len(real_errors),
             total_scored=len(results),
             warning_types=warning_types,
-            # The last error the walk saw, or the end it stopped on where it saw none. Every
-            # ``real_error`` is an error row, so ``error`` is present + non-empty.
-            dominant_warning=str(real_errors[-1]["error"]) if real_errors else ended_on.value,
+            dominant_warning=str(real_errors[-1]["error"]),
         ),
     )
 
@@ -253,7 +250,7 @@ def _walk_stop_signal(batch: QueryLoopResult) -> StopSignal | None:
     ended_on = batch.ended_on
     if ended_on is None or batch.stop_signal is not None or ended_on in _UNSIGNALLED_ENDS:
         return batch.stop_signal
-    return _build_scoring_error_signal(results=batch.results, ended_on=ended_on)
+    return _build_scoring_error_signal(batch.results)
 
 
 @dataclass

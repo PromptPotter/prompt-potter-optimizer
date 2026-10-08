@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from promptpotter.application.bench.resume_and_fork.decisions import (
     record_decision,
 )
+from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.pipeline_overlay import (
     allowed_values_from_narrowing,
@@ -22,9 +23,9 @@ from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import (
     FORK_DIRECTION,
-    UNATTRIBUTED_OPERATOR,
     BenchCheckpointKind,
     ForkDirection,
+    ForkRemainder,
     ForkSpec,
     ForkTrigger,
 )
@@ -36,6 +37,7 @@ from promptpotter.infrastructure.store.session_pointer import (
 )
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import PayloadInvalidError, graceful
+from promptpotter.shared.identity import acting_principal_id
 
 if TYPE_CHECKING:
     from promptpotter.domain.run_records import CycleSeed
@@ -48,6 +50,7 @@ __all__ = [
     "ForkResult",
     "cleanup_stub_fork_if_empty",
     "declare_steered_values",
+    "mint_diag_sibling",
     "mint_fork",
     "mint_operator_fork",
 ]
@@ -325,13 +328,26 @@ def declare_steered_values(seed: CycleSeed, narrowing: Mapping[str, Any] | None)
     return seed.model_copy(update={"optimizer_narrowing": declared})
 
 
+def mint_diag_sibling(*, stores: Stores, hop: CycleHop) -> str:
+    return mint_fork(
+        stores.campaigns,
+        hop,
+        stores.campaigns.session_id_of(hop),
+        0,
+        ForkSpec(
+            trigger=ForkTrigger.OPERATOR_DIAG,
+            reason="diag-sibling BFS exploration",
+            issued_by=acting_principal_id(stores.identity),
+        ),
+    )
+
+
 def mint_operator_fork(
     *,
     stores: Stores,
     hop: CycleHop,
     from_round: int,
     seed: CycleSeed,
-    steered_by: str,
     from_candidate_id: str = "",
     keep_rounds: bool = False,
     reason: str = "",
@@ -344,7 +360,7 @@ def mint_operator_fork(
 
     ``keep_rounds`` picks which of the two the act is. Default is the OFFSHOOT: branch from the
     origin, re-score the edited searchpoint, number rounds from 1 — the steer that starts over from
-    a point. Set, it is the REWIND the terminal spells ``resume --rewind N``: rounds ``0..N-1`` are
+    a point, under the parent's REMAINING rounds and spend wherever the seed names no cap. Set, it is the REWIND the terminal spells ``resume --rewind N``: rounds ``0..N-1`` are
     lifted and the fork continues at N under the seed's overrides. That is the shape a mask
     preview earns — the preview names the round the record stops holding, and this is the fork that
     keeps everything before it."""
@@ -360,6 +376,12 @@ def mint_operator_fork(
             "keep_rounds lifts the parent's round 0 as its origin, so the seed must not "
             "declare origin_prompt_fields; fork without keep_rounds to start from an edited origin"
         )
+    if not keep_rounds:
+        # The remainder the parent's dashboard serves, so the fork's caps are the ones on screen.
+        remainder = served_dashboard(stores, hop).get("fork_remainder")
+        if remainder is not None:
+            caps = ForkRemainder.model_validate(remainder).under(seed.config_overrides)
+            seed = seed.model_copy(update={"config_overrides": caps})
     if not from_candidate_id and not keep_rounds:
         origin_round = stores.campaigns.load_round_file(hop, 0)
         if origin_round is not None and origin_round.candidate_scores:
@@ -372,7 +394,7 @@ def mint_operator_fork(
             if keep_rounds
             else f"operator-steered fork from {hop.cycle_id}"
         ),
-        issued_by=steered_by or UNATTRIBUTED_OPERATOR,
+        issued_by=acting_principal_id(stores.identity),
         from_round=from_round,
         from_candidate_id=from_candidate_id or None,
         seed=seed,

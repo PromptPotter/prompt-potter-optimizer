@@ -10,7 +10,7 @@ import type { ElectedRow, RoundResult, SampleRow } from "@/lib/types";
 import type { ReadFailure } from "@/lib/hooks/useRead";
 
 export interface RoundRows {
-  live: boolean;
+  unfiled: boolean;
   doc: RoundResult | null;
   loading: boolean;
   failure: ReadFailure | null;
@@ -22,7 +22,7 @@ export interface RoundRows {
 export function useRoundRows(round: number | null): RoundRows {
   const { dash } = useCycleStream();
   const { viewedPath } = useWorkspace();
-  const { live, doc, loading, failure } = useRoundSource(viewedPath, round, dash);
+  const { unfiled, doc, loading, failure } = useRoundSource(viewedPath, round, dash);
 
   const rows = useMemo(() => {
     if (round == null) return [];
@@ -31,7 +31,7 @@ export function useRoundRows(round: number | null): RoundRows {
 
   return useMemo(
     () => ({
-      live,
+      unfiled,
       doc,
       loading,
       failure,
@@ -40,6 +40,6 @@ export function useRoundRows(round: number | null): RoundRows {
         (typeof at === "number" ? rows[at] : rows.find((r) => r.label === at)) ?? null,
       samples: (row) => (row ? samplesForRow(row, dash, doc) : []),
     }),
-    [live, doc, loading, failure, rows, dash],
+    [unfiled, doc, loading, failure, rows, dash],
   );
 }

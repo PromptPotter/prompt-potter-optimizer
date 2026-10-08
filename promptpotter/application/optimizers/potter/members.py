@@ -68,7 +68,7 @@ from promptpotter.config.prompt_blocks import block_library, library_identity
 from promptpotter.domain.dashboard_rows import OptimizerLimit
 from promptpotter.domain.phases import StopLoop
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM, NodeKind
-from promptpotter.domain.results_health import compute_node_failure_rates, evidence_starved_node
+from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.scoring import is_graded
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.tracing.bridge import observed_node
@@ -282,10 +282,11 @@ class Escalation:
         l1_zero_candidates = (
             round_result.optimizer_state.payload_as(PotterRoundState).l1_parse_failure is not None
         )
-        # Derived from the SAME helper the degradation grade reads, so routing and verdict can't
-        # diverge. Health is stamped only at the close, so the rates are read directly here.
+        # The stamped grade's own rates, so routing and verdict cannot diverge. A round that
+        # measured nothing carries no health, and starves no node.
+        health = round_result.health
         evidence_starved = (
-            evidence_starved_node(compute_node_failure_rates(round_result.results)) is not None
+            health is not None and evidence_starved_node(health.node_failure_rates) is not None
         )
         event = state.escalation.observe_round(
             improved=round_result.improved,

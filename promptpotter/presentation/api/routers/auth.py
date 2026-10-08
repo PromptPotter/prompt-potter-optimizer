@@ -46,7 +46,7 @@ from promptpotter.shared.errors import (
     NotFoundError,
     ServiceUnavailableError,
 )
-from promptpotter.shared.identity import AccessState
+from promptpotter.shared.identity import AccessState, display_name
 
 logger = logging.getLogger(__name__)
 
@@ -332,7 +332,7 @@ def me(
     """
     bundle = _require_bundle(request)
     email, provider, access_state = identity.email, identity.provider, identity.access_state
-    name = _display_name_from(email)
+    name = display_name(email)
     connected = [ConnectedAccount(provider=provider, email=email)] if provider else []
     configured = set(bundle.config.configured)
     available = sorted(configured - {provider}) if provider else sorted(configured)
@@ -368,15 +368,6 @@ def me(
         terms_version=TERMS_VERSION,
         terms_accepted_version=user.terms_accepted.version if user.terms_accepted else None,
     )
-
-
-def _display_name_from(email: str | None) -> str | None:
-    """Stage-1 fallback — session schema doesn't persist the OIDC ``name``
-    claim yet, so the modal uses the email local-part as a placeholder."""
-    if not email or "@" not in email:
-        return None
-    local = email.split("@", 1)[0]
-    return local.replace(".", " ").replace("_", " ").title() or None
 
 
 @auth_router.get("/quota-status", response_model=QuotaStatus)

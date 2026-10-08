@@ -49,7 +49,6 @@ class ForkCyclePayload(CyclePayload):
     # Kept as a dict here and validated into a typed `CycleSeed` at the applier, which stamps the
     # lineage provenance the wire omits.
     seed: dict[str, Any]
-    steered_by: str = Field(default="", max_length=256)
     reason: str = Field(default="", max_length=512)
     keep_rounds: bool = Field(
         default=False,

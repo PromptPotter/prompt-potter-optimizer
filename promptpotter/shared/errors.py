@@ -41,21 +41,14 @@ class CellUnscoreableError(RuntimeError):
     """Raised where a cell answers with no verdict; ``measure_sample`` is the one catcher and banks
     :attr:`category`, so the configuration under test is never charged.
 
-    ``spent`` (``step_tokens`` shape) and ``step_timings`` are what the cell paid before it had no
-    verdict, and the catcher bills them. ``{}`` where a ledger holds it already (an L4 inner cycle)."""
+    ``spent`` (``step_tokens`` shape) is what the cell paid before it had no verdict, and the
+    catcher bills it; ``{}`` where a ledger holds it already (an L4 inner cycle)."""
 
     category: ErrorCategory = ErrorCategory.UNSCOREABLE
 
-    def __init__(
-        self,
-        message: str,
-        *,
-        spent: Mapping[str, StepTokenUsage],
-        step_timings: Mapping[str, float],
-    ) -> None:
+    def __init__(self, message: str, *, spent: Mapping[str, StepTokenUsage]) -> None:
         super().__init__(message)
         self.spent = spent
-        self.step_timings = step_timings
 
 
 class CellHaltedError(CellUnscoreableError):
@@ -93,9 +86,8 @@ class CellSendRefusedError(CellInfrastructureError):
         *,
         category: ErrorCategory,
         spent: Mapping[str, StepTokenUsage],
-        step_timings: Mapping[str, float],
     ) -> None:
-        super().__init__(message, spent=spent, step_timings=step_timings)
+        super().__init__(message, spent=spent)
         self.category = category
 
 
@@ -105,8 +97,8 @@ def cell_failure(
     """The hole for a cell that measured the machine or a refusal instead of the prompt — the one
     mapping every in-process backend raises through. A waitable throttle is ``CellThrottledError``."""
     if category is ErrorCategory.CONNECTION:
-        return CellInfrastructureError(message, spent=spent, step_timings={})
-    return CellSendRefusedError(message, category=category, spent=spent, step_timings={})
+        return CellInfrastructureError(message, spent=spent)
+    return CellSendRefusedError(message, category=category, spent=spent)
 
 
 # The refusals once an account's credit or a key's limit is spent: OpenRouter's three (HTTP 402 /

@@ -11,14 +11,12 @@ import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useCommand } from "@/lib/hooks/useCommand";
 import type { NodeConfigParam, NodeOutputSchema, NodeSearchNarrowing } from "@/lib/api/types";
 import { useRoundSource } from "@/lib/hooks/useRoundSource";
-import { steeredBy, useAuth } from "@/lib/auth-context";
+import { useAuth } from "@/lib/auth-context";
 import type { CyclePath } from "@/lib/ids";
 import type { DashboardSnapshot } from "@/lib/poll";
 import {
   candidateSearchPoint,
   liveCandidateSearchPoint,
-  forkReconcileDefaults,
-  configOverridesFromDefaults,
   permittedModels as permittedModelsOf,
   searchPoint,
 } from "@/lib/derivations";
@@ -45,7 +43,7 @@ export function SteerForkPanel({
   path: CyclePath;
   // `null` where this browser holds no stream for the cycle; the seed then comes from the round file.
   dash: DashboardSnapshot | null;
-  // The parent CYCLE, distinct from `roundIsLive` below (is `candidate.round` in flight).
+  // The parent CYCLE's, distinct from `unfiled` below (`candidate.round` has no round file yet).
   parentIsLive: boolean;
   schema: Record<string, NodeConfigParam[]> | null;
   schemaStatus: PipelineStatus;
@@ -58,9 +56,9 @@ export function SteerForkPanel({
   const campaignId = hop?.campaignId ?? "";
   const cycleId = hop?.cycleId ?? "";
   const isLive = parentIsLive;
-  const { live: roundIsLive, doc } = useRoundSource(path, candidate.round, dash);
+  const { unfiled, doc } = useRoundSource(path, candidate.round, dash);
   const { me } = useAuth();
-  const seed = roundIsLive
+  const seed = unfiled
     ? liveCandidateSearchPoint(dash, candidate.label)
     : candidateSearchPoint(doc, candidate.candidate_id);
   const seedPrompt = seed?.origin_prompt_fields ?? {};
@@ -98,10 +96,8 @@ export function SteerForkPanel({
   const editedOverlay = useRef<Record<string, Record<string, unknown>> | null>(null);
   // Empty = inherit the campaign's mint-time narrowing unchanged.
   const editedNarrowing = useRef<Record<string, NodeSearchNarrowing>>({});
-  // Seeded with the SHOWN "remaining" defaults, so an untouched confirm never inherits the full budget.
-  const limits = useRef<RunLimitOverrides>(
-    configOverridesFromDefaults(forkReconcileDefaults(dash)),
-  );
+  // Empty = no cap of the operator's own, and the mint takes the parent's remaining rounds and spend.
+  const limits = useRef<RunLimitOverrides>({});
 
   const cmd = useCommand<"steer-fork">("steer-fork");
   const pending = cmd.pending !== null;
@@ -121,7 +117,6 @@ export function SteerForkPanel({
       () =>
         postSteerFork(campaignId, cycleId, candidate.round, candidate.candidate_id, {
           seed: forkSeed,
-          steeredBy: steeredBy(me),
           // The live parent's worker exits first, so the fork launch doesn't race its loop.
           pauseFirst: isLive,
         }),
@@ -187,7 +182,7 @@ export function SteerForkPanel({
         }}
       />
 
-      <LimitReconcile onChange={(l) => (limits.current = l)} />
+      <LimitReconcile dash={dash} onChange={(l) => (limits.current = l)} />
 
       {cmd.failure && (
         <span className="steer-fork-err" role="alert">fork: {cmd.failure.message}</span>

@@ -1103,6 +1103,9 @@ def test_a_round_the_budget_cuts_elects_on_the_cells_it_paid_for(
     session.budget_tripped = lambda: StopReason.SPEND_BUDGET if len(paid) >= budget else None
     closed, cut = asyncio.run(execute_round(cycle, cut_round, search, _QUIET_CALLBACKS))  # type: ignore[arg-type]
     assert cut is StopReason.SPEND_BUDGET
+    # The controller routes on this round before anything closes it, so the verdict rides the
+    # round as built: an ungraded one starves no node and escalation never hears of it.
+    assert closed.health is not None and closed.health.samples == len(closed.results)
     rows = closed.all_candidate_results
     assert sum(len(arm) for arm in rows.values()) == replayed + len(paid), "a cell nobody elects on"
     [reference] = closed.reference_results.values()
@@ -2185,6 +2188,31 @@ def test_paired_reading_matches_ttest_rel_and_brackets_the_same_evidence_it_test
 
     # One pair tests nothing and brackets nothing — absent, not a p of 1.0 nor a zero-width bar.
     assert paired_reading([0.5], [0.1])[1:4] == (None, None, None)
+
+
+def test_a_level_is_bracketed_on_the_student_t_its_paired_lift_is_tested_on() -> None:
+    """The band drawn beside a candidate's fitness, checked against an INDEPENDENT quantile. On the
+    normal one an eight-cell band is a fifth too narrow, and a level reads clear of a bar its own
+    paired lift does not clear. Silent: a narrower band is a plausible band, and `held` is read
+    off it."""
+    from statistics import mean, stdev
+
+    from promptpotter.application.scoring.selection import mean_fitness_ci
+
+    grades = [0.90, 0.10, 0.85, 0.20, 0.75, 0.30, 0.95, 0.05]
+    lo, hi = mean_fitness_ci(measurements(grades), grade="fitness")  # type: ignore[arg-type]
+    half = 2.364624251592785 * stdev(grades) / len(grades) ** 0.5  # scipy `t.ppf(0.975, 7)`
+    assert lo == pytest.approx(mean(grades) - half, abs=1e-9)
+    assert hi == pytest.approx(mean(grades) + half, abs=1e-9)
+
+    # Four cells at 0.0 have no spread, and the band is still not a point: PoBB's 1/(4n) floor
+    # holds it open, on three degrees of freedom, clipped to what a fitness can be.
+    floor_lo, floor_hi = mean_fitness_ci(measurements([0.0] * 4), grade="fitness")  # type: ignore[arg-type]
+    assert floor_lo == 0.0
+    assert floor_hi == pytest.approx(3.182446305284263 / 16, abs=1e-9)  # `t.ppf(0.975, 3)`
+
+    # One cell brackets nothing — absent, never a zero-width bar.
+    assert mean_fitness_ci(measurements([1.0]), grade="fitness") == (None, None)  # type: ignore[arg-type]
 
 
 def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench_under_one_grader(

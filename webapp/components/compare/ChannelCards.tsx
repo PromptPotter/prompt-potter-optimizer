@@ -60,7 +60,7 @@ import { useRoundFile } from "@/lib/hooks/useRoundFile";
 import { useLineageTree } from "@/lib/lineage";
 import { cx } from "@/lib/cx";
 import {
-  effectTone,
+  sideTone,
   fmtDuration,
   fmtMetricInterval,
   fmtMetricValue,
@@ -295,7 +295,7 @@ function MainLine({ steps }: { steps: readonly MainLineStep[] }) {
             <span className="cmp-line-score">
               {fmtPct0(s.node.accuracy)}
               {s.node.reference_lift !== null && (
-                <span className={effectTone(s.node.reference_lift_ci_lo, s.node.reference_lift_ci_hi)}>
+                <span className={sideTone(s.node.reference_lift_side)}>
                   {" "}
                   {fmtSigned(s.node.reference_lift, 2)}
                 </span>
@@ -341,7 +341,7 @@ function benchLead(row: HeadToHeadRow | null) {
   const bench = row?.bench ?? null;
   const s = bench?.selected ?? null;
   const level = s?.[s.headline] ?? null;
-  const lift = bench?.lift[bench.headline] ?? null;
+  const lift = row?.headline_lift ?? null;
   return {
     score:
       bench === null || s === null
@@ -356,7 +356,7 @@ function benchLead(row: HeadToHeadRow | null) {
         : {
             value: fmtSigned(lift.value),
             band: fmtMetricInterval("delta", lift.ci_lo, lift.ci_hi),
-            tone: effectTone(lift.ci_lo, lift.ci_hi),
+            tone: sideTone(lift.side),
           },
   };
 }

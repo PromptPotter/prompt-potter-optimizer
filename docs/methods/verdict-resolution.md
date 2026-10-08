@@ -140,7 +140,7 @@ enum's docstring's. A sound round can carry a pinned arm, and a pinned arm can s
   δ all sit within a logit of each other carries no difficulty information to adjust for, so the
   θ column there is logit-accuracy wearing a ruler's name. `flat_ruler` above is checked FIRST,
   on an absolute floor, because this ratio cannot see it.
-- **Unmeasured difficulty** (`unmeasured_delta`). At least `PRIOR_PINNED_RATIO` of the round's cells
+- **A prior-pinned round** (`prior_pinned`). At least `PRIOR_PINNED_RATIO` of the round's cells
   sit on a δ the ruler hands to more than one cell. A continuous fit does not produce ties: a run of
   identical δ is the PRIOR determining the value for cells whose observations carried no variance —
   every arm that ever saw them answered the same way, which on a hard bank is most of them. Those
@@ -152,12 +152,15 @@ enum's docstring's. A sound round can carry a pinned arm, and a pinned arm can s
   **Read the LIFT, never the level, and never a level across rounds.** Within one round the pin is
   shared by every arm, so it cancels out of a lift; between rounds it does not cancel at all.
   Checked after the band (`ruler.py::theta_caveat` — order is severity).
-  The same state covers a cell with NO δ: one the ruler does not carry, because no arm already on
-  the scale answered it in this cycle (`DeltaRuler.unlinked`). θ leaves that cell out, so it is
-  read on fewer cells than the accuracy beside it. It is the one caveat with both scopes, and a
-  later round links the cell once an arm that answered it is on the scale.
+- **Unmeasured difficulty** (`unmeasured_delta`). A cell with NO δ: one the ruler does not carry,
+  because no arm already on the scale answered it in this cycle (`DeltaRuler.unlinked`). θ leaves
+  that cell out, so it is read on fewer cells than the accuracy beside it — and two arms can skip
+  different cells, so unlike the pin it does not cancel inside a lift. It is the one caveat with
+  both scopes: the round's reading carries it for the frontier's cells, an arm's row for its own,
+  and a prior-pinned round's arms still carry theirs. A later round links the cell once an arm
+  that answered it is on the scale.
 
-  **The question this state makes unanswerable — "is the round-N winner better than C0?" — has its
+  **The question these two states make unanswerable — "is the round-N winner better than C0?" — has its
   own answer, and it is not θ.** `RoundResult.overlap` (`domain/results.py::OverlapReading`) reads
   C0 and each individual the optimizer has since declared its pick — the best-so-far the bench
   grades, by the rule above, never a composite high-water (`domain/results.py::best_line`, the

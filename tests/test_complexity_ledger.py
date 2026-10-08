@@ -43,9 +43,9 @@ LEDGER_BASELINE = {
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 7,
     # Test functions across them, each admitted through the charter's three axes.
-    "test_functions": 98,
+    "test_functions": 100,
     # Every property of every schema the generated contract offers the browser.
-    "served_fields": 843,
+    "served_fields": 853,
 }
 
 

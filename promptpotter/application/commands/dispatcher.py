@@ -667,7 +667,6 @@ class CommandDispatcher:
                     from_round=payload.round,
                     from_candidate_id=payload.candidate_id,
                     seed=seed,
-                    steered_by=payload.steered_by,
                     keep_rounds=payload.keep_rounds,
                     reason=payload.reason,
                 )

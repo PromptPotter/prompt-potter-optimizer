@@ -18,6 +18,7 @@ import {
   sampleFlips,
   searchPointDiff,
   searchpointCopyChoices,
+  spendHeadline,
   type DiffGroup,
   type ObserveState,
   type ObserveTarget,
@@ -27,7 +28,7 @@ import {
 import type { ElectedRow } from "@/lib/types";
 import { CELL_MEAN_ROWS } from "@/lib/cell-means";
 import { PROMPT_STRING_FIELDS } from "@/lib/prompt-fields";
-import { fmtPct0, fmtSigned, fmtUsd } from "@/lib/format";
+import { fmtPct0, fmtSigned } from "@/lib/format";
 import { cx } from "@/lib/cx";
 import { useViewedLineage } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
@@ -244,7 +245,7 @@ function ConfigBox({
           {summary.metered ? (
             <>
               <Term content={<SpendBuckets metered={summary.metered} />}>
-                <strong>{fmtUsd(summary.metered.billed_usd)}</strong>
+                <strong>{spendHeadline(summary.metered)}</strong>
               </Term>
               <span className="run-headline-unit">{METER_WORD.bill}</span>
             </>

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { AccountFailure, AccountLoading, AccountSection } from "./AccountSection";
 import { SegmentedControl, CommitInput, type Segment } from "@/components/ui";
 import { cx } from "@/lib/cx";
+import { billText } from "@/lib/derivations";
 import { fmtTokens, fmtUsd } from "@/lib/format";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
@@ -60,8 +61,9 @@ function Meter({ used, cap, tone }: { used: number; cap: number; tone?: "warn" }
 }
 
 function SpendSection({ quota }: { quota: QuotaStatus }) {
-  // Unpriced tokens make the $ figure a floor. Same condition and words as `shell/RemoteControl.tsx`'s pill.
-  const blind = quota.spend_unpriced_tokens > 0;
+  // A floor bill leaves the USD cap blind; `shell/remote/RemoteControl.tsx`'s pill says the same.
+  const lifetime = quota.spend_lifetime;
+  const blind = lifetime.bill_is_floor;
   const usdCap = quota.spend_budget_usd_total;
   const tokenCap = quota.token_budget_total;
   const metered = usdCap !== null || tokenCap !== null;
@@ -78,24 +80,23 @@ function SpendSection({ quota }: { quota: QuotaStatus }) {
         <div className="account-wallet-cell">
           <span className="account-kicker">Model spend</span>
           <span className="account-figure">
-            {blind ? "≥ " : ""}
-            {fmtUsd(quota.spend_used_total_usd)}
+            {billText(lifetime.billed_usd, blind)}
             <span className="account-figure-of">
               {usdCap === null ? " no ceiling" : ` of ${fmtUsd(usdCap)}`}
             </span>
           </span>
           {usdCap !== null ? (
-            <Meter used={quota.spend_used_total_usd} cap={usdCap} tone={blind ? "warn" : undefined} />
+            <Meter used={lifetime.billed_usd} cap={usdCap} tone={blind ? "warn" : undefined} />
           ) : null}
           {blind ? (
             <span className="account-warn">
-              ⚠ USD cap inactive — {fmtTokens(quota.spend_unpriced_tokens)} billed with no
+              ⚠ USD cap inactive — {fmtTokens(lifetime.unpriced_tokens)} billed with no
               resolvable rate, so this figure undercounts. The token ceiling is the one holding.
             </span>
           ) : null}
-          {quota.spend_unreported_usd > 0 ? (
+          {lifetime.unreported_usd > 0 ? (
             <span className="account-warn">
-              + up to {fmtUsd(quota.spend_unreported_usd)} unreported — sends that ended with no
+              + up to {fmtUsd(lifetime.unreported_usd)} unreported — sends that ended with no
               bill. Not spent, unknown; the ceiling holds it beside what was billed.
             </span>
           ) : null}

@@ -28,6 +28,7 @@ from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.phases import DashboardState, RunPhase, StopReason
 from promptpotter.domain.results import DisplayMetric, OverlapReading, VerifyStrategy
 from promptpotter.domain.ruler import AbilityReading
+from promptpotter.domain.run_records import ForkRemainder
 from promptpotter.domain.scoring import anchored_criterion_dials
 from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import StrictModel
@@ -50,6 +51,7 @@ __all__ = [
     "RunLimits",
     "VerifyPassProgress",
     "overlay_criterion_dials",
+    "overlay_fork_remainder",
     "overlay_round_readings",
     "overlay_spend_metered",
     "overlay_verify",
@@ -97,6 +99,20 @@ def overlay_spend_metered(body: dict[str, Any], meter: CeilingMeter) -> None:
         k: MeteredSpend.of(r, meter).model_dump()
         for k, r in sorted(by_round.items(), key=lambda kv: int(kv[0]))
     }
+
+
+def overlay_fork_remainder(body: dict[str, Any]) -> None:
+    """What an offshoot of this cycle starts under, off the body's own rounds, caps and metered
+    spend — so it is laid on after ``overlay_spend_metered``, and the mint reads this same key."""
+    limits = body.get("run_limits")
+    caps: Mapping[str, Any] = limits if isinstance(limits, dict) else {}
+    metered = body.get("spend_metered")
+    body["fork_remainder"] = ForkRemainder.of(
+        rounds_closed=sum(1 for r in body.get("rounds") or [] if r.get("round", 0) > 0),
+        max_rounds=caps.get("max_rounds"),
+        metered_usd=None if metered is None else metered["metered_usd"],
+        spend_budget_usd=caps.get("spend_budget_usd"),
+    ).model_dump()
 
 
 def overlay_criterion_dials(body: dict[str, Any]) -> None:
@@ -494,6 +510,8 @@ class LiveDashboardState(StrictModel):
     # WIRE-ONLY like `run_phase`: the dashboard route sets it off `spend` under the campaign's
     # `ceiling_meter`, a manifest fact no ledger record carries, so a replay serves it too.
     spend_metered: MeteredSpend | None = Field(default=None, exclude=True)
+    # WIRE-ONLY: what an offshoot of this cycle starts under, off `run_limits` and `spend_metered`.
+    fork_remainder: ForkRemainder | None = Field(default=None, exclude=True)
 
     # The SAME fold, keyed by the round each call stamped itself with — so "what did round 3 cost,
     # and how much of its input did providers serve off their own prefix cache" is answerable at

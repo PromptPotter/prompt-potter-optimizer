@@ -35,7 +35,7 @@ from promptpotter.domain.pipeline_overlay import (
 )
 from promptpotter.domain.spend import MeteredSpend
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.account_spend import campaign_spend
+from promptpotter.infrastructure.store.account_spend import LifetimeSpend, campaign_spend
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.presentation.api.deps import StoresDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json
@@ -87,25 +87,11 @@ class CampaignSummary(StrictModel):
         default="",
         description="Optional operator-supplied reason for the last lifecycle transition",
     )
-    spend_used_usd: float = Field(
+    spend_lifetime: LifetimeSpend = Field(
         description=(
-            "What this campaign has billed over its whole life — every cycle's ledger, forks and "
-            "forwarded L4 inner spend included, plus spend banked when one of its cycles was "
-            "deleted. Its share of `QuotaStatus.spend_used_total_usd`. A FLOOR while "
-            "`spend_unpriced_tokens` is non-zero."
-        )
-    )
-    spend_unpriced_tokens: int = Field(
-        description=(
-            "Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them. Zero "
-            "means the dollar figure is complete."
-        )
-    )
-    spend_unreported_usd: float = Field(
-        description=(
-            "The most that this campaign's sends which ended with no bill may have cost, at the "
-            "bounds they were admitted on — unknown, never spent. Its share of "
-            "`QuotaStatus.spend_unreported_usd`."
+            "This campaign's share of `QuotaStatus.spend_lifetime`: every cycle's ledger, forks "
+            "and forwarded L4 inner spend included, plus spend banked when one of its cycles was "
+            "deleted. A wider scope than `spend_metered`, which reads the campaign's line alone."
         )
     )
     spend_metered: MeteredSpend = Field(
@@ -161,7 +147,6 @@ class CampaignDetailResponse(CampaignSummary):
 
 
 def _campaign_summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
-    spent = campaign_spend(stores.campaigns, campaign.campaign_id)
     return CampaignSummary(
         campaign_id=campaign.campaign_id,
         dataset_name=campaign.dataset_name,
@@ -175,9 +160,7 @@ def _campaign_summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
         lifecycle_status=campaign.lifecycle_status,
         lifecycle_changed_at=campaign.lifecycle_changed_at,
         lifecycle_reason=campaign.lifecycle_reason,
-        spend_used_usd=round(spent.used_usd, 6),
-        spend_unpriced_tokens=spent.unpriced_tokens,
-        spend_unreported_usd=round(spent.unreported_usd, 6),
+        spend_lifetime=LifetimeSpend.of(campaign_spend(stores.campaigns, campaign.campaign_id)),
         spend_metered=MeteredSpend.of(
             read_line_spend(stores, campaign), ceiling_meter(campaign.arm)
         ),

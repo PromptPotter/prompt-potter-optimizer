@@ -246,9 +246,6 @@ an untyped dict.
 - `application/views/render/phase.py::render_progress_table` differences θ across rounds and
   advises a "Plateau" stop without `AbilityReading.comparable_to` or the served caveat, where the
   browser filters by ruler. `grep -n "theta - prev\|comparable_to" promptpotter/application/views/render/phase.py`.
-- A fork's run limits are reconciled in the browser (`webapp/lib/derivations/forkReconcile.ts`: the
-  parent's remaining rounds and dollars) and not by `fork_siblings.py::mint_operator_fork`, so a
-  browser steer and `resume --steer` mint different ceilings. `grep -rln forkReconcileDefaults webapp/lib webapp/components`.
 - The check-in wire is hand-declared in `webapp/lib/api/draft-types.ts` (`DraftCampaignWire`,
   `DraftPatch`, the `ProvenanceTag` union) because the routes return `dict[str, Any]`; a field or
   `Provenance` member added in Python compiles green and renders blank. `grep -n "export type

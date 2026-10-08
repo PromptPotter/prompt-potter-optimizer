@@ -45,12 +45,12 @@ export function FreqChart() {
   const { round: effectiveRound, isLiveView } = useEffectiveRound();
 
   // No stitch: `useRoundRows` idles the round-file fetch on the live round.
-  const { live, doc: roundDoc } = useRoundRows(effectiveRound);
+  const { unfiled, doc: roundDoc } = useRoundRows(effectiveRound);
 
   const results: ResultRow[] = useMemo(() => {
-    if (live) return liveResultsFrom(dash);
+    if (unfiled) return liveResultsFrom(dash);
     return (roundDoc?.results as ResultRow[] | undefined) ?? [];
-  }, [live, dash, roundDoc]);
+  }, [unfiled, dash, roundDoc]);
 
   const data = bucketScores(results);
   const accStrong = getCss("--color-accent-strong");

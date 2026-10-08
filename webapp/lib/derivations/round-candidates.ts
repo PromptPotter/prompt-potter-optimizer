@@ -19,13 +19,13 @@ export function roundHasCandidates(r: RoundSummary): boolean {
 }
 
 // The rounds that closed WITH measurements, in served order. Not "has a round file": a round
-// that closed empty has one too, and `useRoundSource::isLiveRound` asks that instead.
-export function closedRoundNumbers(dash: DashboardSnapshot | null): Set<number> {
-  const closed = new Set<number>();
+// that closed empty has one too, and `useRoundSource::isRoundUnfiled` asks that instead.
+export function measuredRoundNumbers(dash: DashboardSnapshot | null): Set<number> {
+  const measured = new Set<number>();
   for (const r of dash?.rounds ?? []) {
-    if (roundHasCandidates(r)) closed.add(r.round);
+    if (roundHasCandidates(r)) measured.add(r.round);
   }
-  return closed;
+  return measured;
 }
 
 // What a dashboard row and a round file's scoreboard row both serve about one scored candidate.
@@ -163,7 +163,7 @@ export function roundCandidates(dash: DashboardSnapshot | null): ElectedRow[] {
   }
 
   const liveRound = roundOf(dash);
-  if (liveRound != null && !closedRoundNumbers(dash).has(liveRound)) {
+  if (liveRound != null && !measuredRoundNumbers(dash).has(liveRound)) {
     // Positional: a row key, never a join key — live readers join on `label`. `stamps_theta` is
     // campaign-constant (`LiveDashboardState.stamps_theta`), so the live round reads the same
     // flag a closed one would.

@@ -45,7 +45,8 @@ from promptpotter.domain.l4.proxies import (
 )
 from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.phases import REFUSAL_STOPS, RunPhase, StopReason
-from promptpotter.domain.results import ArmOutcome, candidate_label, invariant_collapses
+from promptpotter.domain.results import ArmOutcome, candidate_label
+from promptpotter.domain.wounds import collapse_counts
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
 from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND, _CYCLE_LEDGER
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
@@ -227,7 +228,7 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
             )
         else:
             parts.append("no scored candidates")
-        collapses = invariant_collapses(rnd.candidate_scores)
+        collapses = collapse_counts(c.validation_failures for c in rnd.candidate_scores)
         anomalies = [
             f"{tag} x{n}"
             # `repeat` is the anomaly the OUTER generator most needs: the inner loop stopped
@@ -353,7 +354,6 @@ def _open_inner_campaign(
         raise CellUnscoreableError(
             f"its campaign {campaign_id} names successor {hop.cycle_id}, which has no index",
             spent={},
-            step_timings={},
         )
     phase = derive_run_phase(
         store.cycle_dir(hop),
@@ -364,7 +364,6 @@ def _open_inner_campaign(
             f"its campaign {campaign_id}/{hop.cycle_id} reads {phase} — another producer "
             "owns it, and two runs writing one cycle is not a measurement",
             spent={},
-            step_timings={},
         )
     session_id = str(existing.get("parent_session_id") or "")
     if not session_id:
@@ -372,7 +371,6 @@ def _open_inner_campaign(
             f"its campaign {campaign_id}/{hop.cycle_id} names no parent session, so there "
             "is no session record to continue under",
             spent={},
-            step_timings={},
         )
 
     session.session_id = session_id
@@ -615,7 +613,6 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
             f"its inner campaign {campaign_id} stopped on {result.stop_reason}",
             category=refused,
             spent={},
-            step_timings={},
         )
     # Every other no-evidence shape is the law's: `compute_outer_proxies` raises
     # `CellUnscoreableError`, which `measure_sample` resolves to this cell's UNSCOREABLE row.

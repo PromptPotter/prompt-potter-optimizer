@@ -2,7 +2,7 @@ import enum
 from collections.abc import Iterable, Mapping
 from typing import Annotated, Any, Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
@@ -703,13 +703,21 @@ class PipelineSchema(StrictModel):
     declared_nodes: list[PipelineNode] = Field(default_factory=list)
     # Every declared sequence by name. `default` is the chain a round runs; the others are an
     # optimizer's own members' to run, and the manifest digest folds them.
-    pipelines: dict[str, list[str]] = Field(default_factory=dict)
+    pipelines: dict[str, list[str]] = Field(default_factory=lambda: {"default": list[str]()})
     available_models: list[str] = Field(default_factory=list)
     view: PipelineView | None = None
     # What each selectable model answers for its own knobs (`infrastructure/llm/capabilities.py`),
     # read through `param_options`. Rides the schema and NOT the identity — `sp_hash` folds node
     # configs — so a refreshed snapshot re-keys nothing. Empty is UNKNOWN, never "accepts nothing".
     model_capabilities: dict[str, ModelCapability] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _names_the_chain_a_round_runs(self) -> "PipelineSchema":
+        if "default" not in self.pipelines:
+            raise ValueError(
+                f"pipelines declares {sorted(self.pipelines)} and no `default`, the chain a round runs"
+            )
+        return self
 
     # DERIVED ON READ, never cached at init: `narrow()` and `filter_to_steps()` build with
     # `model_copy`, which skips `model_post_init`, so a cached index answered with pre-copy nodes.
@@ -727,7 +735,7 @@ class PipelineSchema(StrictModel):
         """The chain a round RUNS: the declared nodes ``pipelines["default"]`` names, in its order.
         Identity stays on it — folding every declared node into ``sp_hash`` re-keys each measurement."""
         declared = self._node_map
-        return [declared[name] for name in self.pipelines.get("default", ()) if name in declared]
+        return [declared[name] for name in self.pipelines["default"] if name in declared]
 
     @property
     def active_steps(self) -> tuple[str, ...]:
@@ -1087,7 +1095,7 @@ class PipelineSchema(StrictModel):
                 "declared_nodes": [n for n in self.declared_nodes if n.name in active],
                 "pipelines": {
                     **self.pipelines,
-                    "default": [n for n in self.pipelines.get("default", ()) if n in active],
+                    "default": [n for n in self.pipelines["default"] if n in active],
                 },
             },
         )

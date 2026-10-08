@@ -39,7 +39,7 @@ export function SpendBuckets({ metered }: { metered: MeteredSpend }) {
       <dl>
         <div className="spend-buckets-total">
           <dt>Counted against cap, {METER_WORD[metered.meter]}</dt>
-          <dd>{fmtUsd(metered.usd)}</dd>
+          <dd>{fmtUsd(metered.metered_usd)}</dd>
         </div>
         {lines
           .filter((l) => l.kind.counted)

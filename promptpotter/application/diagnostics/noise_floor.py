@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NewType
 
 from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.initialization.loop_start import (
@@ -32,7 +32,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["NoiseFloorError", "measure_noise_floor"]
+__all__ = ["NoiseFloorError", "RescoreCount", "measure_noise_floor", "rescore_count"]
+
+# How many times the origin is re-scored: two or more, since one rescore has no spread.
+RescoreCount = NewType("RescoreCount", int)
+
+
+def rescore_count(k: int) -> RescoreCount:
+    if k < 2:
+        raise ValueError(f"k={k}: one rescore has no spread to report — ask for two or more.")
+    return RescoreCount(k)
 
 
 class NoiseFloorError(Exception):
@@ -50,7 +59,7 @@ async def measure_noise_floor(
     *,
     stores: Stores,
     hop: CycleHop,
-    k: int,
+    k: RescoreCount,
     log: Callable[[str], None] | None = None,
 ) -> NoiseFloorOutcome:
     """Re-score the cached round-0 origin *k* times with ``force_fresh`` and report the spread. On a pp-self cycle the
@@ -140,7 +149,9 @@ async def measure_noise_floor(
         accuracies.append(accuracy)
         log_fn(f"noise-floor rescore {i + 1}/{k}: composite={composites[-1]:.4f}")
 
-    mean_composite, ci_lo, ci_hi = mean_ci(composites)
+    band = mean_ci(composites)
+    assert band is not None  # a RescoreCount is two or more
+    mean_composite, ci_lo, ci_hi = band
 
     source_accuracy = round_file.accuracy
     workspace_accuracy = sum(accuracies) / len(accuracies)

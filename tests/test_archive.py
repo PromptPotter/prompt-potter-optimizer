@@ -885,14 +885,17 @@ def test_an_applied_scenario_forks_at_its_round_and_carries_the_criterion(
         from_round=2,
         from_candidate_id="",
         seed=CycleSeed(config_overrides=ConfigOverrides(scoring=criterion)),
-        steered_by="tester",
         keep_rounds=True,
     )
     child = parent.model_copy(update={"cycle_id": fork_id})
+    # Its author is the identity the stores were built for; no caller names one.
+    index = store.load(child)
+    assert index is not None
+    assert index["fork"]["issued_by"] == str(built_stores.identity.user_id)
 
     # The REBASE branch: the record says which act this was, and it is the one that lifts rounds.
-    assert (store.load(child) or {}).get("fork", {}).get("trigger") == "operator_rewind"
-    assert (store.load(child) or {}).get("forked_from_round") == 2
+    assert index["fork"]["trigger"] == "operator_rewind"
+    assert index["forked_from_round"] == 2
 
     # …and the criterion survives the ledger round-trip into the fork's effective config.
     seed = store.read_cycle_seed(child)

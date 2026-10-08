@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from typing import get_args
 
+from promptpotter.application.diagnostics.noise_floor import RescoreCount, rescore_count
 from promptpotter.application.runner.origin_gate import GateDecision
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
@@ -26,6 +27,13 @@ def _rounds_cap_arg(raw: str) -> RoundsCap:
         raise argparse.ArgumentTypeError(
             f"expected a round count >= 0 or `none`, got {raw!r}"
         ) from exc
+
+
+def _rescore_count_arg(raw: str) -> RescoreCount:
+    try:
+        return rescore_count(int(raw))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected a rescore count >= 2, got {raw!r}") from exc
 
 
 def _add_global_args(parser: argparse.ArgumentParser) -> None:
@@ -240,8 +248,8 @@ def _add_resume_args(p_resume: argparse.ArgumentParser) -> None:
         type=int,
         default=None,
         metavar="N",
-        help="Round ceiling for a `--steer` fork (default: inherit the parent). "
-        "Ignored unless `--steer` is set.",
+        help="Round ceiling for a `--steer` fork (default: the rounds the parent's cap has "
+        "left; its spend cap likewise). Ignored unless `--steer` is set.",
     )
     _add_runtime_halts(p_resume)
 
@@ -343,9 +351,9 @@ def _add_noise_floor_args(p_noise_floor: argparse.ArgumentParser) -> None:
     p_noise_floor.add_argument(
         "--k",
         dest="k",
-        type=int,
-        default=3,
-        help="Number of force_fresh re-scores of the cached origin (default 3). "
+        type=_rescore_count_arg,
+        default=rescore_count(3),
+        help="Number of force_fresh re-scores of the cached origin (default 3, at least 2). "
         "kx real spend — on a pp-self cycle each re-score re-runs the full inner "
         "recursion, so keep k small.",
     )

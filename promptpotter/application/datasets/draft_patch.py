@@ -226,7 +226,7 @@ def candidate_library_from_column(stores: Stores, draft_id: str, column: str) ->
     bank = stores.checkin.load_bank(draft_id)
     if bank is None:
         raise PayloadInvalidError("draft has no cached rows to build from.")
-    terms = candidate_library_from_rows(bank.get("items", []), column)
+    terms = candidate_library_from_rows(bank["items"], column)
     if not terms:
         raise PayloadInvalidError(
             f"column {column!r} has no usable values.",

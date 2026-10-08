@@ -2,13 +2,12 @@
 
 import { useState } from "react";
 import type { OptimizerLimit, RunLimitOverrides } from "@/lib/api";
-import { forkReconcileDefaults } from "@/lib/derivations";
 import { fmtUsd, fmtTokens } from "@/lib/format";
 import { parseCap } from "@/lib/run-limits";
-import { useCycleStream } from "@/lib/poll";
+import type { DashboardSnapshot } from "@/lib/poll";
 
-// The steer flow's run-limit reconcile. A fork numbers its rounds from 1, so rounds + spend default
-// to the parent's REMAINING; every other blank field inherits the parent's value.
+// The steer flow's run-limit reconcile. A fork numbers its rounds from 1, so a blank rounds or
+// spend cap takes the parent's served `fork_remainder` at the mint; every other blank inherits.
 
 interface Fields {
   rounds: string;
@@ -21,22 +20,18 @@ interface Fields {
 const limitKey = (l: OptimizerLimit) => `${l.node}.${l.knob}`;
 
 export function LimitReconcile({
+  dash,
   onChange,
 }: {
+  // The PARENT cycle's dashboard; `null` where this browser holds no stream for it.
+  dash: DashboardSnapshot | null;
   onChange: (limits: RunLimitOverrides) => void;
 }) {
-  const { dash } = useCycleStream();
-  // Snapshot once at open: the 2 s poll keeps mutating `dash` and must not clobber typed values.
-  const [defaults] = useState(() => forkReconcileDefaults(dash));
-  const [rl] = useState(() => dash?.run_limits ?? null);
+  const left = dash?.fork_remainder ?? null;
+  const rl = dash?.run_limits ?? null;
   // Guarded: `dashboard.json` is served verbatim, and a file an older build wrote lacks it.
   const declared = Array.isArray(rl?.optimizer) ? rl.optimizer : [];
-  const [f, setF] = useState<Fields>(() => ({
-    rounds: defaults.roundsRemaining != null ? String(defaults.roundsRemaining) : "",
-    spend: defaults.spendRemaining != null ? String(defaults.spendRemaining) : "",
-    tokens: "",
-    optimizer: {},
-  }));
+  const [f, setF] = useState<Fields>({ rounds: "", spend: "", tokens: "", optimizer: {} });
 
   const set = (next: Fields) => {
     setF(next);
@@ -76,14 +71,14 @@ export function LimitReconcile({
           inputMode="numeric"
           className="limit-input"
           value={f.rounds}
-          placeholder="inherit"
+          placeholder={ph(left?.max_rounds, "inherit")}
           aria-label="Fork max rounds"
           onChange={(e) => set({ ...f, rounds: e.target.value })}
         />
         <small className="limit-note">
-          {defaults.parentMaxRounds != null
-            ? `${defaults.roundsConsumed} of ${defaults.parentMaxRounds} used — fork runs this many from R1`
-            : "parent uncapped — set a ceiling for the fork"}
+          {left?.parent_max_rounds != null
+            ? `${left.rounds_closed} of ${left.parent_max_rounds} used — blank runs the rest from R1`
+            : "parent uncapped — set a cap for the fork"}
         </small>
       </label>
 
@@ -98,17 +93,17 @@ export function LimitReconcile({
             inputMode="decimal"
             className="limit-input"
             value={f.spend}
-            placeholder="no cap"
+            placeholder={ph(left?.spend_budget_usd, "no cap")}
             aria-label="Fork spend cap in USD"
             onChange={(e) => set({ ...f, spend: e.target.value })}
           />
         </span>
         <small className="limit-note">
-          {defaults.parentBudgetUsd == null
+          {left?.parent_spend_budget_usd == null
             ? "parent uncapped — leave blank to inherit"
-            : defaults.spentUsd == null
+            : left.metered_usd == null
               ? "parent's spend unread — leave blank to inherit its cap"
-              : `${fmtUsd(defaults.spentUsd)} of ${fmtUsd(defaults.parentBudgetUsd)} spent — fork starts fresh`}
+              : `${fmtUsd(left.metered_usd)} of ${fmtUsd(left.parent_spend_budget_usd)} counted — blank caps the fork at the rest`}
         </small>
       </label>
 

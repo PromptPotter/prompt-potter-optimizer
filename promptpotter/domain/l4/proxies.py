@@ -106,7 +106,8 @@ def inner_cell_facts(result: CycleResult, campaign_id: str) -> InnerCellFacts | 
 def effective_round_budget(result: CycleResult) -> int:
     """The rounds this cell was ALLOWED — the panel's ONE denominator: the declared cap, never fewer
     than the rounds that ran; the rounds that ran alone where the config declared none."""
-    return max(result.round_budget or 0, len(result.round_levels))
+    ran = len(result.round_levels)
+    return ran if result.round_budget is None else max(result.round_budget, ran)
 
 
 def parent_level_series(result: CycleResult) -> list[float]:
@@ -196,7 +197,7 @@ def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
         # is worse than no cell at all.
         logger.warning("inner cycle EXCLUDED (no evidence about the optimizer prompt): %s", reason)
         # The inner cycle forwarded its own spend onto the outer ledger as it ran.
-        raise CellUnscoreableError(reason, spent={}, step_timings={})
+        raise CellUnscoreableError(reason, spent={})
 
     assert result.origin_level is not None  # guaranteed by no_evidence_reason
     # Every level is an ability in LOGITS on the fixed ruler, so a delta is a difference of two

@@ -6,6 +6,7 @@ from typing import Literal, NamedTuple, get_args
 
 from promptpotter.application.evidence.metric_catalogue import MetricSpec, catalogue_for
 from promptpotter.application.evidence.subjects import SubjectReading
+from promptpotter.domain.dashboard_rows import LiftSide, lift_side
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.statistics import (
     cells_for_exact_verdict,
@@ -45,6 +46,8 @@ class PairwiseComparison(StrictModel):
     median_shift: float
     ci_lo: float | None
     ci_hi: float | None
+    # Which side of 0 that interval sits on; `None` beside a `None` interval.
+    shift_side: LiftSide | None
     p_value: float | None
     # Holm-Bonferroni across every pair in THIS read that carries a p. Served beside the raw value
     # rather than replacing it, so the correction is visible instead of baked in.
@@ -204,6 +207,7 @@ def _pairwise(rows: list[SubjectReading]) -> list[PairwiseComparison]:
                     median_shift=shift,
                     ci_lo=lo,
                     ci_hi=hi,
+                    shift_side=lift_side(lo, hi),
                     p_value=p_value,
                     p_adjusted=None,
                     n_cells=n,

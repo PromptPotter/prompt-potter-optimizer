@@ -20,7 +20,12 @@ from promptpotter.domain.results import (
 from promptpotter.domain.ruler import ThetaCaveat
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.domain.validators import BrokenSignal, StopSignal
-from promptpotter.domain.wounds import NurseOwner, RuntimeFailure, ValidationFailure
+from promptpotter.domain.wounds import (
+    INVARIANT_REASONS,
+    NurseOwner,
+    RuntimeFailure,
+    ValidationFailure,
+)
 from promptpotter.shared.errors import ErrorCategory
 
 __all__ = [
@@ -165,10 +170,13 @@ def build_score_report(
     )
 
 
+# The reasons a candidate still measures under: the phantom edit is stripped and the real ones run.
+# An invariant collapse is never one, so a collapsed proposal always ends ``ArmOutcome.INVALID``.
+_NON_FATAL_REASONS = frozenset({"hallucinated_node"})
+assert not INVARIANT_REASONS & _NON_FATAL_REASONS
+
+
 def fatal_validation_failures(failures: Sequence[ValidationFailure]) -> list[ValidationFailure]:
     """The failures that cost a candidate its measurement, as opposed to riding along as signal.
-
-    ``hallucinated_node`` is the one non-fatal reason — the phantom edit is stripped and the real
-    edits still ran. One definition, because the scorer and the yield count must agree on which
-    candidates measured."""
-    return [vf for vf in failures if vf.reason != "hallucinated_node"]
+    One definition, because the scorer and the yield count must agree on which candidates measured."""
+    return [vf for vf in failures if vf.reason not in _NON_FATAL_REASONS]

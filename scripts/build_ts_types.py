@@ -45,6 +45,7 @@ from promptpotter.application.evidence.grid import (
     FactorReading,
 )
 from promptpotter.application.evidence.head_to_head import (
+    HeadlineLift,
     HeadToHead,
     HeadToHeadRow,
     SelectionPair,
@@ -148,7 +149,7 @@ from promptpotter.domain.results import (
     VerifyReading,
 )
 from promptpotter.domain.ruler import AbilityReading
-from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
+from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ForkRemainder
 from promptpotter.domain.spend import KindSpend, MeteredSpend, SpendBucket, SpendRollup
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure.projections.live_dashboard.state import (
@@ -163,6 +164,7 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     RunLimits,
     VerifyPassProgress,
 )
+from promptpotter.infrastructure.store.account_spend import LifetimeSpend
 from promptpotter.infrastructure.store.family_ray_queries import RayItem, RayResponse
 from promptpotter.infrastructure.store.lineage_queries import (
     LineageDivergence,
@@ -232,6 +234,8 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     SpendRollup,
     KindSpend,
     MeteredSpend,
+    LifetimeSpend,  # nested in CampaignSummary and QuotaStatus
+    ForkRemainder,  # nested in LiveDashboardState
     # --- dashboard.json IS `LiveDashboardState` (the webapp polls it every 2s). It was
     # hand-declared webapp-side with an index signature that typechecked anything. ---
     BackpressureReading,
@@ -314,6 +318,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     DatasetSplit,  # nested in Instrument
     Instrument,
     ArmBudget,  # nested in HeadToHeadRow
+    HeadlineLift,  # nested in HeadToHeadRow
     HeadToHeadRow,
     SelectionPair,
     HeadToHead,

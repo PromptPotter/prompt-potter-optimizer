@@ -26,7 +26,7 @@ import {
   shortId,
 } from "@/lib/format";
 import type { RunGroup } from "./campaign-forest";
-import { METER_WORD, meteredBucketsLine } from "./spend";
+import { METER_WORD, billText, meteredBucketsLine, spendHeadline } from "./spend";
 
 export interface RowStat {
   label: string;
@@ -65,16 +65,6 @@ function settingValue(v: unknown): string {
   return Array.isArray(v) ? v.map((x) => fmtValue(x)).join(",") : fmtValue(v);
 }
 
-// A price-less model makes the spend a FLOOR, and the `≥` says so on the figure it bounds.
-function spendFloor(unpricedTokens: number): string {
-  return unpricedTokens > 0 ? "≥" : "";
-}
-
-// The bill, the figure the row's own card leads with: no cap sits beside a row to read a meter by.
-export function spendLabel(c: CampaignSummary): string {
-  return `${spendFloor(c.spend_metered.unpriced_tokens)}${fmtUsd(c.spend_metered.billed_usd)}`;
-}
-
 export const SPEND_STAT_LABEL = "Billed";
 
 // The bill leads; what the same calls would have cost with every replay priced, and what the cap
@@ -82,10 +72,10 @@ export const SPEND_STAT_LABEL = "Billed";
 export function spendStat(metered: MeteredSpend): RowStat {
   return {
     label: SPEND_STAT_LABEL,
-    value: `${spendFloor(metered.unpriced_tokens)}${fmtUsd(metered.billed_usd)}`,
+    value: spendHeadline(metered),
     sub:
       `Incurred ${fmtUsd(metered.incurred_usd)} · Counted against cap ` +
-      `${fmtUsd(metered.usd)} ${METER_WORD[metered.meter]}: ${meteredBucketsLine(metered)}`,
+      `${fmtUsd(metered.metered_usd)} ${METER_WORD[metered.meter]}: ${meteredBucketsLine(metered)}`,
   };
 }
 
@@ -246,22 +236,20 @@ export function campaignCard(
   if (answering.cycle_id !== cycleId) facts.push(["Answering", answering.cycle_id]);
 
   const cap = runsWith ? runsWith.max_rounds : null;
+  const lifetime = campaign.spend_lifetime;
   const stats: RowStat[] = [
     ...(campaign.bench ? [benchStat(campaign.bench)] : []),
     spendStat(campaign.spend_metered),
     {
       label: "Lifetime bill",
-      value: `${spendFloor(campaign.spend_unpriced_tokens)}${fmtUsd(campaign.spend_used_usd)}`,
-      sub:
-        campaign.spend_unpriced_tokens > 0
-          ? `floor — ${fmtTokens(campaign.spend_unpriced_tokens)} unpriced`
-          : campaign.spend_unreported_usd > 0
-            ? `billed · up to ${fmtUsd(campaign.spend_unreported_usd)} more unreported`
-            : "lifetime, every cycle",
+      value: billText(lifetime.billed_usd, lifetime.bill_is_floor),
+      sub: lifetime.bill_is_floor
+        ? `floor — ${fmtTokens(lifetime.unpriced_tokens)} unpriced`
+        : lifetime.unreported_usd > 0
+          ? `billed · up to ${fmtUsd(lifetime.unreported_usd)} more unreported`
+          : "lifetime, every cycle",
       className:
-        campaign.spend_unpriced_tokens > 0 || campaign.spend_unreported_usd > 0
-          ? "summary-block-warn"
-          : undefined,
+        lifetime.bill_is_floor || lifetime.unreported_usd > 0 ? "summary-block-warn" : undefined,
     },
     {
       label: "Rounds",

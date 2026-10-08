@@ -218,7 +218,7 @@ export interface WhiskerBand {
 }
 
 // Widens θ's SE to match the served 95% `mean_fitness_ci`. z (not t) holds only because θ's SE
-// is the Rasch posterior SE, not a mean over cells (`shared/statistics.py::mean_ci_t`).
+// is the Rasch posterior SE, not a mean over cells (`shared/statistics.py::mean_ci`).
 const Z95 = 1.96;
 
 export function whiskerBands(ctx: SeriesCtx): WhiskerBand[] {

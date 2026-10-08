@@ -8,9 +8,13 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
 
+from pydantic import Field
+
 from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.run_records import SpendTombstoneRecord
+from promptpotter.domain.spend import bill_is_floor
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.layout import CycleLayout
@@ -95,6 +99,35 @@ class UserSpend(NamedTuple):
 
 
 ZERO_SPEND = UserSpend(0.0, 0, 0)
+
+
+class LifetimeSpend(StrictModel):
+    """What an account, or one campaign's share of it, was billed over its whole life."""
+
+    billed_usd: float = Field(
+        description="What the providers BILLED, over every cycle, fork and forwarded inner run, "
+        "plus what a deleted cycle banked. Never an estimate: a send whose bill never came is "
+        "`unreported_usd`, not this."
+    )
+    bill_is_floor: bool = Field(
+        description="`billed_usd` understates, by what `unpriced_tokens` cost; the token ceiling "
+        "is then the binding one."
+    )
+    unpriced_tokens: int = Field(description="Billed tokens with no resolvable rate.")
+    unreported_usd: float = Field(
+        description="The most that sends which ended with no bill (cancelled, timed out, killed "
+        "with a run) may have cost, at the bounds they were admitted on. Not spent — unknown. It "
+        "binds the ceiling beside `billed_usd`."
+    )
+
+    @classmethod
+    def of(cls, spent: UserSpend) -> LifetimeSpend:
+        return cls(
+            billed_usd=round(spent.used_usd, 6),
+            bill_is_floor=bill_is_floor(spent.unpriced_tokens),
+            unpriced_tokens=spent.unpriced_tokens,
+            unreported_usd=round(spent.unreported_usd, 6),
+        )
 
 
 def _billed_of(rec: dict[str, Any]) -> UserSpend:
@@ -326,6 +359,7 @@ def _already_banked(workspace_ledger: Path, *, campaign_id: str, cycle_id: str) 
 
 __all__ = [
     "ZERO_SPEND",
+    "LifetimeSpend",
     "UsageRow",
     "UserSpend",
     "account_ledgers",

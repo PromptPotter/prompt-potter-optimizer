@@ -35,6 +35,7 @@ __all__ = [
     "StepTokenUsage",
     "TokenAccount",
     "TokenUsageKind",
+    "bill_is_floor",
     "declare_ceiling",
 ]
 
@@ -226,6 +227,12 @@ def declare_ceiling(base: SpendCeilings, *layers: BudgetChange) -> SpendCeilings
     return SpendCeilings(usd, tokens)
 
 
+def bill_is_floor(unpriced_tokens: int) -> bool:
+    """THE rule for "this USD bill understates": billed tokens no rate priced. Every served spend
+    model stamps its ``bill_is_floor`` here, so no surface compares the count itself."""
+    return unpriced_tokens > 0
+
+
 class SpendBucket(StrictModel):
     """One spend sub-bucket — a spend kind's, or one node's.
 
@@ -254,7 +261,7 @@ class SpendBucket(StrictModel):
     incurred_unpriced_tokens: int = 0
 
     def metered_usd(self, meter: CeilingMeter) -> float:
-        return self.used_usd if meter == "bill" else self.incurred_usd
+        return self.incurred_usd if METER_PRICES_REPLAYS[meter] else self.used_usd
 
     @property
     def cache_share(self) -> float | None:
@@ -465,13 +472,18 @@ class MeteredSpend(StrictModel):
     Every surface sets this beside a cap, so none picks the bill or the incurred total itself."""
 
     meter: CeilingMeter
-    # What the meter's counted kinds sum to; `tokens` are their billed tokens.
-    usd: float
-    tokens: int
+    # What the meter's counted kinds sum to; `metered_tokens` are their billed tokens.
+    metered_usd: float
+    metered_tokens: int
+    # THE spend every surface leads with: the providers' bill over every kind, a replay free.
+    # `metered_usd` is read only beside a cap, `incurred_usd` only in the breakdown under this.
     billed_usd: float
+    # `billed_usd` understates, by what `unpriced_tokens` cost: the USD cap cannot see past it.
+    bill_is_floor: bool
+    # `metered_usd` IS `billed_usd` under this meter, so a cap needs no second figure beside it.
+    metered_is_bill: bool
     incurred_usd: float
     billed_tokens: int
-    # >0 ⇒ the bill is a floor the USD cap cannot see past.
     unpriced_tokens: int
     # Total over every kind; `replay_share` is the search's, `None` where it incurred nothing.
     kinds: dict[TokenUsageKind, KindSpend]
@@ -483,9 +495,11 @@ class MeteredSpend(StrictModel):
         counted = METER_KINDS[meter]
         return cls(
             meter=meter,
-            usd=usd,
-            tokens=tokens,
+            metered_usd=usd,
+            metered_tokens=tokens,
             billed_usd=spend.total_used_usd,
+            bill_is_floor=bill_is_floor(spend.unpriced_tokens),
+            metered_is_bill=not METER_PRICES_REPLAYS[meter] and set(counted) == set(spend.by_kind),
             incurred_usd=spend.total_incurred_usd,
             billed_tokens=spend.total_tokens_used,
             unpriced_tokens=spend.unpriced_tokens,
@@ -505,3 +519,7 @@ METER_KINDS: dict[CeilingMeter, tuple[TokenUsageKind, ...]] = {
     "bill": get_args(TokenUsageKind),
     "search_incurred": SEARCH_KINDS,
 }
+
+METER_PRICES_REPLAYS: dict[CeilingMeter, bool] = {"bill": False, "search_incurred": True}
+"""Whether a meter counts a replayed call at the price it would have billed. Total over
+``CeilingMeter`` beside ``METER_KINDS``, so a meter declared in neither raises where it is read."""
