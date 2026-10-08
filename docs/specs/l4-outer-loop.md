@@ -159,7 +159,7 @@ quotes no figure; re-measure before quoting a price to anyone.
    good-candidates pathology — routed through the P3 post-aggregate formula, never the election rank key.
    PoBB-decisive promotion over inner-campaign arms (`scoring/selection.py::elimination_p_best`).
 7. **Self-adopt mode — the SIFT / Darwin Gödel Machine loop, with our statistics in its gates.** Proposal,
-   unbuilt, off by default. [SIFT](../research/landscape.md#sift--self-improvement-via-fast-tree-search-paper)
+   unbuilt, off by default. [SIFT](../research/landscape.md#sift-self-improvement-via-fast-tree-search-paper)
    and DGM let the improved agent write the next improvement; ours keeps the outer optimizer fixed. The prior
    art beside them, and what each decides for this mode, is
    [`../research/external-constraints.md`](../research/external-constraints.md) § L4. The mode:
